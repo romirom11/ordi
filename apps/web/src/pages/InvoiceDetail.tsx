@@ -21,6 +21,12 @@ extendDict({
     'finance.sendFailed': 'Could not send the invoice',
     'finance.sent': 'Invoice sent',
     'finance.paymentRecorded': 'Payment recorded',
+    'finance.status.draft': 'Draft',
+    'finance.status.sent': 'Sent',
+    'finance.status.viewed': 'Viewed',
+    'finance.status.partially_paid': 'Partially paid',
+    'finance.status.paid': 'Paid',
+    'finance.status.canceled': 'Canceled',
   },
   uk: {
     'finance.timeline': 'Хронологія',
@@ -34,6 +40,12 @@ extendDict({
     'finance.sendFailed': 'Не вдалося надіслати рахунок',
     'finance.sent': 'Рахунок надіслано',
     'finance.paymentRecorded': 'Оплату зафіксовано',
+    'finance.status.draft': 'Чернетка',
+    'finance.status.sent': 'Надіслано',
+    'finance.status.viewed': 'Переглянуто',
+    'finance.status.partially_paid': 'Частково оплачено',
+    'finance.status.paid': 'Оплачено',
+    'finance.status.canceled': 'Скасовано',
   },
 });
 
@@ -71,6 +83,12 @@ interface Invoice {
   viewedAt?: string | null;
 }
 
+/** Today as YYYY-MM-DD (local); the API requires a payment date even when the field is left blank. */
+function todayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 export function InvoiceDetailPage({ id }: { id: string }) {
   const t = useT();
   const qc = useQueryClient();
@@ -95,7 +113,12 @@ export function InvoiceDetailPage({ id }: { id: string }) {
   });
   const [pay, setPay] = useState({ amount: '', date: '', method: 'bank' });
   const recordPayment = useMutation({
-    mutationFn: () => api.post(`/invoices/${id}/payments`, { amount: Number(pay.amount), date: pay.date || undefined, method: pay.method }),
+    mutationFn: () => api.post(`/invoices/${id}/payments`, {
+      amount: Number(pay.amount),
+      currency: invoice.data?.currency ?? 'USD',
+      date: pay.date || todayIso(),
+      method: pay.method,
+    }),
     onSuccess: () => {
       setShowPayment(false);
       setPay({ amount: '', date: '', method: 'bank' });
@@ -136,7 +159,7 @@ export function InvoiceDetailPage({ id }: { id: string }) {
         <div className="min-w-0">
           <div className="flex items-center gap-3">
             <h1 className="font-mono text-2xl font-semibold tracking-tight">{iv.number ?? t('public.invoice')}</h1>
-            <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium', statusClass)}>{(iv.status ?? 'draft').replace('_', ' ')}</span>
+            <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium', statusClass)}>{t(`finance.status.${iv.status ?? 'draft'}`, (iv.status ?? 'draft').replace('_', ' '))}</span>
           </div>
           <p className="mt-1.5 text-[13px] text-muted-foreground">
             {iv.companyId ? <Link to={`/companies/${iv.companyId}`} className="hover:text-foreground hover:underline">{iv.companyName ?? t('public.client')}</Link> : iv.companyName ?? t('public.client')}
@@ -269,7 +292,7 @@ interface TimelineEvent { label: string; date?: string | null; icon: ReactNode; 
 
 function buildTimeline(iv: Invoice, payments: Payment[], t: (k: string, f?: string) => string): TimelineEvent[] {
   const events: TimelineEvent[] = [];
-  events.push({ label: t('finance.timelineCreated'), date: iv.createdAt ?? iv.issueDate, icon: <FilePlus2 size={13} /> });
+  events.push({ label: t('finance.timelineCreated'), date: iv.issueDate ?? iv.createdAt, icon: <FilePlus2 size={13} /> });
   if (iv.sentAt) events.push({ label: t('finance.timelineSent'), date: iv.sentAt, icon: <Send size={13} /> });
   if (iv.viewedAt) events.push({ label: t('finance.timelineViewed'), date: iv.viewedAt, icon: <Eye size={13} /> });
   for (const p of payments) {

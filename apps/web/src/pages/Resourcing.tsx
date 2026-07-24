@@ -16,6 +16,7 @@ extendDict({
     'resourcing.legendOver': 'Over-allocated',
     'resourcing.thisWeekShort': 'Now',
     'resourcing.addForUser': 'Add allocation',
+    'resourcing.allocationDeleted': 'Allocation removed',
   },
   uk: {
     'resourcing.emptyRange': 'У цьому діапазоні нікого не розподілено',
@@ -25,6 +26,7 @@ extendDict({
     'resourcing.legendOver': 'Перевантажений',
     'resourcing.thisWeekShort': 'Зараз',
     'resourcing.addForUser': 'Додати розподіл',
+    'resourcing.allocationDeleted': 'Розподіл видалено',
   },
 });
 
@@ -189,7 +191,7 @@ function ResourcingView() {
   });
   const deleteAllocation = useMutation({
     mutationFn: (id: string) => api.del(`/allocations/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['allocations'] }),
+    onSuccess: () => { toast(t('resourcing.allocationDeleted')); qc.invalidateQueries({ queryKey: ['allocations'] }); },
     onError: () => toast.error(t('resourcing.deleteFailed')),
   });
 
@@ -394,8 +396,7 @@ function LoadCell({ total, tone, absent, allocs, canWrite, projectName, onAdd, o
       {allocs.map((a) => (
         <MenuItem
           key={a.id}
-          icon={canWrite ? <Trash2 size={13} /> : undefined}
-          danger={canWrite}
+          icon={canWrite ? <Trash2 size={13} className="text-faint" /> : undefined}
           disabled={!canWrite}
           onSelect={canWrite ? () => onDelete(a.id) : undefined}
         >

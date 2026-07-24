@@ -65,6 +65,12 @@ function StatusPill({ status, overdue }: { status?: string | null; overdue?: boo
   );
 }
 
+/** Today as YYYY-MM-DD (local); the API requires issueDate on invoices/quotes, which the compact create form doesn't collect explicitly. */
+function todayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 interface Company { id: string; name: string; defaultCurrency?: string }
 interface DocRow {
   id: string;
@@ -303,9 +309,15 @@ function DocForm({ kind, companies, onSubmit, pending }: { kind: 'invoice' | 'qu
       <div className="space-y-2">
         {items.map((it, i) => (
           <div key={i} className="flex items-center gap-2">
-            <Input placeholder={t('public.description')} value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} className="flex-1" />
-            <Input type="number" min={0} placeholder={t('public.qty')} value={it.quantity} onChange={(e) => setItem(i, { quantity: e.target.value })} className="w-16" />
-            <Input type="number" min={0} step="0.01" placeholder={t('public.price')} value={it.unitPrice} onChange={(e) => setItem(i, { unitPrice: e.target.value })} className="w-24" />
+            <div className="min-w-0 flex-1">
+              <Input placeholder={t('public.description')} value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} />
+            </div>
+            <div className="w-16 shrink-0">
+              <Input type="number" min={0} placeholder={t('public.qty')} value={it.quantity} onChange={(e) => setItem(i, { quantity: e.target.value })} />
+            </div>
+            <div className="w-24 shrink-0">
+              <Input type="number" min={0} step="0.01" placeholder={t('public.price')} value={it.unitPrice} onChange={(e) => setItem(i, { unitPrice: e.target.value })} />
+            </div>
             <button type="button" className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive" onClick={() => setItems((arr) => arr.filter((_, j) => j !== i))} disabled={items.length === 1}>
               <Trash2 size={14} />
             </button>
@@ -334,7 +346,8 @@ function InvoicesView() {
     mutationFn: (v: { companyId: string; date: string; items: LineItem[] }) =>
       api.post<{ id: string }>('/invoices', {
         companyId: v.companyId,
-        dueDate: v.date || undefined,
+        issueDate: todayIso(),
+        dueDate: v.date || todayIso(),
         items: v.items.map((it) => ({ description: it.description, quantity: Number(it.quantity), unitPrice: Number(it.unitPrice) })),
       }),
     onSuccess: (r) => {
@@ -379,6 +392,7 @@ function QuotesView() {
     mutationFn: (v: { companyId: string; date: string; items: LineItem[] }) =>
       api.post('/quotes', {
         companyId: v.companyId,
+        issueDate: todayIso(),
         validUntil: v.date || undefined,
         items: v.items.map((it) => ({ description: it.description, quantity: Number(it.quantity), unitPrice: Number(it.unitPrice) })),
       }),
@@ -450,7 +464,7 @@ function DocTable({ rows, loading, kind, onRow }: { rows: DocRow[]; loading: boo
             )}
             style={{ ['--i' as string]: Math.min(i, 10) }}
           >
-            <span className="w-20 shrink-0 truncate font-mono text-xs text-muted-foreground">{r.number ?? r.id.slice(0, 8)}</span>
+            <span className="w-28 shrink-0 truncate font-mono text-xs text-muted-foreground">{r.number ?? r.id.slice(0, 8)}</span>
             <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{r.companyName ?? '—'}</span>
             <StatusPill status={r.status} overdue={overdue} />
             <span className="w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
