@@ -3,8 +3,9 @@
 export const COMPANY_STATUSES = ['lead', 'active', 'paused', 'archived'] as const;
 export type CompanyStatus = (typeof COMPANY_STATUSES)[number];
 
-export const PROJECT_KINDS = ['client', 'internal'] as const;
-export type ProjectKind = (typeof PROJECT_KINDS)[number];
+/** How a project type generates revenue: invoiced to a client, none (pure cost), or direct (product/ledger income). */
+export const REVENUE_SOURCES = ['client_billing', 'none', 'direct'] as const;
+export type RevenueSource = (typeof REVENUE_SOURCES)[number];
 
 export const PROJECT_STATUSES = ['active', 'paused', 'completed', 'archived'] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];

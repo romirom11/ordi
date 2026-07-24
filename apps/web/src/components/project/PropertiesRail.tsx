@@ -6,18 +6,25 @@ import { useCan } from '../../lib/auth';
 import {
   ProgressBar, ProgressRing, Skeleton, StatusIcon, cn,
 } from '../ui';
+import { DropdownMenu, MenuItem, MenuLabel } from '../overlays';
 import { projectColor } from './ProjectIcon';
 import {
   RailField, LeadPicker, DateRailPicker, ProjectStatusPicker, VisibilityPicker, CompanyPicker,
   type UserLite, type CompanyLite, type ProjectStatus,
 } from './pickers';
-import { useT } from '../../lib/i18n';
+import { useT, extendDict } from '../../lib/i18n';
+
+extendDict({
+  en: { 'projects.type': 'Type' },
+  uk: { 'projects.type': 'Тип' },
+});
 
 interface ProjectLite {
   id: string; key: string; status: string; leadId?: string | null;
   startDate?: string | null; targetDate?: string | null; visibility?: string;
-  companyId?: string | null; companyName?: string | null;
+  companyId?: string | null; companyName?: string | null; projectTypeId?: string | null;
 }
+interface ProjectTypeLite { id: string; name: string; color?: string; requiresClient?: boolean }
 interface StatusLite { id: string; name: string; category?: string; color?: string }
 interface TaskLite { statusId: string }
 
@@ -41,6 +48,12 @@ export function PropertiesRail({ project, statuses, tasks, tasksLoading, users, 
     staleTime: 5 * 60_000,
   });
   const companies = companiesQ.data ?? [];
+  const typesQ = useQuery<ProjectTypeLite[]>({
+    queryKey: ['project-types'],
+    queryFn: () => api.get<{ data: ProjectTypeLite[] }>('/project-types').then((r) => r.data),
+    staleTime: 5 * 60_000,
+  });
+  const projectTypes = typesQ.data ?? [];
 
   const catOf = (sid: string) => statuses.find((s) => s.id === sid)?.category;
   const total = tasks.length;
@@ -96,6 +109,14 @@ export function PropertiesRail({ project, statuses, tasks, tasksLoading, users, 
         <RailField label={t('common.status')}>
           <ProjectStatusPicker value={project.status} disabled={!canWrite} onSelect={(s: ProjectStatus) => onPatch({ status: s })} />
         </RailField>
+        <RailField label={t('projects.type')}>
+          <ProjectTypeRailPicker
+            value={project.projectTypeId}
+            types={projectTypes}
+            disabled={!can('projects.write')}
+            onSelect={(tid) => onPatch({ projectTypeId: tid })}
+          />
+        </RailField>
         <RailField label={t('projects.lead')}>
           <LeadPicker value={project.leadId} users={users} disabled={!canWrite} onSelect={(uid) => onPatch({ leadId: uid })} />
         </RailField>
@@ -117,5 +138,39 @@ export function PropertiesRail({ project, statuses, tasks, tasksLoading, users, 
         </RailField>
       </div>
     </div>
+  );
+}
+
+/** Project type chip + dropdown (admins only) — mirrors the other rail pickers. */
+function ProjectTypeRailPicker({ value, types, onSelect, disabled }: {
+  value?: string | null; types: ProjectTypeLite[]; onSelect: (id: string) => void; disabled?: boolean;
+}) {
+  const t = useT();
+  const current = value ? types.find((x) => x.id === value) : undefined;
+  const trigger = (
+    <span className={cn(
+      'group flex min-h-7 w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-[13px] transition-colors duration-150',
+      disabled ? 'cursor-default' : 'cursor-pointer hover:bg-muted',
+      !current && 'text-faint',
+    )}>
+      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: current?.color ?? '#8a8f98' }} />
+      <span className="truncate">{current?.name ?? '—'}</span>
+    </span>
+  );
+  if (disabled) return trigger;
+  return (
+    <DropdownMenu trigger={trigger} align="start" width={210} className="w-full">
+      <MenuLabel>{t('projects.type')}</MenuLabel>
+      {types.map((pt) => (
+        <MenuItem
+          key={pt.id}
+          checked={value === pt.id}
+          icon={<span className="h-2 w-2 rounded-full" style={{ backgroundColor: pt.color ?? '#8a8f98' }} />}
+          onSelect={() => { if (pt.id !== value) onSelect(pt.id); }}
+        >
+          {pt.name}
+        </MenuItem>
+      ))}
+    </DropdownMenu>
   );
 }

@@ -4,7 +4,7 @@ import { PERMISSIONS, PERMISSION_META, type Permission } from '@ordi/shared';
 import {
   Building2, ArrowLeftRight, Users as UsersIcon, Shield, SlidersHorizontal, Wallet, Plug,
   ScrollText, Inbox, Plus, Copy, Upload, Trash2, Lock, Globe, ImageIcon, ChevronRight,
-  ChevronLeft, MoreHorizontal, Check, RotateCcw, Boxes, Receipt,
+  ChevronLeft, MoreHorizontal, Check, RotateCcw, Boxes, Receipt, FolderKanban,
 } from 'lucide-react';
 import { api, qs } from '../lib/api';
 import { Link } from '../lib/router';
@@ -17,6 +17,7 @@ import { ImportExportPanel } from '../components/ImportExportPanel';
 import { IntegrationsPanel } from '../components/settings/IntegrationsPanel';
 import { InvoicesPanel } from '../components/settings/InvoicesPanel';
 import { ModulesPanel } from '../components/settings/ModulesPanel';
+import { ProjectTypesPanel } from '../components/settings/ProjectTypesPanel';
 import { SectionHead, SettingRow, Field, RowList, AnimatedRow } from '../components/settings/primitives';
 import { downscaleImage } from '../components/settings/image';
 import { usePageTitle } from '../lib/tabs';
@@ -205,6 +206,7 @@ const GROUPS: NavGroup[] = [
     label: 'settings.groupConfig',
     items: [
       { id: 'modules', label: 'settings.modules', perm: 'settings.manage', icon: Boxes },
+      { id: 'project-types', label: 'settings.projectTypes', perm: 'settings.manage', icon: FolderKanban },
       { id: 'custom-fields', label: 'settings.customFields', perm: 'settings.manage', icon: SlidersHorizontal },
       { id: 'finance', label: 'nav.finance', perm: 'finance.settings', icon: Wallet },
       { id: 'invoices', label: 'settings.invoices', perm: 'finance.settings', icon: Receipt },
@@ -275,6 +277,7 @@ export function SettingsPage({ section }: { section?: string }) {
             {active.id === 'users' && <UsersPanel />}
             {active.id === 'roles' && <RolesPanel />}
             {active.id === 'modules' && <ModulesPanel />}
+            {active.id === 'project-types' && <ProjectTypesPanel />}
             {active.id === 'custom-fields' && <CustomFieldsPanel />}
             {active.id === 'finance' && <FinancePanel />}
             {active.id === 'invoices' && <InvoicesPanel />}

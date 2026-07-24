@@ -8,6 +8,13 @@ export const projectTypes = pgTable('project_types', {
   name: text('name').notNull(),
   icon: text('icon').notNull().default('folder'),
   color: text('color').notNull().default('#6b7280'),
+  /** Projects of this type must be linked to a client company. */
+  requiresClient: boolean('requires_client').notNull().default(false),
+  /** client_billing | none | direct — drives invoice eligibility & profitability revenue. */
+  revenueSource: text('revenue_source').notNull().default('client_billing'),
+  /** Preselected in the new-project dialog. */
+  isDefault: boolean('is_default').notNull().default(false),
+  position: integer('position').notNull().default(0),
   ...timestamps,
 });
 
@@ -22,10 +29,9 @@ export const projectTemplates = pgTable('project_templates', {
 export const projects = pgTable('projects', {
   id: pk(),
   companyId: text('company_id').references(() => companies.id),
-  kind: text('kind').notNull().default('client'), // client | internal
   name: text('name').notNull(),
   key: text('key').notNull().unique(),
-  projectTypeId: text('project_type_id').references(() => projectTypes.id),
+  projectTypeId: text('project_type_id').notNull().references(() => projectTypes.id),
   templateSourceId: text('template_source_id'),
   status: text('status').notNull().default('active'),
   visibility: text('visibility').notNull().default('workspace'),
@@ -40,7 +46,7 @@ export const projects = pgTable('projects', {
   version: version(),
   deletedAt: deletedAt(),
 }, (t) => ({
-  kindIdx: index('projects_kind_idx').on(t.kind),
+  typeIdx: index('projects_type_idx').on(t.projectTypeId),
   statusIdx: index('projects_status_idx').on(t.status),
   companyIdx: index('projects_company_idx').on(t.companyId),
 }));

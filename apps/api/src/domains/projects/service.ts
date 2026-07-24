@@ -80,17 +80,31 @@ async function assigneeIdsOf(taskId: string): Promise<string[]> {
 
 // ─────────────────────────── Projects ───────────────────────────
 
-export async function listProjects(actor: Actor, filters: { kind?: string; status?: string; companyId?: string }) {
+export async function listProjects(actor: Actor, filters: { typeId?: string; status?: string; companyId?: string }) {
   const { db } = getDb();
   const ids = await accessibleProjectIds(actor);
   if (!ids.length) return [];
   return db.select().from(projects).where(and(
     isNull(projects.deletedAt),
     inArray(projects.id, ids),
-    filters.kind ? eq(projects.kind, filters.kind) : undefined,
+    filters.typeId ? eq(projects.projectTypeId, filters.typeId) : undefined,
     filters.status ? eq(projects.status, filters.status) : undefined,
     filters.companyId ? eq(projects.companyId, filters.companyId) : undefined,
   )).orderBy(desc(projects.createdAt));
+}
+
+/**
+ * Load a project type and apply its behaviour to the desired company link:
+ * requiresClient → companyId is mandatory; otherwise the link is forced to null.
+ */
+async function resolveTypeCompany(projectTypeId: string, companyId: string | null | undefined): Promise<{ typeId: string; companyId: string | null }> {
+  const { db } = getDb();
+  const [type] = await db.select().from(schema.projectTypes).where(eq(schema.projectTypes.id, projectTypeId));
+  if (!type) throw err.validation('Project type not found', { projectTypeId });
+  if (type.requiresClient && !companyId) {
+    throw err.validation(`Project type "${type.name}" requires a client`, { projectTypeId });
+  }
+  return { typeId: type.id, companyId: type.requiresClient ? companyId! : null };
 }
 
 export async function createProject(actor: Actor, input: any): Promise<{ id: string; key: string }> {
@@ -101,14 +115,14 @@ export async function createProject(actor: Actor, input: any): Promise<{ id: str
     .from(projects)
     .where(and(eq(projects.key, input.key), isNull(projects.deletedAt)));
   if (dupe) throw err.domain(`Project key "${input.key}" is already in use — pick another key.`);
+  const { typeId, companyId } = await resolveTypeCompany(input.projectTypeId, input.companyId);
   const id = ulid();
   await db.insert(projects).values({
     id,
-    companyId: input.companyId ?? null,
-    kind: input.kind,
+    companyId,
     name: input.name,
     key: input.key,
-    projectTypeId: input.projectTypeId ?? null,
+    projectTypeId: typeId,
     templateSourceId: input.templateSourceId ?? null,
     status: 'active',
     visibility: input.visibility ?? 'workspace',
@@ -148,7 +162,7 @@ export async function createProject(actor: Actor, input: any): Promise<{ id: str
   // Intake settings row with a random form token, disabled by default (PRD §8.6).
   await db.insert(schema.intakeSettings).values({ projectId: id, formToken: generateToken(), formEnabled: false });
 
-  await emit({ type: 'project.created', aggregateType: 'project', aggregateId: id, payload: { key: input.key, kind: input.kind, companyId: input.companyId ?? null }, actorId: actor.userId, actorType: actor.actorType });
+  await emit({ type: 'project.created', aggregateType: 'project', aggregateId: id, payload: { key: input.key, typeId, companyId }, actorId: actor.userId, actorType: actor.actorType });
   await writeActivity(db, { entityType: 'project', entityId: id, action: 'created', after: input, actorId: actor.userId, actorType: actor.actorType });
   return { id, key: input.key };
 }
@@ -168,8 +182,15 @@ export async function updateProject(actor: Actor, id: string, input: any) {
   if (!before) throw err.notFound('Project not found');
   assertVersion(before, input.version, before);
   const patch: Record<string, unknown> = {};
-  for (const k of ['name', 'status', 'visibility', 'projectTypeId', 'leadId', 'startDate', 'targetDate', 'description', 'customFields']) {
+  for (const k of ['name', 'status', 'visibility', 'leadId', 'startDate', 'targetDate', 'description', 'customFields']) {
     if (input[k] !== undefined) patch[k] = input[k];
+  }
+  // Changing the type re-applies its behaviour: requiresClient needs the existing
+  // company link; a type without a client detaches the company.
+  if (input.projectTypeId !== undefined && input.projectTypeId !== before.projectTypeId) {
+    const { typeId, companyId } = await resolveTypeCompany(input.projectTypeId, before.companyId);
+    patch.projectTypeId = typeId;
+    if (companyId !== before.companyId) patch.companyId = companyId;
   }
   // Merge settings keys (never blindly replace — preserve estimateUnit etc.).
   if (input.estimateUnit !== undefined || input.settings !== undefined) {

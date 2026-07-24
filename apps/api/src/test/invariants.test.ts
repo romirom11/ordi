@@ -27,17 +27,32 @@ describe('optimistic version locking (PRD §3.4)', () => {
   });
 });
 
-describe('internal projects do not leak into finance (PRD §5.4)', () => {
-  it('rejects an invoice attached to an internal project', async () => {
+describe('project types drive client + finance behaviour (PRD §5.4)', () => {
+  it('rejects an invoice attached to a project whose type does not bill a client', async () => {
     const owner = reqAs(users.owner!.cookie);
+    const types = (await json(owner.get('/project-types'))).data as any[];
+    const nonBilling = types.find((x) => x.revenueSource === 'none');
+    expect(nonBilling).toBeTruthy();
     const company = await json(owner.post('/companies', { name: 'IntCo', defaultCurrency: 'USD' }));
-    const internal = await json(owner.post('/projects', { name: 'Ops', key: 'INT', kind: 'internal' }));
+    const internal = await json(owner.post('/projects', { name: 'Ops', key: 'INT', projectTypeId: nonBilling.id }));
     expect(internal.id).toBeTruthy();
     const res = await owner.post('/invoices', {
       companyId: company.id, projectId: internal.id, currency: 'USD',
       issueDate: '2026-01-01', dueDate: '2026-02-01', items: [{ description: 'x', quantity: 1, unitPrice: 100 }],
     });
     expect([422, 400]).toContain(res.status);
+  });
+
+  it('a type that requires a client rejects creation without a company', async () => {
+    const owner = reqAs(users.owner!.cookie);
+    const types = (await json(owner.get('/project-types'))).data as any[];
+    const clientType = types.find((x) => x.requiresClient);
+    expect(clientType).toBeTruthy();
+    const res = await owner.post('/projects', { name: 'No client', key: 'NOCL', projectTypeId: clientType.id });
+    expect([422, 400]).toContain(res.status);
+    const company = await json(owner.post('/companies', { name: 'CliCo', defaultCurrency: 'USD' }));
+    const ok = await json(owner.post('/projects', { name: 'With client', key: 'WCL', projectTypeId: clientType.id, companyId: company.id }));
+    expect(ok.id).toBeTruthy();
   });
 });
 

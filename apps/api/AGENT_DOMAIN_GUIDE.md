@@ -25,7 +25,7 @@ You are implementing ONE domain module inside `apps/api/src/domains/<domain>/`.
 
 ### Resource access
 - `import { assertProject, assertSpace, accessibleProjectIds } from '../../core/access'`
-  - `await assertProject(actor, projectId, 'viewer'|'member'|'admin')` → throws 404 if no access; returns `{ id, visibility, kind, companyId }`.
+  - `await assertProject(actor, projectId, 'viewer'|'member'|'admin')` → throws 404 if no access; returns `{ id, visibility, projectTypeId, companyId }`.
   - `await assertSpace(actor, spaceId, 'viewer'|'editor')` → throws 404; returns `{ id, visibility, projectId }`.
   - `await accessibleProjectIds(actor)` → `string[]` (cached per request).
 

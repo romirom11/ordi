@@ -105,7 +105,7 @@ extendDict({
 });
 
 interface Project {
-  id: string; name: string; key: string; status: string; kind?: string;
+  id: string; name: string; key: string; status: string; projectTypeId?: string | null;
   companyId?: string | null; companyName?: string | null; description?: unknown;
   leadId?: string | null; startDate?: string | null; targetDate?: string | null;
   visibility?: string; version?: number; settings?: Record<string, unknown>;

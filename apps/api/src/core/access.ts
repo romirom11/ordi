@@ -61,10 +61,10 @@ export async function assertProject(
   actor: Actor,
   projectId: string,
   minRole: 'viewer' | 'member' | 'admin' = 'viewer',
-): Promise<{ id: string; visibility: 'workspace' | 'private'; kind: string; companyId: string | null }> {
+): Promise<{ id: string; visibility: 'workspace' | 'private'; projectTypeId: string; companyId: string | null }> {
   const { db } = getDb();
   const [project] = await db
-    .select({ id: schema.projects.id, visibility: schema.projects.visibility, kind: schema.projects.kind, companyId: schema.projects.companyId })
+    .select({ id: schema.projects.id, visibility: schema.projects.visibility, projectTypeId: schema.projects.projectTypeId, companyId: schema.projects.companyId })
     .from(schema.projects)
     .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
   if (!project) throw err.notFound('Project not found');

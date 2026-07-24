@@ -96,8 +96,8 @@ server.tool('create_invoice_from_project', 'Create a draft invoice pre-filled fr
   projectId: z.string(), issueDate: z.string(), dueDate: z.string(),
   items: z.array(z.object({ description: z.string(), quantity: z.number(), unitPrice: z.number() })).optional(),
 }, ({ projectId, issueDate, dueDate, items }) => wrap(async () => {
-  const project = await client.get<{ companyId: string | null; kind: string }>(`/projects/${projectId}`);
-  if (!project.companyId) throw new Error('Project has no client (internal projects cannot be invoiced)');
+  const project = await client.get<{ companyId: string | null }>(`/projects/${projectId}`);
+  if (!project.companyId) throw new Error('Project has no client company — only projects whose type bills a client can be invoiced');
   return client.post('/invoices', { companyId: project.companyId, projectId, issueDate, dueDate, items: items ?? [] });
 }));
 

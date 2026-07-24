@@ -68,12 +68,14 @@ async function main() {
     await db.insert(schema.deals).values({ id: ulid(), companyId: id, title: 'Website redesign', stageId: leadStage!.id, amount: '15000', currency: 'USD', ownerId, createdBy: ownerId });
   }
 
-  // Demo projects (client + internal)
+  // Demo projects (client work + internal) referencing the baseline project types
+  const [clientType] = await db.select().from(schema.projectTypes).where(eq(schema.projectTypes.name, 'Client work'));
+  const [internalType] = await db.select().from(schema.projectTypes).where(eq(schema.projectTypes.name, 'Internal'));
   let [project] = await db.select().from(schema.projects).where(eq(schema.projects.key, 'GLX'));
   if (!project) {
     const id = ulid();
     await db.insert(schema.projects).values({
-      id, companyId: company!.id, kind: 'client', name: 'Globex Website', key: 'GLX', status: 'active',
+      id, companyId: company!.id, projectTypeId: clientType!.id, name: 'Globex Website', key: 'GLX', status: 'active',
       visibility: 'workspace', leadId: ownerId, createdBy: ownerId, settings: { estimateUnit: 'hours' },
     });
     await db.insert(schema.projectMembers).values([
@@ -110,7 +112,7 @@ async function main() {
   const [internal] = await db.select().from(schema.projects).where(eq(schema.projects.key, 'OPS'));
   if (!internal) {
     const id = ulid();
-    await db.insert(schema.projects).values({ id, kind: 'internal', name: 'Operations', key: 'OPS', status: 'active', visibility: 'workspace', leadId: ownerId, createdBy: ownerId });
+    await db.insert(schema.projects).values({ id, projectTypeId: internalType!.id, name: 'Operations', key: 'OPS', status: 'active', visibility: 'workspace', leadId: ownerId, createdBy: ownerId });
     await db.insert(schema.projectMembers).values({ projectId: id, userId: ownerId, role: 'admin', canWriteTasks: true });
     await db.insert(schema.taskStatuses).values([
       { id: ulid(), projectId: id, name: 'Todo', category: 'todo', position: 0, isDefault: true, color: '#64748b' },

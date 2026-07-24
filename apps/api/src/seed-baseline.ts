@@ -89,6 +89,16 @@ export async function seedBaseline(db: Db, workspaceName = 'ordi'): Promise<{ ro
     await db.insert(schema.taxRates).values({ id: ulid(), name: 'VAT 20%', ratePercent: '20' });
   }
 
+  // Default project types (also seeded idempotently by migration 0003 for existing DBs)
+  const existingProjectTypes = await db.select().from(schema.projectTypes);
+  if (!existingProjectTypes.length) {
+    await db.insert(schema.projectTypes).values([
+      { id: ulid(), name: 'Client work', icon: 'briefcase', color: '#6366f1', requiresClient: true, revenueSource: 'client_billing', isDefault: true, position: 0 },
+      { id: ulid(), name: 'Internal', icon: 'wrench', color: '#64748b', requiresClient: false, revenueSource: 'none', isDefault: false, position: 1 },
+      { id: ulid(), name: 'Product', icon: 'rocket', color: '#10b981', requiresClient: false, revenueSource: 'direct', isDefault: false, position: 2 },
+    ]);
+  }
+
   // Default (workspace-wide) task types
   const existingTypes = await db.select().from(schema.taskTypes);
   if (!existingTypes.length) {

@@ -97,12 +97,17 @@ async function insertQuoteItems(quoteId: string, items: ItemInput[]): Promise<st
   return ids;
 }
 
+/** Invoices/quotes may only attach to projects whose type bills a client (PRD §5.4). */
 async function assertClientProject(projectId: string): Promise<void> {
   const { db } = getDb();
-  const [p] = await db.select({ kind: schema.projects.kind })
-    .from(schema.projects).where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
+  const [p] = await db.select({ revenueSource: schema.projectTypes.revenueSource, typeName: schema.projectTypes.name })
+    .from(schema.projects)
+    .innerJoin(schema.projectTypes, eq(schema.projects.projectTypeId, schema.projectTypes.id))
+    .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
   if (!p) throw err.validation('Project not found');
-  if (p.kind !== 'client') throw err.domain('An invoice cannot be attached to an internal project (PRD §5.4)', { projectId });
+  if (p.revenueSource !== 'client_billing') {
+    throw err.domain(`An invoice cannot be attached to a "${p.typeName}" project — its type does not bill a client (PRD §5.4)`, { projectId });
+  }
 }
 
 async function getWorkspace() {
@@ -332,10 +337,11 @@ export async function softDeleteInvoice(actor: Actor, id: string) {
 export async function invoiceFromTime(actor: Actor, input: any) {
   const { db } = getDb();
   await getCompanyRow(input.companyId);
-  // Restrict to the company's client projects.
+  // Restrict to the company's projects whose type bills a client.
   const projRows = await db.select({ id: schema.projects.id })
     .from(schema.projects)
-    .where(and(inArray(schema.projects.id, input.projectIds), eq(schema.projects.companyId, input.companyId), eq(schema.projects.kind, 'client'), isNull(schema.projects.deletedAt)));
+    .innerJoin(schema.projectTypes, eq(schema.projects.projectTypeId, schema.projectTypes.id))
+    .where(and(inArray(schema.projects.id, input.projectIds), eq(schema.projects.companyId, input.companyId), eq(schema.projectTypes.revenueSource, 'client_billing'), isNull(schema.projects.deletedAt)));
   const projectIds = projRows.map((r) => r.id);
   if (!projectIds.length) throw err.validation('No client projects for this company in the selection');
 
@@ -1008,14 +1014,19 @@ export async function profitability(params: { scope: 'project' | 'client' | 'lab
   const toEnd = to + 'T23:59:59.999Z';
 
   if (params.scope === 'project') {
-    const projects = await db.select().from(schema.projects).where(and(
-      isNull(schema.projects.deletedAt),
-      params.projectId ? eq(schema.projects.id, params.projectId) : undefined,
-      params.companyId ? eq(schema.projects.companyId, params.companyId) : undefined,
-    ));
+    const projects = await db.select({
+      id: schema.projects.id, name: schema.projects.name,
+      typeId: schema.projectTypes.id, typeName: schema.projectTypes.name, revenueSource: schema.projectTypes.revenueSource,
+    }).from(schema.projects)
+      .innerJoin(schema.projectTypes, eq(schema.projects.projectTypeId, schema.projectTypes.id))
+      .where(and(
+        isNull(schema.projects.deletedAt),
+        params.projectId ? eq(schema.projects.id, params.projectId) : undefined,
+        params.companyId ? eq(schema.projects.companyId, params.companyId) : undefined,
+      ));
     const out = [];
     for (const p of projects) {
-      out.push(await projectProfit(p.id, p.name, p.kind, from, to, toEnd));
+      out.push(await projectProfit(p, from, to, toEnd));
     }
     return { scope: 'project', from: params.from ?? null, to: params.to ?? null, rows: out };
   }
@@ -1027,11 +1038,16 @@ export async function profitability(params: { scope: 'project' | 'client' | 'lab
     ));
     const rows = [];
     for (const c of companies) {
-      const projs = await db.select().from(schema.projects).where(and(eq(schema.projects.companyId, c.id), isNull(schema.projects.deletedAt)));
+      const projs = await db.select({
+        id: schema.projects.id, name: schema.projects.name,
+        typeId: schema.projectTypes.id, typeName: schema.projectTypes.name, revenueSource: schema.projectTypes.revenueSource,
+      }).from(schema.projects)
+        .innerJoin(schema.projectTypes, eq(schema.projects.projectTypeId, schema.projectTypes.id))
+        .where(and(eq(schema.projects.companyId, c.id), isNull(schema.projects.deletedAt)));
       if (!projs.length) continue;
       let revenue = 0, laborCost = 0, expenseCost = 0;
       for (const p of projs) {
-        const pr = await projectProfit(p.id, p.name, p.kind, from, to, toEnd);
+        const pr = await projectProfit(p, from, to, toEnd);
         revenue += pr.revenue; laborCost += pr.laborCost; expenseCost += pr.expenseCost;
       }
       rows.push({ companyId: c.id, companyName: c.name, ...computeProfitability({ revenue, laborCost, expenseCost }) });
@@ -1078,8 +1094,12 @@ export async function profitability(params: { scope: 'project' | 'client' | 'lab
   };
 }
 
-async function projectProfit(projectId: string, name: string, kind: string, from: string, to: string, toEnd: string) {
+async function projectProfit(
+  p: { id: string; name: string; typeId: string; typeName: string; revenueSource: string },
+  from: string, to: string, toEnd: string,
+) {
   const { db } = getDb();
+  const projectId = p.id;
   // Labor cost & billable value from time entries in the period.
   const [t] = await db.execute(sql`
     select coalesce(sum(duration_seconds/3600.0 * cost_rate),0) as labor_cost,
@@ -1098,10 +1118,17 @@ async function projectProfit(projectId: string, name: string, kind: string, from
   const expenseCost = Number(ex?.expense_cost ?? 0);
   const invoiced = Number(inv?.invoiced ?? 0);
   const billableValue = Number(t?.billable_value ?? 0);
-  // internal projects are pure cost, zero revenue (PRD §5.4).
-  const revenue = kind === 'internal' ? 0 : (invoiced > 0 ? invoiced : billableValue);
+  // Revenue depends on the project type's revenueSource (PRD §5.4):
+  //   none           → pure cost, zero revenue
+  //   client_billing → invoiced (or billable value while nothing is invoiced yet)
+  //   direct         → same fallback for now; real direct revenue will come from
+  //                    the upcoming manual income ledger.
+  const revenue = p.revenueSource === 'none' ? 0 : (invoiced > 0 ? invoiced : billableValue);
   const profit = computeProfitability({ revenue, laborCost, expenseCost });
-  return { projectId, name, kind, ...profit, laborCost: round2(laborCost), expenseCost: round2(expenseCost) };
+  return {
+    projectId, name: p.name, typeId: p.typeId, typeName: p.typeName,
+    ...profit, laborCost: round2(laborCost), expenseCost: round2(expenseCost),
+  };
 }
 
 // ─── misc helpers ─────────────────────────────────────────────────────────────

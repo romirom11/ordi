@@ -1,16 +1,16 @@
 import { z } from 'zod';
 import { idSchema, customFieldsSchema, richTextSchema } from './common';
 import {
-  PROJECT_KINDS, PROJECT_STATUSES, VISIBILITY, PROJECT_MEMBER_ROLES,
+  PROJECT_STATUSES, VISIBILITY, PROJECT_MEMBER_ROLES, REVENUE_SOURCES,
   TASK_STATUS_CATEGORIES, TASK_PRIORITIES, TASK_RELATION_TYPES, CYCLE_STATUSES, ESTIMATE_UNITS,
 } from '../constants';
 
 export const projectInputSchema = z.object({
   name: z.string().min(1),
   key: z.string().regex(/^[A-Z]{2,5}$/, '2-5 uppercase letters'),
-  kind: z.enum(PROJECT_KINDS),
+  /** Required — every project has a user-configurable type. "Type requires a client" is validated server-side against the type row. */
+  projectTypeId: idSchema,
   companyId: idSchema.nullable().optional(),
-  projectTypeId: idSchema.nullable().optional(),
   templateSourceId: idSchema.nullable().optional(),
   visibility: z.enum(VISIBILITY).default('workspace'),
   leadId: idSchema.nullable().optional(),
@@ -19,17 +19,13 @@ export const projectInputSchema = z.object({
   description: z.string().nullable().optional(),
   estimateUnit: z.enum(ESTIMATE_UNITS).default('hours'),
   customFields: customFieldsSchema.optional(),
-}).refine((v) => v.kind === 'internal' ? !v.companyId : true, {
-  message: 'internal projects must not have a company', path: ['companyId'],
-}).refine((v) => v.kind === 'client' ? !!v.companyId : true, {
-  message: 'client projects require a company', path: ['companyId'],
 });
 
 export const projectUpdateSchema = z.object({
   name: z.string().min(1).optional(),
   status: z.enum(PROJECT_STATUSES).optional(),
   visibility: z.enum(VISIBILITY).optional(),
-  projectTypeId: idSchema.nullable().optional(),
+  projectTypeId: idSchema.optional(),
   leadId: idSchema.nullable().optional(),
   startDate: z.string().nullable().optional(),
   targetDate: z.string().nullable().optional(),
@@ -72,6 +68,15 @@ export const projectTypeInputSchema = z.object({
   name: z.string().min(1),
   icon: z.string().default('folder'),
   color: z.string().default('#6b7280'),
+  requiresClient: z.boolean().default(false),
+  revenueSource: z.enum(REVENUE_SOURCES).default('client_billing'),
+  isDefault: z.boolean().default(false),
+  position: z.number().int().default(0),
+});
+
+/** PATCH /project-types/order — full ordered list of type ids. */
+export const projectTypeOrderSchema = z.object({
+  ids: z.array(idSchema).min(1),
 });
 
 export const taskInputSchema = z.object({

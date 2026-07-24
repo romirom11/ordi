@@ -1,10 +1,10 @@
 import { Hono } from 'hono';
-import { getDb, schema, eq, and, isNull } from '@ordi/db';
+import { getDb, schema, eq, and, isNull, asc, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import {
   projectInputSchema, projectUpdateSchema, projectMemberInputSchema,
-  taskStatusInputSchema, taskTypeInputSchema, projectTypeInputSchema, projectTemplateInputSchema,
-  projectRepositoryInputSchema, gitAutomationRuleInputSchema,
+  taskStatusInputSchema, taskTypeInputSchema, projectTypeInputSchema, projectTypeOrderSchema,
+  projectTemplateInputSchema, projectRepositoryInputSchema, gitAutomationRuleInputSchema,
 } from '@ordi/shared';
 import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
@@ -27,7 +27,7 @@ export function projectsRoutes() {
   // ── Projects (reads are membership-gated, PRD §4.4) ──
   app.get('/projects', async (c) => {
     const rows = await svc.listProjects(currentActor(c), {
-      kind: c.req.query('kind'), status: c.req.query('status'), companyId: c.req.query('companyId'),
+      typeId: c.req.query('typeId'), status: c.req.query('status'), companyId: c.req.query('companyId'),
     });
     return c.json({ data: rows });
   });
@@ -176,29 +176,54 @@ export function projectsRoutes() {
   });
 
   // ── Project types (workspace config, PRD §8.1) ──
+  // Readable by any authed user — the new-project dialog needs the list.
   app.get('/project-types', async (c) => {
     const { db } = getDb();
-    return c.json({ data: await db.select().from(schema.projectTypes) });
+    const rows = await db.select().from(schema.projectTypes).orderBy(asc(schema.projectTypes.position), asc(schema.projectTypes.createdAt));
+    return c.json({ data: rows });
   });
 
   app.post('/project-types', guard('settings.manage'), async (c) => {
     const body = projectTypeInputSchema.parse(await c.req.json());
     const { db } = getDb();
     const id = ulid();
-    await db.insert(schema.projectTypes).values({ id, name: body.name, icon: body.icon, color: body.color });
+    if (body.isDefault) await db.update(schema.projectTypes).set({ isDefault: false });
+    await db.insert(schema.projectTypes).values({
+      id, name: body.name, icon: body.icon, color: body.color,
+      requiresClient: body.requiresClient, revenueSource: body.revenueSource,
+      isDefault: body.isDefault, position: body.position,
+    });
     return c.json({ id }, 201);
+  });
+
+  app.patch('/project-types/order', guard('settings.manage'), async (c) => {
+    const body = projectTypeOrderSchema.parse(await c.req.json());
+    const { db } = getDb();
+    for (const [i, id] of body.ids.entries()) {
+      await db.update(schema.projectTypes).set({ position: i }).where(eq(schema.projectTypes.id, id));
+    }
+    return c.json({ ok: true });
   });
 
   app.patch('/project-types/:id', guard('settings.manage'), async (c) => {
     const body = projectTypeInputSchema.partial().parse(await c.req.json());
     const { db } = getDb();
+    // A single default: setting one clears the others.
+    if (body.isDefault) await db.update(schema.projectTypes).set({ isDefault: false });
     await db.update(schema.projectTypes).set(body).where(eq(schema.projectTypes.id, c.req.param('id')));
     return c.json({ ok: true });
   });
 
   app.delete('/project-types/:id', guard('settings.manage'), async (c) => {
     const { db } = getDb();
-    await db.delete(schema.projectTypes).where(eq(schema.projectTypes.id, c.req.param('id')));
+    const id = c.req.param('id');
+    const [totalRow] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.projectTypes);
+    if ((totalRow?.n ?? 0) <= 1) throw err.domain('Cannot delete the last project type — at least one must remain.');
+    const [usedRow] = await db.select({ n: sql<number>`count(*)::int` })
+      .from(schema.projects).where(eq(schema.projects.projectTypeId, id));
+    const used = usedRow?.n ?? 0;
+    if (used > 0) throw err.domain(`This type is used by ${used} project${used === 1 ? '' : 's'} — move them to another type first.`);
+    await db.delete(schema.projectTypes).where(eq(schema.projectTypes.id, id));
     return c.json({ ok: true });
   });
 

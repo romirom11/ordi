@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, FolderKanban, Lock, Target } from 'lucide-react';
+import { Plus, FolderKanban, Lock, Target, ChevronDown } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
 import { Link, useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
@@ -8,7 +8,7 @@ import {
   Button, Input, Select, Badge, PageHeader, Breadcrumbs, Skeleton, EmptyState, Spinner,
   Avatar, ProgressRing, Tooltip, fmtDate, cn,
 } from '../components/ui';
-import { Dialog } from '../components/overlays';
+import { Dialog, DropdownMenu, MenuItem } from '../components/overlays';
 import { toast } from '../components/overlays';
 import { ProjectIcon } from '../components/project/ProjectIcon';
 import { ProjectContextMenu } from '../components/project/contextMenus';
@@ -28,6 +28,8 @@ extendDict({
     'projects.noLead': 'No lead',
     'projects.private': 'Private',
     'projects.count': 'projects',
+    'projects.type': 'Type',
+    'projects.selectType': 'Select type…',
   },
   uk: {
     'projects.noClientsYet': 'Клієнтів ще немає.',
@@ -42,14 +44,20 @@ extendDict({
     'projects.noLead': 'Без керівника',
     'projects.private': 'Приватний',
     'projects.count': 'проєктів',
+    'projects.type': 'Тип',
+    'projects.selectType': 'Оберіть тип…',
   },
 });
 
 interface Project {
-  id: string; name: string; key: string; kind: 'client' | 'internal';
+  id: string; name: string; key: string; projectTypeId?: string | null;
   status: string; companyId?: string | null; companyName?: string | null;
   leadId?: string | null; startDate?: string | null; targetDate?: string | null;
   visibility?: string; version?: number;
+}
+interface ProjectTypeLite {
+  id: string; name: string; icon?: string; color?: string;
+  requiresClient?: boolean; revenueSource?: string; isDefault?: boolean; position?: number;
 }
 interface CompanyLite { id: string; name: string }
 interface UserLite { id: string; name: string; avatar?: string | null }
@@ -130,6 +138,16 @@ export function ProjectsPage() {
     for (const u of usersQ.data ?? []) m.set(u.id, u);
     return m;
   }, [usersQ.data]);
+  const typesQ = useQuery<ProjectTypeLite[]>({
+    queryKey: ['project-types'],
+    queryFn: () => api.get<{ data: ProjectTypeLite[] }>('/project-types').then((r) => r.data),
+    staleTime: 5 * 60_000,
+  });
+  const typeById = useMemo(() => {
+    const m = new Map<string, ProjectTypeLite>();
+    for (const pt of typesQ.data ?? []) m.set(pt.id, pt);
+    return m;
+  }, [typesQ.data]);
 
   const projects = data ?? [];
   const counts = useMemo(() => {
@@ -201,6 +219,7 @@ export function ProjectsPage() {
           <div className="overflow-hidden rounded-xl border border-border bg-card">
             {shown.map((p, i) => {
               const lead = p.leadId ? userById.get(p.leadId) : undefined;
+              const ptype = p.projectTypeId ? typeById.get(p.projectTypeId) : undefined;
               return (
                 <ProjectContextMenu
                   key={p.id}
@@ -223,6 +242,12 @@ export function ProjectsPage() {
                     {p.companyName && <span className="hidden truncate text-xs text-muted-foreground sm:inline">· {p.companyName}</span>}
                   </div>
 
+                  {ptype && (
+                    <span className="hidden shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-2 py-0.5 text-xs text-muted-foreground md:inline-flex">
+                      <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: ptype.color ?? '#8a8f98' }} />
+                      {ptype.name}
+                    </span>
+                  )}
                   <Badge className="hidden shrink-0 bg-muted font-mono text-[11px] text-muted-foreground sm:inline-flex">{p.key}</Badge>
                   <div className="hidden shrink-0 md:block"><StatusPill status={p.status} /></div>
                   <div className="hidden w-20 shrink-0 justify-end sm:flex"><ProjectProgress id={p.id} /></div>
@@ -266,16 +291,22 @@ function NewProjectModal({ open, onClose, onCreated }: { open: boolean; onClose:
   const [name, setName] = useState('');
   const [key, setKey] = useState('');
   const [keyTouched, setKeyTouched] = useState(false);
-  const [kind, setKind] = useState<'client' | 'internal'>('client');
+  const [typeId, setTypeId] = useState('');
   const [companyId, setCompanyId] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   // Fresh form every time the dialog opens.
   useEffect(() => {
     if (!open) return;
-    setName(''); setKey(''); setKeyTouched(false); setKind('client'); setCompanyId(''); setError(null);
+    setName(''); setKey(''); setKeyTouched(false); setTypeId(''); setCompanyId(''); setError(null);
   }, [open]);
 
+  const typesQ = useQuery<ProjectTypeLite[]>({
+    queryKey: ['project-types'],
+    queryFn: () => api.get<{ data: ProjectTypeLite[] }>('/project-types').then((r) => r.data),
+    enabled: open,
+  });
+  const types = typesQ.data ?? [];
   const companiesQ = useQuery<CompanyLite[]>({
     queryKey: ['companies', 'lite'],
     queryFn: () => api.get<{ data: CompanyLite[] }>('/companies').then((r) => r.data),
@@ -284,15 +315,23 @@ function NewProjectModal({ open, onClose, onCreated }: { open: boolean; onClose:
   const companies = companiesQ.data ?? [];
   const noClientsYet = canCrm && companiesQ.isSuccess && companies.length === 0;
 
-  // A brand-new workspace has no clients — defaulting to "client" would dead-end
-  // the very first project behind a picker with nothing in it.
+  // Preselect a sensible type: with no clients in the workspace a client-requiring
+  // default would dead-end the very first project, so fall back to the first type
+  // that works without a client.
   useEffect(() => {
-    if (open && noClientsYet) setKind('internal');
-  }, [open, noClientsYet]);
+    if (!open || typeId || !types.length || (canCrm && !companiesQ.isSuccess)) return;
+    const preferred = noClientsYet
+      ? (types.find((x) => !x.requiresClient) ?? types[0])
+      : (types.find((x) => x.isDefault) ?? types[0]);
+    if (preferred) setTypeId(preferred.id);
+  }, [open, typeId, types, noClientsYet, canCrm, companiesQ.isSuccess]);
+
+  const selectedType = types.find((x) => x.id === typeId);
+  const needsClient = !!selectedType?.requiresClient;
 
   const mut = useMutation({
     mutationFn: () => api.post<Project>('/projects', {
-      name, key, kind, companyId: kind === 'client' ? (companyId || undefined) : undefined,
+      name, key, projectTypeId: typeId, companyId: needsClient ? (companyId || undefined) : undefined,
     }),
     onSuccess: (p) => onCreated(p.id),
     onError: (e) => { const m = e instanceof ApiError ? e.message : t('projects.createFailed'); setError(m); toast.error(m); },
@@ -303,7 +342,8 @@ function NewProjectModal({ open, onClose, onCreated }: { open: boolean; onClose:
     setError(null);
     if (!name.trim()) { setError(t('common.nameRequired')); return; }
     if (!/^[A-Z]{2,5}$/.test(key)) { setError(t('projects.keyInvalid')); return; }
-    if (kind === 'client' && !companyId) { setError(t('projects.clientRequired')); return; }
+    if (!typeId) { setError(t('projects.selectType')); return; }
+    if (needsClient && !companyId) { setError(t('projects.clientRequired')); return; }
     mut.mutate();
   };
 
@@ -338,14 +378,42 @@ function NewProjectModal({ open, onClose, onCreated }: { open: boolean; onClose:
             />
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">{t('projects.kind')}</label>
-            <Select value={kind} onChange={(e) => setKind(e.target.value as 'client' | 'internal')} className="w-full">
-              <option value="client">{t('projects.kindClient')}</option>
-              <option value="internal">{t('projects.kindInternal')}</option>
-            </Select>
+            <label className="text-xs font-medium text-muted-foreground">{t('projects.type')}</label>
+            <DropdownMenu
+              align="start"
+              width={220}
+              className="block w-full"
+              trigger={
+                <button
+                  type="button"
+                  className="flex h-8 w-full items-center gap-2 rounded-md border border-input bg-transparent px-2.5 text-[13px] outline-none transition-colors duration-150 hover:border-border-strong focus-visible:border-primary/60"
+                >
+                  {selectedType ? (
+                    <>
+                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: selectedType.color ?? '#8a8f98' }} />
+                      <span className="truncate">{selectedType.name}</span>
+                    </>
+                  ) : (
+                    <span className="truncate text-faint">{typesQ.isLoading ? t('common.loading') : t('projects.selectType')}</span>
+                  )}
+                  <ChevronDown size={13} className="ml-auto shrink-0 text-faint" />
+                </button>
+              }
+            >
+              {types.map((pt) => (
+                <MenuItem
+                  key={pt.id}
+                  checked={pt.id === typeId}
+                  icon={<span className="h-2 w-2 rounded-full" style={{ backgroundColor: pt.color ?? '#8a8f98' }} />}
+                  onSelect={() => setTypeId(pt.id)}
+                >
+                  {pt.name}
+                </MenuItem>
+              ))}
+            </DropdownMenu>
           </div>
         </div>
-        {kind === 'client' && (
+        {needsClient && (
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">{t('crm.client')}</label>
             {canCrm && noClientsYet ? (
