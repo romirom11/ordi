@@ -14,8 +14,12 @@ import { PublicQuotePage } from './pages/public/Quote';
 import { PortalPage } from './pages/public/Portal';
 import { IntakeFormPage } from './pages/public/Intake';
 import { CareersPage } from './pages/public/Careers';
-import { Spinner } from './components/ui';
+import { Spinner, Button, Input, Card } from './components/ui';
 import { installErrorReporting } from './lib/sentry';
+import { isTauri } from './lib/desktop';
+import { getInstanceUrl, setInstanceUrl } from './lib/api';
+import { useT } from './lib/i18n';
+import { useState } from 'react';
 
 installErrorReporting();
 
@@ -23,8 +27,59 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
 });
 
+/** Desktop first launch (PRD §18): ask for the ordi instance URL. */
+function InstanceGate() {
+  const t = useT();
+  const [url, setUrl] = useState('https://');
+  const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  const connect = async () => {
+    setError(null);
+    setChecking(true);
+    const clean = url.replace(/\/+$/, '');
+    try {
+      const res = await fetch(`${clean}/healthz`, { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) throw new Error(String(res.status));
+      setInstanceUrl(clean);
+      window.location.reload();
+    } catch {
+      setError(t('desktop.connectFailed'));
+      setChecking(false);
+    }
+  };
+
+  return (
+    <div className="grid min-h-screen place-items-center bg-muted/30 px-4">
+      <Card className="w-full max-w-sm p-6">
+        <div className="mb-1 flex items-center gap-2 font-semibold">
+          <div className="grid h-6 w-6 place-items-center rounded bg-primary text-primary-foreground text-xs">o</div>
+          ordi
+        </div>
+        <p className="mb-4 text-sm text-muted-foreground">{t('desktop.connectTitle')}</p>
+        <label className="block text-xs text-muted-foreground">
+          {t('desktop.instanceUrl')}
+          <Input autoFocus value={url} onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://ordi.example.com" className="mt-1"
+            onKeyDown={(e) => { if (e.key === 'Enter') void connect(); }} />
+        </label>
+        {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+        <Button className="mt-4 w-full" disabled={checking || url.length < 9} onClick={() => void connect()}>
+          {checking ? <Spinner /> : t('desktop.connect')}
+        </Button>
+      </Card>
+    </div>
+  );
+}
+
 function Root() {
   const path = usePathname();
+
+  // Desktop build (tauri:// origin) has no same-origin API — require an
+  // instance URL before anything else (PRD §18 first launch).
+  if (isTauri && !getInstanceUrl()) {
+    return <I18nProvider locale={guessLocale()}><InstanceGate /></I18nProvider>;
+  }
 
   // Public routes (no auth)
   if (path.startsWith('/login')) return <I18nProvider locale={guessLocale()}><LoginPage /></I18nProvider>;

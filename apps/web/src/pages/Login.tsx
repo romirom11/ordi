@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { KeyRound } from 'lucide-react';
-import { api, ApiError } from '../lib/api';
+import { api, ApiError, setSessionToken } from '../lib/api';
+import { isTauri } from '../lib/desktop';
 import { Button, Input, Card, Spinner } from '../components/ui';
 import { useT } from '../lib/i18n';
 
@@ -18,7 +19,12 @@ export function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      await api.post('/auth/login', { email, password, totp: totp || undefined });
+      const res = await api.post<{ ok: boolean; sessionToken?: string }>(
+        '/auth/login', { email, password, totp: totp || undefined },
+      );
+      // Desktop (tauri:// origin) cannot use same-site cookies — keep the
+      // session token and send it as a bearer credential instead.
+      if (isTauri && res.sessionToken) setSessionToken(res.sessionToken);
       window.location.href = '/';
     } catch (err) {
       if (err instanceof ApiError) {

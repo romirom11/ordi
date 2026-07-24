@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Bell } from 'lucide-react';
 import { api } from '../lib/api';
 import { useT } from '../lib/i18n';
+import { setBadge } from '../lib/desktop';
 
 interface Notif { id: string; type: string; entityRef: string | null; payload: Record<string, unknown>; readAt: string | null; createdAt: string }
 
@@ -21,6 +22,8 @@ export function NotificationsBell() {
   });
 
   const unread = data?.unread ?? 0;
+  // Desktop: mirror the unread count onto the dock/taskbar badge (PRD §18).
+  useEffect(() => { setBadge(unread); }, [unread]);
   return (
     <div className="relative">
       <button onClick={() => setOpen((o) => !o)} className="relative rounded-md p-2 hover:bg-muted">

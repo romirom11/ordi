@@ -4,6 +4,18 @@
  */
 import { useEffect } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { isTauri, notifyDesktop } from './desktop';
+
+/** Events worth an OS notification on desktop (PRD §18). */
+const OS_NOTIFY: Record<string, string> = {
+  'task.assigned': 'Task assigned to you',
+  'comment.mentioned': 'You were mentioned',
+  'quote.accepted': 'Quote accepted',
+  'invoice.paid': 'Invoice paid',
+  'leave.requested': 'Leave request pending',
+  'leave.decided': 'Leave request decided',
+  'git.pr_merged': 'PR merged in your task',
+};
 
 /** Map event families to the query keys they invalidate. */
 function invalidateFor(qc: QueryClient, type: string, data: any): void {
@@ -71,6 +83,9 @@ export function useRealtime(): void {
           let data: any = {};
           try { data = JSON.parse((ev as MessageEvent).data); } catch { /* ignore */ }
           invalidateFor(qc, t, data);
+          if (isTauri && OS_NOTIFY[t]) {
+            notifyDesktop('ordi', data?.ref ? `${OS_NOTIFY[t]}: ${data.ref}` : OS_NOTIFY[t]!);
+          }
         });
       }
     };

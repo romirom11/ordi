@@ -5,9 +5,10 @@ import {
 } from 'lucide-react';
 import { Link, usePathname, useNavigate } from '../lib/router';
 import { useMe, useCan } from '../lib/auth';
-import { api } from '../lib/api';
+import { api, setSessionToken } from '../lib/api';
 import { useRealtime } from '../lib/sse';
 import { useT } from '../lib/i18n';
+import { initDesktop } from '../lib/desktop';
 import { cn } from './ui';
 import { CommandPalette } from './CommandPalette';
 import { TimerIndicator } from './TimerIndicator';
@@ -33,6 +34,12 @@ export function Shell({ children }: { children: ReactNode }) {
   const gChord = useRef<number>(0);
 
   useRealtime();
+
+  // Desktop (Tauri) native events: OS quick-add shortcut + ordi:// deep links.
+  useEffect(() => initDesktop({
+    onQuickAdd: () => setQuickOpen(true),
+    onNavigate: navigate,
+  }), [navigate]);
 
   // Keyboard scheme (PRD §17.1): ⌘K palette, C new task, T stop timer,
   // G then D/P/C/F/K/T/M navigation.
@@ -87,6 +94,7 @@ export function Shell({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     await api.post('/auth/logout').catch(() => {});
+    setSessionToken(null);
     window.location.href = '/login';
   };
 

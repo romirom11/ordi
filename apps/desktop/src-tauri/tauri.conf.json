@@ -10,6 +10,7 @@
     "beforeBuildCommand": "pnpm --filter @ordi/web build"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "ordi",
@@ -41,6 +42,12 @@
   "bundle": {
     "active": true,
     "targets": ["deb", "appimage", "msi", "dmg"],
-    "icon": ["icons/icon.png"]
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
   }
 }
