@@ -5,6 +5,8 @@
 import { useEffect } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { isTauri, notifyDesktop } from './desktop';
+import { useMe } from './auth';
+import { toast } from '../components/overlays';
 
 /** Events worth an OS notification on desktop (PRD §18). */
 const OS_NOTIFY: Record<string, string> = {
@@ -48,8 +50,51 @@ function invalidateFor(qc: QueryClient, type: string, data: any): void {
   inv(['notifications']);
 }
 
+/** Soft two-tone chirp for events addressed to the current user. */
+function chirp(): void {
+  try {
+    type AudioWindow = Window & { webkitAudioContext?: typeof AudioContext; __ordiAudio?: AudioContext };
+    const w = window as AudioWindow;
+    const Ctx = window.AudioContext ?? w.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = (w.__ordiAudio ??= new Ctx());
+    if (ctx.state === 'suspended') void ctx.resume();
+    const now = ctx.currentTime;
+    for (const [freq, at] of [[880, 0], [1174.66, 0.09]] as const) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, now + at);
+      gain.gain.exponentialRampToValueAtTime(0.06, now + at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + at + 0.22);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + at);
+      osc.stop(now + at + 0.25);
+    }
+  } catch { /* audio blocked until first interaction – fine */ }
+}
+
+/** Events addressed directly to me → in-app toast + chirp (web equivalent of the desktop notification). */
+function personalPing(type: string, data: any, meId: string, locale: string): void {
+  const targets: string[] = type === 'task.assigned' ? (data?.assigneeIds ?? [])
+    : type === 'comment.mentioned' || type === 'page.mentioned' ? (data?.mentions ?? [])
+    : [];
+  if (!targets.includes(meId)) return;
+  if (data?.actorId === meId || data?.createdBy === meId) return; // not my own action
+  const uk = locale === 'uk';
+  const label = type === 'task.assigned'
+    ? (uk ? 'Вам призначено задачу' : 'Task assigned to you')
+    : (uk ? 'Вас згадали' : 'You were mentioned');
+  toast.info(data?.ref ? `${label}: ${data.ref}` : label);
+  chirp();
+}
+
 export function useRealtime(): void {
   const qc = useQueryClient();
+  const me = useMe();
+  const meId = me.user.id;
+  const meLocale = me.user.locale;
   useEffect(() => {
     let es: EventSource | null = null;
     let stopped = false;
@@ -83,6 +128,7 @@ export function useRealtime(): void {
           let data: any = {};
           try { data = JSON.parse((ev as MessageEvent).data); } catch { /* ignore */ }
           invalidateFor(qc, t, data);
+          if (!isTauri) personalPing(t, data, meId, meLocale);
           if (isTauri && OS_NOTIFY[t]) {
             notifyDesktop('ordi', data?.ref ? `${OS_NOTIFY[t]}: ${data.ref}` : OS_NOTIFY[t]!);
           }
@@ -92,5 +138,5 @@ export function useRealtime(): void {
 
     connect();
     return () => { stopped = true; es?.close(); };
-  }, [qc]);
+  }, [qc, meId, meLocale]);
 }
