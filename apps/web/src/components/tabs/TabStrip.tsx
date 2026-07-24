@@ -13,17 +13,26 @@ import {
 import { extendDict, useT } from '../../lib/i18n';
 import { tabFallbackTitle, useTabs, type TabItem } from '../../lib/tabs';
 import { cn, Tooltip } from '../ui';
+import { ContextMenu, toast, type ContextMenuEntry } from '../overlays';
 import { Hint } from '../Hint';
 
 extendDict({
   en: {
     'tabs.newTab': 'New tab',
     'tabs.closeTab': 'Close tab',
+    'tabs.closeOthers': 'Close other tabs',
+    'tabs.closeRight': 'Close tabs to the right',
+    'tabs.copyLink': 'Copy link',
+    'tabs.linkCopied': 'Link copied',
     'tabs.newTabHint': 'Ctrl/Cmd+click any link to open it in a new tab. Alt+W closes the current one.',
   },
   uk: {
     'tabs.newTab': 'Нова вкладка',
     'tabs.closeTab': 'Закрити вкладку',
+    'tabs.closeOthers': 'Закрити інші вкладки',
+    'tabs.closeRight': 'Закрити вкладки праворуч',
+    'tabs.copyLink': 'Копіювати посилання',
+    'tabs.linkCopied': 'Посилання скопійовано',
     'tabs.newTabHint': 'Ctrl/Cmd+клік на будь-яке посилання відкриє його в новій вкладці. Alt+W закриває поточну.',
   },
 });
@@ -112,9 +121,34 @@ export function TabStrip() {
     const isActive = tab.id === tabs.activeId;
     const isClosing = closingIds.has(tab.id);
     const label = tab.title || tabFallbackTitle(tab.url, t);
+    const menu: ContextMenuEntry[] = [
+      { key: 'close', label: t('tabs.closeTab'), icon: <X size={13} />, onSelect: () => closeAnimated(tab.id) },
+      {
+        key: 'others',
+        label: t('tabs.closeOthers'),
+        disabled: tabs.tabs.length < 2,
+        onSelect: () => tabs.tabs.filter((o) => o.id !== tab.id).forEach((o) => tabs.closeTab(o.id)),
+      },
+      {
+        key: 'right',
+        label: t('tabs.closeRight'),
+        disabled: tabs.tabs.findIndex((o) => o.id === tab.id) >= tabs.tabs.length - 1,
+        onSelect: () => tabs.tabs.slice(tabs.tabs.findIndex((o) => o.id === tab.id) + 1).forEach((o) => tabs.closeTab(o.id)),
+      },
+      { type: 'separator' },
+      {
+        key: 'copy',
+        label: t('tabs.copyLink'),
+        onSelect: () => {
+          navigator.clipboard?.writeText(`${window.location.origin}${tab.url}`)
+            .then(() => toast(t('tabs.linkCopied')))
+            .catch(() => {});
+        },
+      },
+    ];
     return (
+      <ContextMenu key={tab.id} items={menu}>
       <div
-        key={tab.id}
         data-tab-id={tab.id}
         role="tab"
         aria-selected={isActive}
@@ -145,6 +179,7 @@ export function TabStrip() {
           <X size={12} />
         </button>
       </div>
+      </ContextMenu>
     );
   };
 

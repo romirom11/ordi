@@ -7,6 +7,7 @@ import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Globe, Lock, Plus, Trash2, Users as UsersIcon } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
+import { useUsersLookup } from '../lib/queries';
 import { useT, extendDict } from '../lib/i18n';
 import { Avatar, Badge, Button, IconButton, SegmentedControl, Select, Skeleton, Spinner, Switch, cn } from './ui';
 import { ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, toast } from './overlays';
@@ -70,11 +71,11 @@ export function ProjectAccessPanel({ projectId, canManage }: { projectId: string
 
   const project = useQuery({ queryKey: ['project', projectId], queryFn: () => api.get<ProjectDetail>(`/projects/${projectId}`) });
   const members = useQuery({ queryKey: ['project-members', projectId], queryFn: () => api.get<{ data: Member[] }>(`/projects/${projectId}/members`) });
-  const lookup = useQuery({ queryKey: ['users-lookup'], queryFn: () => api.get<{ data: LookupUser[] }>('/users/lookup') });
+  const lookup = useUsersLookup();
 
   const userById = useMemo(() => {
     const m = new Map<string, LookupUser>();
-    for (const u of lookup.data?.data ?? []) m.set(u.id, u);
+    for (const u of lookup.data ?? []) m.set(u.id, u);
     return m;
   }, [lookup.data]);
 
@@ -105,7 +106,7 @@ export function ProjectAccessPanel({ projectId, canManage }: { projectId: string
 
   const memberList = members.data?.data ?? [];
   const memberIds = new Set(memberList.map((m) => m.userId));
-  const addable = (lookup.data?.data ?? []).filter((u) => !memberIds.has(u.id));
+  const addable = (lookup.data ?? []).filter((u) => !memberIds.has(u.id));
   const visibility = project.data?.visibility ?? 'workspace';
 
   const roleOptions: { key: MemberRole; label: string }[] = [

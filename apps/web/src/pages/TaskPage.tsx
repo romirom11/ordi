@@ -10,6 +10,7 @@ import { AlertTriangle, ChevronRight, Copy, X } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { Link, useNavigate } from '../lib/router';
 import { usePageTitle } from '../lib/tabs';
+import { useUsersLookup } from '../lib/queries';
 import { Button, EmptyState, IconButton, Kbd, Skeleton, Tooltip } from '../components/ui';
 import { toast } from '../components/overlays';
 import { RichEditor, EMPTY_DOC } from '../components/richtext/RichEditor';
@@ -89,10 +90,7 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
     queryKey: ['task-statuses', projectId],
     queryFn: () => api.get<{ data: TaskStatus[] }>(`/projects/${projectId}/task-statuses`).then((r) => r.data),
   });
-  const usersQ = useQuery({
-    queryKey: ['users-lookup'],
-    queryFn: () => api.get<{ data: UserLite[] }>('/users/lookup').then((r) => r.data),
-  });
+  const usersQ = useUsersLookup();
   const labelsQ = useQuery({
     queryKey: ['labels'],
     queryFn: () => api.get<{ data: TaskLabel[] }>('/labels').then((r) => r.data),

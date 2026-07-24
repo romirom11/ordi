@@ -247,13 +247,7 @@ export function useCompanies(q = '', status = '') {
   });
 }
 
-export function useUsersLookup() {
-  return useQuery<UserLite[]>({
-    queryKey: ['users-lookup'],
-    queryFn: () => api.get<{ data: UserLite[] }>('/users/lookup').then((r) => r.data),
-    staleTime: 5 * 60_000,
-  });
-}
+export { useUsersLookup } from '../../lib/queries';
 
 export function StatusPill({ status, className }: { status: string; className?: string }) {
   const t = useT();

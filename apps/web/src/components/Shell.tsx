@@ -4,6 +4,7 @@ import {
   LayoutDashboard, CheckSquare, Handshake, FolderKanban, BookText,
   Clock, Receipt, Users, Settings, Search, LogOut, LayoutGrid, CalendarRange,
   SquarePen, Sun, Moon, Monitor, ChevronDown, ChevronRight, GripVertical, User as UserIcon,
+  SquareArrowOutUpRight, Link as LinkIcon, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import { Link, usePathname, useNavigate } from '../lib/router';
 import { useMe, useCan } from '../lib/auth';
@@ -14,7 +15,7 @@ import { useTheme, type ThemePref } from '../lib/theme';
 import { initDesktop } from '../lib/desktop';
 import { TabsProvider, useTabs } from '../lib/tabs';
 import { cn, Avatar, Kbd, Tooltip, IconButton } from './ui';
-import { DropdownMenu, MenuItem, MenuSeparator, MenuLabel, Toaster } from './overlays';
+import { ContextMenu, DropdownMenu, MenuItem, MenuSeparator, MenuLabel, Toaster, toast, type ContextMenuEntry } from './overlays';
 import { CommandPalette } from './CommandPalette';
 import { TimerIndicator } from './TimerIndicator';
 import { NotificationsBell } from './NotificationsBell';
@@ -23,11 +24,25 @@ import { TabStrip } from './tabs/TabStrip';
 
 extendDict({
   en: {
+    'ctx.openInNewTab': 'Open in new tab',
+    'ctx.copyLink': 'Copy link',
+    'ctx.linkCopied': 'Link copied',
+    'ctx.moveUp': 'Move up',
+    'ctx.moveDown': 'Move down',
+    'ctx.collapseSection': 'Collapse section',
+    'ctx.expandSection': 'Expand section',
     'nav.section.work': 'Work',
     'nav.section.operations': 'Operations',
     'nav.section.insights': 'Insights',
   },
   uk: {
+    'ctx.openInNewTab': 'Відкрити в новій вкладці',
+    'ctx.copyLink': 'Копіювати посилання',
+    'ctx.linkCopied': 'Посилання скопійовано',
+    'ctx.moveUp': 'Перемістити вгору',
+    'ctx.moveDown': 'Перемістити вниз',
+    'ctx.collapseSection': 'Згорнути секцію',
+    'ctx.expandSection': 'Розгорнути секцію',
     'nav.section.work': 'Робота',
     'nav.section.operations': 'Операції',
     'nav.section.insights': 'Аналітика',
@@ -242,9 +257,48 @@ function ShellInner({ children }: { children: ReactNode }) {
     { key: 'system', label: t('theme.system'), icon: <Monitor size={14} /> },
   ];
 
+  /** Reorder without dragging — the context-menu equivalent of drag & drop. */
+  const moveWithinSection = (key: string, delta: number) => {
+    const def = NAV_DEFS.find((d) => d.key === key);
+    if (!def) return;
+    const full = orderedNav.map((n) => n.key);
+    const siblings = orderedNav.filter((n) => n.section === def.section).map((n) => n.key);
+    const at = siblings.indexOf(key);
+    const target = siblings[at + delta];
+    if (target === undefined) return;
+    const from = full.indexOf(key);
+    full.splice(full.indexOf(target), 0, ...full.splice(from, 1));
+    commitOrder(full);
+  };
+
+  const copyLink = (to: string) => {
+    navigator.clipboard?.writeText(`${window.location.origin}${to}`)
+      .then(() => toast(t('ctx.linkCopied')))
+      .catch(() => toast.error(t('common.error')));
+  };
+
   const renderNavItem = (n: NavDef) => {
     const active = n.to === '/' ? path === '/' : path.startsWith(n.to);
+    const siblings = orderedNav.filter((s) => s.section === n.section);
+    const at = siblings.findIndex((s) => s.key === n.key);
+    const menu: ContextMenuEntry[] = [
+      { key: 'newtab', label: t('ctx.openInNewTab'), icon: <SquareArrowOutUpRight size={13} />, onSelect: () => tabs?.openInNewTab(n.to) },
+      { key: 'copy', label: t('ctx.copyLink'), icon: <LinkIcon size={13} />, onSelect: () => copyLink(n.to) },
+      { type: 'separator' },
+      { key: 'up', label: t('ctx.moveUp'), icon: <ArrowUp size={13} />, disabled: at <= 0, onSelect: () => moveWithinSection(n.key, -1) },
+      { key: 'down', label: t('ctx.moveDown'), icon: <ArrowDown size={13} />, disabled: at < 0 || at >= siblings.length - 1, onSelect: () => moveWithinSection(n.key, 1) },
+      ...(n.section === 'main' ? [] : [
+        { type: 'separator' } as ContextMenuEntry,
+        {
+          key: 'collapse',
+          label: collapsed[n.section] ? t('ctx.expandSection') : t('ctx.collapseSection'),
+          icon: collapsed[n.section] ? <ChevronDown size={13} /> : <ChevronRight size={13} />,
+          onSelect: () => toggleSection(n.section),
+        } as ContextMenuEntry,
+      ]),
+    ];
     return (
+      <ContextMenu key={n.key} items={menu}>
       <div
         key={n.key}
         draggable
@@ -274,6 +328,7 @@ function ShellInner({ children }: { children: ReactNode }) {
           />
         </Link>
       </div>
+      </ContextMenu>
     );
   };
 
@@ -390,6 +445,14 @@ function ShellInner({ children }: { children: ReactNode }) {
         <div className="space-y-1 p-2.5">
           <TimerIndicator />
           <NotificationsBell />
+          <ContextMenu
+            items={[
+              { key: 'profile', label: t('nav.profile'), icon: <UserIcon size={13} />, onSelect: () => navigate('/profile') },
+              { key: 'newtab', label: t('ctx.openInNewTab'), icon: <SquareArrowOutUpRight size={13} />, onSelect: () => tabs?.openInNewTab('/profile') },
+              { type: 'separator' },
+              { key: 'signout', label: t('nav.signOut'), icon: <LogOut size={13} />, danger: true, onSelect: logout },
+            ]}
+          >
           <Link
             to="/profile"
             className={cn(
@@ -400,6 +463,7 @@ function ShellInner({ children }: { children: ReactNode }) {
             <Avatar name={me.user.name} src={me.user.avatar} size={18} />
             <span className="truncate">{me.user.name}</span>
           </Link>
+          </ContextMenu>
         </div>
       </aside>
 

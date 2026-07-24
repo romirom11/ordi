@@ -6,12 +6,13 @@
 import { useState, useEffect, useRef, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Bell, Inbox, CheckSquare, AtSign, Receipt, CalendarRange, FileCheck2, BookText,
+  Bell, Inbox, CheckSquare, AtSign, Receipt, CalendarRange, FileCheck2, BookText, CheckCheck,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useT } from '../lib/i18n';
 import { setBadge } from '../lib/desktop';
 import { cn, fmtRelative } from './ui';
+import { ContextMenu } from './overlays';
 
 interface Notif { id: string; type: string; entityRef: string | null; payload: Record<string, unknown>; readAt: string | null; createdAt: string }
 
@@ -56,6 +57,11 @@ export function NotificationsBell() {
 
   return (
     <div className="relative" ref={rootRef}>
+      <ContextMenu
+        items={[
+          { key: 'read', label: t('notifications.markAllRead'), icon: <CheckCheck size={13} />, disabled: unread === 0, onSelect: () => readAll.mutate() },
+        ]}
+      >
       <button
         onClick={() => setOpen((o) => !o)}
         aria-label={t('notifications.title')}
@@ -73,6 +79,7 @@ export function NotificationsBell() {
           </span>
         )}
       </button>
+      </ContextMenu>
       {open && (
         <div
           className="absolute bottom-full left-0 z-50 mb-1.5 w-80 overflow-hidden rounded-lg border border-border bg-elevated shadow-pop"
