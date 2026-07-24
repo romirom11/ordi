@@ -38,7 +38,7 @@ export function CompaniesPage() {
 
   const { data, isLoading } = useQuery<Company[]>({
     queryKey: ['companies', q, status],
-    queryFn: () => api.get<Company[]>(`/companies${qs({ q, status })}`),
+    queryFn: () => api.get<{ data: Company[] }>(`/companies${qs({ q, status })}`).then((r) => r.data),
   });
 
   const companies = data ?? [];

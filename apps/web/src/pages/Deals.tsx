@@ -20,8 +20,8 @@ export function DealsPage() {
   const canWrite = can('deals.write');
   const [creating, setCreating] = useState(false);
 
-  const stagesQ = useQuery<Stage[]>({ queryKey: ['deal-stages'], queryFn: () => api.get<Stage[]>('/deal-stages') });
-  const dealsQ = useQuery<Deal[]>({ queryKey: ['deals'], queryFn: () => api.get<Deal[]>('/deals') });
+  const stagesQ = useQuery<Stage[]>({ queryKey: ['deal-stages'], queryFn: () => api.get<{ data: Stage[] }>('/deal-stages').then((r) => r.data) });
+  const dealsQ = useQuery<Deal[]>({ queryKey: ['deals'], queryFn: () => api.get<{ data: Deal[] }>('/deals').then((r) => r.data) });
 
   const move = useMutation({
     mutationFn: (vars: { id: string; stageId: string; lostReason?: string; version?: number }) =>
@@ -128,7 +128,7 @@ function NewDealModal({ stages, onClose, onCreated }: { stages: Stage[]; onClose
   const canCrm = useCan()('crm.read');
   const companiesQ = useQuery<CompanyLite[]>({
     queryKey: ['companies', 'lite'],
-    queryFn: () => api.get<CompanyLite[]>('/companies'),
+    queryFn: () => api.get<{ data: CompanyLite[] }>('/companies').then((r) => r.data),
     enabled: canCrm,
   });
   const companies = companiesQ.data ?? [];

@@ -908,8 +908,8 @@ export async function profitability(params: { scope: 'project' | 'client' | 'lab
       coalesce(sum(te.duration_seconds) filter (where te.billable),0)/3600.0 as billable_hours,
       coalesce(sum(te.duration_seconds) filter (where not te.billable),0)/3600.0 as nonbillable_hours,
       coalesce(sum(te.duration_seconds/3600.0 * te.cost_rate),0) as labor_cost,
-      coalesce(sum((te.duration_seconds/3600.0 * te.cost_rate) filter (where te.billable)),0) as billable_cost,
-      coalesce(sum((te.duration_seconds/3600.0 * te.cost_rate) filter (where not te.billable)),0) as nonbillable_cost
+      coalesce(sum(te.duration_seconds/3600.0 * te.cost_rate) filter (where te.billable),0) as billable_cost,
+      coalesce(sum(te.duration_seconds/3600.0 * te.cost_rate) filter (where not te.billable),0) as nonbillable_cost
     from time_entries te join users u on u.id = te.user_id
     where te.started_at >= ${from} and te.started_at < ${toEnd}
     group by te.user_id, u.name
@@ -939,7 +939,7 @@ async function projectProfit(projectId: string, name: string, kind: string, from
   // Labor cost & billable value from time entries in the period.
   const [t] = await db.execute(sql`
     select coalesce(sum(duration_seconds/3600.0 * cost_rate),0) as labor_cost,
-           coalesce(sum((duration_seconds/3600.0 * hourly_rate) filter (where billable)),0) as billable_value
+           coalesce(sum(duration_seconds/3600.0 * hourly_rate) filter (where billable),0) as billable_value
     from time_entries where project_id = ${projectId} and started_at >= ${from} and started_at < ${toEnd}`) as any[];
   // Invoiced revenue (issued within period, not canceled).
   const [inv] = await db.execute(sql`

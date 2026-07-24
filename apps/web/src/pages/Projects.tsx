@@ -23,11 +23,11 @@ export function ProjectsPage() {
   const canCreate = can('projects.create');
   const [creating, setCreating] = useState(false);
 
-  const { data, isLoading } = useQuery<Project[]>({
+  const { data, isLoading } = useQuery<{ data: Project[] }>({
     queryKey: ['projects'],
-    queryFn: () => api.get<Project[]>('/projects'),
+    queryFn: () => api.get<{ data: Project[] }>('/projects'),
   });
-  const projects = data ?? [];
+  const projects = data?.data ?? [];
 
   return (
     <div>
@@ -88,7 +88,7 @@ function NewProjectModal({ onClose, onCreated }: { onClose: () => void; onCreate
 
   const companiesQ = useQuery<CompanyLite[]>({
     queryKey: ['companies', 'lite'],
-    queryFn: () => api.get<CompanyLite[]>('/companies'),
+    queryFn: () => api.get<{ data: CompanyLite[] }>('/companies').then((r) => r.data),
     enabled: canCrm && kind === 'client',
   });
   const companies = companiesQ.data ?? [];

@@ -68,7 +68,7 @@ export function ProjectDetailPage({ id, taskId }: { id: string; taskId?: string 
   useEffect(() => { setSelectedTaskId(taskId ?? null); }, [taskId]);
 
   const projectQ = useQuery<Project>({ queryKey: ['project', id], queryFn: () => api.get<Project>(`/projects/${id}`) });
-  const statusesQ = useQuery<TaskStatus[]>({ queryKey: ['task-statuses', id], queryFn: () => api.get<TaskStatus[]>(`/projects/${id}/task-statuses`) });
+  const statusesQ = useQuery<TaskStatus[]>({ queryKey: ['task-statuses', id], queryFn: () => api.get<{ data: TaskStatus[] }>(`/projects/${id}/task-statuses`).then((r) => r.data) });
 
   const statuses = (statusesQ.data ?? []).slice().sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
   const project = projectQ.data;
@@ -119,7 +119,7 @@ function TasksTab({ id, statuses, statusesLoading, onOpen }: {
   const canWrite = can('projects.write') || can('projects.create');
   const [view, setView] = useState<'list' | 'board'>('list');
 
-  const tasksQ = useQuery<Task[]>({ queryKey: ['tasks', id], queryFn: () => api.get<Task[]>(`/tasks${qs({ projectId: id })}`) });
+  const tasksQ = useQuery<Task[]>({ queryKey: ['tasks', id], queryFn: () => api.get<{ data: Task[] }>(`/tasks${qs({ projectId: id })}`).then((r) => r.data) });
   const tasks = tasksQ.data ?? [];
 
   const addTask = useMutation({
@@ -405,7 +405,7 @@ function CyclesTab({ id }: { id: string }) {
   const qc = useQueryClient();
   const can = useCan();
   const canWrite = can('projects.write') || can('projects.create');
-  const { data, isLoading } = useQuery<Cycle[]>({ queryKey: ['cycles', id], queryFn: () => api.get<Cycle[]>(`/projects/${id}/cycles`) });
+  const { data, isLoading } = useQuery<Cycle[]>({ queryKey: ['cycles', id], queryFn: () => api.get<{ data: Cycle[] }>(`/projects/${id}/cycles`).then((r) => r.data) });
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
   const [start, setStart] = useState('');
@@ -485,7 +485,7 @@ function CyclesTab({ id }: { id: string }) {
 /* ---------------- Overview ---------------- */
 
 function OverviewTab({ id, statuses, project }: { id: string; statuses: TaskStatus[]; project?: Project }) {
-  const { data } = useQuery<Task[]>({ queryKey: ['tasks', id], queryFn: () => api.get<Task[]>(`/tasks${qs({ projectId: id })}`) });
+  const { data } = useQuery<Task[]>({ queryKey: ['tasks', id], queryFn: () => api.get<{ data: Task[] }>(`/tasks${qs({ projectId: id })}`).then((r) => r.data) });
   const tasks = data ?? [];
   const catOf = (sid: string) => statuses.find((s) => s.id === sid)?.category;
   const done = tasks.filter((t) => catOf(t.statusId) === 'done').length;

@@ -175,7 +175,7 @@ function ContactsTab({ id, canWrite }: { id: string; canWrite: boolean }) {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery<Contact[]>({
     queryKey: ['contacts', id],
-    queryFn: () => api.get<Contact[]>(`/contacts${qs({ companyId: id })}`),
+    queryFn: () => api.get<{ data: Contact[] }>(`/contacts${qs({ companyId: id })}`).then((r) => r.data),
   });
   const [adding, setAdding] = useState(false);
   const [first, setFirst] = useState('');
@@ -241,7 +241,7 @@ function ContactsTab({ id, canWrite }: { id: string; canWrite: boolean }) {
 function DealsTab({ id }: { id: string }) {
   const { data, isLoading } = useQuery<Deal[]>({
     queryKey: ['deals', 'company', id],
-    queryFn: () => api.get<Deal[]>(`/deals${qs({ companyId: id })}`),
+    queryFn: () => api.get<{ data: Deal[] }>(`/deals${qs({ companyId: id })}`).then((r) => r.data),
   });
   const deals = data ?? [];
 
@@ -267,7 +267,7 @@ function NotesTab({ id, canWrite }: { id: string; canWrite: boolean }) {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery<Note[]>({
     queryKey: ['notes', id],
-    queryFn: () => api.get<Note[]>(`/notes${qs({ companyId: id })}`),
+    queryFn: () => api.get<{ data: Note[] }>(`/notes${qs({ companyId: id })}`).then((r) => r.data),
   });
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -313,7 +313,7 @@ function NotesTab({ id, canWrite }: { id: string; canWrite: boolean }) {
 function ActivityTab({ id }: { id: string }) {
   const { data, isLoading } = useQuery<AuditEntry[]>({
     queryKey: ['audit', 'company', id],
-    queryFn: () => api.get<AuditEntry[]>(`/audit/entity/company/${id}`),
+    queryFn: () => api.get<{ data: AuditEntry[] }>(`/audit/entity/company/${id}`).then((r) => r.data),
   });
   const entries = data ?? [];
 
