@@ -89,6 +89,7 @@ interface Company { id: string; name: string; defaultCurrency?: string }
 interface DocRow {
   id: string;
   number?: string | null;
+  companyId?: string | null;
   companyName?: string | null;
   status?: string | null;
   total?: number | string | null;
@@ -389,7 +390,7 @@ function InvoicesView() {
         </Select>
         {can('finance.write') && <Button size="sm" className="ml-auto" onClick={() => setShowForm(true)}><Plus size={14} /> {t('finance.newInvoice')}</Button>}
       </div>
-      <DocTable rows={rows} loading={invoices.isLoading} kind="invoice" onRow={(id) => navigate(`/finance/invoices/${id}`)} />
+      <DocTable rows={rows} loading={invoices.isLoading} kind="invoice" companies={companies.data?.data} onRow={(id) => navigate(`/finance/invoices/${id}`)} />
 
       {can('finance.write') && (
         <Dialog open={showForm} onClose={() => setShowForm(false)} title={t('finance.newInvoice')} width={560}>
@@ -434,7 +435,7 @@ function QuotesView() {
         </Select>
         {can('finance.write') && <Button size="sm" className="ml-auto" onClick={() => setShowForm(true)}><Plus size={14} /> {t('finance.newQuote')}</Button>}
       </div>
-      <DocTable rows={rows} loading={quotes.isLoading} kind="quote" />
+      <DocTable rows={rows} loading={quotes.isLoading} kind="quote" companies={companies.data?.data} />
 
       {can('finance.write') && (
         <Dialog open={showForm} onClose={() => setShowForm(false)} title={t('finance.newQuote')} width={560}>
@@ -445,9 +446,14 @@ function QuotesView() {
   );
 }
 
-function DocTable({ rows, loading, kind, onRow }: { rows: DocRow[]; loading: boolean; kind: 'invoice' | 'quote'; onRow?: (id: string) => void }) {
+function DocTable({ rows, loading, kind, onRow, companies }: {
+  rows: DocRow[]; loading: boolean; kind: 'invoice' | 'quote'; onRow?: (id: string) => void; companies?: Company[];
+}) {
   const t = useT();
   const tabs = useTabs();
+  // The list endpoints return companyId only — resolve names client-side.
+  const companyName = (r: DocRow): string | null =>
+    r.companyName ?? (r.companyId ? companies?.find((c) => c.id === r.companyId)?.name ?? null : null);
   if (loading) {
     return (
       <div className="overflow-hidden rounded-xl border border-border">
@@ -486,7 +492,7 @@ function DocTable({ rows, loading, kind, onRow }: { rows: DocRow[]; loading: boo
             style={{ ['--i' as string]: Math.min(i, 10) }}
           >
             <span className="w-28 shrink-0 truncate font-mono text-xs text-muted-foreground">{r.number ?? r.id.slice(0, 8)}</span>
-            <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{r.companyName ?? '—'}</span>
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{companyName(r) ?? '—'}</span>
             <StatusPill status={r.status} overdue={overdue} />
             <span className="w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
               {fmtDate(kind === 'invoice' ? r.dueDate : r.validUntil)}

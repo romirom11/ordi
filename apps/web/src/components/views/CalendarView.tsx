@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { Button, PriorityIcon, cn } from '../ui';
+import { Button, PriorityIcon, appLocale, cn } from '../ui';
 
 interface CalTask {
   id: string;
@@ -44,7 +44,7 @@ export function CalendarView({ tasks, projectKey, onOpenTask }: {
   }
   const unscheduled = tasks.filter((t) => !t.dueDate);
   const todayKey = ymd(now);
-  const monthLabel = cursor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  const monthLabel = cursor.toLocaleDateString(appLocale(), { month: 'long', year: 'numeric' });
 
   return (
     <div className="space-y-4">

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { Button, PriorityIcon, cn } from '../ui';
+import { Button, PriorityIcon, appLocale, cn } from '../ui';
 
 interface GanttStatus { id: string; category?: string }
 interface GanttTask {
@@ -66,7 +66,7 @@ export function TimelineView({ tasks, statuses, onOpenTask }: {
   const todayInWindow = todayIdx >= 0 && todayIdx < TOTAL_DAYS;
 
   const windowEnd = new Date(windowStart.getFullYear(), windowStart.getMonth(), windowStart.getDate() + TOTAL_DAYS - 1);
-  const rangeLabel = `${windowStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${windowEnd.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  const rangeLabel = `${windowStart.toLocaleDateString(appLocale(), { month: 'short', day: 'numeric' })} – ${windowEnd.toLocaleDateString(appLocale(), { month: 'short', day: 'numeric', year: 'numeric' })}`;
 
   return (
     <div className="space-y-4">
@@ -101,7 +101,7 @@ export function TimelineView({ tasks, statuses, onOpenTask }: {
             {weeks.map((w) => (
               <div key={w.toISOString()} className="shrink-0 px-1.5 py-1.5 text-xs text-muted-foreground"
                 style={{ width: 7 * PX_PER_DAY }}>
-                {w.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                {w.toLocaleDateString(appLocale(), { month: 'short', day: 'numeric' })}
               </div>
             ))}
           </div>

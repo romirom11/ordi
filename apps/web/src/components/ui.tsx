@@ -544,10 +544,21 @@ export function SegmentedControl<T extends string>({ options, value, onChange, c
 
 /* ───────────────────────── Formatters ───────────────────────── */
 
+/** BCP-47 locale matching the APP language (not the browser), for date/number formatting. */
+export function appLocale(): string | undefined {
+  try {
+    const l = localStorage.getItem('ordi:locale');
+    if (l === 'uk') return 'uk-UA';
+    if (l === 'en') return 'en-US';
+  } catch { /* SSR / private mode */ }
+  return undefined;
+}
+
 const money = new Map<string, Intl.NumberFormat>();
 export function fmtMoney(amount: number | string, currency = 'USD'): string {
-  const key = currency;
-  if (!money.has(key)) money.set(key, new Intl.NumberFormat(undefined, { style: 'currency', currency }));
+  const loc = appLocale();
+  const key = `${loc ?? ''}:${currency}`;
+  if (!money.has(key)) money.set(key, new Intl.NumberFormat(loc, { style: 'currency', currency }));
   return money.get(key)!.format(Number(amount));
 }
 
@@ -555,7 +566,7 @@ export function fmtDate(d?: string | null): string {
   if (!d) return '—';
   const date = new Date(d);
   const sameYear = date.getFullYear() === new Date().getFullYear();
-  return date.toLocaleDateString(undefined, sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
+  return date.toLocaleDateString(appLocale(), sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 export function fmtRelative(d?: string | null): string {

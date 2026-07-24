@@ -4,7 +4,7 @@ import { api, qs, ApiError } from '../lib/api';
 import { useCan } from '../lib/auth';
 import {
   Button, IconButton, Input, Textarea, Card, PageHeader, PageBody, Breadcrumbs, EmptyState, Skeleton,
-  SegmentedControl, Select, fmtMoney, cn,
+  SegmentedControl, Select, fmtMoney, appLocale, cn,
 } from '../components/ui';
 import { Dialog, toast } from '../components/overlays';
 import { ChevronLeft, ChevronRight, Plus, Play, Square, Clock, Timer } from 'lucide-react';
@@ -141,7 +141,7 @@ function entryDate(e: TimeEntry): string {
 function dayLabel(iso: string): string {
   const today = isoDate(new Date());
   if (iso === today) return '';
-  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  return new Date(iso + 'T00:00:00').toLocaleDateString(appLocale(), { weekday: 'long', month: 'short', day: 'numeric' });
 }
 /** Human, locale-aware week range, e.g. "20 Jul – 26 Jul" / "20 лип – 26 лип". */
 function weekRangeLabel(weekStart: string): string {
@@ -149,8 +149,8 @@ function weekRangeLabel(weekStart: string): string {
   const end = new Date(weekStart + 'T00:00:00');
   end.setDate(end.getDate() + 6);
   const sameMonth = start.getMonth() === end.getMonth();
-  const startStr = start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  const endStr = end.toLocaleDateString(undefined, sameMonth ? { day: 'numeric' } : { month: 'short', day: 'numeric' });
+  const startStr = start.toLocaleDateString(appLocale(), { month: 'short', day: 'numeric' });
+  const endStr = end.toLocaleDateString(appLocale(), sameMonth ? { day: 'numeric' } : { month: 'short', day: 'numeric' });
   return `${startStr} – ${endStr}`;
 }
 

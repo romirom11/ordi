@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, qs, ApiError } from '../lib/api';
 import { useCan } from '../lib/auth';
-import { Button, IconButton, Input, Select, Card, Avatar, PageHeader, PageBody, Breadcrumbs, EmptyState, Skeleton, cn } from '../components/ui';
+import { Button, IconButton, Input, Select, Card, Avatar, PageHeader, PageBody, Breadcrumbs, EmptyState, Skeleton, appLocale, cn } from '../components/ui';
 import { Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator, toast } from '../components/overlays';
 import { ChevronLeft, ChevronRight, Plus, Trash2, Users } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
@@ -85,14 +85,14 @@ function overlapsWeek(from: string | null | undefined, to: string | null | undef
   return true;
 }
 function shortDate(iso: string): string {
-  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return new Date(iso + 'T00:00:00').toLocaleDateString(appLocale(), { month: 'short', day: 'numeric' });
 }
 function weekRangeLabel(ws: string): string {
   const start = new Date(ws + 'T00:00:00');
   const end = new Date(addDays(ws, 6) + 'T00:00:00');
   const sameMonth = start.getMonth() === end.getMonth();
-  const startStr = start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  const endStr = end.toLocaleDateString(undefined, sameMonth ? { day: 'numeric' } : { month: 'short', day: 'numeric' });
+  const startStr = start.toLocaleDateString(appLocale(), { month: 'short', day: 'numeric' });
+  const endStr = end.toLocaleDateString(appLocale(), sameMonth ? { day: 'numeric' } : { month: 'short', day: 'numeric' });
   return `${startStr}–${endStr}`;
 }
 
