@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, qs, ApiError } from '../lib/api';
 import { useCan } from '../lib/auth';
 import {
-  Button, IconButton, Input, Textarea, Card, PageHeader, EmptyState, Skeleton,
+  Button, IconButton, Input, Textarea, Card, PageHeader, PageBody, Breadcrumbs, EmptyState, Skeleton,
   SegmentedControl, fmtMoney, cn,
 } from '../components/ui';
 import { Dialog, toast } from '../components/overlays';
@@ -94,6 +94,16 @@ function dayLabel(iso: string): string {
   if (iso === today) return '';
   return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
 }
+/** Human, locale-aware week range, e.g. "20 Jul – 26 Jul" / "20 лип – 26 лип". */
+function weekRangeLabel(weekStart: string): string {
+  const start = new Date(weekStart + 'T00:00:00');
+  const end = new Date(weekStart + 'T00:00:00');
+  end.setDate(end.getDate() + 6);
+  const sameMonth = start.getMonth() === end.getMonth();
+  const startStr = start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const endStr = end.toLocaleDateString(undefined, sameMonth ? { day: 'numeric' } : { month: 'short', day: 'numeric' });
+  return `${startStr} – ${endStr}`;
+}
 
 export function TimePage() {
   const t = useT();
@@ -110,6 +120,7 @@ export function TimePage() {
     <div>
       <PageHeader
         title={t('nav.time')}
+        breadcrumbs={<Breadcrumbs items={[{ label: t('nav.time') }]} />}
         actions={<SegmentedControl options={tabs} value={tab} onChange={setTab} />}
       />
       {tab === 'week' ? <MyWeekView /> : <ReportsView />}
@@ -286,13 +297,13 @@ function MyWeekView() {
   };
 
   return (
-    <div className="p-6">
+    <PageBody>
       <TimerHero onChange={invalidateTime} />
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-1.5">
           <IconButton size="sm" onClick={() => shift(-7)} aria-label="Previous week"><ChevronLeft size={15} /></IconButton>
-          <span className="min-w-[7rem] text-center text-[13px] font-medium tabular-nums">{t('time.weekOf')} {weekStart}</span>
+          <span className="min-w-[8.5rem] text-center text-[13px] font-medium tabular-nums">{weekRangeLabel(weekStart)}</span>
           <IconButton size="sm" onClick={() => shift(7)} aria-label="Next week"><ChevronRight size={15} /></IconButton>
         </div>
         <button className="text-xs text-muted-foreground transition-colors hover:text-foreground" onClick={() => setWeekStart(isoDate(mondayOf(new Date())))}>{t('tasks.thisWeek')}</button>
@@ -387,7 +398,7 @@ function MyWeekView() {
           </div>
         </form>
       </Dialog>
-    </div>
+    </PageBody>
   );
 }
 
@@ -404,7 +415,7 @@ function ReportsView() {
   const hoursOf = (r: ReportRow): number => (r.hours != null ? Number(r.hours) : r.seconds != null ? Number(r.seconds) / 3600 : 0);
 
   return (
-    <div className="p-6">
+    <PageBody>
       <div className="mb-4 flex items-center gap-2">
         <span className="text-xs text-muted-foreground">{t('time.groupBy')}</span>
         <SegmentedControl
@@ -443,6 +454,6 @@ function ReportsView() {
           </tbody>
         </table>
       </Card>
-    </div>
+    </PageBody>
   );
 }

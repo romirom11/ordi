@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, qs, ApiError } from '../lib/api';
 import { useCan } from '../lib/auth';
-import { Button, IconButton, Input, Select, Card, Avatar, PageHeader, EmptyState, Skeleton, cn } from '../components/ui';
+import { Button, IconButton, Input, Select, Card, Avatar, PageHeader, PageBody, Breadcrumbs, EmptyState, Skeleton, cn } from '../components/ui';
 import { Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator, toast } from '../components/overlays';
 import { ChevronLeft, ChevronRight, Plus, Trash2, Users } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
@@ -226,9 +226,10 @@ function ResourcingView() {
       <PageHeader
         title={t('nav.resourcing')}
         subtitle={t('resourcing.subtitle')}
+        breadcrumbs={<Breadcrumbs items={[{ label: t('nav.resourcing') }]} />}
         actions={canWrite && <Button size="sm" onClick={() => openAddFor()}><Plus size={14} /> {t('resourcing.addAllocation')}</Button>}
       />
-      <div className="p-6">
+      <PageBody width="full">
         <div className="mb-3 flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-1.5">
             <IconButton size="sm" onClick={() => setRangeStart(addDays(rangeStart, -7))} aria-label="Previous"><ChevronLeft size={15} /></IconButton>
@@ -313,7 +314,7 @@ function ResourcingView() {
             </div>
           </Card>
         )}
-      </div>
+      </PageBody>
 
       <Dialog open={showForm} onClose={() => setShowForm(false)} title={t('resourcing.addAllocation')} width={440}>
         <form

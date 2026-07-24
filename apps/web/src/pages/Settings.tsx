@@ -4,17 +4,18 @@ import { PERMISSIONS, PERMISSION_META, type Permission } from '@ordi/shared';
 import {
   Building2, ArrowLeftRight, Users as UsersIcon, Shield, SlidersHorizontal, Wallet, Plug,
   ScrollText, Inbox, Plus, Copy, Upload, Trash2, Lock, Globe, ImageIcon, ChevronRight,
-  ChevronLeft, MoreHorizontal, Check, RotateCcw, Boxes,
+  ChevronLeft, MoreHorizontal, Check, RotateCcw, Boxes, Receipt,
 } from 'lucide-react';
 import { api, qs } from '../lib/api';
 import { Link } from '../lib/router';
 import { useCan } from '../lib/auth';
 import {
-  Button, Input, Select, Card, Badge, PageHeader, EmptyState, Skeleton, Switch, Avatar, Spinner, cn,
+  Button, Input, Select, Card, Badge, PageHeader, PageBody, Breadcrumbs, EmptyState, Skeleton, Switch, Avatar, Spinner, cn,
 } from '../components/ui';
 import { Dialog, ConfirmDialog, DropdownMenu, MenuItem, toast } from '../components/overlays';
 import { ImportExportPanel } from '../components/ImportExportPanel';
 import { IntegrationsPanel } from '../components/settings/IntegrationsPanel';
+import { InvoicesPanel } from '../components/settings/InvoicesPanel';
 import { ModulesPanel } from '../components/settings/ModulesPanel';
 import { SectionHead, SettingRow, Field, RowList, AnimatedRow } from '../components/settings/primitives';
 import { downscaleImage } from '../components/settings/image';
@@ -66,6 +67,7 @@ extendDict({
     'settings.backToRoles': 'All roles',
     'settings.member': 'member',
     'settings.members': 'members',
+    'settings.invoices': 'Invoices',
     'settings.saveFailed': 'Could not save changes',
     'settings.conflict': 'Someone else made changes — reloaded latest.',
   },
@@ -113,6 +115,7 @@ extendDict({
     'settings.backToRoles': 'Усі ролі',
     'settings.member': 'учасник',
     'settings.members': 'учасників',
+    'settings.invoices': 'Інвойси',
     'settings.saveFailed': 'Не вдалося зберегти зміни',
     'settings.conflict': 'Хтось інший вніс зміни — завантажено найновіше.',
   },
@@ -142,6 +145,7 @@ const GROUPS: NavGroup[] = [
       { id: 'modules', label: 'settings.modules', perm: 'settings.manage', icon: Boxes },
       { id: 'custom-fields', label: 'settings.customFields', perm: 'settings.manage', icon: SlidersHorizontal },
       { id: 'finance', label: 'nav.finance', perm: 'finance.settings', icon: Wallet },
+      { id: 'invoices', label: 'settings.invoices', perm: 'finance.settings', icon: Receipt },
       { id: 'integrations', label: 'settings.integrations', perm: 'integrations.manage', icon: Plug },
     ],
   },
@@ -168,7 +172,11 @@ export function SettingsPage({ section }: { section?: string }) {
 
   return (
     <div className="flex flex-col">
-      <PageHeader title={t('nav.settings')} subtitle={t('settings.subtitle')} />
+      <PageHeader
+        title={t('nav.settings')}
+        subtitle={t('settings.subtitle')}
+        breadcrumbs={<Breadcrumbs items={[{ label: t('nav.settings'), to: '/settings' }, { label: t(active.label) }]} />}
+      />
       <div className="flex min-h-[calc(100vh-53px)]">
         <aside className="w-52 shrink-0 border-r border-border p-3">
           <nav className="space-y-4">
@@ -199,18 +207,19 @@ export function SettingsPage({ section }: { section?: string }) {
           </nav>
         </aside>
         <div className="min-w-0 flex-1">
-          <div key={active.id} className="anim-fade-in mx-auto max-w-2xl px-8 py-6">
+          <PageBody key={active.id} width="default" className="anim-fade-in">
             {active.id === 'workspace' && <WorkspacePanel />}
             {active.id === 'users' && <UsersPanel />}
             {active.id === 'roles' && <RolesPanel />}
             {active.id === 'modules' && <ModulesPanel />}
             {active.id === 'custom-fields' && <CustomFieldsPanel />}
             {active.id === 'finance' && <FinancePanel />}
+            {active.id === 'invoices' && <InvoicesPanel />}
             {active.id === 'integrations' && <IntegrationsPanel />}
             {active.id === 'audit' && <AuditPanel />}
             {active.id === 'events' && <DlqPanel />}
             {active.id === 'import-export' && <ImportExportPanel />}
-          </div>
+          </PageBody>
         </div>
       </div>
     </div>
