@@ -245,11 +245,13 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submit(); }
         }}
-        onMouseDown={() => {
+        onMouseDown={(e) => {
           // Dialog stops mousedown propagation, so DropdownMenu's document-level
           // outside-click handler never fires for clicks inside the dialog.
-          // Re-dispatch a document mousedown so open chip menus close as expected
-          // (menus themselves are portaled to <body> and unaffected).
+          // Re-dispatch a document mousedown so open chip menus close as expected.
+          // Skip clicks inside a portaled menu: React portals bubble through the
+          // React tree, but those clicks are already handled by the menu itself.
+          if ((e.target as HTMLElement).closest?.('[role="menu"]')) return;
           document.dispatchEvent(new MouseEvent('mousedown'));
         }}
       >
