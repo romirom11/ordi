@@ -4,6 +4,7 @@ import { api, qs } from '../lib/api';
 import { useCan } from '../lib/auth';
 import { Button, Input, Select, Textarea, Card, Badge, PageHeader, EmptyState, Skeleton, fmtMoney, fmtDate, cn } from '../components/ui';
 import { Plus, X, Check, Ban, UserPlus } from 'lucide-react';
+import { useT } from '../lib/i18n';
 
 const EMP_STATUS: Record<string, string> = { active: '#22c55e', on_leave: '#f59e0b', terminated: '#6b7280' };
 const LEAVE_STATUS: Record<string, string> = { pending: '#f59e0b', approved: '#22c55e', rejected: '#ef4444', canceled: '#6b7280' };
@@ -23,28 +24,29 @@ function empName(e: Employee): string {
 type Tab = 'employees' | 'leave' | 'recruiting' | 'dashboard';
 
 export function PeoplePage() {
+  const t = useT();
   const can = useCan();
   const [tab, setTab] = useState<Tab>('employees');
 
   if (!can('people.read')) {
-    return <EmptyState title="No access" hint="You don't have permission to view HR data. Ask an admin for the people.read permission if you need it." />;
+    return <EmptyState title={t('resourcing.noAccess')} hint={t('people.noAccessHint')} />;
   }
 
   const tabs: { id: Tab; label: string; show: boolean }[] = [
-    { id: 'employees', label: 'Employees', show: true },
-    { id: 'leave', label: 'Leave', show: true },
-    { id: 'recruiting', label: 'Recruiting', show: can('people.recruit') },
-    { id: 'dashboard', label: 'Dashboard', show: true },
+    { id: 'employees', label: t('people.employees'), show: true },
+    { id: 'leave', label: t('people.leave'), show: true },
+    { id: 'recruiting', label: t('people.recruiting'), show: can('people.recruit') },
+    { id: 'dashboard', label: t('nav.dashboard'), show: true },
   ];
 
   return (
     <div>
       <PageHeader
-        title="People"
+        title={t('nav.people')}
         actions={
           <div className="flex rounded-md border border-border p-0.5 text-sm">
-            {tabs.filter((t) => t.show).map((t) => (
-              <button key={t.id} className={cn('rounded px-3 py-1', tab === t.id && 'bg-muted font-medium')} onClick={() => setTab(t.id)}>{t.label}</button>
+            {tabs.filter((tb) => tb.show).map((tb) => (
+              <button key={tb.id} className={cn('rounded px-3 py-1', tab === tb.id && 'bg-muted font-medium')} onClick={() => setTab(tb.id)}>{tb.label}</button>
             ))}
           </div>
         }
@@ -58,6 +60,7 @@ export function PeoplePage() {
 }
 
 function EmployeesView() {
+  const t = useT();
   const qc = useQueryClient();
   const can = useCan();
   const canWrite = can('people.write');
@@ -78,16 +81,16 @@ function EmployeesView() {
   return (
     <div className="p-6">
       <div className="mb-4 flex items-center justify-end">
-        {canWrite && <Button size="sm" onClick={() => setShowForm((v) => !v)}><Plus size={14} /> New employee</Button>}
+        {canWrite && <Button size="sm" onClick={() => setShowForm((v) => !v)}><Plus size={14} /> {t('people.newEmployee')}</Button>}
       </div>
       {showForm && canWrite && (
         <Card className="mb-4 p-4">
           <form className="flex flex-wrap items-end gap-3" onSubmit={(e) => { e.preventDefault(); if (form.firstName) create.mutate(); }}>
-            <label className="text-xs text-muted-foreground">First name<Input value={form.firstName} onChange={(e) => setForm((f) => ({ ...f, firstName: e.target.value }))} className="mt-1 w-40" /></label>
-            <label className="text-xs text-muted-foreground">Last name<Input value={form.lastName} onChange={(e) => setForm((f) => ({ ...f, lastName: e.target.value }))} className="mt-1 w-40" /></label>
-            <label className="text-xs text-muted-foreground">Position<Input value={form.position} onChange={(e) => setForm((f) => ({ ...f, position: e.target.value }))} className="mt-1 w-40" /></label>
-            <label className="text-xs text-muted-foreground">Department<Input value={form.department} onChange={(e) => setForm((f) => ({ ...f, department: e.target.value }))} className="mt-1 w-40" /></label>
-            <Button type="submit" size="sm" disabled={create.isPending}>Create</Button>
+            <label className="text-xs text-muted-foreground">{t('crm.firstName')}<Input value={form.firstName} onChange={(e) => setForm((f) => ({ ...f, firstName: e.target.value }))} className="mt-1 w-40" /></label>
+            <label className="text-xs text-muted-foreground">{t('crm.lastName')}<Input value={form.lastName} onChange={(e) => setForm((f) => ({ ...f, lastName: e.target.value }))} className="mt-1 w-40" /></label>
+            <label className="text-xs text-muted-foreground">{t('people.position')}<Input value={form.position} onChange={(e) => setForm((f) => ({ ...f, position: e.target.value }))} className="mt-1 w-40" /></label>
+            <label className="text-xs text-muted-foreground">{t('people.department')}<Input value={form.department} onChange={(e) => setForm((f) => ({ ...f, department: e.target.value }))} className="mt-1 w-40" /></label>
+            <Button type="submit" size="sm" disabled={create.isPending}>{t('common.create')}</Button>
           </form>
         </Card>
       )}
@@ -95,16 +98,16 @@ function EmployeesView() {
       {employees.isLoading ? (
         <Card className="p-4"><Skeleton className="h-40 w-full" /></Card>
       ) : rows.length === 0 ? (
-        <EmptyState title="No employees" hint="Add your team to track roles, lifecycle and time-off in one place." />
+        <EmptyState title={t('people.noEmployees')} hint={t('people.noEmployeesHint')} />
       ) : (
         <Card className="overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                <th className="px-4 py-2 font-medium">Name</th>
-                <th className="px-4 py-2 font-medium">Position</th>
-                <th className="px-4 py-2 font-medium">Department</th>
-                <th className="px-4 py-2 font-medium">Status</th>
+                <th className="px-4 py-2 font-medium">{t('common.name')}</th>
+                <th className="px-4 py-2 font-medium">{t('people.position')}</th>
+                <th className="px-4 py-2 font-medium">{t('people.department')}</th>
+                <th className="px-4 py-2 font-medium">{t('common.status')}</th>
               </tr>
             </thead>
             <tbody>

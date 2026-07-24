@@ -15,6 +15,8 @@ const NAV: NavItem[] = [
   { id: 'custom-fields', label: 'Custom fields', perm: 'settings.manage' },
   { id: 'finance', label: 'Finance', perm: 'finance.settings' },
   { id: 'integrations', label: 'Integrations', perm: 'integrations.manage' },
+  { id: 'audit', label: 'Audit log', perm: 'audit.read' },
+  { id: 'events', label: 'Event queue', perm: 'audit.read' },
 ];
 
 export function SettingsPage({ section }: { section?: string }) {
@@ -51,6 +53,8 @@ export function SettingsPage({ section }: { section?: string }) {
           {active.id === 'custom-fields' && <CustomFieldsPanel />}
           {active.id === 'finance' && <FinancePanel />}
           {active.id === 'integrations' && <IntegrationsPanel />}
+          {active.id === 'audit' && <AuditPanel />}
+          {active.id === 'events' && <DlqPanel />}
         </div>
       </div>
     </div>
@@ -444,6 +448,95 @@ function IntegrationsPanel() {
           <Button type="submit" size="sm" disabled={addHook.isPending}><Plus size={14} /> Add</Button>
         </form>
       </Card>
+    </div>
+  );
+}
+
+/* ── Audit log (PRD §14.4) ── */
+
+interface AuditRow { id: string; entityType: string; entityId: string; actorId?: string | null; actorType?: string; action: string; diff?: Record<string, unknown>; sensitivity?: string; createdAt: string }
+
+function AuditPanel() {
+  const [entityType, setEntityType] = useState('');
+  const { data, isLoading } = useQuery<{ data: AuditRow[] }>({
+    queryKey: ['audit', entityType],
+    queryFn: () => api.get<{ data: AuditRow[] }>(`/audit${qs({ entityType })}`),
+  });
+  const rows = data?.data ?? [];
+  return (
+    <div className="max-w-4xl space-y-4">
+      <div className="flex items-center gap-2">
+        <h2 className="text-base font-semibold">Audit log</h2>
+        <Select value={entityType} onChange={(e) => setEntityType(e.target.value)} className="ml-auto">
+          <option value="">All entities</option>
+          {['company', 'contact', 'deal', 'project', 'task', 'invoice', 'quote', 'payment', 'employee', 'leave_request', 'user', 'compensation'].map((t) => <option key={t} value={t}>{t}</option>)}
+        </Select>
+      </div>
+      {isLoading ? <Skeleton className="h-40" /> : rows.length === 0 ? (
+        <EmptyState title="No audit records" hint="Mutations across the workspace appear here with redacted diffs." />
+      ) : (
+        <Card className="divide-y divide-border">
+          {rows.map((r) => (
+            <div key={r.id} className="px-3 py-2 text-sm">
+              <div className="flex items-center gap-2">
+                <Badge className="bg-muted text-muted-foreground">{r.entityType}</Badge>
+                <span className="font-medium">{r.action}</span>
+                {r.sensitivity === 'sensitive' && <Badge className="bg-destructive/10 text-destructive">sensitive</Badge>}
+                <span className="ml-auto text-xs text-muted-foreground">{r.actorType ?? 'user'} · {new Date(r.createdAt).toLocaleString()}</span>
+              </div>
+              {r.diff && Object.keys(r.diff).length > 0 && (
+                <pre className="mt-1 overflow-x-auto rounded bg-muted/60 p-2 text-xs text-muted-foreground">{JSON.stringify(r.diff, null, 1)}</pre>
+              )}
+            </div>
+          ))}
+        </Card>
+      )}
+    </div>
+  );
+}
+
+/* ── Dead-letter queue admin (PRD §3.3): inspect + replay ── */
+
+interface DlqRow { id: string; consumer: string; eventId: string; error: string; attempts: number; createdAt: string; payload?: Record<string, unknown> }
+
+function DlqPanel() {
+  const qc = useQueryClient();
+  const { data, isLoading, isError } = useQuery<{ data: DlqRow[]; counts?: Record<string, number> }>({
+    queryKey: ['dlq'],
+    queryFn: () => api.get<{ data: DlqRow[]; counts?: Record<string, number> }>('/dlq'),
+  });
+  const replay = useMutation({
+    mutationFn: (id: string) => api.post(`/dlq/${id}/replay`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['dlq'] }),
+  });
+  const rows = data?.data ?? [];
+  return (
+    <div className="max-w-4xl space-y-4">
+      <div>
+        <h2 className="text-base font-semibold">Event queue — dead letters</h2>
+        <p className="text-sm text-muted-foreground">Events that exhausted retries. Replay after fixing the underlying issue; delivery is idempotent.</p>
+      </div>
+      {isLoading ? <Skeleton className="h-32" /> : isError ? (
+        <EmptyState title="Requires settings.manage + audit.read" />
+      ) : rows.length === 0 ? (
+        <EmptyState title="Queue is healthy" hint="No dead-lettered events. Failed handlers retry automatically with backoff before landing here." />
+      ) : (
+        <Card className="divide-y divide-border">
+          {rows.map((r) => (
+            <div key={r.id} className="flex items-start gap-3 px-3 py-2 text-sm">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <Badge className="bg-muted text-muted-foreground">{r.consumer}</Badge>
+                  <span className="truncate font-mono text-xs text-muted-foreground">{r.eventId}</span>
+                  <span className="text-xs text-muted-foreground">×{r.attempts}</span>
+                </div>
+                <p className="mt-0.5 truncate text-xs text-destructive">{r.error}</p>
+              </div>
+              <Button size="sm" variant="outline" disabled={replay.isPending} onClick={() => replay.mutate(r.id)}>Replay</Button>
+            </div>
+          ))}
+        </Card>
+      )}
     </div>
   );
 }

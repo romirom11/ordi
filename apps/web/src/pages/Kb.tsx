@@ -1,44 +1,19 @@
-import { type ReactNode, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { api } from '../lib/api';
-import { Button, Input, Textarea, Card, PageHeader, EmptyState, Skeleton, fmtDate, cn } from '../components/ui';
+import { Button, Input, Card, PageHeader, EmptyState, Skeleton, fmtDate, cn } from '../components/ui';
 import { Plus, History, Pencil, FileText, ChevronRight, RotateCcw } from 'lucide-react';
+import { RichEditor, EMPTY_DOC } from '../components/richtext/RichEditor';
+import { RichText, docIsEmpty } from '../components/richtext/RichText';
+import { useT } from '../lib/i18n';
 
 interface Space { id: string; name: string; icon?: string | null }
 interface FlatPage { id: string; title: string; parentId: string | null; position?: number }
 interface PageNode extends FlatPage { children: PageNode[] }
-interface PageDetail { id: string; title: string; body: unknown; spaceId: string; updatedAt?: string }
+interface PageDetail { id: string; title: string; body: unknown; spaceId: string; updatedAt?: string; version?: number }
 interface Version { id?: string; versionNo: number; title: string; authorId?: string | null; createdAt: string }
-
-const EMPTY_DOC = { type: 'doc', content: [{ type: 'paragraph' }] };
-
-function textToDoc(text: string): unknown {
-  const paras = text.split('\n\n').map((block) => ({
-    type: 'paragraph',
-    content: block ? [{ type: 'text', text: block }] : [],
-  }));
-  return { type: 'doc', content: paras.length ? paras : [{ type: 'paragraph' }] };
-}
-
-function docToText(doc: any): string {
-  if (!doc || !Array.isArray(doc.content)) return '';
-  const blocks: string[] = [];
-  const walk = (nodes: any[]): string =>
-    nodes
-      .map((n) => {
-        if (n?.type === 'text') return n.text ?? '';
-        if (Array.isArray(n?.content)) return walk(n.content);
-        return '';
-      })
-      .join('');
-  for (const node of doc.content) {
-    if (Array.isArray(node?.content)) blocks.push(walk(node.content));
-    else blocks.push('');
-  }
-  return blocks.join('\n\n');
-}
 
 function buildTree(pages: FlatPage[]): PageNode[] {
   const map = new Map<string, PageNode>();
@@ -53,62 +28,8 @@ function buildTree(pages: FlatPage[]): PageNode[] {
   return roots;
 }
 
-function renderInline(content: any, keyPrefix: string): ReactNode {
-  if (!Array.isArray(content)) return null;
-  return content.map((n: any, i: number) => {
-    if (n?.type !== 'text') return null;
-    let el: ReactNode = n.text ?? '';
-    const marks: string[] = Array.isArray(n.marks) ? n.marks.map((m: any) => m?.type) : [];
-    if (marks.includes('code')) el = <code className="rounded bg-muted px-1 py-0.5 text-[0.85em]">{el}</code>;
-    if (marks.includes('bold')) el = <strong>{el}</strong>;
-    if (marks.includes('italic')) el = <em>{el}</em>;
-    return <span key={keyPrefix + i}>{el}</span>;
-  });
-}
-
-function RenderNode({ node, k }: { node: any; k: string }): ReactNode {
-  if (!node) return null;
-  switch (node.type) {
-    case 'heading': {
-      const level = Number(node.attrs?.level ?? 2);
-      const cls = level <= 1 ? 'text-2xl font-semibold' : level === 2 ? 'text-xl font-semibold' : 'text-lg font-medium';
-      return <p className={cn('mt-4 mb-1', cls)}>{renderInline(node.content, k)}</p>;
-    }
-    case 'paragraph':
-      return <p className="my-2 leading-relaxed">{renderInline(node.content, k)}</p>;
-    case 'bulletList':
-      return (
-        <ul className="my-2 list-disc pl-6">
-          {(node.content ?? []).map((li: any, i: number) => (
-            <li key={k + i}>{(li.content ?? []).map((c: any, j: number) => <RenderNode key={k + i + '-' + j} node={c} k={k + i + '-' + j} />)}</li>
-          ))}
-        </ul>
-      );
-    case 'orderedList':
-      return (
-        <ol className="my-2 list-decimal pl-6">
-          {(node.content ?? []).map((li: any, i: number) => (
-            <li key={k + i}>{(li.content ?? []).map((c: any, j: number) => <RenderNode key={k + i + '-' + j} node={c} k={k + i + '-' + j} />)}</li>
-          ))}
-        </ol>
-      );
-    case 'codeBlock':
-      return <pre className="my-2 overflow-x-auto rounded-md bg-muted p-3 text-xs"><code>{docToText({ content: [node] })}</code></pre>;
-    default:
-      if (Array.isArray(node.content)) return <>{node.content.map((c: any, i: number) => <RenderNode key={k + i} node={c} k={k + i} />)}</>;
-      return null;
-  }
-}
-
-function RenderDoc({ doc }: { doc: unknown }): ReactNode {
-  const d = doc as any;
-  if (!d || !Array.isArray(d.content) || d.content.length === 0) {
-    return <p className="text-sm text-muted-foreground">This page is empty.</p>;
-  }
-  return <div className="text-sm">{d.content.map((n: any, i: number) => <RenderNode key={String(i)} node={n} k={String(i)} />)}</div>;
-}
-
 function PageTree({ nodes, spaceId, activeId, depth }: { nodes: PageNode[]; spaceId: string; activeId?: string; depth: number }) {
+  const t = useT();
   return (
     <div className="space-y-0.5">
       {nodes.map((n) => (
@@ -122,7 +43,7 @@ function PageTree({ nodes, spaceId, activeId, depth }: { nodes: PageNode[]; spac
           >
             <span style={{ paddingLeft: depth * 12 }} className="flex items-center gap-1.5">
               {n.children.length > 0 ? <ChevronRight size={13} /> : <FileText size={13} />}
-              <span className="truncate">{n.title || 'Untitled'}</span>
+              <span className="truncate">{n.title || t('kb.untitled')}</span>
             </span>
           </Link>
           {n.children.length > 0 && <PageTree nodes={n.children} spaceId={spaceId} activeId={activeId} depth={depth + 1} />}
@@ -133,6 +54,7 @@ function PageTree({ nodes, spaceId, activeId, depth }: { nodes: PageNode[]; spac
 }
 
 export function KbPage({ spaceId, pageId }: { spaceId?: string; pageId?: string }) {
+  const t = useT();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const can = useCan();
@@ -177,9 +99,9 @@ export function KbPage({ spaceId, pageId }: { spaceId?: string; pageId?: string 
       {/* Left: spaces + page tree */}
       <aside className="flex w-64 shrink-0 flex-col border-r border-border">
         <div className="flex items-center justify-between px-3 py-2.5">
-          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Spaces</span>
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('kb.spaces')}</span>
           {canManageSpaces && (
-            <button className="rounded p-1 hover:bg-muted" onClick={() => setAddingSpace((v) => !v)} title="New space">
+            <button className="rounded p-1 hover:bg-muted" onClick={() => setAddingSpace((v) => !v)} title={t('kb.newSpace')}>
               <Plus size={15} />
             </button>
           )}
@@ -192,8 +114,8 @@ export function KbPage({ spaceId, pageId }: { spaceId?: string; pageId?: string 
               if (newSpace.trim()) createSpace.mutate(newSpace.trim());
             }}
           >
-            <Input autoFocus value={newSpace} onChange={(e) => setNewSpace(e.target.value)} placeholder="Space name" className="h-7 text-xs" />
-            <Button size="sm" type="submit" disabled={createSpace.isPending}>Add</Button>
+            <Input autoFocus value={newSpace} onChange={(e) => setNewSpace(e.target.value)} placeholder={t('kb.spaceName')} className="h-7 text-xs" />
+            <Button size="sm" type="submit" disabled={createSpace.isPending}>{t('common.add')}</Button>
           </form>
         )}
         <div className="px-2">
@@ -208,15 +130,15 @@ export function KbPage({ spaceId, pageId }: { spaceId?: string; pageId?: string 
               <span className="truncate">{s.name}</span>
             </Link>
           ))}
-          {spaces.data && spaces.data.data.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">No spaces yet.</p>}
+          {spaces.data && spaces.data.data.length === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">{t('kb.noSpaces')}</p>}
         </div>
 
         {spaceId && (
           <div className="mt-2 flex-1 overflow-auto border-t border-border pt-2">
             <div className="flex items-center justify-between px-3 pb-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pages</span>
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('kb.pages')}</span>
               {canWrite && (
-                <button className="rounded p-1 hover:bg-muted" onClick={() => setAddingPage((v) => !v)} title="New page">
+                <button className="rounded p-1 hover:bg-muted" onClick={() => setAddingPage((v) => !v)} title={t('kb.newPage')}>
                   <Plus size={15} />
                 </button>
               )}
@@ -229,13 +151,13 @@ export function KbPage({ spaceId, pageId }: { spaceId?: string; pageId?: string 
                   if (newPage.trim()) createPage.mutate(newPage.trim());
                 }}
               >
-                <Input autoFocus value={newPage} onChange={(e) => setNewPage(e.target.value)} placeholder="Page title" className="h-7 text-xs" />
-                <Button size="sm" type="submit" disabled={createPage.isPending}>Add</Button>
+                <Input autoFocus value={newPage} onChange={(e) => setNewPage(e.target.value)} placeholder={t('kb.pageTitle')} className="h-7 text-xs" />
+                <Button size="sm" type="submit" disabled={createPage.isPending}>{t('common.add')}</Button>
               </form>
             )}
             <div className="px-2">
               {pages.isLoading && <Skeleton className="mx-1 h-6" />}
-              {pages.data && tree.length === 0 && <p className="px-2 py-2 text-xs text-muted-foreground">No pages.</p>}
+              {pages.data && tree.length === 0 && <p className="px-2 py-2 text-xs text-muted-foreground">{t('kb.noPages')}</p>}
               <PageTree nodes={tree} spaceId={spaceId} activeId={pageId} depth={0} />
             </div>
           </div>
@@ -245,10 +167,10 @@ export function KbPage({ spaceId, pageId }: { spaceId?: string; pageId?: string 
       {/* Right: page detail */}
       <div className="flex-1 overflow-auto">
         {!spaceId && (
-          <EmptyState title="Knowledge base" hint="Pick a space on the left to browse its pages, or create a new space to start documenting." />
+          <EmptyState title={t('kb.title')} hint={t('kb.pickSpaceHint')} />
         )}
         {spaceId && !pageId && (
-          <EmptyState title="Select a page" hint="Choose a page from the tree, or create a new one to capture briefs, processes and specs." />
+          <EmptyState title={t('kb.selectPage')} hint={t('kb.selectPageHint')} />
         )}
         {spaceId && pageId && <PageDetailView pageId={pageId} canWrite={canWrite} />}
       </div>
@@ -257,10 +179,11 @@ export function KbPage({ spaceId, pageId }: { spaceId?: string; pageId?: string 
 }
 
 function PageDetailView({ pageId, canWrite }: { pageId: string; canWrite: boolean }) {
+  const t = useT();
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState('');
-  const [body, setBody] = useState('');
+  const [bodyDoc, setBodyDoc] = useState<any>(EMPTY_DOC);
   const [showVersions, setShowVersions] = useState(false);
 
   const page = useQuery({ queryKey: ['page', pageId], queryFn: () => api.get<PageDetail>(`/pages/${pageId}`) });
@@ -273,12 +196,12 @@ function PageDetailView({ pageId, canWrite }: { pageId: string; canWrite: boolea
   useEffect(() => {
     if (page.data) {
       setTitle(page.data.title ?? '');
-      setBody(docToText(page.data.body));
+      setBodyDoc(page.data.body ?? EMPTY_DOC);
     }
   }, [page.data]);
 
   const save = useMutation({
-    mutationFn: () => api.patch(`/pages/${pageId}`, { title, body: textToDoc(body) }),
+    mutationFn: () => api.patch(`/pages/${pageId}`, { title, body: bodyDoc, version: page.data?.version }),
     onSuccess: () => {
       setEditing(false);
       qc.invalidateQueries({ queryKey: ['page', pageId] });
@@ -295,27 +218,27 @@ function PageDetailView({ pageId, canWrite }: { pageId: string; canWrite: boolea
       </div>
     );
   }
-  if (page.isError || !page.data) return <div className="p-8 text-sm text-muted-foreground">Page not found.</div>;
+  if (page.isError || !page.data) return <div className="p-8 text-sm text-muted-foreground">{t('kb.pageNotFound')}</div>;
 
   return (
     <div>
       <PageHeader
-        title={editing ? 'Editing page' : page.data.title || 'Untitled'}
-        subtitle={page.data.updatedAt ? `Updated ${fmtDate(page.data.updatedAt)}` : undefined}
+        title={editing ? t('kb.editingPage') : page.data.title || t('kb.untitled')}
+        subtitle={page.data.updatedAt ? `${t('kb.updated')} ${fmtDate(page.data.updatedAt)}` : undefined}
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => setShowVersions((v) => !v)}>
-              <History size={14} /> History
+              <History size={14} /> {t('kb.history')}
             </Button>
             {canWrite && !editing && (
               <Button size="sm" onClick={() => setEditing(true)}>
-                <Pencil size={14} /> Edit
+                <Pencil size={14} /> {t('common.edit')}
               </Button>
             )}
             {editing && (
               <>
-                <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Button>
-                <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>Save</Button>
+                <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>{t('common.cancel')}</Button>
+                <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>{t('common.save')}</Button>
               </>
             )}
           </>
@@ -323,14 +246,16 @@ function PageDetailView({ pageId, canWrite }: { pageId: string; canWrite: boolea
       />
       <div className="flex">
         <div className="mx-auto max-w-3xl flex-1 p-8">
-          {save.isError && <p className="mb-3 text-sm text-destructive">Failed to save. Try again.</p>}
+          {save.isError && <p className="mb-3 text-sm text-destructive">{t('kb.saveFailed')}</p>}
           {editing ? (
             <div className="space-y-3">
-              <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" className="text-lg font-semibold" />
-              <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={18} placeholder="Write the page body… (blank line = new paragraph)" className="font-mono text-xs" />
+              <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('common.title')} className="text-lg font-semibold" />
+              <RichEditor value={bodyDoc} onChange={setBodyDoc} placeholder={t('kb.bodyPlaceholder')} onSubmit={() => { if (!save.isPending) save.mutate(); }} />
             </div>
+          ) : docIsEmpty(page.data.body) ? (
+            <p className="text-sm text-muted-foreground">{t('kb.emptyPage')}</p>
           ) : (
-            <RenderDoc doc={page.data.body} />
+            <RichText doc={page.data.body} className="text-sm" />
           )}
         </div>
         {showVersions && <VersionsPanel pageId={pageId} />}
@@ -340,6 +265,7 @@ function PageDetailView({ pageId, canWrite }: { pageId: string; canWrite: boolea
 }
 
 function VersionsPanel({ pageId }: { pageId: string }) {
+  const t = useT();
   const qc = useQueryClient();
   const versions = useQuery({ queryKey: ['pageVersions', pageId], queryFn: () => api.get<{ data: Version[] }>(`/pages/${pageId}/versions`) });
   const restore = useMutation({
@@ -351,17 +277,17 @@ function VersionsPanel({ pageId }: { pageId: string }) {
   });
   return (
     <Card className="m-4 w-72 shrink-0 self-start">
-      <div className="border-b border-border px-3 py-2 text-sm font-medium">Version history</div>
+      <div className="border-b border-border px-3 py-2 text-sm font-medium">{t('kb.versions')}</div>
       <div className="max-h-[70vh] overflow-auto p-2">
         {versions.isLoading && <Skeleton className="h-6" />}
-        {versions.data && versions.data.data.length === 0 && <p className="p-2 text-xs text-muted-foreground">No versions yet.</p>}
+        {versions.data && versions.data.data.length === 0 && <p className="p-2 text-xs text-muted-foreground">{t('kb.noVersions')}</p>}
         {versions.data?.data.map((v) => (
           <div key={String(v.versionNo)} className="flex items-center justify-between rounded px-2 py-1.5 text-sm hover:bg-muted/60">
             <div>
               <div className="font-medium">v{v.versionNo}</div>
               <div className="text-xs text-muted-foreground">{fmtDate(v.createdAt)}</div>
             </div>
-            <button className="rounded p-1 text-muted-foreground hover:bg-muted" title="Restore" onClick={() => restore.mutate(v.versionNo)} disabled={restore.isPending}>
+            <button className="rounded p-1 text-muted-foreground hover:bg-muted" title={t('kb.restore')} onClick={() => restore.mutate(v.versionNo)} disabled={restore.isPending}>
               <RotateCcw size={14} />
             </button>
           </div>

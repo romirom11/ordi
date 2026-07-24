@@ -5,6 +5,7 @@ import { useCan } from '../lib/auth';
 import { api } from '../lib/api';
 import { Button, Input, Select, Card, Badge, Skeleton, fmtMoney, fmtDate, cn } from '../components/ui';
 import { ArrowLeft, Send, Download, Ban, Plus, ExternalLink } from 'lucide-react';
+import { useT } from '../lib/i18n';
 
 const STATUS_COLORS: Record<string, string> = {
   draft: '#6b7280', sent: '#3b82f6', viewed: '#8b5cf6', partially_paid: '#f59e0b',
@@ -35,6 +36,7 @@ interface Invoice {
 }
 
 export function InvoiceDetailPage({ id }: { id: string }) {
+  const t = useT();
   const qc = useQueryClient();
   const can = useCan();
   const [showPayment, setShowPayment] = useState(false);
@@ -57,7 +59,7 @@ export function InvoiceDetailPage({ id }: { id: string }) {
   });
 
   if (invoice.isLoading) return <div className="mx-auto max-w-4xl space-y-4 p-8"><Skeleton className="h-10 w-1/3" /><Skeleton className="h-48 w-full" /></div>;
-  if (invoice.isError || !invoice.data) return <div className="p-8 text-sm text-muted-foreground">Invoice not found.</div>;
+  if (invoice.isError || !invoice.data) return <div className="p-8 text-sm text-muted-foreground">{t('finance.invoiceNotFound')}</div>;
 
   const iv = invoice.data;
   const cur = iv.currency ?? 'USD';
@@ -70,30 +72,30 @@ export function InvoiceDetailPage({ id }: { id: string }) {
 
   return (
     <div className="mx-auto max-w-4xl p-8">
-      <Link to="/finance" className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline"><ArrowLeft size={14} /> Finance</Link>
+      <Link to="/finance" className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline"><ArrowLeft size={14} /> {t('nav.finance')}</Link>
 
       <div className="mb-6 flex items-start justify-between">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold">{iv.number ?? 'Invoice'}</h1>
+            <h1 className="text-2xl font-semibold">{iv.number ?? t('public.invoice')}</h1>
             <Badge color={statusColor(iv.status)}>{iv.status ?? 'draft'}</Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            {iv.companyId ? <Link to={`/companies/${iv.companyId}`} className="hover:underline">{iv.companyName ?? 'Client'}</Link> : iv.companyName ?? 'Client'}
-            {iv.dueDate && <> · Due {fmtDate(iv.dueDate)}</>}
+            {iv.companyId ? <Link to={`/companies/${iv.companyId}`} className="hover:underline">{iv.companyName ?? t('public.client')}</Link> : iv.companyName ?? t('public.client')}
+            {iv.dueDate && <> · {t('public.due')} {fmtDate(iv.dueDate)}</>}
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {can('finance.send') && <Button size="sm" variant="outline" onClick={() => send.mutate()} disabled={send.isPending}><Send size={14} /> Send</Button>}
+          {can('finance.send') && <Button size="sm" variant="outline" onClick={() => send.mutate()} disabled={send.isPending}><Send size={14} /> {t('common.send')}</Button>}
           <Button size="sm" variant="outline" onClick={() => window.open(`/api/v1/invoices/${id}/pdf`, '_blank')}><Download size={14} /> PDF</Button>
-          {can('finance.payments') && outstanding > 0 && <Button size="sm" onClick={() => setShowPayment((v) => !v)}><Plus size={14} /> Record payment</Button>}
-          {can('finance.write') && cancelable && <Button size="sm" variant="destructive" onClick={() => { if (confirm(`Cancel ${iv.number ?? 'this invoice'}?`)) cancel.mutate(); }} disabled={cancel.isPending}><Ban size={14} /> Cancel</Button>}
+          {can('finance.payments') && outstanding > 0 && <Button size="sm" onClick={() => setShowPayment((v) => !v)}><Plus size={14} /> {t('finance.recordPayment')}</Button>}
+          {can('finance.write') && cancelable && <Button size="sm" variant="destructive" onClick={() => { if (confirm(t('finance.cancelInvoiceConfirm'))) cancel.mutate(); }} disabled={cancel.isPending}><Ban size={14} /> {t('common.cancel')}</Button>}
         </div>
       </div>
 
       {iv.publicToken && (
         <Card className="mb-6 flex items-center justify-between px-4 py-2 text-sm">
-          <span className="text-muted-foreground">Public link</span>
+          <span className="text-muted-foreground">{t('finance.publicLink')}</span>
           <a href={`/i/${iv.publicToken}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
             /i/{iv.publicToken} <ExternalLink size={13} />
           </a>
@@ -102,17 +104,17 @@ export function InvoiceDetailPage({ id }: { id: string }) {
 
       {showPayment && can('finance.payments') && (
         <Card className="mb-6 p-4">
-          <div className="mb-3 text-sm font-medium">Record payment</div>
+          <div className="mb-3 text-sm font-medium">{t('finance.recordPayment')}</div>
           <form className="flex flex-wrap items-end gap-3" onSubmit={(e) => { e.preventDefault(); if (Number(pay.amount) > 0) recordPayment.mutate(); }}>
-            <label className="text-xs text-muted-foreground">Amount<Input type="number" min={0} step="0.01" value={pay.amount} onChange={(e) => setPay((p) => ({ ...p, amount: e.target.value }))} className="mt-1 w-32" /></label>
-            <label className="text-xs text-muted-foreground">Date<Input type="date" value={pay.date} onChange={(e) => setPay((p) => ({ ...p, date: e.target.value }))} className="mt-1" /></label>
-            <label className="text-xs text-muted-foreground">Method
+            <label className="text-xs text-muted-foreground">{t('public.amount')}<Input type="number" min={0} step="0.01" value={pay.amount} onChange={(e) => setPay((p) => ({ ...p, amount: e.target.value }))} className="mt-1 w-32" /></label>
+            <label className="text-xs text-muted-foreground">{t('common.date')}<Input type="date" value={pay.date} onChange={(e) => setPay((p) => ({ ...p, date: e.target.value }))} className="mt-1" /></label>
+            <label className="text-xs text-muted-foreground">{t('finance.method')}
               <Select value={pay.method} onChange={(e) => setPay((p) => ({ ...p, method: e.target.value }))} className="mt-1 block h-9">
                 {['bank', 'card', 'cash', 'other'].map((m) => <option key={m} value={m}>{m}</option>)}
               </Select>
             </label>
-            <Button type="submit" size="sm" disabled={recordPayment.isPending}>Save</Button>
-            {recordPayment.isError && <span className="text-xs text-destructive">Payment failed.</span>}
+            <Button type="submit" size="sm" disabled={recordPayment.isPending}>{t('common.save')}</Button>
+            {recordPayment.isError && <span className="text-xs text-destructive">{t('finance.paymentFailed')}</span>}
           </form>
         </Card>
       )}
@@ -121,14 +123,14 @@ export function InvoiceDetailPage({ id }: { id: string }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs text-muted-foreground">
-              <th className="px-4 py-2 font-medium">Description</th>
-              <th className="px-4 py-2 text-right font-medium">Qty</th>
-              <th className="px-4 py-2 text-right font-medium">Unit price</th>
-              <th className="px-4 py-2 text-right font-medium">Amount</th>
+              <th className="px-4 py-2 font-medium">{t('public.description')}</th>
+              <th className="px-4 py-2 text-right font-medium">{t('public.qty')}</th>
+              <th className="px-4 py-2 text-right font-medium">{t('finance.unitPrice')}</th>
+              <th className="px-4 py-2 text-right font-medium">{t('public.amount')}</th>
             </tr>
           </thead>
           <tbody>
-            {items.length === 0 && <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">No line items.</td></tr>}
+            {items.length === 0 && <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">{t('finance.noLineItems')}</td></tr>}
             {items.map((it, i) => (
               <tr key={it.id ?? String(i)} className="border-b border-border last:border-0">
                 <td className="px-4 py-2">{it.description ?? '—'}</td>
@@ -143,9 +145,9 @@ export function InvoiceDetailPage({ id }: { id: string }) {
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
-          <div className="border-b border-border px-4 py-2 text-sm font-medium">Payments</div>
+          <div className="border-b border-border px-4 py-2 text-sm font-medium">{t('finance.payments')}</div>
           <div className="divide-y divide-border">
-            {payments.length === 0 && <p className="px-4 py-4 text-sm text-muted-foreground">No payments recorded yet.</p>}
+            {payments.length === 0 && <p className="px-4 py-4 text-sm text-muted-foreground">{t('finance.noPayments')}</p>}
             {payments.map((p) => (
               <div key={p.id} className="flex items-center justify-between px-4 py-2 text-sm">
                 <span>{fmtDate(p.date)} · <span className="text-muted-foreground">{p.method ?? ''}</span></span>
@@ -156,11 +158,11 @@ export function InvoiceDetailPage({ id }: { id: string }) {
         </Card>
         <Card className="p-4">
           <dl className="space-y-1.5 text-sm">
-            <Row label="Subtotal" value={fmtMoney(iv.subtotal ?? 0, cur)} />
-            <Row label="Tax" value={fmtMoney(iv.taxTotal ?? 0, cur)} />
-            <Row label="Total" value={fmtMoney(total, cur)} bold />
-            <Row label="Paid" value={fmtMoney(paid, cur)} />
-            <Row label="Outstanding" value={fmtMoney(outstanding, cur)} bold accent={outstanding > 0} />
+            <Row label={t('public.subtotal')} value={fmtMoney(iv.subtotal ?? 0, cur)} />
+            <Row label={t('public.tax')} value={fmtMoney(iv.taxTotal ?? 0, cur)} />
+            <Row label={t('common.total')} value={fmtMoney(total, cur)} bold />
+            <Row label={t('public.paid')} value={fmtMoney(paid, cur)} />
+            <Row label={t('finance.outstanding')} value={fmtMoney(outstanding, cur)} bold accent={outstanding > 0} />
           </dl>
         </Card>
       </div>

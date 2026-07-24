@@ -4,6 +4,7 @@ import { api, qs } from '../lib/api';
 import { useCan } from '../lib/auth';
 import { Button, Input, Textarea, Select, Card, PageHeader, Skeleton, fmtMoney, cn } from '../components/ui';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { useT } from '../lib/i18n';
 
 interface TimeEntry {
   id: string;
@@ -47,6 +48,7 @@ function entryDate(e: TimeEntry): string {
 }
 
 export function TimePage() {
+  const t = useT();
   const can = useCan();
   const [tab, setTab] = useState<'week' | 'reports'>('week');
   const canReports = can('time.read_all');
@@ -54,12 +56,12 @@ export function TimePage() {
   return (
     <div>
       <PageHeader
-        title="Time"
+        title={t('nav.time')}
         actions={
           <div className="flex rounded-md border border-border p-0.5 text-sm">
-            <button className={cn('rounded px-3 py-1', tab === 'week' && 'bg-muted font-medium')} onClick={() => setTab('week')}>My week</button>
+            <button className={cn('rounded px-3 py-1', tab === 'week' && 'bg-muted font-medium')} onClick={() => setTab('week')}>{t('time.myWeek')}</button>
             {canReports && (
-              <button className={cn('rounded px-3 py-1', tab === 'reports' && 'bg-muted font-medium')} onClick={() => setTab('reports')}>Reports</button>
+              <button className={cn('rounded px-3 py-1', tab === 'reports' && 'bg-muted font-medium')} onClick={() => setTab('reports')}>{t('time.reports')}</button>
             )}
           </div>
         }
@@ -70,6 +72,7 @@ export function TimePage() {
 }
 
 function MyWeekView() {
+  const t = useT();
   const qc = useQueryClient();
   const [weekStart, setWeekStart] = useState(() => isoDate(mondayOf(new Date())));
   const week = useQuery({
@@ -114,10 +117,10 @@ function MyWeekView() {
     <div className="p-6">
       <div className="mb-4 flex items-center gap-3">
         <button className="rounded border border-border p-1.5 hover:bg-muted" onClick={() => shift(-7)}><ChevronLeft size={15} /></button>
-        <span className="text-sm font-medium">Week of {weekStart}</span>
+        <span className="text-sm font-medium">{t('time.weekOf')} {weekStart}</span>
         <button className="rounded border border-border p-1.5 hover:bg-muted" onClick={() => shift(7)}><ChevronRight size={15} /></button>
-        <button className="text-xs text-muted-foreground hover:underline" onClick={() => setWeekStart(isoDate(mondayOf(new Date())))}>This week</button>
-        <span className="ml-auto text-sm text-muted-foreground">Total: <span className="font-medium text-foreground">{fmtDur(weekTotal)}</span></span>
+        <button className="text-xs text-muted-foreground hover:underline" onClick={() => setWeekStart(isoDate(mondayOf(new Date())))}>{t('tasks.thisWeek')}</button>
+        <span className="ml-auto text-sm text-muted-foreground">{t('common.total')}: <span className="font-medium text-foreground">{fmtDur(weekTotal)}</span></span>
       </div>
 
       {week.isLoading ? (
@@ -137,7 +140,7 @@ function MyWeekView() {
                 <div className="space-y-1">
                   {entries.map((e) => (
                     <div key={e.id} className="rounded bg-muted/60 p-1.5 text-xs">
-                      <div className="font-medium">{e.taskRef ?? e.projectName ?? 'Entry'}</div>
+                      <div className="font-medium">{e.taskRef ?? e.projectName ?? t('time.entry')}</div>
                       <div className="text-muted-foreground">{fmtDur(Number(e.durationSeconds))}</div>
                       {e.note && <div className="truncate text-muted-foreground">{e.note}</div>}
                     </div>
@@ -151,7 +154,7 @@ function MyWeekView() {
       )}
 
       <Card className="mt-6 max-w-2xl p-4">
-        <div className="mb-3 text-sm font-medium">Add manual entry</div>
+        <div className="mb-3 text-sm font-medium">{t('time.addManualEntry')}</div>
         <form
           className="grid grid-cols-2 gap-3"
           onSubmit={(e) => {
@@ -160,24 +163,24 @@ function MyWeekView() {
           }}
         >
           <label className="text-xs text-muted-foreground">
-            Task ID
+            {t('time.taskId')}
             <Input value={form.taskId} onChange={(e) => setForm((f) => ({ ...f, taskId: e.target.value }))} placeholder="task id" className="mt-1" />
           </label>
           <label className="text-xs text-muted-foreground">
-            Date
+            {t('common.date')}
             <Input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} className="mt-1" />
           </label>
           <label className="text-xs text-muted-foreground">
-            Duration (minutes)
+            {t('time.durationMinutes')}
             <Input type="number" min={1} value={form.minutes} onChange={(e) => setForm((f) => ({ ...f, minutes: e.target.value }))} placeholder="60" className="mt-1" />
           </label>
           <label className="text-xs text-muted-foreground">
-            Note
+            {t('time.note')}
             <Textarea value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} rows={1} className="mt-1" />
           </label>
           <div className="col-span-2 flex items-center gap-3">
-            <Button type="submit" size="sm" disabled={addEntry.isPending}><Plus size={14} /> Add entry</Button>
-            {addEntry.isError && <span className="text-xs text-destructive">Failed to add entry.</span>}
+            <Button type="submit" size="sm" disabled={addEntry.isPending}><Plus size={14} /> {t('time.addEntry')}</Button>
+            {addEntry.isError && <span className="text-xs text-destructive">{t('time.addEntryFailed')}</span>}
           </div>
         </form>
       </Card>
@@ -186,6 +189,7 @@ function MyWeekView() {
 }
 
 function ReportsView() {
+  const t = useT();
   const [groupBy, setGroupBy] = useState<'project' | 'user' | 'company'>('project');
   const report = useQuery({
     queryKey: ['timeReport', groupBy],
@@ -197,20 +201,20 @@ function ReportsView() {
   return (
     <div className="p-6">
       <div className="mb-4 flex items-center gap-2">
-        <span className="text-sm text-muted-foreground">Group by</span>
+        <span className="text-sm text-muted-foreground">{t('time.groupBy')}</span>
         <Select value={groupBy} onChange={(e) => setGroupBy(e.target.value as typeof groupBy)}>
-          <option value="project">Project</option>
-          <option value="user">User</option>
-          <option value="company">Company</option>
+          <option value="project">{t('time.groupProject')}</option>
+          <option value="user">{t('time.groupUser')}</option>
+          <option value="company">{t('time.groupCompany')}</option>
         </Select>
       </div>
       <Card>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs text-muted-foreground">
-              <th className="px-4 py-2 font-medium">{groupBy[0]!.toUpperCase() + groupBy.slice(1)}</th>
-              <th className="px-4 py-2 text-right font-medium">Hours</th>
-              <th className="px-4 py-2 text-right font-medium">Billable</th>
+              <th className="px-4 py-2 font-medium">{t(groupBy === 'project' ? 'time.groupProject' : groupBy === 'user' ? 'time.groupUser' : 'time.groupCompany')}</th>
+              <th className="px-4 py-2 text-right font-medium">{t('time.hours')}</th>
+              <th className="px-4 py-2 text-right font-medium">{t('time.billable')}</th>
             </tr>
           </thead>
           <tbody>
@@ -218,7 +222,7 @@ function ReportsView() {
               <tr><td colSpan={3} className="px-4 py-3"><Skeleton className="h-5 w-full" /></td></tr>
             )}
             {!report.isLoading && rows.length === 0 && (
-              <tr><td colSpan={3} className="px-4 py-8 text-center text-muted-foreground">No time recorded for this grouping yet.</td></tr>
+              <tr><td colSpan={3} className="px-4 py-8 text-center text-muted-foreground">{t('time.noReportData')}</td></tr>
             )}
             {rows.map((r, i) => (
               <tr key={r.key ?? r.name ?? r.label ?? String(i)} className="border-b border-border last:border-0">

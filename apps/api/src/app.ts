@@ -18,6 +18,9 @@ import { notificationsRoutes } from './domains/core/notifications.routes';
 import { savedViewsRoutes } from './domains/core/savedviews.routes';
 import { attachmentsRoutes } from './domains/core/attachments.routes';
 import { auditRoutes } from './domains/core/audit.routes';
+import { dlqRoutes } from './domains/core/dlq.routes';
+import { importExportRoutes } from './domains/core/importexport.routes';
+import { openApiDoc, docsHtml } from './domains/core/openapi';
 import { dashboardRoutes } from './domains/core/dashboard.routes';
 import { streamRoutes } from './domains/core/stream.routes';
 import { settingsRoutes } from './domains/core/settings.routes';
@@ -62,6 +65,10 @@ export function createApp() {
   // Public routes (no auth): invoices/quotes/portal/intake/careers/git webhooks
   app.route('/', publicRoutes());
 
+  // OpenAPI contract (PRD §15.1) — public, static document
+  app.get('/api/docs/openapi.json', (c) => c.json(openApiDoc as Record<string, unknown>));
+  app.get('/api/docs', (c) => c.html(docsHtml));
+
   // Authenticated API
   const api = new Hono<AppEnv>();
   api.use('*', authMiddleware);
@@ -75,6 +82,8 @@ export function createApp() {
   api.route('/saved-views', savedViewsRoutes());
   api.route('/attachments', attachmentsRoutes());
   api.route('/audit', auditRoutes());
+  api.route('/dlq', dlqRoutes());
+  api.route('/', importExportRoutes()); // /export/*.csv, /import/*
   api.route('/', dashboardRoutes()); // /dashboard, /dashboards
   api.route('/stream', streamRoutes());
   api.route('/settings', settingsRoutes());

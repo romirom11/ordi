@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Bell } from 'lucide-react';
 import { api } from '../lib/api';
+import { useT } from '../lib/i18n';
 
 interface Notif { id: string; type: string; entityRef: string | null; payload: Record<string, unknown>; readAt: string | null; createdAt: string }
 
 export function NotificationsBell() {
+  const t = useT();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const { data } = useQuery({
@@ -28,11 +30,11 @@ export function NotificationsBell() {
       {open && (
         <div className="absolute right-0 top-10 z-40 w-80 rounded-lg border border-border bg-card shadow-lg">
           <div className="flex items-center justify-between border-b border-border px-3 py-2 text-sm font-medium">
-            Notifications
-            <button className="text-xs text-muted-foreground hover:underline" onClick={() => readAll.mutate()}>Mark all read</button>
+            {t('notifications.title')}
+            <button className="text-xs text-muted-foreground hover:underline" onClick={() => readAll.mutate()}>{t('notifications.markAllRead')}</button>
           </div>
           <div className="max-h-96 overflow-auto">
-            {(data?.data ?? []).length === 0 && <div className="p-4 text-sm text-muted-foreground">Nothing yet</div>}
+            {(data?.data ?? []).length === 0 && <div className="p-4 text-sm text-muted-foreground">{t('common.nothingYet')}</div>}
             {(data?.data ?? []).map((n) => (
               <div key={n.id} className={`border-b border-border px-3 py-2 text-sm ${n.readAt ? 'opacity-60' : ''}`}>
                 <div className="font-medium">{n.type}</div>

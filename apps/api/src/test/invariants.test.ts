@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { getDb, schema, eq } from '@ordi/db';
+import { getDb, schema, eq, and } from '@ordi/db';
 import { ulid } from 'ulid';
 import { resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
 import { processOutboxOnce } from '../workers/relay';
@@ -71,5 +71,39 @@ describe('money totals are server-authoritative (PRD §11.3)', () => {
     expect(subtotal).toBe(200);
     const total = Number(full.total ?? full.invoice?.total);
     expect(total).toBe(240);
+  });
+});
+
+describe('dead-letter replay (PRD §3.3)', () => {
+  it('replayed event is re-dispatched and completes', async () => {
+    const { db } = getDb();
+    const owner = reqAs(users.owner!.cookie);
+    // Simulate a dead event: outbox row + a dead_letter record with exhausted attempts.
+    const eventId = ulid();
+    await db.insert(schema.events).values({
+      id: eventId, type: 'task.created', aggregateType: 'task', aggregateId: ulid(),
+      payload: {}, actorType: 'system',
+    });
+    const dlqId = ulid();
+    await db.insert(schema.deadLetterEvents).values({
+      id: dlqId, consumer: 'webhooks', eventId, error: 'forced failure', attempts: 5, payload: {},
+    });
+    // Listed in the admin DLQ
+    const list = await json(owner.get('/dlq'));
+    expect((list.data as any[]).some((r) => r.id === dlqId)).toBe(true);
+    // Replay resets the row; the relay must then process it (no active webhooks => no-op success)
+    const res = await owner.post(`/dlq/${dlqId}/replay`);
+    expect(res.status).toBe(200);
+    await processOutboxOnce();
+    const processed = await db.select().from(schema.processedEvents)
+      .where(and(eq(schema.processedEvents.consumer, 'webhooks'), eq(schema.processedEvents.eventId, eventId)));
+    expect(processed.length).toBe(1);
+    const [ev] = await db.select().from(schema.events).where(eq(schema.events.id, eventId));
+    expect(ev?.publishedAt).not.toBeNull();
+  });
+
+  it('DLQ admin requires audit.read + settings.manage', async () => {
+    expect((await reqAs(users.member!.cookie).get('/dlq')).status).toBe(403);
+    expect((await reqAs(users.finance!.cookie).get('/dlq')).status).toBe(403);
   });
 });

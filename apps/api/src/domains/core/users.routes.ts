@@ -25,6 +25,16 @@ export function usersRoutes() {
     return c.json({ data: rows });
   });
 
+  // Lightweight directory for assignee pickers and @mentions: any authenticated
+  // user; only public fields (id, name, avatar) — no emails or role data.
+  app.get('/lookup', async (c) => {
+    const { db } = getDb();
+    const rows = await db.select({
+      id: schema.users.id, name: schema.users.name, avatar: schema.users.avatar,
+    }).from(schema.users).where(eq(schema.users.isActive, true));
+    return c.json({ data: rows });
+  });
+
   app.post('/invite', guard('users.manage'), async (c) => {
     const actor = currentActor(c);
     const body = inviteUserSchema.parse(await c.req.json());

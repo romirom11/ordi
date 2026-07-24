@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { Badge, Card, Skeleton, fmtMoney, fmtDate } from '../../components/ui';
 import { Download } from 'lucide-react';
+import { useT } from '../../lib/i18n';
 
 const STATUS_COLORS: Record<string, string> = {
   draft: '#6b7280', sent: '#3b82f6', viewed: '#8b5cf6', partially_paid: '#f59e0b', paid: '#22c55e', canceled: '#ef4444',
@@ -29,13 +30,14 @@ interface PubInvoice {
 }
 
 export function PublicInvoicePage({ token }: { token: string }) {
+  const t = useT();
   const invoice = useQuery({ queryKey: ['publicInvoice', token], queryFn: () => api.get<PubInvoice>(`/i/${token}`), retry: false });
 
   if (invoice.isLoading) {
     return <Frame><Skeleton className="h-96 w-full" /></Frame>;
   }
   if (invoice.isError || !invoice.data) {
-    return <Frame><Card className="p-10 text-center text-sm text-muted-foreground">This invoice link is invalid or has expired.</Card></Frame>;
+    return <Frame><Card className="p-10 text-center text-sm text-muted-foreground">{t('public.invoiceInvalid')}</Card></Frame>;
   }
 
   const iv = invoice.data;
@@ -44,7 +46,7 @@ export function PublicInvoicePage({ token }: { token: string }) {
   const paid = Number(iv.amountPaid ?? 0);
   const outstanding = total - paid;
   const items = iv.items ?? [];
-  const client = iv.companyName ?? iv.company?.name ?? 'Client';
+  const client = iv.companyName ?? iv.company?.name ?? t('public.client');
   const issuer = iv.issuerName ?? iv.workspaceName ?? '';
 
   return (
@@ -52,30 +54,30 @@ export function PublicInvoicePage({ token }: { token: string }) {
       <Card className="p-8 print:border-0 print:shadow-none">
         <div className="mb-8 flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-semibold">Invoice {iv.number ?? ''}</h1>
-            {issuer && <p className="mt-1 text-sm text-muted-foreground">From {issuer}</p>}
+            <h1 className="text-2xl font-semibold">{t('public.invoice')} {iv.number ?? ''}</h1>
+            {issuer && <p className="mt-1 text-sm text-muted-foreground">{t('public.from')} {issuer}</p>}
           </div>
           <Badge color={(iv.status && STATUS_COLORS[iv.status]) || '#6b7280'}>{iv.status ?? 'draft'}</Badge>
         </div>
 
         <div className="mb-8 grid grid-cols-2 gap-4 text-sm">
           <div>
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Billed to</div>
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">{t('public.billedTo')}</div>
             <div className="mt-1 font-medium">{client}</div>
           </div>
           <div className="text-right">
-            <div className="text-muted-foreground">Issued {fmtDate(iv.issueDate)}</div>
-            <div className="text-muted-foreground">Due {fmtDate(iv.dueDate)}</div>
+            <div className="text-muted-foreground">{t('public.issued')} {fmtDate(iv.issueDate)}</div>
+            <div className="text-muted-foreground">{t('public.due')} {fmtDate(iv.dueDate)}</div>
           </div>
         </div>
 
         <table className="mb-6 w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs text-muted-foreground">
-              <th className="py-2 font-medium">Description</th>
-              <th className="py-2 text-right font-medium">Qty</th>
-              <th className="py-2 text-right font-medium">Price</th>
-              <th className="py-2 text-right font-medium">Amount</th>
+              <th className="py-2 font-medium">{t('public.description')}</th>
+              <th className="py-2 text-right font-medium">{t('public.qty')}</th>
+              <th className="py-2 text-right font-medium">{t('public.price')}</th>
+              <th className="py-2 text-right font-medium">{t('public.amount')}</th>
             </tr>
           </thead>
           <tbody>
@@ -91,11 +93,11 @@ export function PublicInvoicePage({ token }: { token: string }) {
         </table>
 
         <div className="ml-auto max-w-xs space-y-1.5 text-sm">
-          <SumRow label="Subtotal" value={fmtMoney(iv.subtotal ?? 0, cur)} />
-          <SumRow label="Tax" value={fmtMoney(iv.taxTotal ?? 0, cur)} />
-          <SumRow label="Total" value={fmtMoney(total, cur)} bold />
-          {paid > 0 && <SumRow label="Paid" value={fmtMoney(paid, cur)} />}
-          <SumRow label="Amount due" value={fmtMoney(outstanding, cur)} bold />
+          <SumRow label={t('public.subtotal')} value={fmtMoney(iv.subtotal ?? 0, cur)} />
+          <SumRow label={t('public.tax')} value={fmtMoney(iv.taxTotal ?? 0, cur)} />
+          <SumRow label={t('common.total')} value={fmtMoney(total, cur)} bold />
+          {paid > 0 && <SumRow label={t('public.paid')} value={fmtMoney(paid, cur)} />}
+          <SumRow label={t('public.amountDue')} value={fmtMoney(outstanding, cur)} bold />
         </div>
 
         {(iv.notes || iv.terms) && (
@@ -108,7 +110,7 @@ export function PublicInvoicePage({ token }: { token: string }) {
         <div className="mt-8 print:hidden">
           <a href={`/api/v1/i/${token}/pdf`} target="_blank" rel="noreferrer"
             className="inline-flex items-center gap-1.5 rounded-md border border-border px-3.5 py-2 text-sm hover:bg-muted">
-            <Download size={15} /> Download PDF
+            <Download size={15} /> {t('finance.downloadPdf')}
           </a>
         </div>
       </Card>

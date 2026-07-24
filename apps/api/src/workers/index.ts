@@ -9,6 +9,7 @@ import { logger } from '../lib/logger';
 import { startRelay } from './relay';
 import { logConsumers } from './consumers';
 import { runAllDailyJobs } from './scheduled';
+import { pollIntakeMailboxes } from './imap';
 
 let boss: PgBoss | null = null;
 
@@ -25,10 +26,17 @@ export async function startWorkers(): Promise<void> {
     await boss.work(queue, async () => { await runAllDailyJobs(); });
     // Every day at 00:05 UTC
     await boss.schedule(queue, '5 0 * * *');
-    logger.info('pg-boss scheduled daily jobs');
+
+    // IMAP intake polling (PRD §8.6): every 10 minutes
+    const imapQueue = 'imap-poll';
+    await boss.createQueue(imapQueue);
+    await boss.work(imapQueue, async () => { await pollIntakeMailboxes(); });
+    await boss.schedule(imapQueue, '*/10 * * * *');
+    logger.info('pg-boss scheduled daily jobs + imap polling');
   } catch (e) {
     logger.warn({ err: e }, 'pg-boss unavailable; using interval fallback for daily jobs');
     setInterval(() => { runAllDailyJobs().catch((err) => logger.error({ err }, 'daily jobs failed')); }, 6 * 3600_000);
+    setInterval(() => { pollIntakeMailboxes().catch((err) => logger.error({ err }, 'imap poll failed')); }, 10 * 60_000);
   }
 
   // run once shortly after boot so a fresh instance catches up

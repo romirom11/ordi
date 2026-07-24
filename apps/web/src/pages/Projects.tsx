@@ -5,6 +5,7 @@ import { api, ApiError } from '../lib/api';
 import { useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { Button, Input, Select, Card, Badge, PageHeader, Skeleton, EmptyState, Spinner } from '../components/ui';
+import { useT } from '../lib/i18n';
 
 interface Project {
   id: string; name: string; key: string; kind: 'client' | 'internal';
@@ -17,6 +18,7 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export function ProjectsPage() {
+  const t = useT();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const can = useCan();
@@ -32,9 +34,9 @@ export function ProjectsPage() {
   return (
     <div>
       <PageHeader
-        title="Projects"
-        subtitle="Client and internal work"
-        actions={canCreate && <Button size="sm" onClick={() => setCreating(true)}><Plus size={14} /> New project</Button>}
+        title={t('nav.projects')}
+        subtitle={t('projects.subtitle')}
+        actions={canCreate && <Button size="sm" onClick={() => setCreating(true)}><Plus size={14} /> {t('projects.newProject')}</Button>}
       />
 
       <div className="p-6">
@@ -42,9 +44,9 @@ export function ProjectsPage() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{[0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-28" />)}</div>
         ) : projects.length === 0 ? (
           <EmptyState
-            title="No projects yet"
-            hint="Create a project to organize tasks, cycles, and docs. Client projects link to a company; internal ones stand alone."
-            action={canCreate ? <Button size="sm" onClick={() => setCreating(true)}><Plus size={14} /> New project</Button> : undefined}
+            title={t('projects.empty')}
+            hint={t('projects.emptyHint')}
+            action={canCreate ? <Button size="sm" onClick={() => setCreating(true)}><Plus size={14} /> {t('projects.newProject')}</Button> : undefined}
           />
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -79,6 +81,7 @@ export function ProjectsPage() {
 }
 
 function NewProjectModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
+  const t = useT();
   const canCrm = useCan()('crm.read');
   const [name, setName] = useState('');
   const [key, setKey] = useState('');
@@ -98,15 +101,15 @@ function NewProjectModal({ onClose, onCreated }: { onClose: () => void; onCreate
       name, key, kind, companyId: kind === 'client' ? (companyId || undefined) : undefined,
     }),
     onSuccess: (p) => onCreated(p.id),
-    onError: (e) => setError(e instanceof ApiError ? e.message : 'Could not create project.'),
+    onError: (e) => setError(e instanceof ApiError ? e.message : t('projects.createFailed')),
   });
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (!name.trim()) { setError('Name is required.'); return; }
-    if (!/^[A-Z]{2,5}$/.test(key)) { setError('Key must be 2–5 uppercase letters.'); return; }
-    if (kind === 'client' && !companyId) { setError('Pick a client for a client project.'); return; }
+    if (!name.trim()) { setError(t('common.nameRequired')); return; }
+    if (!/^[A-Z]{2,5}$/.test(key)) { setError(t('projects.keyInvalid')); return; }
+    if (kind === 'client' && !companyId) { setError(t('projects.clientRequired')); return; }
     mut.mutate();
   };
 
@@ -114,17 +117,17 @@ function NewProjectModal({ onClose, onCreated }: { onClose: () => void; onCreate
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onClick={onClose}>
       <div className="w-full max-w-md rounded-lg border border-border bg-card p-5 shadow-lg" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">New project</h2>
+          <h2 className="text-sm font-semibold">{t('projects.newProject')}</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X size={16} /></button>
         </div>
         <form onSubmit={submit} className="space-y-3">
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Name</label>
+            <label className="text-xs font-medium text-muted-foreground">{t('common.name')}</label>
             <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Marketing site" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Key</label>
+              <label className="text-xs font-medium text-muted-foreground">{t('projects.key')}</label>
               <Input
                 value={key}
                 onChange={(e) => setKey(e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5))}
@@ -133,19 +136,19 @@ function NewProjectModal({ onClose, onCreated }: { onClose: () => void; onCreate
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Kind</label>
+              <label className="text-xs font-medium text-muted-foreground">{t('projects.kind')}</label>
               <Select value={kind} onChange={(e) => setKind(e.target.value as 'client' | 'internal')} className="w-full">
-                <option value="client">Client</option>
-                <option value="internal">Internal</option>
+                <option value="client">{t('projects.kindClient')}</option>
+                <option value="internal">{t('projects.kindInternal')}</option>
               </Select>
             </div>
           </div>
           {kind === 'client' && (
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Client</label>
+              <label className="text-xs font-medium text-muted-foreground">{t('crm.client')}</label>
               {canCrm ? (
                 <Select value={companyId} onChange={(e) => setCompanyId(e.target.value)} className="w-full">
-                  <option value="">{companiesQ.isLoading ? 'Loading…' : 'Select a client…'}</option>
+                  <option value="">{companiesQ.isLoading ? t('common.loading') : t('projects.selectClient')}</option>
                   {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </Select>
               ) : (
@@ -155,8 +158,8 @@ function NewProjectModal({ onClose, onCreated }: { onClose: () => void; onCreate
           )}
           {error && <p className="text-sm text-destructive">{error}</p>}
           <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-            <Button type="submit" size="sm" disabled={mut.isPending}>{mut.isPending ? <Spinner /> : 'Create'}</Button>
+            <Button type="button" variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
+            <Button type="submit" size="sm" disabled={mut.isPending}>{mut.isPending ? <Spinner /> : t('common.create')}</Button>
           </div>
         </form>
       </div>

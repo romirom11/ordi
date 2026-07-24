@@ -2,10 +2,12 @@ import { useState, type ReactNode } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { Button, Input, Textarea, Card, Skeleton } from '../../components/ui';
+import { useT } from '../../lib/i18n';
 
 interface IntakeInfo { projectName?: string | null; name?: string | null; workspaceName?: string | null; description?: string | null }
 
 export function IntakeFormPage({ token }: { token: string }) {
+  const t = useT();
   const info = useQuery({ queryKey: ['intake', token], queryFn: () => api.get<IntakeInfo>(`/intake/${token}`), retry: false });
   const [form, setForm] = useState({ name: '', email: '', title: '', description: '', website: '' });
   const submit = useMutation({
@@ -13,16 +15,16 @@ export function IntakeFormPage({ token }: { token: string }) {
   });
 
   if (info.isLoading) return <Frame><Skeleton className="h-72 w-full" /></Frame>;
-  if (info.isError || !info.data) return <Frame><Card className="p-10 text-center text-sm text-muted-foreground">This form is not available.</Card></Frame>;
+  if (info.isError || !info.data) return <Frame><Card className="p-10 text-center text-sm text-muted-foreground">{t('public.formUnavailable')}</Card></Frame>;
 
-  const projectName = info.data.projectName ?? info.data.name ?? 'this project';
+  const projectName = info.data.projectName ?? info.data.name ?? t('public.thisProject');
 
   if (submit.isSuccess) {
     return (
       <Frame>
         <Card className="p-10 text-center">
-          <h1 className="text-xl font-semibold">Thank you</h1>
-          <p className="mt-2 text-sm text-muted-foreground">Your request has been received. We'll get back to you by email if we need more detail.</p>
+          <h1 className="text-xl font-semibold">{t('public.thankYou')}</h1>
+          <p className="mt-2 text-sm text-muted-foreground">{t('public.requestReceived')}</p>
         </Card>
       </Frame>
     );
@@ -31,8 +33,8 @@ export function IntakeFormPage({ token }: { token: string }) {
   return (
     <Frame>
       <Card className="p-8">
-        <h1 className="text-xl font-semibold">Submit a request</h1>
-        <p className="mt-1 text-sm text-muted-foreground">for {projectName}</p>
+        <h1 className="text-xl font-semibold">{t('public.submitRequest')}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">{t('public.forProject')} {projectName}</p>
         {info.data.description && <p className="mt-3 text-sm text-muted-foreground">{info.data.description}</p>}
         <form
           className="mt-6 space-y-4"
@@ -42,10 +44,10 @@ export function IntakeFormPage({ token }: { token: string }) {
             if (form.name && form.email && form.title) submit.mutate();
           }}
         >
-          <label className="block text-xs text-muted-foreground">Your name<Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} required className="mt-1" /></label>
-          <label className="block text-xs text-muted-foreground">Email<Input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} required className="mt-1" /></label>
-          <label className="block text-xs text-muted-foreground">Title<Input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} required className="mt-1" /></label>
-          <label className="block text-xs text-muted-foreground">Description<Textarea value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} rows={5} className="mt-1" /></label>
+          <label className="block text-xs text-muted-foreground">{t('public.yourName')}<Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} required className="mt-1" /></label>
+          <label className="block text-xs text-muted-foreground">{t('auth.email')}<Input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} required className="mt-1" /></label>
+          <label className="block text-xs text-muted-foreground">{t('public.requestTitle')}<Input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} required className="mt-1" /></label>
+          <label className="block text-xs text-muted-foreground">{t('public.description')}<Textarea value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} rows={5} className="mt-1" /></label>
           {/* honeypot: hidden from users, catches bots */}
           <input
             type="text"
@@ -56,8 +58,8 @@ export function IntakeFormPage({ token }: { token: string }) {
             aria-hidden="true"
             className="absolute left-[-9999px] h-0 w-0 opacity-0"
           />
-          {submit.isError && <p className="text-sm text-destructive">Something went wrong. Please try again.</p>}
-          <Button type="submit" disabled={submit.isPending}>Submit request</Button>
+          {submit.isError && <p className="text-sm text-destructive">{t('public.tryAgain')}</p>}
+          <Button type="submit" disabled={submit.isPending}>{t('public.sendRequest')}</Button>
         </form>
       </Card>
     </Frame>

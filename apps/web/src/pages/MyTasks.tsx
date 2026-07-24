@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { api } from '../lib/api';
 import { useNavigate } from '../lib/router';
 import { PageHeader, Skeleton, EmptyState, fmtDate, cn } from '../components/ui';
+import { useT } from '../lib/i18n';
 
 interface MyTask {
   id: string;
@@ -69,13 +70,14 @@ function groupTasks(data: unknown): Record<Bucket, MyTask[]> {
 }
 
 const SECTIONS: { key: Bucket; label: string; icon: ReactNode; accent?: boolean }[] = [
-  { key: 'overdue', label: 'Overdue', icon: <AlertTriangle size={14} className="text-destructive" />, accent: true },
-  { key: 'today', label: 'Today', icon: <CalendarClock size={14} /> },
-  { key: 'week', label: 'This week', icon: <CalendarRange size={14} /> },
-  { key: 'later', label: 'Later', icon: <Inbox size={14} /> },
+  { key: 'overdue', label: 'common.overdue', icon: <AlertTriangle size={14} className="text-destructive" />, accent: true },
+  { key: 'today', label: 'common.today', icon: <CalendarClock size={14} /> },
+  { key: 'week', label: 'tasks.thisWeek', icon: <CalendarRange size={14} /> },
+  { key: 'later', label: 'tasks.later', icon: <Inbox size={14} /> },
 ];
 
 export function MyTasksPage() {
+  const t = useT();
   const navigate = useNavigate();
   const { data, isLoading } = useQuery<unknown>({
     queryKey: ['me', 'tasks'],
@@ -93,7 +95,7 @@ export function MyTasksPage() {
 
   return (
     <div>
-      <PageHeader title="My tasks" subtitle="Everything assigned to you across projects" />
+      <PageHeader title={t('nav.myTasks')} subtitle={t('tasks.myTasksSubtitle')} />
       <div className="mx-auto max-w-3xl p-6">
         {isLoading ? (
           <div className="space-y-2">
@@ -101,8 +103,8 @@ export function MyTasksPage() {
           </div>
         ) : total === 0 ? (
           <EmptyState
-            title="No tasks assigned to you"
-            hint="When teammates assign you work or you pick up a task, it will appear here grouped by due date."
+            title={t('tasks.noneAssigned')}
+            hint={t('tasks.noneAssignedHint')}
           />
         ) : (
           <div className="space-y-6">
@@ -113,7 +115,7 @@ export function MyTasksPage() {
                 <section key={s.key}>
                   <h2 className={cn('mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide',
                     s.accent ? 'text-destructive' : 'text-muted-foreground')}>
-                    {s.icon} {s.label}
+                    {s.icon} {t(s.label)}
                     <span className="ml-1 rounded bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">{tasks.length}</span>
                   </h2>
                   <div className="overflow-hidden rounded-lg border border-border bg-card">

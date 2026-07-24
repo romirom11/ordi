@@ -23,6 +23,32 @@ export interface PdfDoc {
   notes?: string;
   terms?: string;
   publicToken: string;
+  /** Per-document language (PRD §11.3): 'uk' | 'en'. */
+  language?: string;
+}
+
+/** Localized labels (PRD §11.3, §19.5): PDF language is per-document. */
+const LABELS: Record<'en' | 'uk', Record<string, string>> = {
+  en: {
+    invoice: 'Invoice', quote: 'Quote', billTo: 'Bill To', issue: 'Issue date',
+    due: 'Due date', validUntil: 'Valid until', status: 'Status',
+    description: 'Description', qty: 'Qty', unit: 'Unit price', amount: 'Amount',
+    subtotal: 'Subtotal', discount: 'Discount', tax: 'Tax', total: 'Total',
+    paid: 'Amount paid', balance: 'Balance due', notes: 'Notes', terms: 'Terms',
+    viewOnline: 'View online',
+  },
+  uk: {
+    invoice: 'Рахунок', quote: 'Комерційна пропозиція', billTo: 'Платник', issue: 'Дата виставлення',
+    due: 'Термін оплати', validUntil: 'Дійсна до', status: 'Статус',
+    description: 'Опис', qty: 'К-сть', unit: 'Ціна', amount: 'Сума',
+    subtotal: 'Проміжна сума', discount: 'Знижка', tax: 'Податок', total: 'Разом',
+    paid: 'Сплачено', balance: 'До сплати', notes: 'Нотатки', terms: 'Умови',
+    viewOnline: 'Переглянути онлайн',
+  },
+};
+
+function labels(doc: PdfDoc): Record<string, string> {
+  return LABELS[doc.language === 'uk' ? 'uk' : 'en'];
 }
 
 export interface PdfLine {
@@ -71,7 +97,8 @@ function buildLines(
   workspace: PdfWorkspace | null | undefined,
 ): { title: string; lines: string[] } {
   const cur = doc.currency;
-  const label = kind === 'invoice' ? 'Invoice' : 'Quote';
+  const L = labels(doc);
+  const label = kind === 'invoice' ? L.invoice! : L.quote!;
   const title = `${label} ${doc.number}`;
   const lines: string[] = [];
 
@@ -81,7 +108,7 @@ function buildLines(
   lines.push('');
 
   // Bill-to
-  lines.push('Bill To:');
+  lines.push(`${L.billTo}:`);
   lines.push(company.name);
   if (company.billingEmail) lines.push(company.billingEmail);
   for (const l of addressLines(company.address)) lines.push(l);
@@ -89,14 +116,14 @@ function buildLines(
 
   // Meta
   lines.push(`${label} #: ${doc.number}`);
-  lines.push(`Issue date: ${doc.issueDate}`);
-  if (kind === 'invoice' && doc.dueDate) lines.push(`Due date: ${doc.dueDate}`);
-  if (kind === 'quote' && doc.validUntil) lines.push(`Valid until: ${doc.validUntil}`);
-  lines.push(`Status: ${doc.status}`);
+  lines.push(`${L.issue}: ${doc.issueDate}`);
+  if (kind === 'invoice' && doc.dueDate) lines.push(`${L.due}: ${doc.dueDate}`);
+  if (kind === 'quote' && doc.validUntil) lines.push(`${L.validUntil}: ${doc.validUntil}`);
+  lines.push(`${L.status}: ${doc.status}`);
   lines.push('');
 
   // Items
-  lines.push(`${col('Description', 40)}${col('Qty', 8, true)}${col('Unit', 14, true)}${col('Amount', 14, true)}`);
+  lines.push(`${col(L.description!, 40)}${col(L.qty!, 8, true)}${col(L.unit!, 14, true)}${col(L.amount!, 14, true)}`);
   lines.push(''.padEnd(76, '-'));
   for (const it of items) {
     lines.push(
@@ -106,25 +133,25 @@ function buildLines(
   lines.push(''.padEnd(76, '-'));
 
   // Totals
-  lines.push(`${col('Subtotal', 62)}${col(fmtMoney(doc.subtotal, cur), 14, true)}`);
+  lines.push(`${col(L.subtotal!, 62)}${col(fmtMoney(doc.subtotal, cur), 14, true)}`);
   if (doc.discountType && doc.discountType !== 'none' && Number(doc.discountValue ?? 0) > 0) {
     const disc = doc.discountType === 'percent' ? `${Number(doc.discountValue)}%` : fmtMoney(doc.discountValue, cur);
-    lines.push(`${col('Discount', 62)}${col(disc, 14, true)}`);
+    lines.push(`${col(L.discount!, 62)}${col(disc, 14, true)}`);
   }
-  lines.push(`${col('Tax', 62)}${col(fmtMoney(doc.taxTotal, cur), 14, true)}`);
-  lines.push(`${col('Total', 62)}${col(fmtMoney(doc.total, cur), 14, true)}`);
+  lines.push(`${col(L.tax!, 62)}${col(fmtMoney(doc.taxTotal, cur), 14, true)}`);
+  lines.push(`${col(L.total!, 62)}${col(fmtMoney(doc.total, cur), 14, true)}`);
   if (kind === 'invoice') {
     const paid = Number(doc.amountPaid ?? 0);
-    lines.push(`${col('Amount paid', 62)}${col(fmtMoney(paid, cur), 14, true)}`);
-    lines.push(`${col('Balance due', 62)}${col(fmtMoney(Number(doc.total) - paid, cur), 14, true)}`);
+    lines.push(`${col(L.paid!, 62)}${col(fmtMoney(paid, cur), 14, true)}`);
+    lines.push(`${col(L.balance!, 62)}${col(fmtMoney(Number(doc.total) - paid, cur), 14, true)}`);
   }
   lines.push('');
 
-  if (doc.notes) { lines.push('Notes:'); lines.push(doc.notes); lines.push(''); }
-  if (doc.terms) { lines.push('Terms:'); lines.push(doc.terms); lines.push(''); }
+  if (doc.notes) { lines.push(`${L.notes}:`); lines.push(doc.notes); lines.push(''); }
+  if (doc.terms) { lines.push(`${L.terms}:`); lines.push(doc.terms); lines.push(''); }
 
   const path = kind === 'invoice' ? 'i' : 'q';
-  lines.push(`View online: ${env.appUrl}/${path}/${doc.publicToken}`);
+  lines.push(`${L.viewOnline}: ${env.appUrl}/${path}/${doc.publicToken}`);
 
   return { title, lines };
 }
@@ -142,7 +169,8 @@ function buildTypst(
   workspace: PdfWorkspace | null | undefined,
 ): string {
   const cur = doc.currency;
-  const label = kind === 'invoice' ? 'Invoice' : 'Quote';
+  const L = labels(doc);
+  const label = kind === 'invoice' ? L.invoice! : L.quote!;
   const rows = items
     .map(
       (it) =>
@@ -150,34 +178,54 @@ function buildTypst(
     )
     .join('\n');
   const meta = kind === 'invoice'
-    ? `Issue: ${esc(doc.issueDate)} #h(1em) Due: ${esc(doc.dueDate ?? '')}`
-    : `Issue: ${esc(doc.issueDate)} #h(1em) Valid until: ${esc(doc.validUntil ?? '')}`;
-  const balance = kind === 'invoice'
-    ? `\n#text[Amount paid: ${esc(fmtMoney(doc.amountPaid ?? 0, cur))}]\\\n#text(weight: "bold")[Balance due: ${esc(fmtMoney(Number(doc.total) - Number(doc.amountPaid ?? 0), cur))}]`
+    ? `${esc(L.issue!)}: ${esc(doc.issueDate)} #h(1em) ${esc(L.due!)}: ${esc(doc.dueDate ?? '')}`
+    : `${esc(L.issue!)}: ${esc(doc.issueDate)} #h(1em) ${esc(L.validUntil!)}: ${esc(doc.validUntil ?? '')}`;
+  const discountRow = doc.discountType && doc.discountType !== 'none' && Number(doc.discountValue ?? 0) > 0
+    ? `\n#text[${esc(L.discount!)}: ${doc.discountType === 'percent' ? `${Number(doc.discountValue)}%` : esc(fmtMoney(doc.discountValue, cur))}]\\`
     : '';
-  return `#set page(paper: "a4", margin: 2cm)
-#set text(size: 10pt)
-#text(size: 16pt, weight: "bold")[${esc(workspace?.name ?? 'ordi')}]\\
-#text(size: 20pt, weight: "bold")[${label} ${esc(doc.number)}]
+  const balance = kind === 'invoice'
+    ? `\n#text[${esc(L.paid!)}: ${esc(fmtMoney(doc.amountPaid ?? 0, cur))}]\\\n#text(size: 12pt, weight: "bold", fill: rgb("#283b6b"))[${esc(L.balance!)}: ${esc(fmtMoney(Number(doc.total) - Number(doc.amountPaid ?? 0), cur))}]`
+    : '';
+  const publicUrl = `${env.appUrl}/${kind === 'invoice' ? 'i' : 'q'}/${doc.publicToken}`;
+  const wsLines = addressLines(workspace?.legalDetails).map((l) => esc(l)).join('\\ ');
+  const companyLines = addressLines(company.address).map((l) => esc(l)).join('\\ ');
+  return `#set page(paper: "a4", margin: (x: 2cm, y: 1.8cm))
+#set text(size: 10pt, font: "Liberation Sans", fallback: true)
 
-#grid(columns: (1fr, 1fr),
-  [*Bill To*\\ ${esc(company.name)}\\ ${esc(company.billingEmail ?? '')}],
-  [${meta}\\ Status: ${esc(doc.status)}],
+#grid(columns: (1fr, auto),
+  [#text(size: 16pt, weight: "bold", fill: rgb("#283b6b"))[${esc(workspace?.name ?? 'ordi')}]${wsLines ? ` \\ #text(size: 8pt, fill: rgb("#6b7280"))[${wsLines}]` : ''}],
+  [#align(right)[#text(size: 20pt, weight: "bold")[${label}]\\ #text(size: 12pt, fill: rgb("#6b7280"))[${esc(doc.number)}]]],
 )
 
+#line(length: 100%, stroke: 0.5pt + rgb("#283b6b"))
+#v(0.8em)
+
+#grid(columns: (1fr, 1fr),
+  [#text(size: 8pt, fill: rgb("#6b7280"))[${esc(L.billTo!).toUpperCase()}]\\ #text(weight: "bold")[${esc(company.name)}]\\ ${esc(company.billingEmail ?? '')}${companyLines ? `\\ ${companyLines}` : ''}],
+  [#align(right)[${meta}\\ ${esc(L.status!)}: ${esc(doc.status)}]],
+)
+
+#v(1em)
 #table(columns: (1fr, auto, auto, auto),
-  [*Description*], [*Qty*], [*Unit*], [*Amount*],
+  stroke: (x, y) => if y == 0 { (bottom: 0.5pt + rgb("#283b6b")) } else { (bottom: 0.25pt + rgb("#e5e7eb")) },
+  inset: 6pt,
+  [*${esc(L.description!)}*], [*${esc(L.qty!)}*], [*${esc(L.unit!)}*], [*${esc(L.amount!)}*],
 ${rows}
 )
 
 #align(right)[
-#text[Subtotal: ${esc(fmtMoney(doc.subtotal, cur))}]\\
-#text[Tax: ${esc(fmtMoney(doc.taxTotal, cur))}]\\
-#text(size: 12pt, weight: "bold")[Total: ${esc(fmtMoney(doc.total, cur))}]${balance}
+#text[${esc(L.subtotal!)}: ${esc(fmtMoney(doc.subtotal, cur))}]\\${discountRow}
+#text[${esc(L.tax!)}: ${esc(fmtMoney(doc.taxTotal, cur))}]\\
+#text(size: 13pt, weight: "bold")[${esc(L.total!)}: ${esc(fmtMoney(doc.total, cur))}]${balance}
 ]
 
-${doc.notes ? `*Notes:* ${esc(doc.notes)}\\` : ''}
-${doc.terms ? `*Terms:* ${esc(doc.terms)}` : ''}
+#v(1em)
+${doc.notes ? `#text(size: 8pt, fill: rgb("#6b7280"))[${esc(L.notes!).toUpperCase()}]\\ ${esc(doc.notes)}\n#v(0.5em)` : ''}
+${doc.terms ? `#text(size: 8pt, fill: rgb("#6b7280"))[${esc(L.terms!).toUpperCase()}]\\ ${esc(doc.terms)}` : ''}
+
+#v(1fr)
+#line(length: 100%, stroke: 0.25pt + rgb("#e5e7eb"))
+#text(size: 8pt, fill: rgb("#6b7280"))[${esc(L.viewOnline!)}: #link("${publicUrl}")[${esc(publicUrl)}]]
 `;
 }
 

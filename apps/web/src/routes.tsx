@@ -12,6 +12,9 @@ import { FinancePage } from './pages/Finance';
 import { InvoiceDetailPage } from './pages/InvoiceDetail';
 import { PeoplePage } from './pages/People';
 import { SettingsPage } from './pages/Settings';
+import { DashboardsPage } from './pages/Dashboards';
+import { ResourcingPage } from './pages/Resourcing';
+import { ProfilePage } from './pages/Profile';
 
 const routes: RouteDef[] = [
   { pattern: '/', render: () => <DashboardPage /> },
@@ -31,6 +34,10 @@ const routes: RouteDef[] = [
   { pattern: '/people', render: () => <PeoplePage /> },
   { pattern: '/settings', render: () => <SettingsPage /> },
   { pattern: '/settings/:section', render: (p) => <SettingsPage section={p.section} /> },
+  { pattern: '/dashboards', render: () => <DashboardsPage /> },
+  { pattern: '/dashboards/:id', render: (p) => <DashboardsPage id={p.id} /> },
+  { pattern: '/resourcing', render: () => <ResourcingPage /> },
+  { pattern: '/profile', render: () => <ProfilePage /> },
 ];
 
 export function AppRoutes() {

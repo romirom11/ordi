@@ -4,7 +4,10 @@ import { Building2, Plus, Star } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
 import { Link } from '../lib/router';
 import { useCan } from '../lib/auth';
-import { Button, Input, Textarea, Badge, Card, EmptyState, Skeleton, Spinner, fmtMoney, fmtDate, cn } from '../components/ui';
+import { Button, Input, Badge, Card, EmptyState, Skeleton, Spinner, fmtMoney, fmtDate, cn } from '../components/ui';
+import { RichEditor } from '../components/richtext/RichEditor';
+import { RichText, docIsEmpty } from '../components/richtext/RichText';
+import { useT } from '../lib/i18n';
 
 interface Company {
   id: string;
@@ -36,31 +39,6 @@ const STATUS_COLOR: Record<string, string> = {
   lead: '#3b82f6', active: '#22c55e', paused: '#eab308', archived: '#9ca3af',
 };
 
-function docToText(body: unknown): string {
-  if (!body) return '';
-  if (typeof body === 'string') return body;
-  const walk = (node: unknown): string => {
-    const n = node as { text?: string; content?: unknown[] } | null;
-    if (!n) return '';
-    if (typeof n.text === 'string') return n.text;
-    if (Array.isArray(n.content)) return n.content.map(walk).join('');
-    return '';
-  };
-  const b = body as { content?: unknown[] };
-  if (Array.isArray(b.content)) return b.content.map((n) => walk(n)).join('\n');
-  return walk(body);
-}
-
-function textToDoc(text: string) {
-  return {
-    type: 'doc',
-    content: text.split('\n').map((line) => ({
-      type: 'paragraph',
-      content: line ? [{ type: 'text', text: line }] : [],
-    })),
-  };
-}
-
 type BillingRow = { currency: string; invoiced: number; paid: number; receivable: number };
 function billingRows(billing: unknown): BillingRow[] {
   if (!billing) return [];
@@ -79,7 +57,16 @@ function billingRows(billing: unknown): BillingRow[] {
 const TABS = ['overview', 'contacts', 'deals', 'notes', 'activity'] as const;
 type Tab = typeof TABS[number];
 
+const TAB_LABELS: Record<Tab, string> = {
+  overview: 'crm.tabOverview',
+  contacts: 'crm.tabContacts',
+  deals: 'nav.deals',
+  notes: 'crm.tabNotes',
+  activity: 'crm.tabActivity',
+};
+
 export function CompanyDetailPage({ id }: { id: string }) {
+  const t = useT();
   const [tab, setTab] = useState<Tab>('overview');
   const can = useCan();
 
@@ -107,10 +94,10 @@ export function CompanyDetailPage({ id }: { id: string }) {
           </div>
         </div>
         <nav className="flex gap-1 text-sm">
-          {visibleTabs.map((t) => (
-            <button key={t} onClick={() => setTab(t)}
-              className={cn('rounded-t-md px-3 py-1.5 capitalize', tab === t ? 'border-b-2 border-primary font-medium' : 'text-muted-foreground hover:text-foreground')}>
-              {t}
+          {visibleTabs.map((tb) => (
+            <button key={tb} onClick={() => setTab(tb)}
+              className={cn('rounded-t-md px-3 py-1.5 capitalize', tab === tb ? 'border-b-2 border-primary font-medium' : 'text-muted-foreground hover:text-foreground')}>
+              {t(TAB_LABELS[tb])}
             </button>
           ))}
         </nav>
@@ -137,6 +124,7 @@ function Tile({ label, value }: { label: string; value: ReactNode }) {
 }
 
 function OverviewTab({ id }: { id: string }) {
+  const t = useT();
   const { data, isLoading } = useQuery<Overview>({
     queryKey: ['company', id, 'overview'],
     queryFn: () => api.get<Overview>(`/companies/${id}/overview`),
@@ -149,19 +137,19 @@ function OverviewTab({ id }: { id: string }) {
   return (
     <div className="space-y-6">
       <div className="grid gap-4 sm:grid-cols-3">
-        <Tile label="Active projects" value={data?.activeProjects ?? 0} />
-        <Tile label="Open tasks" value={data?.openTasks ?? 0} />
+        <Tile label={t('crm.activeProjects')} value={data?.activeProjects ?? 0} />
+        <Tile label={t('crm.openTasks')} value={data?.openTasks ?? 0} />
       </div>
 
       {billing.length > 0 && (
         <div>
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Finance</h3>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('nav.finance')}</h3>
           <div className="space-y-3">
             {billing.map((b, i) => (
               <div key={i} className="grid gap-4 sm:grid-cols-3">
-                <Tile label={`Invoiced (${b.currency})`} value={fmtMoney(b.invoiced, b.currency)} />
-                <Tile label={`Paid (${b.currency})`} value={fmtMoney(b.paid, b.currency)} />
-                <Tile label={`Receivable (${b.currency})`} value={fmtMoney(b.receivable, b.currency)} />
+                <Tile label={`${t('crm.invoiced')} (${b.currency})`} value={fmtMoney(b.invoiced, b.currency)} />
+                <Tile label={`${t('public.paid')} (${b.currency})`} value={fmtMoney(b.paid, b.currency)} />
+                <Tile label={`${t('finance.receivable')} (${b.currency})`} value={fmtMoney(b.receivable, b.currency)} />
               </div>
             ))}
           </div>
@@ -172,6 +160,7 @@ function OverviewTab({ id }: { id: string }) {
 }
 
 function ContactsTab({ id, canWrite }: { id: string; canWrite: boolean }) {
+  const t = useT();
   const qc = useQueryClient();
   const { data, isLoading } = useQuery<Contact[]>({
     queryKey: ['contacts', id],
@@ -186,26 +175,26 @@ function ContactsTab({ id, canWrite }: { id: string; canWrite: boolean }) {
   const mut = useMutation({
     mutationFn: () => api.post('/contacts', { companyId: id, firstName: first, lastName: last, email: email || undefined }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['contacts', id] }); setAdding(false); setFirst(''); setLast(''); setEmail(''); },
-    onError: (e) => setError(e instanceof ApiError ? e.message : 'Could not add contact.'),
+    onError: (e) => setError(e instanceof ApiError ? e.message : t('crm.addContactFailed')),
   });
 
   const contacts = data ?? [];
 
   return (
     <div className="max-w-2xl space-y-3">
-      {canWrite && !adding && <Button size="sm" variant="outline" onClick={() => setAdding(true)}><Plus size={14} /> Add contact</Button>}
+      {canWrite && !adding && <Button size="sm" variant="outline" onClick={() => setAdding(true)}><Plus size={14} /> {t('crm.addContact')}</Button>}
       {adding && (
         <Card className="p-4">
-          <form onSubmit={(e: FormEvent) => { e.preventDefault(); setError(null); if (!first.trim()) { setError('First name is required.'); return; } mut.mutate(); }} className="space-y-3">
+          <form onSubmit={(e: FormEvent) => { e.preventDefault(); setError(null); if (!first.trim()) { setError(t('crm.firstNameRequired')); return; } mut.mutate(); }} className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              <Input autoFocus placeholder="First name" value={first} onChange={(e) => setFirst(e.target.value)} />
-              <Input placeholder="Last name" value={last} onChange={(e) => setLast(e.target.value)} />
+              <Input autoFocus placeholder={t('crm.firstName')} value={first} onChange={(e) => setFirst(e.target.value)} />
+              <Input placeholder={t('crm.lastName')} value={last} onChange={(e) => setLast(e.target.value)} />
             </div>
-            <Input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <Input type="email" placeholder={t('auth.email')} value={email} onChange={(e) => setEmail(e.target.value)} />
             {error && <p className="text-sm text-destructive">{error}</p>}
             <div className="flex justify-end gap-2">
-              <Button type="button" size="sm" variant="outline" onClick={() => setAdding(false)}>Cancel</Button>
-              <Button type="submit" size="sm" disabled={mut.isPending}>Add</Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => setAdding(false)}>{t('common.cancel')}</Button>
+              <Button type="submit" size="sm" disabled={mut.isPending}>{t('common.add')}</Button>
             </div>
           </form>
         </Card>
@@ -214,7 +203,7 @@ function ContactsTab({ id, canWrite }: { id: string; canWrite: boolean }) {
       {isLoading ? (
         <div className="space-y-1">{[0, 1].map((i) => <Skeleton key={i} className="h-12" />)}</div>
       ) : contacts.length === 0 ? (
-        <EmptyState title="No contacts yet" hint="Add the people you work with at this client so documents and mentions can reach them." />
+        <EmptyState title={t('crm.noContacts')} hint={t('crm.noContactsHint')} />
       ) : (
         <div className="overflow-hidden rounded-lg border border-border bg-card">
           {contacts.map((ct, i) => (
@@ -239,6 +228,7 @@ function ContactsTab({ id, canWrite }: { id: string; canWrite: boolean }) {
 }
 
 function DealsTab({ id }: { id: string }) {
+  const t = useT();
   const { data, isLoading } = useQuery<Deal[]>({
     queryKey: ['deals', 'company', id],
     queryFn: () => api.get<{ data: Deal[] }>(`/deals${qs({ companyId: id })}`).then((r) => r.data),
@@ -246,7 +236,7 @@ function DealsTab({ id }: { id: string }) {
   const deals = data ?? [];
 
   if (isLoading) return <div className="space-y-1 max-w-2xl">{[0, 1].map((i) => <Skeleton key={i} className="h-12" />)}</div>;
-  if (deals.length === 0) return <EmptyState title="No deals" hint="Deals for this client will show up here. Create one from the Deals board." />;
+  if (deals.length === 0) return <EmptyState title={t('deals.empty')} hint={t('crm.noDealsHint')} />;
 
   return (
     <div className="max-w-2xl overflow-hidden rounded-lg border border-border bg-card">
@@ -264,43 +254,55 @@ function DealsTab({ id }: { id: string }) {
 }
 
 function NotesTab({ id, canWrite }: { id: string; canWrite: boolean }) {
+  const t = useT();
   const qc = useQueryClient();
   const { data, isLoading } = useQuery<Note[]>({
     queryKey: ['notes', id],
     queryFn: () => api.get<{ data: Note[] }>(`/notes${qs({ companyId: id })}`).then((r) => r.data),
   });
-  const [text, setText] = useState('');
+  const [doc, setDoc] = useState<any>(null);
+  const [editorKey, setEditorKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const mut = useMutation({
-    mutationFn: () => api.post('/notes', { companyId: id, body: textToDoc(text) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['notes', id] }); setText(''); },
-    onError: (e) => setError(e instanceof ApiError ? e.message : 'Could not save note.'),
+    mutationFn: (body: any) => api.post('/notes', { companyId: id, body }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['notes', id] });
+      setDoc(null);
+      setEditorKey((k) => k + 1); // remount the editor to clear it
+    },
+    onError: (e) => setError(e instanceof ApiError ? e.message : t('crm.saveNoteFailed')),
   });
+
+  const submit = () => {
+    setError(null);
+    if (docIsEmpty(doc) || mut.isPending) return;
+    mut.mutate(doc);
+  };
 
   const notes = data ?? [];
 
   return (
     <div className="max-w-2xl space-y-4">
       {canWrite && (
-        <form onSubmit={(e: FormEvent) => { e.preventDefault(); setError(null); if (!text.trim()) return; mut.mutate(); }} className="space-y-2">
-          <Textarea rows={3} placeholder="Write a note…" value={text} onChange={(e) => setText(e.target.value)} />
+        <div className="space-y-2">
+          <RichEditor key={editorKey} value={doc} onChange={setDoc} compact placeholder={t('crm.notePlaceholder')} onSubmit={submit} />
           {error && <p className="text-sm text-destructive">{error}</p>}
           <div className="flex justify-end">
-            <Button type="submit" size="sm" disabled={mut.isPending || !text.trim()}>Add note</Button>
+            <Button type="button" size="sm" onClick={submit} disabled={mut.isPending || docIsEmpty(doc)}>{t('crm.addNote')}</Button>
           </div>
-        </form>
+        </div>
       )}
 
       {isLoading ? (
         <div className="space-y-2">{[0, 1].map((i) => <Skeleton key={i} className="h-16" />)}</div>
       ) : notes.length === 0 ? (
-        <EmptyState title="No notes yet" hint="Capture context, meeting takeaways, or reminders about this client." />
+        <EmptyState title={t('crm.noNotes')} hint={t('crm.noNotesHint')} />
       ) : (
         <div className="space-y-2">
           {notes.map((n) => (
             <Card key={n.id} className="p-3">
-              <p className="whitespace-pre-wrap text-sm">{docToText(n.body)}</p>
+              <RichText doc={n.body} className="text-sm" />
               <p className="mt-2 text-xs text-muted-foreground">{n.authorName ? `${n.authorName} · ` : ''}{fmtDate(n.createdAt)}</p>
             </Card>
           ))}
@@ -311,6 +313,7 @@ function NotesTab({ id, canWrite }: { id: string; canWrite: boolean }) {
 }
 
 function ActivityTab({ id }: { id: string }) {
+  const t = useT();
   const { data, isLoading } = useQuery<AuditEntry[]>({
     queryKey: ['audit', 'company', id],
     queryFn: () => api.get<{ data: AuditEntry[] }>(`/audit/entity/company/${id}`).then((r) => r.data),
@@ -318,7 +321,7 @@ function ActivityTab({ id }: { id: string }) {
   const entries = data ?? [];
 
   if (isLoading) return <div className="space-y-2 max-w-2xl">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-8" />)}</div>;
-  if (entries.length === 0) return <EmptyState title="No activity" hint="Changes to this client and its records will be logged here." />;
+  if (entries.length === 0) return <EmptyState title={t('crm.noActivity')} hint={t('crm.noActivityHint')} />;
 
   return (
     <ul className="max-w-2xl space-y-2">
@@ -327,7 +330,7 @@ function ActivityTab({ id }: { id: string }) {
           <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/50" />
           <span className="flex-1">
             {a.actorName && <span className="font-medium">{a.actorName} </span>}
-            <span className="text-muted-foreground">{a.summary ?? a.action ?? 'made a change'}</span>
+            <span className="text-muted-foreground">{a.summary ?? a.action ?? t('dashboard.madeChange')}</span>
           </span>
           <span className="shrink-0 text-xs text-muted-foreground">{fmtDate(a.createdAt)}</span>
         </li>

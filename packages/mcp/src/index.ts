@@ -92,6 +92,15 @@ server.tool('create_invoice_from_time', 'Create a draft invoice from unbilled ti
   companyId: z.string(), from: z.string(), to: z.string(), projectIds: z.array(z.string()), grouping: z.enum(['task', 'user', 'single']).optional(),
 }, (args) => wrap(() => client.post('/invoices/from-time', { ...args, grouping: args.grouping ?? 'task' })));
 
+server.tool('create_invoice_from_project', 'Create a draft invoice pre-filled from a client project', {
+  projectId: z.string(), issueDate: z.string(), dueDate: z.string(),
+  items: z.array(z.object({ description: z.string(), quantity: z.number(), unitPrice: z.number() })).optional(),
+}, ({ projectId, issueDate, dueDate, items }) => wrap(async () => {
+  const project = await client.get<{ companyId: string | null; kind: string }>(`/projects/${projectId}`);
+  if (!project.companyId) throw new Error('Project has no client (internal projects cannot be invoiced)');
+  return client.post('/invoices', { companyId: project.companyId, projectId, issueDate, dueDate, items: items ?? [] });
+}));
+
 server.tool('send_invoice', 'Send an invoice by email', { invoiceId: z.string() },
   ({ invoiceId }) => wrap(() => client.post(`/invoices/${invoiceId}/send`, {})));
 

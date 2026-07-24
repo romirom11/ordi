@@ -1,10 +1,14 @@
 import { useState, useEffect, type FormEvent, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { X, List, Columns3, Plus, MessageSquare } from 'lucide-react';
+import { X, List, Columns3, CalendarDays, GanttChart, Table2, Plus, MessageSquare } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
 import { useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { Button, Input, Textarea, Select, Card, Badge, Skeleton, EmptyState, Spinner, fmtDate, cn } from '../components/ui';
+import { CalendarView } from '../components/views/CalendarView';
+import { TimelineView } from '../components/views/TimelineView';
+import { SpreadsheetView } from '../components/views/SpreadsheetView';
+import { SavedViewsBar, type SavedView } from '../components/views/SavedViewsBar';
 
 interface Project {
   id: string; name: string; key: string; status: string; kind?: string;
@@ -14,7 +18,8 @@ interface TaskStatus {
   id: string; name: string; category?: string; color?: string; position?: number; isDefault?: boolean;
 }
 interface Task {
-  id: string; number?: number; title: string; statusId: string; priority?: string;
+  id: string; number?: number; ref?: string; title: string; statusId: string; priority?: string;
+  dueDate?: string | null; startDate?: string | null; estimate?: number | string | null; version?: number;
   assignees?: { id: string; name?: string }[];
 }
 interface Comment {
@@ -96,7 +101,7 @@ export function ProjectDetailPage({ id, taskId }: { id: string; taskId?: string 
       </div>
 
       <div className="flex-1 overflow-auto">
-        {tab === 'tasks' && <TasksTab id={id} statuses={statuses} statusesLoading={statusesQ.isLoading} onOpen={openTask} />}
+        {tab === 'tasks' && <TasksTab id={id} statuses={statuses} statusesLoading={statusesQ.isLoading} projectKey={project?.key} onOpen={openTask} />}
         {tab === 'cycles' && <CyclesTab id={id} />}
         {tab === 'overview' && <OverviewTab id={id} statuses={statuses} project={project} />}
         {tab === 'settings' && <SettingsTab project={project} />}
@@ -111,13 +116,35 @@ export function ProjectDetailPage({ id, taskId }: { id: string; taskId?: string 
 
 /* ---------------- Tasks ---------------- */
 
-function TasksTab({ id, statuses, statusesLoading, onOpen }: {
-  id: string; statuses: TaskStatus[]; statusesLoading: boolean; onOpen: (tid: string) => void;
+const TASK_VIEWS = [
+  { key: 'list', label: 'List', icon: List },
+  { key: 'board', label: 'Board', icon: Columns3 },
+  { key: 'calendar', label: 'Calendar', icon: CalendarDays },
+  { key: 'timeline', label: 'Timeline', icon: GanttChart },
+  { key: 'spreadsheet', label: 'Spreadsheet', icon: Table2 },
+] as const;
+type TaskView = typeof TASK_VIEWS[number]['key'];
+
+function isTaskView(v: unknown): v is TaskView {
+  return typeof v === 'string' && TASK_VIEWS.some((tv) => tv.key === v);
+}
+
+function TasksTab({ id, statuses, statusesLoading, projectKey, onOpen }: {
+  id: string; statuses: TaskStatus[]; statusesLoading: boolean; projectKey?: string; onOpen: (tid: string) => void;
 }) {
   const qc = useQueryClient();
   const can = useCan();
   const canWrite = can('projects.write') || can('projects.create');
-  const [view, setView] = useState<'list' | 'board'>('list');
+  const [view, setViewState] = useState<TaskView>(() => {
+    try {
+      const stored = localStorage.getItem(`ordi:view:${id}`);
+      return isTaskView(stored) ? stored : 'list';
+    } catch { return 'list'; }
+  });
+  const setView = (v: TaskView) => {
+    setViewState(v);
+    try { localStorage.setItem(`ordi:view:${id}`, v); } catch { /* private mode */ }
+  };
 
   const tasksQ = useQuery<Task[]>({ queryKey: ['tasks', id], queryFn: () => api.get<{ data: Task[] }>(`/tasks${qs({ projectId: id })}`).then((r) => r.data) });
   const tasks = tasksQ.data ?? [];
@@ -133,15 +160,21 @@ function TasksTab({ id, statuses, statusesLoading, onOpen }: {
 
   return (
     <div className="p-6">
-      <div className="mb-4 flex items-center gap-1">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="inline-flex overflow-hidden rounded-md border border-border">
-          <button onClick={() => setView('list')} className={cn('flex items-center gap-1 px-2.5 py-1 text-xs', view === 'list' ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/60')}>
-            <List size={13} /> List
-          </button>
-          <button onClick={() => setView('board')} className={cn('flex items-center gap-1 border-l border-border px-2.5 py-1 text-xs', view === 'board' ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/60')}>
-            <Columns3 size={13} /> Board
-          </button>
+          {TASK_VIEWS.map((tv, i) => {
+            const Icon = tv.icon;
+            return (
+              <button key={tv.key} onClick={() => setView(tv.key)}
+                className={cn('flex items-center gap-1 px-2.5 py-1 text-xs', i > 0 && 'border-l border-border',
+                  view === tv.key ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/60')}>
+                <Icon size={13} /> {tv.label}
+              </button>
+            );
+          })}
         </div>
+        <SavedViewsBar projectId={id} currentView={view}
+          onApply={(v: SavedView) => { if (isTaskView(v.layout)) setView(v.layout); }} />
       </div>
 
       {loading ? (
@@ -150,8 +183,14 @@ function TasksTab({ id, statuses, statusesLoading, onOpen }: {
         <EmptyState title="No workflow yet" hint="This project has no task statuses. Configure a workflow to start adding tasks." />
       ) : view === 'list' ? (
         <ListView statuses={statuses} byStatus={byStatus} onOpen={onOpen} canWrite={canWrite} onAdd={(title, statusId) => addTask.mutate({ title, statusId })} />
-      ) : (
+      ) : view === 'board' ? (
         <BoardView statuses={statuses} byStatus={byStatus} onOpen={onOpen} canWrite={canWrite} onAdd={(title, statusId) => addTask.mutate({ title, statusId })} />
+      ) : view === 'calendar' ? (
+        <CalendarView tasks={tasks} projectKey={projectKey} onOpenTask={onOpen} />
+      ) : view === 'timeline' ? (
+        <TimelineView tasks={tasks} statuses={statuses} onOpenTask={onOpen} />
+      ) : (
+        <SpreadsheetView tasks={tasks} statuses={statuses} projectId={id} onOpenTask={onOpen} />
       )}
     </div>
   );

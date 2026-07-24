@@ -72,6 +72,7 @@ async function retryDue(consumer: string, eventId: string): Promise<boolean> {
   const row = await getRetry(consumer, eventId);
   if (!row) return true;
   if (row.attempts >= MAX_ATTEMPTS) return false; // dead => terminal, never retried automatically
+  if (row.attempts <= 0) return true; // admin replay reset the counter → immediately due
   const backoff = BACKOFF_MS[Math.min(row.attempts - 1, BACKOFF_MS.length - 1)]!;
   const dueAt = row.createdAt.getTime() + backoff;
   return Date.now() >= dueAt;

@@ -5,6 +5,7 @@ import { api } from '../lib/api';
 import { useNavigate } from '../lib/router';
 import { useMe } from '../lib/auth';
 import { Card, PageHeader, Skeleton, EmptyState, Badge, fmtMoney, fmtDate, cn } from '../components/ui';
+import { useT } from '../lib/i18n';
 
 interface TaskLite {
   id: string;
@@ -73,6 +74,7 @@ function normalizeMoney(value: unknown, label: string): MoneyRow[] {
 }
 
 export function DashboardPage() {
+  const t = useT();
   const me = useMe();
   const navigate = useNavigate();
   const { data, isLoading } = useQuery<DashboardData>({
@@ -88,23 +90,23 @@ export function DashboardPage() {
 
   const myTasks = data?.myTasks ?? {};
   const buckets: { key: string; label: string; icon: ReactNode; tasks: TaskLite[] }[] = [
-    { key: 'overdue', label: 'Overdue', icon: <AlertTriangle size={14} className="text-destructive" />, tasks: myTasks.overdue ?? [] },
-    { key: 'today', label: 'Today', icon: <CalendarClock size={14} />, tasks: myTasks.today ?? [] },
-    { key: 'upcoming', label: 'Upcoming', icon: <CalendarDays size={14} />, tasks: myTasks.upcoming ?? [] },
+    { key: 'overdue', label: t('common.overdue'), icon: <AlertTriangle size={14} className="text-destructive" />, tasks: myTasks.overdue ?? [] },
+    { key: 'today', label: t('common.today'), icon: <CalendarClock size={14} />, tasks: myTasks.today ?? [] },
+    { key: 'upcoming', label: t('common.upcoming'), icon: <CalendarDays size={14} />, tasks: myTasks.upcoming ?? [] },
   ];
   const totalTasks = buckets.reduce((n, b) => n + b.tasks.length, 0);
 
   const receivables = [
-    ...normalizeMoney(data?.receivables, 'Receivable'),
-    ...normalizeMoney(data?.overdue, 'Overdue'),
-  ].filter((r) => r.amount !== 0 || r.label === 'Receivable');
+    ...normalizeMoney(data?.receivables, 'finance.receivable'),
+    ...normalizeMoney(data?.overdue, 'finance.overdue'),
+  ].filter((r) => r.amount !== 0 || r.label === 'finance.receivable');
 
   const dealsByStage = data?.dealsByStage ?? [];
   const maxDeal = Math.max(1, ...dealsByStage.map((d) => Number(d.amount ?? 0)));
 
   return (
     <div>
-      <PageHeader title={`Good to see you, ${me.user.name.split(' ')[0] ?? me.user.name}`} subtitle="Your workspace at a glance" />
+      <PageHeader title={`${t('dashboard.greeting')}, ${me.user.name.split(' ')[0] ?? me.user.name}`} subtitle={t('dashboard.subtitle')} />
 
       {isLoading ? (
         <div className="grid gap-4 p-6 md:grid-cols-2">
@@ -115,12 +117,12 @@ export function DashboardPage() {
           {/* My tasks */}
           <Card className="p-4 md:col-span-2">
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold">My tasks</h2>
-              <button onClick={() => navigate('/my-tasks')} className="text-xs text-muted-foreground hover:text-foreground">View all</button>
+              <h2 className="text-sm font-semibold">{t('nav.myTasks')}</h2>
+              <button onClick={() => navigate('/my-tasks')} className="text-xs text-muted-foreground hover:text-foreground">{t('common.viewAll')}</button>
             </div>
             {totalTasks === 0 ? (
               <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
-                <CheckCircle2 size={16} className="text-primary" /> You are all caught up. Assigned work will show up here.
+                <CheckCircle2 size={16} className="text-primary" /> {t('dashboard.allCaughtUp')}
               </div>
             ) : (
               <div className="grid gap-4 sm:grid-cols-3">
@@ -138,7 +140,7 @@ export function DashboardPage() {
                           <span className="truncate">{t.title}</span>
                         </button>
                       ))}
-                      {b.tasks.length === 0 && <p className="px-1.5 text-xs text-muted-foreground">Nothing here.</p>}
+                      {b.tasks.length === 0 && <p className="px-1.5 text-xs text-muted-foreground">{t('dashboard.nothingHere')}</p>}
                     </div>
                   </div>
                 ))}
@@ -149,12 +151,12 @@ export function DashboardPage() {
           {/* Receivables (present only when finance data is returned) */}
           {receivables.length > 0 && (
             <Card className="p-4">
-              <h2 className="mb-3 text-sm font-semibold">Receivables</h2>
+              <h2 className="mb-3 text-sm font-semibold">{t('finance.receivables')}</h2>
               <div className="grid grid-cols-2 gap-3">
                 {receivables.map((r, i) => (
                   <div key={i} className="rounded-md border border-border p-3">
-                    <p className="text-xs text-muted-foreground">{r.label}</p>
-                    <p className={cn('mt-1 text-lg font-semibold tabular-nums', r.label === 'Overdue' && r.amount > 0 && 'text-destructive')}>
+                    <p className="text-xs text-muted-foreground">{t(r.label)}</p>
+                    <p className={cn('mt-1 text-lg font-semibold tabular-nums', r.label === 'finance.overdue' && r.amount > 0 && 'text-destructive')}>
                       {fmtMoney(r.amount, r.currency)}
                     </p>
                   </div>
@@ -166,14 +168,14 @@ export function DashboardPage() {
           {/* Deals by stage */}
           {dealsByStage.length > 0 && (
             <Card className="p-4">
-              <h2 className="mb-3 text-sm font-semibold">Deals by stage</h2>
+              <h2 className="mb-3 text-sm font-semibold">{t('dashboard.dealsByStage')}</h2>
               <div className="space-y-2">
                 {dealsByStage.map((d, i) => {
                   const amt = Number(d.amount ?? 0);
                   return (
                     <div key={d.stageId ?? i}>
                       <div className="mb-0.5 flex items-center justify-between text-xs">
-                        <span className="text-muted-foreground">{d.stageName ?? d.name ?? 'Stage'}</span>
+                        <span className="text-muted-foreground">{d.stageName ?? d.name ?? t('deals.stage')}</span>
                         <span className="tabular-nums">{d.count ?? 0} · {fmtMoney(amt)}</span>
                       </div>
                       <div className="h-1.5 overflow-hidden rounded-full bg-muted">
@@ -188,9 +190,9 @@ export function DashboardPage() {
 
           {/* Recent activity */}
           <Card className="p-4 md:col-span-2">
-            <h2 className="mb-3 flex items-center gap-1.5 text-sm font-semibold"><Activity size={14} /> Recent activity</h2>
+            <h2 className="mb-3 flex items-center gap-1.5 text-sm font-semibold"><Activity size={14} /> {t('dashboard.recentActivity')}</h2>
             {(data?.recentActivity ?? []).length === 0 ? (
-              <EmptyState title="No activity yet" hint="As your team works, updates across projects and clients will stream in here." />
+              <EmptyState title={t('dashboard.noActivity')} hint={t('dashboard.noActivityHint')} />
             ) : (
               <ul className="space-y-2">
                 {(data?.recentActivity ?? []).slice(0, 12).map((a) => (
@@ -198,7 +200,7 @@ export function DashboardPage() {
                     <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/50" />
                     <span className="flex-1">
                       {a.actorName && <span className="font-medium">{a.actorName} </span>}
-                      <span className="text-muted-foreground">{a.summary ?? a.message ?? a.action ?? 'made a change'}</span>
+                      <span className="text-muted-foreground">{a.summary ?? a.message ?? a.action ?? t('dashboard.madeChange')}</span>
                     </span>
                     <span className="shrink-0 text-xs text-muted-foreground">{fmtDate(a.createdAt)}</span>
                   </li>

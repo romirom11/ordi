@@ -146,7 +146,50 @@ intake/careers pages, git webhooks) live in a dedicated `public` module.
 - All §22 compromises are respected (no online payments, no accounting/e-invoicing,
   no automation builder, permission-level finance/CRM access, token portal, etc.).
 
-## 10. Testing
+## 10. Gap-closure wave (post-1.0 hardening)
+
+After the initial full implementation, the remaining PRD deltas were closed:
+
+- **Task views**: Calendar, Timeline (pure-CSS Gantt with overdue shading and a
+  today line) and Spreadsheet (inline cell editing + bulk column edit) joined
+  List/Board; the active view persists per project; saved views (personal/shared)
+  get a chips bar. No chart library — deliberate, keeps the bundle small.
+- **Rich text**: real Tiptap editor (StarterKit, links, task lists, placeholder,
+  @mentions with a dependency-free suggestion dropdown) + a recursive read-only
+  renderer. Mentions store tiptap-standard `attrs.id`, which the KB backlink
+  extractor already consumes. Mention directory comes from a new
+  `GET /users/lookup` (id/name/avatar only — no emails/roles), available to any
+  authenticated user so mentions are not admin-only.
+- **Realtime**: the SPA subscribes to `/api/v1/stream` (`lib/sse.ts`) and maps
+  event families to TanStack Query invalidations with reconnect/backoff.
+- **Keyboard**: ⌘K palette, `C` quick-create (with `!priority` quick-syntax),
+  `T` stop timer, `G`-chords (`G D/P/C/F/K/T/M`) for navigation.
+- **i18n**: key-based uk/en dictionaries (`lib/i18n.tsx`); locale from the user
+  profile, Intl for dates/money; public pages guess locale pre-auth. PDF
+  labels are localized per document (uk/en) in the Typst template and fallback.
+- **OpenAPI**: a static OpenAPI 3.1 doc generated from the shared Zod schemas
+  (zod-to-json-schema) served at `/api/docs` — chosen over migrating every route
+  to hono-openapi (invasive) while still giving a typed public contract.
+- **TOTP**: setup/enable/disable endpoints + profile UI (otpauth URL + secret).
+- **DLQ admin**: `/dlq` list + replay + deliberate reprocess (clears
+  processed_events), surfaced in Settings → Event queue; audit feed panel too.
+- **CSV**: import (companies/contacts/tasks, dry-run with per-line errors,
+  transactional apply) and export (companies/contacts/tasks/invoices/time) with
+  a dependency-free CSV codec.
+- **IMAP intake**: `workers/imap.ts` polls configured project mailboxes
+  (ImapFlow + mailparser) every 10 minutes, mapping unseen mail to intake items;
+  per-mailbox failures are isolated.
+- **Observability**: pino stays; a dependency-free Sentry reporter (store-API
+  envelope via fetch) activates on `SENTRY_DSN` / `VITE_SENTRY_DSN` — swappable
+  for the full SDK behind the same `captureException`.
+- **Ops**: `docs/operations.md` — PITR (WAL-G) setup meeting RPO ≤ 5 min,
+  rehearsed restore runbook for RTO ≤ 1 h, monitoring queries (DLQ depth, WAL
+  lag, outbox lag), sensitive-audit retention purge.
+- **Desktop**: CI workflow (`desktop.yml`) builds macOS universal / Windows msi /
+  Linux AppImage+deb via tauri-action on version tags — binaries are a CI
+  artifact by design; the container environment lacks GTK/WebKit dev libs.
+
+## 11. Testing
 
 - Unit (Vitest) in `@ordi/shared` for all pure calc (money, cost, aging, leave,
   git, RBAC resolver, redaction).
@@ -154,3 +197,14 @@ intake/careers pages, git webhooks) live in a dedicated `public` module.
   matrix, sensitive-data isolation, version locking, internal-project rules, and
   outbox idempotency/DLQ — generated where possible from the permission catalog so
   a new permission without a test fails CI (§20).
+
+## 11. OpenAPI publication (§15.1)
+
+The `/api/docs` contract is a static OpenAPI 3.1 document built at module load
+in `apps/api/src/domains/core/openapi.ts` from the shared Zod input schemas via
+`zod-to-json-schema`, rather than per-route `hono-openapi` decoration: routes
+stay thin (guard → validate → service) and the doc adds an `x-permission`
+extension per operation so MCP/external integrations can see the required
+capability. `/api/docs/openapi.json` serves the raw spec; `/api/docs` serves a
+dependency-free HTML browser over it. Responses are intentionally loose
+(generic envelope) — handlers remain the source of truth for response shapes.

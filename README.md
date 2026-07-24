@@ -93,6 +93,24 @@ ORDI_API_URL=http://localhost:3000 ORDI_API_TOKEN=<token> pnpm --filter @ordi/mc
 ```
 Create a token in the app under **Settings → API tokens** (scope ⊆ your role).
 
+## Feature highlights
+
+- Tasks in 5 views: List, Board, Calendar, Timeline (Gantt), Spreadsheet — plus
+  saved views, drafts, cycles with burndown, intake (public form + IMAP).
+- Tiptap rich text with @mentions everywhere (tasks, KB, notes); KB versions,
+  soft-locks, backlinks, Markdown export.
+- Finance: full invoice/quote lifecycle, localized PDF (uk/en, Typst), public
+  pages, portal, payments/credit notes, recurring, reminders, invoice-from-time,
+  profitability & labor cost (Productive-style).
+- People: lifecycle, leave with balances, recruiting with public careers pages,
+  versioned compensation (audited access), resourcing view.
+- Realtime SSE cache invalidation, ⌘K palette, keyboard scheme (C/T/G-chords),
+  custom dashboards, uk/en UI, OpenAPI at `/api/docs`, CSV import/export,
+  dead-letter admin with replay, TOTP 2FA, MCP agent (31 tools).
+
+See [`docs/operations.md`](docs/operations.md) for backup/PITR (RPO ≤ 5 min,
+RTO ≤ 1 h), monitoring and deployment runbooks.
+
 ## Security & operations
 
 - RBAC enforced on every request; UI only hides. 403s are audited with the

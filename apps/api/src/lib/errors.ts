@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 import { ZodError } from 'zod';
 import { ERROR_STATUS, type ErrorCode } from '@ordi/shared';
 import { logger } from './logger';
+import { captureException } from './sentry';
 
 export class ApiException extends Error {
   code: ErrorCode;
@@ -33,5 +34,6 @@ export function handleError(e: unknown, c: Context): Response {
     return c.json({ error: { code: 'validation_error', message: 'Validation failed', details: e.flatten() } }, 400);
   }
   logger.error({ err: e }, 'unhandled error');
+  captureException(e, { requestId: c.get('requestId' as never), path: c.req.path });
   return c.json({ error: { code: 'internal_error', message: 'Internal server error' } }, 500);
 }

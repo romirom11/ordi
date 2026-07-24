@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { setCookie, deleteCookie } from 'hono/cookie';
 import { getDb, schema, eq, and } from '@ordi/db';
 import { ulid } from 'ulid';
+import { z } from 'zod';
 import * as OTPAuth from 'otpauth';
 import { loginSchema, acceptInviteSchema, createApiTokenSchema, validateTokenScope } from '@ordi/shared';
 import type { AppEnv } from '../../context';
@@ -10,6 +11,7 @@ import { err } from '../../lib/errors';
 import { SESSION_COOKIE, requireAuth, currentActor } from '../../core/auth';
 import { hashPassword, verifyPassword, generateToken, sha256 } from '../../lib/crypto';
 import { effectivePermissions } from '../../core/rbac';
+import { writeActivity } from '../../core/activity';
 
 const rateLimit = new Map<string, { count: number; resetAt: number }>();
 function checkRate(key: string, max: number, windowMs: number): void {
@@ -137,5 +139,68 @@ export function authRoutes() {
   });
 
   app.route('/tokens', tokens);
+
+  // ── TOTP two-factor auth (PRD §6) ──
+  const totpCodeSchema = z.object({ code: z.string().min(1) });
+
+  const totp = new Hono<AppEnv>();
+  totp.use('*', requireAuth);
+
+  totp.get('/', async (c) => {
+    const actor = currentActor(c);
+    const { db } = getDb();
+    const [user] = await db.select({ totpEnabled: schema.users.totpEnabled })
+      .from(schema.users).where(eq(schema.users.id, actor.userId));
+    return c.json({ enabled: user?.totpEnabled ?? false });
+  });
+
+  totp.post('/setup', async (c) => {
+    const actor = currentActor(c);
+    const secret = new OTPAuth.Secret();
+    const instance = new OTPAuth.TOTP({ issuer: 'ordi', label: actor.email, secret });
+    const { db } = getDb();
+    // Enabled stays false until the user confirms a valid code via /totp/enable.
+    await db.update(schema.users).set({ totpSecret: secret.base32, totpEnabled: false })
+      .where(eq(schema.users.id, actor.userId));
+    await writeActivity(db, {
+      entityType: 'user', entityId: actor.userId, action: 'totp_setup',
+      actorId: actor.userId, actorType: actor.actorType, diff: {},
+    });
+    return c.json({ secret: secret.base32, otpauthUrl: instance.toString() });
+  });
+
+  totp.post('/enable', async (c) => {
+    const actor = currentActor(c);
+    const body = totpCodeSchema.parse(await c.req.json());
+    const { db } = getDb();
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, actor.userId));
+    if (!user?.totpSecret) throw err.domain('TOTP is not set up');
+    const instance = new OTPAuth.TOTP({ secret: user.totpSecret });
+    if (instance.validate({ token: body.code, window: 1 }) === null) throw err.domain('Invalid code');
+    await db.update(schema.users).set({ totpEnabled: true }).where(eq(schema.users.id, actor.userId));
+    await writeActivity(db, {
+      entityType: 'user', entityId: actor.userId, action: 'totp_enabled',
+      actorId: actor.userId, actorType: actor.actorType, diff: {},
+    });
+    return c.json({ ok: true, enabled: true });
+  });
+
+  totp.post('/disable', async (c) => {
+    const actor = currentActor(c);
+    const body = totpCodeSchema.parse(await c.req.json());
+    const { db } = getDb();
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, actor.userId));
+    if (!user?.totpSecret) throw err.domain('TOTP is not set up');
+    const instance = new OTPAuth.TOTP({ secret: user.totpSecret });
+    if (instance.validate({ token: body.code, window: 1 }) === null) throw err.domain('Invalid code');
+    await db.update(schema.users).set({ totpEnabled: false, totpSecret: null }).where(eq(schema.users.id, actor.userId));
+    await writeActivity(db, {
+      entityType: 'user', entityId: actor.userId, action: 'totp_disabled',
+      actorId: actor.userId, actorType: actor.actorType, diff: {},
+    });
+    return c.json({ ok: true, enabled: false });
+  });
+
+  app.route('/totp', totp);
   return app;
 }

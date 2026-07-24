@@ -2,8 +2,10 @@ import { useState, type FormEvent } from 'react';
 import { KeyRound } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { Button, Input, Card, Spinner } from '../components/ui';
+import { useT } from '../lib/i18n';
 
 export function LoginPage() {
+  const t = useT();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [totp, setTotp] = useState('');
@@ -23,12 +25,12 @@ export function LoginPage() {
         const details = err.details as { totpRequired?: boolean } | undefined;
         if (details?.totpRequired && !totpRequired) {
           setTotpRequired(true);
-          setError('Enter the 6-digit code from your authenticator app.');
+          setError(t('auth.enterTotp'));
         } else {
           setError(err.message);
         }
       } else {
-        setError('Could not sign in. Try again.');
+        setError(t('auth.signInFailed'));
       }
       setLoading(false);
     }
@@ -41,12 +43,12 @@ export function LoginPage() {
           <div className="grid h-7 w-7 place-items-center rounded bg-primary text-sm text-primary-foreground">o</div>
           <span className="text-lg font-semibold">ordi</span>
         </div>
-        <h1 className="mb-1 text-base font-semibold">Sign in</h1>
-        <p className="mb-5 text-sm text-muted-foreground">Use your work email to continue.</p>
+        <h1 className="mb-1 text-base font-semibold">{t('auth.signIn')}</h1>
+        <p className="mb-5 text-sm text-muted-foreground">{t('auth.useWorkEmail')}</p>
 
         <form onSubmit={onSubmit} className="space-y-3">
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Email</label>
+            <label className="text-xs font-medium text-muted-foreground">{t('auth.email')}</label>
             <Input
               type="email"
               autoComplete="email"
@@ -58,7 +60,7 @@ export function LoginPage() {
             />
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Password</label>
+            <label className="text-xs font-medium text-muted-foreground">{t('auth.password')}</label>
             <Input
               type="password"
               autoComplete="current-password"
@@ -71,7 +73,7 @@ export function LoginPage() {
           {totpRequired && (
             <div className="space-y-1">
               <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                <KeyRound size={12} /> Authentication code
+                <KeyRound size={12} /> {t('auth.totp')}
               </label>
               <Input
                 inputMode="numeric"
@@ -87,7 +89,7 @@ export function LoginPage() {
           {error && <p className="text-sm text-destructive">{error}</p>}
 
           <Button type="submit" disabled={loading} className="w-full">
-            {loading ? <Spinner /> : 'Sign in'}
+            {loading ? <Spinner /> : t('auth.signIn')}
           </Button>
         </form>
       </Card>

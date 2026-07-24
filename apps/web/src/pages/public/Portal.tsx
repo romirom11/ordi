@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { Card, Badge, Skeleton, fmtMoney, fmtDate } from '../../components/ui';
+import { useT } from '../../lib/i18n';
 
 const STATUS_COLORS: Record<string, string> = {
   draft: '#6b7280', sent: '#3b82f6', viewed: '#8b5cf6', partially_paid: '#f59e0b', paid: '#22c55e',
@@ -28,13 +29,14 @@ interface Portal {
 }
 
 export function PortalPage({ token }: { token: string }) {
+  const t = useT();
   const portal = useQuery({ queryKey: ['portal', token], queryFn: () => api.get<Portal>(`/portal/${token}`), retry: false });
 
   if (portal.isLoading) return <Frame><Skeleton className="h-64 w-full" /></Frame>;
-  if (portal.isError || !portal.data) return <Frame><Card className="p-10 text-center text-sm text-muted-foreground">This portal link is invalid or has expired.</Card></Frame>;
+  if (portal.isError || !portal.data) return <Frame><Card className="p-10 text-center text-sm text-muted-foreground">{t('public.portalInvalid')}</Card></Frame>;
 
   const p = portal.data;
-  const name = p.companyName ?? p.company?.name ?? 'Client portal';
+  const name = p.companyName ?? p.company?.name ?? t('public.clientPortal');
   const invoices = p.invoices ?? [];
   const quotes = p.quotes ?? [];
 
@@ -45,9 +47,9 @@ export function PortalPage({ token }: { token: string }) {
         {p.workspaceName && <p className="mt-1 text-sm text-muted-foreground">{p.workspaceName}</p>}
       </div>
 
-      <DocList title="Invoices" docs={invoices} base="i" dateKey="dueDate" empty="No invoices yet." />
+      <DocList title={t('finance.invoices')} docs={invoices} base="i" dateKey="dueDate" empty={t('public.noInvoices')} />
       <div className="h-6" />
-      <DocList title="Quotes" docs={quotes} base="q" dateKey="validUntil" empty="No quotes yet." />
+      <DocList title={t('finance.quotes')} docs={quotes} base="q" dateKey="validUntil" empty={t('public.noQuotes')} />
     </Frame>
   );
 }
