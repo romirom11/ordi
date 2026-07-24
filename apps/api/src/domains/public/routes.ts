@@ -75,6 +75,12 @@ export function publicRoutes() {
     const [company] = await db.select({ name: schema.companies.name })
       .from(schema.companies).where(eq(schema.companies.id, inv.companyId));
 
+    const [ws] = await db.select({
+      name: schema.workspaceSettings.name,
+      logo: schema.workspaceSettings.logo,
+      invoiceSettings: schema.workspaceSettings.invoiceSettings,
+    }).from(schema.workspaceSettings).where(eq(schema.workspaceSettings.id, 'workspace'));
+
     const outstanding = Number(inv.total) - Number(inv.amountPaid);
     return c.json({
       invoice: {
@@ -86,6 +92,8 @@ export function publicRoutes() {
       },
       items,
       company: { name: company?.name ?? null, logo: null },
+      workspace: { name: ws?.name ?? 'ordi', logo: ws?.logo ?? null },
+      invoiceSettings: ws?.invoiceSettings ?? {},
       amountPaid: Number(inv.amountPaid),
       outstanding,
     });

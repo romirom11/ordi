@@ -81,6 +81,58 @@ export async function runRecurringInvoices(): Promise<void> {
   }
 }
 
+/** Advance a YYYY-MM-DD date by one recurring-payment interval (UTC). */
+function advanceInterval(date: string, interval: string): string {
+  const d = new Date(date + 'T00:00:00Z');
+  if (interval === 'weekly') d.setUTCDate(d.getUTCDate() + 7);
+  else if (interval === 'monthly') d.setUTCMonth(d.getUTCMonth() + 1);
+  else if (interval === 'quarterly') d.setUTCMonth(d.getUTCMonth() + 3);
+  else if (interval === 'yearly') d.setUTCFullYear(d.getUTCFullYear() + 1);
+  else d.setUTCMonth(d.getUTCMonth() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Recurring payments (subscriptions): for active rows due today or earlier,
+ * advance next_date past today, stamp last_created_at, and — when
+ * auto_create_expense is set — materialise a matching expense row. Idempotent:
+ * next_date is advanced beyond today so a re-run in the same day is a no-op.
+ */
+export async function runRecurringPayments(): Promise<void> {
+  const { db } = getDb();
+  const t = today();
+  const due = await db.select().from(schema.recurringPayments).where(and(
+    eq(schema.recurringPayments.isActive, true),
+    isNull(schema.recurringPayments.deletedAt),
+    lte(schema.recurringPayments.nextDate, t),
+  ));
+  for (const rp of due) {
+    if (rp.autoCreateExpense) {
+      await db.insert(schema.expenses).values({
+        id: ulid(),
+        companyId: rp.companyId ?? null,
+        projectId: null,
+        categoryId: null,
+        amount: rp.amount,
+        currency: rp.currency,
+        date: rp.nextDate,
+        description: rp.vendor ? `${rp.name} — ${rp.vendor}` : rp.name,
+        billable: false,
+        markup: '0',
+        createdBy: rp.createdBy,
+      });
+    }
+    // Advance next_date until it is strictly in the future (catch up missed cycles).
+    let next = advanceInterval(rp.nextDate, rp.interval);
+    let guardCount = 0;
+    while (next <= t && guardCount < 520) { next = advanceInterval(next, rp.interval); guardCount++; }
+    await db.update(schema.recurringPayments)
+      .set({ nextDate: next, lastCreatedAt: new Date() })
+      .where(eq(schema.recurringPayments.id, rp.id));
+  }
+  if (due.length) logger.info({ count: due.length }, 'recurring payments processed');
+}
+
 /** Invoice reminders per reminder_rules, idempotent via reminder_log. */
 export async function runReminders(): Promise<void> {
   const { db } = getDb();
@@ -148,6 +200,7 @@ export async function runAllDailyJobs(): Promise<void> {
   await runCycleActivation();
   await runRecurringTasks();
   await runRecurringInvoices();
+  await runRecurringPayments();
   await runReminders();
   await runCycleSnapshots();
   await runQuoteExpiry();

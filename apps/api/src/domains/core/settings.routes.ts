@@ -25,7 +25,7 @@ export function settingsRoutes() {
   app.get('/workspace', async (c) => {
     const { db } = getDb();
     const [ws] = await db.select().from(schema.workspaceSettings).where(eq(schema.workspaceSettings.id, 'workspace'));
-    if (!ws) return c.json({ id: 'workspace', name: 'ordi', modules: {}, integrations: { slackWebhookUrl: null } });
+    if (!ws) return c.json({ id: 'workspace', name: 'ordi', modules: {}, integrations: { slackWebhookUrl: null }, invoiceSettings: {} });
 
     // GET is open to any authed user (Shell reads name/logo). Only settings.manage
     // holders may fetch the real webhook secret, and only when explicitly asked
@@ -54,6 +54,10 @@ export function settingsRoutes() {
     }
     if (patch.integrations !== undefined) {
       allowed.integrations = { ...((existing?.integrations as Record<string, unknown>) ?? {}), ...patch.integrations };
+    }
+    // invoiceSettings merged (not replaced) so partial patches keep other keys.
+    if (patch.invoiceSettings !== undefined) {
+      allowed.invoiceSettings = { ...((existing?.invoiceSettings as Record<string, unknown>) ?? {}), ...patch.invoiceSettings };
     }
 
     if (existing) {

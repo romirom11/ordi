@@ -53,7 +53,90 @@ async function loadEmployee(id: string) {
 }
 
 export async function getEmployee(actor: Actor, id: string) {
-  return stripEmployee(actor, await loadEmployee(id));
+  const { db } = getDb();
+  const e = await loadEmployee(id);
+  const stripped = stripEmployee(actor, e);
+  let user: { id: string; name: string; email: string; avatar: string | null; isActive: boolean } | null = null;
+  if (e.userId) {
+    const [u] = await db.select({
+      id: schema.users.id, name: schema.users.name, email: schema.users.email,
+      avatar: schema.users.avatar, isActive: schema.users.isActive,
+    }).from(schema.users).where(eq(schema.users.id, e.userId));
+    if (u) user = u;
+  }
+  return { ...stripped, user };
+}
+
+/**
+ * People directory (PRD §12): a unified list of workspace people. Rows are driven
+ * by user accounts (actor_type='user'), each joined to an employee profile by
+ * userId link or, failing that, by email match. Standalone employee profiles with
+ * no matching user are appended. Compensation is NOT included here.
+ */
+export async function peopleDirectory() {
+  const { db } = getDb();
+  const users = await db.select().from(schema.users).where(eq(schema.users.actorType, 'user'));
+  const emps = await db.select({
+    id: schema.employees.id,
+    userId: schema.employees.userId,
+    firstName: schema.employees.firstName,
+    lastName: schema.employees.lastName,
+    email: schema.employees.email,
+    status: schema.employees.status,
+    positionTitle: schema.positions.title,
+    departmentName: schema.departments.name,
+  }).from(schema.employees)
+    .leftJoin(schema.positions, eq(schema.positions.id, schema.employees.positionId))
+    .leftJoin(schema.departments, eq(schema.departments.id, schema.employees.departmentId))
+    .where(isNull(schema.employees.deletedAt));
+
+  type Emp = (typeof emps)[number];
+  const byUserId = new Map<string, Emp>();
+  const byEmail = new Map<string, Emp>();
+  for (const e of emps) {
+    if (e.userId) byUserId.set(e.userId, e);
+    if (e.email) byEmail.set(e.email.toLowerCase(), e);
+  }
+
+  const usedEmpIds = new Set<string>();
+  const rows: Array<{
+    userId: string | null; employeeId: string | null; name: string; email: string | null;
+    avatar: string | null; position: string | null; departmentName: string | null;
+    status: 'active' | 'deactivated'; hasEmployeeProfile: boolean;
+  }> = [];
+
+  for (const u of users) {
+    const emp = byUserId.get(u.id) ?? (u.email ? byEmail.get(u.email.toLowerCase()) : undefined);
+    if (emp) usedEmpIds.add(emp.id);
+    rows.push({
+      userId: u.id,
+      employeeId: emp?.id ?? null,
+      name: u.name,
+      email: u.email,
+      avatar: u.avatar ?? null,
+      position: emp?.positionTitle ?? null,
+      departmentName: emp?.departmentName ?? null,
+      status: u.isActive ? 'active' : 'deactivated',
+      hasEmployeeProfile: Boolean(emp),
+    });
+  }
+
+  for (const e of emps) {
+    if (usedEmpIds.has(e.id)) continue;
+    rows.push({
+      userId: e.userId ?? null,
+      employeeId: e.id,
+      name: `${e.firstName} ${e.lastName}`.trim(),
+      email: e.email ?? null,
+      avatar: null,
+      position: e.positionTitle ?? null,
+      departmentName: e.departmentName ?? null,
+      status: e.status === 'terminated' ? 'deactivated' : 'active',
+      hasEmployeeProfile: true,
+    });
+  }
+
+  return rows;
 }
 
 export async function createEmployee(actor: Actor, input: any): Promise<string> {

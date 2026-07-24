@@ -30,6 +30,10 @@ export function peopleRoutes() {
   const app = new Hono<AppEnv>();
   app.use('*', requireAuth);
 
+  // ── People directory (PRD §12): unified users ∪ employee profiles ──
+  app.get('/people/directory', guard('people.read'), async (c) =>
+    c.json({ data: await svc.peopleDirectory() }));
+
   // ── Employees (PRD §12.1) ──
   app.get('/employees', guard('people.read'), async (c) => {
     const data = await svc.listEmployees(currentActor(c), {
