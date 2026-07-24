@@ -14,8 +14,6 @@ import {
 } from '../components/ui';
 import { Dialog, ConfirmDialog, DropdownMenu, MenuItem, toast } from '../components/overlays';
 import { ImportExportPanel } from '../components/ImportExportPanel';
-import { ProjectAccessPanel } from '../components/ProjectAccessPanel';
-function TempAccess({ pid }: { pid: string }) { return <ProjectAccessPanel projectId={pid} canManage />; }
 import { SectionHead, SettingRow, Field, RowList, AnimatedRow } from '../components/settings/primitives';
 import { downscaleImage } from '../components/settings/image';
 import { useT } from '../lib/i18n';
@@ -198,9 +196,6 @@ export function SettingsPage({ section }: { section?: string }) {
           </nav>
         </aside>
         <div className="min-w-0 flex-1">
-          {typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('access') && (
-            <div className="mx-auto max-w-2xl px-8 py-6"><TempAccess pid={new URLSearchParams(window.location.search).get('access')!} /></div>
-          )}
           <div key={active.id} className="anim-fade-in mx-auto max-w-2xl px-8 py-6">
             {active.id === 'workspace' && <WorkspacePanel />}
             {active.id === 'users' && <UsersPanel />}
