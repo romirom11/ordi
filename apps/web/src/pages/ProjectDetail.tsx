@@ -9,6 +9,7 @@ import { CalendarView } from '../components/views/CalendarView';
 import { TimelineView } from '../components/views/TimelineView';
 import { SpreadsheetView } from '../components/views/SpreadsheetView';
 import { SavedViewsBar, type SavedView } from '../components/views/SavedViewsBar';
+import { useT } from '../lib/i18n';
 
 interface Project {
   id: string; name: string; key: string; status: string; kind?: string;
@@ -64,8 +65,16 @@ function textToDoc(text: string) {
 
 const TABS = ['tasks', 'cycles', 'overview', 'settings'] as const;
 type Tab = typeof TABS[number];
+// i18n dictionary keys for the tab labels (ids stay untranslated).
+const TAB_LABEL_KEYS: Record<Tab, string> = {
+  tasks: 'common.tasks',
+  cycles: 'projects.cycles',
+  overview: 'projects.overview',
+  settings: 'nav.settings',
+};
 
 export function ProjectDetailPage({ id, taskId }: { id: string; taskId?: string }) {
+  const t = useT();
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>('tasks');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(taskId ?? null);
@@ -91,10 +100,10 @@ export function ProjectDetailPage({ id, taskId }: { id: string; taskId?: string 
           {project?.companyName && <span className="text-sm text-muted-foreground">· {project.companyName}</span>}
         </div>
         <nav className="flex gap-1 text-sm">
-          {TABS.map((t) => (
-            <button key={t} onClick={() => setTab(t)}
-              className={cn('rounded-t-md px-3 py-1.5 capitalize', tab === t ? 'border-b-2 border-primary font-medium' : 'text-muted-foreground hover:text-foreground')}>
-              {t}
+          {TABS.map((tb) => (
+            <button key={tb} onClick={() => setTab(tb)}
+              className={cn('rounded-t-md px-3 py-1.5 capitalize', tab === tb ? 'border-b-2 border-primary font-medium' : 'text-muted-foreground hover:text-foreground')}>
+              {t(TAB_LABEL_KEYS[tb])}
             </button>
           ))}
         </nav>
@@ -116,12 +125,13 @@ export function ProjectDetailPage({ id, taskId }: { id: string; taskId?: string 
 
 /* ---------------- Tasks ---------------- */
 
+// `labelKey` is an i18n dictionary key, translated at render time.
 const TASK_VIEWS = [
-  { key: 'list', label: 'List', icon: List },
-  { key: 'board', label: 'Board', icon: Columns3 },
-  { key: 'calendar', label: 'Calendar', icon: CalendarDays },
-  { key: 'timeline', label: 'Timeline', icon: GanttChart },
-  { key: 'spreadsheet', label: 'Spreadsheet', icon: Table2 },
+  { key: 'list', labelKey: 'tasks.list', icon: List },
+  { key: 'board', labelKey: 'tasks.board', icon: Columns3 },
+  { key: 'calendar', labelKey: 'tasks.calendar', icon: CalendarDays },
+  { key: 'timeline', labelKey: 'tasks.timeline', icon: GanttChart },
+  { key: 'spreadsheet', labelKey: 'tasks.spreadsheet', icon: Table2 },
 ] as const;
 type TaskView = typeof TASK_VIEWS[number]['key'];
 
@@ -132,6 +142,7 @@ function isTaskView(v: unknown): v is TaskView {
 function TasksTab({ id, statuses, statusesLoading, projectKey, onOpen }: {
   id: string; statuses: TaskStatus[]; statusesLoading: boolean; projectKey?: string; onOpen: (tid: string) => void;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const can = useCan();
   const canWrite = can('projects.write') || can('projects.create');
@@ -152,7 +163,7 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, onOpen }: {
   const addTask = useMutation({
     mutationFn: (vars: { title: string; statusId?: string }) => api.post('/tasks', { projectId: id, title: vars.title, statusId: vars.statusId }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks', id] }),
-    onError: (e) => alert(e instanceof ApiError ? e.message : 'Could not create task.'),
+    onError: (e) => alert(e instanceof ApiError ? e.message : t('tasks.createFailed')),
   });
 
   const byStatus = (sid: string) => tasks.filter((t) => t.statusId === sid);
@@ -168,7 +179,7 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, onOpen }: {
               <button key={tv.key} onClick={() => setView(tv.key)}
                 className={cn('flex items-center gap-1 px-2.5 py-1 text-xs', i > 0 && 'border-l border-border',
                   view === tv.key ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/60')}>
-                <Icon size={13} /> {tv.label}
+                <Icon size={13} /> {t(tv.labelKey)}
               </button>
             );
           })}
@@ -180,7 +191,7 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, onOpen }: {
       {loading ? (
         <div className="space-y-2">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-9" />)}</div>
       ) : statuses.length === 0 ? (
-        <EmptyState title="No workflow yet" hint="This project has no task statuses. Configure a workflow to start adding tasks." />
+        <EmptyState title={t('projects.noWorkflow')} hint={t('projects.noWorkflowHint')} />
       ) : view === 'list' ? (
         <ListView statuses={statuses} byStatus={byStatus} onOpen={onOpen} canWrite={canWrite} onAdd={(title, statusId) => addTask.mutate({ title, statusId })} />
       ) : view === 'board' ? (
@@ -231,6 +242,7 @@ function ListView({ statuses, byStatus, onOpen, canWrite, onAdd }: {
   statuses: TaskStatus[]; byStatus: (sid: string) => Task[]; onOpen: (tid: string) => void;
   canWrite: boolean; onAdd: (title: string, statusId?: string) => void;
 }) {
+  const t = useT();
   return (
     <div className="space-y-5">
       {statuses.map((s) => {
@@ -250,10 +262,10 @@ function ListView({ statuses, byStatus, onOpen, canWrite, onAdd }: {
               ))}
               {canWrite && (
                 <div className={cn(items.length > 0 && 'border-t border-border')}>
-                  <QuickAdd statusId={s.id} onAdd={onAdd} placeholder="Add task…" />
+                  <QuickAdd statusId={s.id} onAdd={onAdd} placeholder={t('tasks.addTask')} />
                 </div>
               )}
-              {items.length === 0 && !canWrite && <p className="px-3 py-2 text-xs text-muted-foreground">No tasks</p>}
+              {items.length === 0 && !canWrite && <p className="px-3 py-2 text-xs text-muted-foreground">{t('tasks.noTasks')}</p>}
             </div>
           </section>
         );
@@ -266,6 +278,7 @@ function BoardView({ statuses, byStatus, onOpen, canWrite, onAdd }: {
   statuses: TaskStatus[]; byStatus: (sid: string) => Task[]; onOpen: (tid: string) => void;
   canWrite: boolean; onAdd: (title: string, statusId?: string) => void;
 }) {
+  const t = useT();
   return (
     <div className="flex gap-3 overflow-x-auto pb-2">
       {statuses.map((s) => {
@@ -293,7 +306,7 @@ function BoardView({ statuses, byStatus, onOpen, canWrite, onAdd }: {
               ))}
               {canWrite && (
                 <div className="rounded-md border border-dashed border-border">
-                  <QuickAdd statusId={s.id} onAdd={onAdd} placeholder="Add task…" />
+                  <QuickAdd statusId={s.id} onAdd={onAdd} placeholder={t('tasks.addTask')} />
                 </div>
               )}
             </div>
@@ -309,6 +322,7 @@ function BoardView({ statuses, byStatus, onOpen, canWrite, onAdd }: {
 function TaskPeek({ taskId, projectId, projectKey, statuses, onClose }: {
   taskId: string; projectId: string; projectKey?: string; statuses: TaskStatus[]; onClose: () => void;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const taskQ = useQuery<TaskDetail>({
     queryKey: ['task', taskId],
@@ -334,7 +348,7 @@ function TaskPeek({ taskId, projectId, projectKey, statuses, onClose }: {
   const patch = useMutation({
     mutationFn: (body: Record<string, unknown>) => api.patch(`/tasks/${taskId}`, { ...body, version: task?.version }),
     onSuccess: invalidate,
-    onError: (e) => alert(e instanceof ApiError ? e.message : 'Could not save changes.'),
+    onError: (e) => alert(e instanceof ApiError ? e.message : t('common.saveFailed')),
   });
 
   const addComment = useMutation({
@@ -342,7 +356,7 @@ function TaskPeek({ taskId, projectId, projectKey, statuses, onClose }: {
       body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] },
     }),
     onSuccess: () => { setComment(''); qc.invalidateQueries({ queryKey: ['task', taskId] }); },
-    onError: (e) => alert(e instanceof ApiError ? e.message : 'Could not add comment.'),
+    onError: (e) => alert(e instanceof ApiError ? e.message : t('tasks.addCommentFailed')),
   });
 
   const keyLabel = projectKey && task?.number != null ? `${projectKey}-${task.number}` : task?.number != null ? `#${task.number}` : '';
@@ -359,7 +373,7 @@ function TaskPeek({ taskId, projectId, projectKey, statuses, onClose }: {
         {taskQ.isLoading ? (
           <div className="space-y-3 p-4"><Skeleton className="h-6 w-3/4" /><Skeleton className="h-20" /></div>
         ) : taskQ.isError || !task ? (
-          <div className="p-4 text-sm text-destructive">Could not load this task.</div>
+          <div className="p-4 text-sm text-destructive">{t('tasks.loadFailed')}</div>
         ) : (
           <div className="flex-1 space-y-5 overflow-y-auto p-4">
             <input
@@ -370,7 +384,7 @@ function TaskPeek({ taskId, projectId, projectKey, statuses, onClose }: {
             />
 
             <div className="flex items-center gap-2">
-              <label className="text-xs font-medium text-muted-foreground">Status</label>
+              <label className="text-xs font-medium text-muted-foreground">{t('common.status')}</label>
               <Select
                 value={task.statusId}
                 onChange={(e) => patch.mutate({ statusId: e.target.value })}
@@ -387,39 +401,39 @@ function TaskPeek({ taskId, projectId, projectKey, statuses, onClose }: {
             )}
 
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Description</label>
+              <label className="text-xs font-medium text-muted-foreground">{t('public.description')}</label>
               <Textarea
                 rows={4}
                 value={desc}
                 onChange={(e) => setDesc(e.target.value)}
                 onBlur={() => { if (desc !== docToText(task.description)) patch.mutate({ description: textToDoc(desc) }); }}
-                placeholder="Add a description…"
+                placeholder={t('tasks.addDescription')}
               />
             </div>
 
             <div>
               <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                <MessageSquare size={13} /> Comments
+                <MessageSquare size={13} /> {t('tasks.comments')}
               </h3>
               <div className="space-y-3">
                 {(task.comments ?? []).map((c) => (
                   <div key={c.id} className="text-sm">
                     <div className="mb-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-                      <span className="font-medium text-foreground">{c.authorName ?? 'Someone'}</span>
+                      <span className="font-medium text-foreground">{c.authorName ?? t('common.someone')}</span>
                       <span>{fmtDate(c.createdAt)}</span>
                     </div>
                     <p className="whitespace-pre-wrap">{docToText(c.body)}</p>
                   </div>
                 ))}
-                {(task.comments ?? []).length === 0 && <p className="text-xs text-muted-foreground">No comments yet.</p>}
+                {(task.comments ?? []).length === 0 && <p className="text-xs text-muted-foreground">{t('tasks.noComments')}</p>}
               </div>
               <form
                 onSubmit={(e: FormEvent) => { e.preventDefault(); const v = comment.trim(); if (!v) return; addComment.mutate(v); }}
                 className="mt-3 space-y-2"
               >
-                <Textarea rows={2} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Write a comment…" />
+                <Textarea rows={2} value={comment} onChange={(e) => setComment(e.target.value)} placeholder={t('tasks.writeComment')} />
                 <div className="flex justify-end">
-                  <Button type="submit" size="sm" disabled={addComment.isPending || !comment.trim()}>Comment</Button>
+                  <Button type="submit" size="sm" disabled={addComment.isPending || !comment.trim()}>{t('tasks.comment')}</Button>
                 </div>
               </form>
             </div>
@@ -441,6 +455,7 @@ function cyclePercent(c: Cycle): number | null {
 }
 
 function CyclesTab({ id }: { id: string }) {
+  const t = useT();
   const qc = useQueryClient();
   const can = useCan();
   const canWrite = can('projects.write') || can('projects.create');
@@ -455,7 +470,7 @@ function CyclesTab({ id }: { id: string }) {
   const mut = useMutation({
     mutationFn: () => api.post('/cycles', { projectId: id, name, startDate: start || undefined, endDate: end || undefined, goal: goal || undefined }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['cycles', id] }); setAdding(false); setName(''); setStart(''); setEnd(''); setGoal(''); },
-    onError: (e) => setError(e instanceof ApiError ? e.message : 'Could not create cycle.'),
+    onError: (e) => setError(e instanceof ApiError ? e.message : t('projects.createCycleFailed')),
   });
 
   const cycles = data ?? [];
@@ -463,23 +478,23 @@ function CyclesTab({ id }: { id: string }) {
   return (
     <div className="max-w-2xl p-6">
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Cycles</h2>
-        {canWrite && !adding && <Button size="sm" variant="outline" onClick={() => setAdding(true)}><Plus size={14} /> New cycle</Button>}
+        <h2 className="text-sm font-semibold">{t('projects.cycles')}</h2>
+        {canWrite && !adding && <Button size="sm" variant="outline" onClick={() => setAdding(true)}><Plus size={14} /> {t('projects.newCycle')}</Button>}
       </div>
 
       {adding && (
         <Card className="mb-4 p-4">
-          <form onSubmit={(e: FormEvent) => { e.preventDefault(); setError(null); if (!name.trim()) { setError('Name is required.'); return; } mut.mutate(); }} className="space-y-3">
-            <Input autoFocus placeholder="Cycle name (e.g. Sprint 12)" value={name} onChange={(e) => setName(e.target.value)} />
+          <form onSubmit={(e: FormEvent) => { e.preventDefault(); setError(null); if (!name.trim()) { setError(t('common.nameRequired')); return; } mut.mutate(); }} className="space-y-3">
+            <Input autoFocus placeholder={t('projects.cycleNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} />
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1"><label className="text-xs text-muted-foreground">Start</label><Input type="date" value={start} onChange={(e) => setStart(e.target.value)} /></div>
-              <div className="space-y-1"><label className="text-xs text-muted-foreground">End</label><Input type="date" value={end} onChange={(e) => setEnd(e.target.value)} /></div>
+              <div className="space-y-1"><label className="text-xs text-muted-foreground">{t('projects.start')}</label><Input type="date" value={start} onChange={(e) => setStart(e.target.value)} /></div>
+              <div className="space-y-1"><label className="text-xs text-muted-foreground">{t('projects.end')}</label><Input type="date" value={end} onChange={(e) => setEnd(e.target.value)} /></div>
             </div>
-            <Input placeholder="Goal (optional)" value={goal} onChange={(e) => setGoal(e.target.value)} />
+            <Input placeholder={t('projects.goalPlaceholder')} value={goal} onChange={(e) => setGoal(e.target.value)} />
             {error && <p className="text-sm text-destructive">{error}</p>}
             <div className="flex justify-end gap-2">
-              <Button type="button" size="sm" variant="outline" onClick={() => setAdding(false)}>Cancel</Button>
-              <Button type="submit" size="sm" disabled={mut.isPending}>{mut.isPending ? <Spinner /> : 'Create'}</Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => setAdding(false)}>{t('common.cancel')}</Button>
+              <Button type="submit" size="sm" disabled={mut.isPending}>{mut.isPending ? <Spinner /> : t('common.create')}</Button>
             </div>
           </form>
         </Card>
@@ -488,7 +503,7 @@ function CyclesTab({ id }: { id: string }) {
       {isLoading ? (
         <div className="space-y-2">{[0, 1].map((i) => <Skeleton key={i} className="h-20" />)}</div>
       ) : cycles.length === 0 ? (
-        <EmptyState title="No cycles yet" hint="Cycles are time-boxed sprints. Create one to plan and track a batch of work." />
+        <EmptyState title={t('projects.noCycles')} hint={t('projects.noCyclesHint')} />
       ) : (
         <div className="space-y-3">
           {cycles.map((c) => {
@@ -505,7 +520,7 @@ function CyclesTab({ id }: { id: string }) {
                 {pct != null && (
                   <div className="mt-3">
                     <div className="mb-1 flex justify-between text-xs text-muted-foreground">
-                      <span>Progress</span><span className="tabular-nums">{pct}%</span>
+                      <span>{t('projects.progress')}</span><span className="tabular-nums">{pct}%</span>
                     </div>
                     <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                       <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
@@ -524,6 +539,7 @@ function CyclesTab({ id }: { id: string }) {
 /* ---------------- Overview ---------------- */
 
 function OverviewTab({ id, statuses, project }: { id: string; statuses: TaskStatus[]; project?: Project }) {
+  const t = useT();
   const { data } = useQuery<Task[]>({ queryKey: ['tasks', id], queryFn: () => api.get<{ data: Task[] }>(`/tasks${qs({ projectId: id })}`).then((r) => r.data) });
   const tasks = data ?? [];
   const catOf = (sid: string) => statuses.find((s) => s.id === sid)?.category;
@@ -532,25 +548,25 @@ function OverviewTab({ id, statuses, project }: { id: string; statuses: TaskStat
   const open = tasks.filter((t) => { const c = catOf(t.statusId); return c !== 'done' && c !== 'canceled'; }).length;
 
   const tiles: { label: string; value: ReactNode }[] = [
-    { label: 'Total tasks', value: tasks.length },
-    { label: 'Open', value: open },
-    { label: 'In progress', value: inProgress },
-    { label: 'Done', value: done },
+    { label: t('projects.totalTasks'), value: tasks.length },
+    { label: t('projects.open'), value: open },
+    { label: t('projects.inProgress'), value: inProgress },
+    { label: t('projects.done'), value: done },
   ];
 
   return (
     <div className="space-y-6 p-6">
       <div className="grid gap-4 sm:grid-cols-4">
-        {tiles.map((t) => (
-          <Card key={t.label} className="p-4">
-            <p className="text-xs text-muted-foreground">{t.label}</p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums">{t.value}</p>
+        {tiles.map((tile) => (
+          <Card key={tile.label} className="p-4">
+            <p className="text-xs text-muted-foreground">{tile.label}</p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums">{tile.value}</p>
           </Card>
         ))}
       </div>
       {project?.description != null && docToText(project.description) && (
         <Card className="p-4">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">About</h3>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('projects.about')}</h3>
           <p className="whitespace-pre-wrap text-sm">{docToText(project.description)}</p>
         </Card>
       )}
@@ -561,6 +577,7 @@ function OverviewTab({ id, statuses, project }: { id: string; statuses: TaskStat
 /* ---------------- Settings ---------------- */
 
 function SettingsTab({ project }: { project?: Project }) {
+  const t = useT();
   const qc = useQueryClient();
   const can = useCan();
   const canWrite = can('projects.write');
@@ -576,7 +593,7 @@ function SettingsTab({ project }: { project?: Project }) {
   const mut = useMutation({
     mutationFn: () => api.patch(`/projects/${project?.id}`, { name, status, version: project?.version }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project', project?.id] }),
-    onError: (e) => setError(e instanceof ApiError ? e.message : 'Could not save.'),
+    onError: (e) => setError(e instanceof ApiError ? e.message : t('common.saveFailed')),
   });
 
   if (!project) return <div className="p-6"><Skeleton className="h-40" /></div>;
@@ -584,35 +601,35 @@ function SettingsTab({ project }: { project?: Project }) {
   if (!canWrite) {
     return (
       <div className="max-w-lg space-y-3 p-6 text-sm">
-        <div><span className="text-muted-foreground">Name:</span> {project.name}</div>
-        <div><span className="text-muted-foreground">Key:</span> <span className="font-mono">{project.key}</span></div>
-        <div><span className="text-muted-foreground">Status:</span> {project.status}</div>
-        <p className="text-xs text-muted-foreground">You need project admin rights to change these settings.</p>
+        <div><span className="text-muted-foreground">{t('common.name')}:</span> {project.name}</div>
+        <div><span className="text-muted-foreground">{t('projects.key')}:</span> <span className="font-mono">{project.key}</span></div>
+        <div><span className="text-muted-foreground">{t('common.status')}:</span> {project.status}</div>
+        <p className="text-xs text-muted-foreground">{t('projects.adminRightsHint')}</p>
       </div>
     );
   }
 
   return (
     <div className="max-w-lg p-6">
-      <form onSubmit={(e: FormEvent) => { e.preventDefault(); setError(null); if (!name.trim()) { setError('Name is required.'); return; } mut.mutate(); }} className="space-y-4">
+      <form onSubmit={(e: FormEvent) => { e.preventDefault(); setError(null); if (!name.trim()) { setError(t('common.nameRequired')); return; } mut.mutate(); }} className="space-y-4">
         <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Name</label>
+          <label className="text-xs font-medium text-muted-foreground">{t('common.name')}</label>
           <Input value={name} onChange={(e) => setName(e.target.value)} />
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Key</label>
+          <label className="text-xs font-medium text-muted-foreground">{t('projects.key')}</label>
           <Input value={project.key} disabled className="font-mono" />
-          <p className="text-xs text-muted-foreground">Project key can't be changed.</p>
+          <p className="text-xs text-muted-foreground">{t('projects.keyImmutable')}</p>
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Status</label>
+          <label className="text-xs font-medium text-muted-foreground">{t('common.status')}</label>
           <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-full">
             {PROJECT_STATUS.map((s) => <option key={s} value={s} className="capitalize">{s}</option>)}
           </Select>
         </div>
         {error && <p className="text-sm text-destructive">{error}</p>}
         <div className="flex justify-end">
-          <Button type="submit" size="sm" disabled={mut.isPending}>{mut.isPending ? <Spinner /> : 'Save'}</Button>
+          <Button type="submit" size="sm" disabled={mut.isPending}>{mut.isPending ? <Spinner /> : t('common.save')}</Button>
         </div>
       </form>
     </div>

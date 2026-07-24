@@ -17,8 +17,9 @@ interface JobOpening { id: string; title: string; status?: string | null; depart
 interface Applicant { id: string; name?: string | null; email?: string | null; stage?: string | null; stageId?: string | null }
 interface ApplicantStage { id: string; name: string; position?: number; isHired?: boolean; isRejected?: boolean }
 
+// Returns '' when the employee has no name; callers fall back to t('people.unnamed').
 function empName(e: Employee): string {
-  return (e.name ?? [e.firstName, e.lastName].filter(Boolean).join(' ')) || 'Unnamed';
+  return (e.name ?? [e.firstName, e.lastName].filter(Boolean).join(' ')) || '';
 }
 
 type Tab = 'employees' | 'leave' | 'recruiting' | 'dashboard';
@@ -113,7 +114,7 @@ function EmployeesView() {
             <tbody>
               {rows.map((e) => (
                 <tr key={e.id} className="cursor-pointer border-b border-border last:border-0 hover:bg-muted/60" onClick={() => setSelected(e.id)}>
-                  <td className="px-4 py-2 font-medium">{empName(e)}</td>
+                  <td className="px-4 py-2 font-medium">{empName(e) || t('people.unnamed')}</td>
                   <td className="px-4 py-2 text-muted-foreground">{e.positionTitle ?? e.position ?? '—'}</td>
                   <td className="px-4 py-2 text-muted-foreground">{e.departmentName ?? e.department ?? '—'}</td>
                   <td className="px-4 py-2"><Badge color={EMP_STATUS[e.status ?? 'active'] ?? '#6b7280'}>{e.status ?? 'active'}</Badge></td>
@@ -130,6 +131,7 @@ function EmployeesView() {
 }
 
 function EmployeeDrawer({ id, onClose }: { id: string; onClose: () => void }) {
+  const t = useT();
   const qc = useQueryClient();
   const can = useCan();
   const employee = useQuery({ queryKey: ['employee', id], queryFn: () => api.get<Employee>(`/employees/${id}`) });
@@ -152,7 +154,7 @@ function EmployeeDrawer({ id, onClose }: { id: string; onClose: () => void }) {
     <div className="fixed inset-0 z-40 flex justify-end bg-black/30" onClick={onClose}>
       <div className="h-full w-full max-w-md overflow-auto border-l border-border bg-card p-6" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{employee.data ? empName(employee.data) : 'Employee'}</h2>
+          <h2 className="text-lg font-semibold">{employee.data ? (empName(employee.data) || t('people.unnamed')) : t('people.employee')}</h2>
           <button className="rounded p-1 hover:bg-muted" onClick={onClose}><X size={16} /></button>
         </div>
         {employee.isLoading ? (
@@ -165,22 +167,22 @@ function EmployeeDrawer({ id, onClose }: { id: string; onClose: () => void }) {
             </div>
             {can('people.write') && (
               <div className="flex gap-2">
-                <Button size="sm" variant="outline" onClick={() => lifecycle.mutate('onboard')} disabled={lifecycle.isPending}><Check size={14} /> Onboard</Button>
-                <Button size="sm" variant="destructive" onClick={() => lifecycle.mutate('exit')} disabled={lifecycle.isPending}><Ban size={14} /> Exit</Button>
+                <Button size="sm" variant="outline" onClick={() => lifecycle.mutate('onboard')} disabled={lifecycle.isPending}><Check size={14} /> {t('people.onboard')}</Button>
+                <Button size="sm" variant="destructive" onClick={() => lifecycle.mutate('exit')} disabled={lifecycle.isPending}><Ban size={14} /> {t('people.exit')}</Button>
               </div>
             )}
             {can('people.read_compensation') && (
               <div>
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Compensation</div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('people.compensation')}</div>
                 {compensation.isLoading ? (
                   <Skeleton className="h-12 w-full" />
                 ) : comp.length === 0 ? (
-                  <p className="text-muted-foreground">No compensation records.</p>
+                  <p className="text-muted-foreground">{t('people.noCompensation')}</p>
                 ) : (
                   <div className="space-y-1">
                     {comp.map((c, i) => (
                       <div key={c.id ?? String(i)} className="flex items-center justify-between rounded bg-muted/50 px-3 py-1.5">
-                        <span className="text-muted-foreground">{c.compType ?? 'salary'} · from {fmtDate(c.effectiveFrom)}</span>
+                        <span className="text-muted-foreground">{c.compType ?? 'salary'} · {t('resourcing.from').toLowerCase()} {fmtDate(c.effectiveFrom)}</span>
                         <span className="font-medium tabular-nums">{fmtMoney(c.amount ?? 0, c.currency ?? 'USD')}</span>
                       </div>
                     ))}
@@ -190,7 +192,7 @@ function EmployeeDrawer({ id, onClose }: { id: string; onClose: () => void }) {
             )}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">Employee not found.</p>
+          <p className="text-sm text-muted-foreground">{t('people.employeeNotFound')}</p>
         )}
       </div>
     </div>
@@ -198,6 +200,7 @@ function EmployeeDrawer({ id, onClose }: { id: string; onClose: () => void }) {
 }
 
 function LeaveView() {
+  const t = useT();
   const qc = useQueryClient();
   const can = useCan();
   const canApprove = can('people.approve_leave');
@@ -224,16 +227,16 @@ function LeaveView() {
         {requests.isLoading ? (
           <Card className="p-4"><Skeleton className="h-40 w-full" /></Card>
         ) : rows.length === 0 ? (
-          <EmptyState title="No leave requests" hint="Requests from the team show up here for approval." />
+          <EmptyState title={t('people.noLeaveRequests')} hint={t('people.noLeaveRequestsHint')} />
         ) : (
           <Card className="overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                  <th className="px-4 py-2 font-medium">Employee</th>
-                  <th className="px-4 py-2 font-medium">Type</th>
-                  <th className="px-4 py-2 font-medium">Dates</th>
-                  <th className="px-4 py-2 font-medium">Status</th>
+                  <th className="px-4 py-2 font-medium">{t('people.employee')}</th>
+                  <th className="px-4 py-2 font-medium">{t('dashboards.type')}</th>
+                  <th className="px-4 py-2 font-medium">{t('people.dates')}</th>
+                  <th className="px-4 py-2 font-medium">{t('common.status')}</th>
                   {canApprove && <th className="px-4 py-2" />}
                 </tr>
               </thead>
@@ -248,8 +251,8 @@ function LeaveView() {
                       <td className="px-4 py-2 text-right">
                         {r.status === 'pending' && (
                           <span className="inline-flex gap-1">
-                            <button className="rounded p-1 text-green-600 hover:bg-muted" title="Approve" onClick={() => decide.mutate({ id: r.id, action: 'approve' })}><Check size={15} /></button>
-                            <button className="rounded p-1 text-destructive hover:bg-muted" title="Reject" onClick={() => decide.mutate({ id: r.id, action: 'reject' })}><X size={15} /></button>
+                            <button className="rounded p-1 text-green-600 hover:bg-muted" title={t('people.approve')} onClick={() => decide.mutate({ id: r.id, action: 'approve' })}><Check size={15} /></button>
+                            <button className="rounded p-1 text-destructive hover:bg-muted" title={t('people.reject')} onClick={() => decide.mutate({ id: r.id, action: 'reject' })}><X size={15} /></button>
                           </span>
                         )}
                       </td>
@@ -263,18 +266,18 @@ function LeaveView() {
       </div>
 
       <Card className="h-fit p-4">
-        <div className="mb-3 text-sm font-medium">Request leave</div>
+        <div className="mb-3 text-sm font-medium">{t('people.requestLeave')}</div>
         <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (form.leaveTypeId && form.fromDate) create.mutate(); }}>
-          <label className="block text-xs text-muted-foreground">Type
+          <label className="block text-xs text-muted-foreground">{t('dashboards.type')}
             <Select value={form.leaveTypeId} onChange={(e) => setForm((f) => ({ ...f, leaveTypeId: e.target.value }))} className="mt-1 block w-full">
-              <option value="">Select type…</option>
-              {typeList.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              <option value="">{t('common.select')}</option>
+              {typeList.map((lt) => <option key={lt.id} value={lt.id}>{lt.name}</option>)}
             </Select>
           </label>
-          <label className="block text-xs text-muted-foreground">From<Input type="date" value={form.fromDate} onChange={(e) => setForm((f) => ({ ...f, fromDate: e.target.value }))} className="mt-1" /></label>
-          <label className="block text-xs text-muted-foreground">To<Input type="date" value={form.toDate} onChange={(e) => setForm((f) => ({ ...f, toDate: e.target.value }))} className="mt-1" /></label>
-          <label className="block text-xs text-muted-foreground">Reason<Textarea value={form.reason} onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))} rows={2} className="mt-1" /></label>
-          <Button type="submit" size="sm" disabled={create.isPending}>Submit request</Button>
+          <label className="block text-xs text-muted-foreground">{t('resourcing.from')}<Input type="date" value={form.fromDate} onChange={(e) => setForm((f) => ({ ...f, fromDate: e.target.value }))} className="mt-1" /></label>
+          <label className="block text-xs text-muted-foreground">{t('resourcing.to')}<Input type="date" value={form.toDate} onChange={(e) => setForm((f) => ({ ...f, toDate: e.target.value }))} className="mt-1" /></label>
+          <label className="block text-xs text-muted-foreground">{t('people.reason')}<Textarea value={form.reason} onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))} rows={2} className="mt-1" /></label>
+          <Button type="submit" size="sm" disabled={create.isPending}>{t('people.submitRequest')}</Button>
         </form>
       </Card>
     </div>
@@ -282,6 +285,7 @@ function LeaveView() {
 }
 
 function RecruitingView() {
+  const t = useT();
   const qc = useQueryClient();
   const openings = useQuery({ queryKey: ['jobOpenings'], queryFn: () => api.get<{ data: JobOpening[] }>('/job-openings') });
   const stages = useQuery({ queryKey: ['applicantStages'], queryFn: () => api.get<{ data: ApplicantStage[] }>('/applicant-stages') });
@@ -310,12 +314,12 @@ function RecruitingView() {
   const stageOf = (a: Applicant): string => a.stageId ?? a.stage ?? '';
 
   if (openings.isLoading) return <div className="p-6"><Skeleton className="h-40 w-full" /></div>;
-  if (list.length === 0) return <EmptyState title="No job openings" hint="Create an opening to start tracking applicants through your hiring pipeline." />;
+  if (list.length === 0) return <EmptyState title={t('people.noOpenings')} hint={t('people.noOpeningsHint')} />;
 
   return (
     <div className="p-6">
       <div className="mb-4 flex items-center gap-3">
-        <span className="text-sm text-muted-foreground">Opening</span>
+        <span className="text-sm text-muted-foreground">{t('people.opening')}</span>
         <Select value={activeOpening} onChange={(e) => setOpeningId(e.target.value)}>
           {list.map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}
         </Select>
@@ -335,7 +339,7 @@ function RecruitingView() {
                 <div className="space-y-2">
                   {cards.map((a) => (
                     <Card key={a.id} className="p-2.5 text-sm">
-                      <div className="font-medium">{a.name ?? 'Applicant'}</div>
+                      <div className="font-medium">{a.name ?? t('people.applicant')}</div>
                       {a.email && <div className="truncate text-xs text-muted-foreground">{a.email}</div>}
                       <div className="mt-2 flex items-center gap-1">
                         <Select
@@ -343,16 +347,16 @@ function RecruitingView() {
                           onChange={(e) => { if (e.target.value) move.mutate({ id: a.id, stageId: e.target.value }); }}
                           className="h-7 flex-1 text-xs"
                         >
-                          <option value="">Move…</option>
+                          <option value="">{t('people.move')}</option>
                           {stageList.filter((s) => s.id !== st.id).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                         </Select>
                         {st.isHired ? null : (
-                          <button className="rounded p-1 text-green-600 hover:bg-muted" title="Hire" onClick={() => hire.mutate(a.id)}><UserPlus size={14} /></button>
+                          <button className="rounded p-1 text-green-600 hover:bg-muted" title={t('people.hire')} onClick={() => hire.mutate(a.id)}><UserPlus size={14} /></button>
                         )}
                       </div>
                     </Card>
                   ))}
-                  {cards.length === 0 && <div className="rounded border border-dashed border-border py-4 text-center text-xs text-muted-foreground">Empty</div>}
+                  {cards.length === 0 && <div className="rounded border border-dashed border-border py-4 text-center text-xs text-muted-foreground">{t('people.empty')}</div>}
                 </div>
               </div>
             );
@@ -364,23 +368,24 @@ function RecruitingView() {
 }
 
 function PeopleDashboardView() {
+  const t = useT();
   const dash = useQuery({ queryKey: ['peopleDashboard'], queryFn: () => api.get<any>('/people/dashboard') });
   const d = dash.data;
   if (dash.isLoading) return <div className="p-6"><Skeleton className="h-40 w-full" /></div>;
   const tiles: { label: string; value: string }[] = [
-    { label: 'Headcount', value: String(d?.headcount ?? d?.activeCount ?? 0) },
-    { label: 'On leave', value: String(d?.onLeave ?? 0) },
-    { label: 'New hires', value: String(d?.newHires ?? 0) },
-    { label: 'Open positions', value: String(d?.openPositions ?? d?.openOpenings ?? 0) },
-    { label: 'In pipeline', value: String(d?.pipelineCount ?? d?.applicants ?? 0) },
-    { label: 'Upcoming leave', value: String(d?.upcomingLeave ?? 0) },
+    { label: t('people.headcount'), value: String(d?.headcount ?? d?.activeCount ?? 0) },
+    { label: t('people.onLeave'), value: String(d?.onLeave ?? 0) },
+    { label: t('people.newHires'), value: String(d?.newHires ?? 0) },
+    { label: t('people.openPositions'), value: String(d?.openPositions ?? d?.openOpenings ?? 0) },
+    { label: t('people.inPipeline'), value: String(d?.pipelineCount ?? d?.applicants ?? 0) },
+    { label: t('people.upcomingLeave'), value: String(d?.upcomingLeave ?? 0) },
   ];
   return (
     <div className="grid grid-cols-2 gap-4 p-6 md:grid-cols-3">
-      {tiles.map((t) => (
-        <Card key={t.label} className="p-4">
-          <div className="text-xs text-muted-foreground">{t.label}</div>
-          <div className="mt-1 text-2xl font-semibold tabular-nums">{t.value}</div>
+      {tiles.map((tile) => (
+        <Card key={tile.label} className="p-4">
+          <div className="text-xs text-muted-foreground">{tile.label}</div>
+          <div className="mt-1 text-2xl font-semibold tabular-nums">{tile.value}</div>
         </Card>
       ))}
     </div>

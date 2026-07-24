@@ -5,6 +5,7 @@ import { useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { Button, Input, Select, Card, Badge, PageHeader, EmptyState, Skeleton, fmtMoney, fmtDate, cn } from '../components/ui';
 import { Plus, Trash2, AlertTriangle } from 'lucide-react';
+import { useT } from '../lib/i18n';
 
 const STATUS_COLORS: Record<string, string> = {
   draft: '#6b7280', sent: '#3b82f6', viewed: '#8b5cf6', partially_paid: '#f59e0b',
@@ -30,21 +31,22 @@ interface ProfitRow { name?: string; label?: string; revenue?: number | string; 
 type Tab = 'dashboard' | 'invoices' | 'quotes' | 'expenses';
 
 export function FinancePage() {
+  const t = useT();
   const [tab, setTab] = useState<Tab>('dashboard');
   const tabs: { id: Tab; label: string }[] = [
-    { id: 'dashboard', label: 'Dashboard' },
-    { id: 'invoices', label: 'Invoices' },
-    { id: 'quotes', label: 'Quotes' },
-    { id: 'expenses', label: 'Expenses' },
+    { id: 'dashboard', label: t('nav.dashboard') },
+    { id: 'invoices', label: t('finance.invoices') },
+    { id: 'quotes', label: t('finance.quotes') },
+    { id: 'expenses', label: t('finance.expenses') },
   ];
   return (
     <div>
       <PageHeader
-        title="Finance"
+        title={t('nav.finance')}
         actions={
           <div className="flex rounded-md border border-border p-0.5 text-sm">
-            {tabs.map((t) => (
-              <button key={t.id} className={cn('rounded px-3 py-1', tab === t.id && 'bg-muted font-medium')} onClick={() => setTab(t.id)}>{t.label}</button>
+            {tabs.map((tb) => (
+              <button key={tb.id} className={cn('rounded px-3 py-1', tab === tb.id && 'bg-muted font-medium')} onClick={() => setTab(tb.id)}>{tb.label}</button>
             ))}
           </div>
         }
@@ -62,6 +64,7 @@ function useCompanies() {
 }
 
 function DashboardView() {
+  const t = useT();
   const can = useCan();
   const dash = useQuery({ queryKey: ['financeDashboard'], queryFn: () => api.get<any>('/finance/dashboard') });
   const d = dash.data;
@@ -83,14 +86,14 @@ function DashboardView() {
   return (
     <div className="space-y-6 p-6">
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Tile label="Receivables" value={fmtMoney(d?.receivables ?? d?.totalReceivables ?? 0, currency)} />
-        <Tile label="Overdue" value={fmtMoney(d?.overdueTotal ?? 0, currency)} accent />
-        <Tile label="Invoiced (period)" value={fmtMoney(d?.invoiced ?? 0, currency)} />
-        <Tile label="Paid (period)" value={fmtMoney(d?.paid ?? 0, currency)} />
+        <Tile label={t('finance.receivables')} value={fmtMoney(d?.receivables ?? d?.totalReceivables ?? 0, currency)} />
+        <Tile label={t('common.overdue')} value={fmtMoney(d?.overdueTotal ?? 0, currency)} accent />
+        <Tile label={t('finance.invoicedPeriod')} value={fmtMoney(d?.invoiced ?? 0, currency)} />
+        <Tile label={t('finance.paidPeriod')} value={fmtMoney(d?.paid ?? 0, currency)} />
       </div>
 
       <Card className="overflow-hidden">
-        <div className="border-b border-border px-4 py-2 text-sm font-medium">Receivables aging</div>
+        <div className="border-b border-border px-4 py-2 text-sm font-medium">{t('finance.receivablesAging')}</div>
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-muted-foreground">
@@ -107,9 +110,9 @@ function DashboardView() {
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
-          <div className="border-b border-border px-4 py-2 text-sm font-medium">Overdue invoices</div>
+          <div className="border-b border-border px-4 py-2 text-sm font-medium">{t('finance.overdueInvoices')}</div>
           <div className="divide-y divide-border">
-            {(d?.overdue ?? []).length === 0 && <p className="px-4 py-6 text-sm text-muted-foreground">Nothing overdue. Great.</p>}
+            {(d?.overdue ?? []).length === 0 && <p className="px-4 py-6 text-sm text-muted-foreground">{t('finance.nothingOverdue')}</p>}
             {(d?.overdue ?? []).map((iv: any) => (
               <div key={iv.id} className="flex items-center justify-between px-4 py-2 text-sm">
                 <span className="font-medium">{iv.number ?? iv.id}</span>
@@ -120,10 +123,10 @@ function DashboardView() {
           </div>
         </Card>
         <Card>
-          <div className="border-b border-border px-4 py-2 text-sm font-medium">Unbilled hours</div>
+          <div className="border-b border-border px-4 py-2 text-sm font-medium">{t('finance.unbilledHours')}</div>
           <div className="p-4 text-sm">
             <div className="text-2xl font-semibold tabular-nums">{Number(d?.unbilledHours ?? d?.unbilled?.hours ?? 0).toFixed(1)}h</div>
-            <p className="mt-1 text-muted-foreground">Billable time not yet on an invoice.</p>
+            <p className="mt-1 text-muted-foreground">{t('finance.unbilledHint')}</p>
           </div>
         </Card>
       </div>
@@ -143,24 +146,25 @@ function Tile({ label, value, accent }: { label: string; value: string; accent?:
 }
 
 function ProfitabilityView() {
+  const t = useT();
   const prof = useQuery({ queryKey: ['profitability', 'project'], queryFn: () => api.get<{ data: ProfitRow[] }>('/finance/profitability' + qs({ scope: 'project' })) });
   const rows = prof.data?.data ?? [];
   return (
     <Card className="overflow-hidden">
-      <div className="border-b border-border px-4 py-2 text-sm font-medium">Profitability by project</div>
+      <div className="border-b border-border px-4 py-2 text-sm font-medium">{t('finance.profitabilityByProject')}</div>
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-muted-foreground">
-            <th className="px-4 py-2 font-medium">Project</th>
-            <th className="px-4 py-2 text-right font-medium">Revenue</th>
-            <th className="px-4 py-2 text-right font-medium">Cost</th>
-            <th className="px-4 py-2 text-right font-medium">Margin</th>
+            <th className="px-4 py-2 font-medium">{t('time.groupProject')}</th>
+            <th className="px-4 py-2 text-right font-medium">{t('finance.revenue')}</th>
+            <th className="px-4 py-2 text-right font-medium">{t('finance.cost')}</th>
+            <th className="px-4 py-2 text-right font-medium">{t('finance.margin')}</th>
             <th className="px-4 py-2 text-right font-medium">%</th>
           </tr>
         </thead>
         <tbody>
           {prof.isLoading && <tr><td colSpan={5} className="px-4 py-3"><Skeleton className="h-5 w-full" /></td></tr>}
-          {!prof.isLoading && rows.length === 0 && <tr><td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">No profitability data.</td></tr>}
+          {!prof.isLoading && rows.length === 0 && <tr><td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">{t('finance.noProfitability')}</td></tr>}
           {rows.map((r, i) => {
             const cur = r.currency ?? 'USD';
             const margin = Number(r.margin ?? 0);
@@ -184,6 +188,7 @@ interface LineItem { description: string; quantity: string; unitPrice: string }
 const emptyLine: LineItem = { description: '', quantity: '1', unitPrice: '' };
 
 function DocForm({ kind, companies, onSubmit, pending }: { kind: 'invoice' | 'quote'; companies: Company[]; onSubmit: (v: { companyId: string; date: string; items: LineItem[] }) => void; pending: boolean }) {
+  const t = useT();
   const [companyId, setCompanyId] = useState('');
   const [date, setDate] = useState('');
   const [items, setItems] = useState<LineItem[]>([{ ...emptyLine }]);
@@ -191,7 +196,7 @@ function DocForm({ kind, companies, onSubmit, pending }: { kind: 'invoice' | 'qu
   const total = items.reduce((a, it) => a + Number(it.quantity || 0) * Number(it.unitPrice || 0), 0);
   return (
     <Card className="mb-4 p-4">
-      <div className="mb-3 text-sm font-medium">New {kind}</div>
+      <div className="mb-3 text-sm font-medium">{kind === 'invoice' ? t('finance.newInvoice') : t('finance.newQuote')}</div>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -201,33 +206,33 @@ function DocForm({ kind, companies, onSubmit, pending }: { kind: 'invoice' | 'qu
       >
         <div className="flex flex-wrap gap-3">
           <label className="text-xs text-muted-foreground">
-            Company
+            {t('common.company')}
             <Select value={companyId} onChange={(e) => setCompanyId(e.target.value)} className="mt-1 block h-9 min-w-48">
-              <option value="">Select company…</option>
+              <option value="">{t('common.select')}</option>
               {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select>
           </label>
           <label className="text-xs text-muted-foreground">
-            {kind === 'invoice' ? 'Due date' : 'Valid until'}
+            {kind === 'invoice' ? t('finance.dueDate') : t('public.validUntil')}
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="mt-1 block" />
           </label>
         </div>
         <div className="space-y-2">
           {items.map((it, i) => (
             <div key={i} className="flex items-center gap-2">
-              <Input placeholder="Description" value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} className="flex-1" />
-              <Input type="number" min={0} placeholder="Qty" value={it.quantity} onChange={(e) => setItem(i, { quantity: e.target.value })} className="w-20" />
-              <Input type="number" min={0} step="0.01" placeholder="Price" value={it.unitPrice} onChange={(e) => setItem(i, { unitPrice: e.target.value })} className="w-28" />
+              <Input placeholder={t('public.description')} value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} className="flex-1" />
+              <Input type="number" min={0} placeholder={t('public.qty')} value={it.quantity} onChange={(e) => setItem(i, { quantity: e.target.value })} className="w-20" />
+              <Input type="number" min={0} step="0.01" placeholder={t('public.price')} value={it.unitPrice} onChange={(e) => setItem(i, { unitPrice: e.target.value })} className="w-28" />
               <button type="button" className="rounded p-1.5 text-muted-foreground hover:bg-muted" onClick={() => setItems((arr) => arr.filter((_, j) => j !== i))} disabled={items.length === 1}>
                 <Trash2 size={14} />
               </button>
             </div>
           ))}
-          <Button type="button" variant="outline" size="sm" onClick={() => setItems((arr) => [...arr, { ...emptyLine }])}><Plus size={13} /> Add line</Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => setItems((arr) => [...arr, { ...emptyLine }])}><Plus size={13} /> {t('finance.addLine')}</Button>
         </div>
         <div className="flex items-center justify-between border-t border-border pt-3">
-          <span className="text-sm text-muted-foreground">Total <span className="font-medium text-foreground tabular-nums">{fmtMoney(total)}</span></span>
-          <Button type="submit" size="sm" disabled={pending || !companyId}>Create draft</Button>
+          <span className="text-sm text-muted-foreground">{t('common.total')} <span className="font-medium text-foreground tabular-nums">{fmtMoney(total)}</span></span>
+          <Button type="submit" size="sm" disabled={pending || !companyId}>{t('finance.createDraft')}</Button>
         </div>
       </form>
     </Card>
@@ -235,6 +240,7 @@ function DocForm({ kind, companies, onSubmit, pending }: { kind: 'invoice' | 'qu
 }
 
 function InvoicesView() {
+  const t = useT();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const can = useCan();
@@ -261,10 +267,10 @@ function InvoicesView() {
     <div className="p-6">
       <div className="mb-4 flex items-center gap-3">
         <Select value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="">All statuses</option>
+          <option value="">{t('common.allStatuses')}</option>
           {['draft', 'sent', 'viewed', 'partially_paid', 'paid', 'canceled'].map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
         </Select>
-        {can('finance.write') && <Button size="sm" className="ml-auto" onClick={() => setShowForm((v) => !v)}><Plus size={14} /> New invoice</Button>}
+        {can('finance.write') && <Button size="sm" className="ml-auto" onClick={() => setShowForm((v) => !v)}><Plus size={14} /> {t('finance.newInvoice')}</Button>}
       </div>
       {showForm && can('finance.write') && <DocForm kind="invoice" companies={companies.data?.data ?? []} onSubmit={(v) => create.mutate(v)} pending={create.isPending} />}
       <DocTable rows={rows} loading={invoices.isLoading} kind="invoice" onRow={(id) => navigate(`/finance/invoices/${id}`)} />
@@ -273,6 +279,7 @@ function InvoicesView() {
 }
 
 function QuotesView() {
+  const t = useT();
   const qc = useQueryClient();
   const can = useCan();
   const [status, setStatus] = useState('');
@@ -297,10 +304,10 @@ function QuotesView() {
     <div className="p-6">
       <div className="mb-4 flex items-center gap-3">
         <Select value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="">All statuses</option>
+          <option value="">{t('common.allStatuses')}</option>
           {['draft', 'sent', 'viewed', 'accepted', 'declined', 'expired'].map((s) => <option key={s} value={s}>{s}</option>)}
         </Select>
-        {can('finance.write') && <Button size="sm" className="ml-auto" onClick={() => setShowForm((v) => !v)}><Plus size={14} /> New quote</Button>}
+        {can('finance.write') && <Button size="sm" className="ml-auto" onClick={() => setShowForm((v) => !v)}><Plus size={14} /> {t('finance.newQuote')}</Button>}
       </div>
       {showForm && can('finance.write') && <DocForm kind="quote" companies={companies.data?.data ?? []} onSubmit={(v) => create.mutate(v)} pending={create.isPending} />}
       <DocTable rows={rows} loading={quotes.isLoading} kind="quote" />
@@ -309,18 +316,23 @@ function QuotesView() {
 }
 
 function DocTable({ rows, loading, kind, onRow }: { rows: DocRow[]; loading: boolean; kind: 'invoice' | 'quote'; onRow?: (id: string) => void }) {
+  const t = useT();
   if (loading) return <Card className="p-4"><Skeleton className="h-40 w-full" /></Card>;
-  if (rows.length === 0) return <EmptyState title={`No ${kind}s`} hint={`Create a ${kind} to bill clients for work and track its status through to payment.`} />;
+  if (rows.length === 0) {
+    return kind === 'invoice'
+      ? <EmptyState title={t('public.noInvoices')} hint={t('finance.noInvoicesHint')} />
+      : <EmptyState title={t('public.noQuotes')} hint={t('finance.noQuotesHint')} />;
+  }
   return (
     <Card className="overflow-hidden">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border text-left text-xs text-muted-foreground">
-            <th className="px-4 py-2 font-medium">Number</th>
-            <th className="px-4 py-2 font-medium">Company</th>
-            <th className="px-4 py-2 font-medium">Status</th>
-            <th className="px-4 py-2 text-right font-medium">Total</th>
-            <th className="px-4 py-2 font-medium">{kind === 'invoice' ? 'Due' : 'Valid until'}</th>
+            <th className="px-4 py-2 font-medium">{t('finance.number')}</th>
+            <th className="px-4 py-2 font-medium">{t('common.company')}</th>
+            <th className="px-4 py-2 font-medium">{t('common.status')}</th>
+            <th className="px-4 py-2 text-right font-medium">{t('common.total')}</th>
+            <th className="px-4 py-2 font-medium">{kind === 'invoice' ? t('public.due') : t('public.validUntil')}</th>
           </tr>
         </thead>
         <tbody>
@@ -349,6 +361,7 @@ function DocTable({ rows, loading, kind, onRow }: { rows: DocRow[]; loading: boo
 }
 
 function ExpensesView() {
+  const t = useT();
   const qc = useQueryClient();
   const can = useCan();
   const expenses = useQuery({ queryKey: ['expenses'], queryFn: () => api.get<{ data: Expense[] }>('/expenses') });
@@ -366,31 +379,31 @@ function ExpensesView() {
     <div className="p-6">
       {can('finance.write') && (
         <Card className="mb-4 p-4">
-          <div className="mb-3 text-sm font-medium">Add expense</div>
+          <div className="mb-3 text-sm font-medium">{t('finance.addExpense')}</div>
           <form className="flex flex-wrap items-end gap-3" onSubmit={(e) => { e.preventDefault(); if (Number(form.amount) > 0) create.mutate(); }}>
-            <label className="text-xs text-muted-foreground">Description<Input value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} className="mt-1 w-56" /></label>
-            <label className="text-xs text-muted-foreground">Amount<Input type="number" min={0} step="0.01" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} className="mt-1 w-28" /></label>
-            <label className="text-xs text-muted-foreground">Currency<Input value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))} className="mt-1 w-20" /></label>
-            <label className="text-xs text-muted-foreground">Date<Input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} className="mt-1" /></label>
-            <label className="text-xs text-muted-foreground">Category<Input value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} className="mt-1 w-32" /></label>
-            <Button type="submit" size="sm" disabled={create.isPending}><Plus size={14} /> Add</Button>
+            <label className="text-xs text-muted-foreground">{t('public.description')}<Input value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} className="mt-1 w-56" /></label>
+            <label className="text-xs text-muted-foreground">{t('public.amount')}<Input type="number" min={0} step="0.01" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} className="mt-1 w-28" /></label>
+            <label className="text-xs text-muted-foreground">{t('common.currency')}<Input value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))} className="mt-1 w-20" /></label>
+            <label className="text-xs text-muted-foreground">{t('common.date')}<Input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} className="mt-1" /></label>
+            <label className="text-xs text-muted-foreground">{t('finance.category')}<Input value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} className="mt-1 w-32" /></label>
+            <Button type="submit" size="sm" disabled={create.isPending}><Plus size={14} /> {t('common.add')}</Button>
           </form>
         </Card>
       )}
       {expenses.isLoading ? (
         <Card className="p-4"><Skeleton className="h-40 w-full" /></Card>
       ) : rows.length === 0 ? (
-        <EmptyState title="No expenses" hint="Log project and business expenses to compare against what you've invoiced." />
+        <EmptyState title={t('finance.noExpenses')} hint={t('finance.noExpensesHint')} />
       ) : (
         <Card className="overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                <th className="px-4 py-2 font-medium">Date</th>
-                <th className="px-4 py-2 font-medium">Description</th>
-                <th className="px-4 py-2 font-medium">Category</th>
-                <th className="px-4 py-2 font-medium">Project</th>
-                <th className="px-4 py-2 text-right font-medium">Amount</th>
+                <th className="px-4 py-2 font-medium">{t('common.date')}</th>
+                <th className="px-4 py-2 font-medium">{t('public.description')}</th>
+                <th className="px-4 py-2 font-medium">{t('finance.category')}</th>
+                <th className="px-4 py-2 font-medium">{t('time.groupProject')}</th>
+                <th className="px-4 py-2 text-right font-medium">{t('public.amount')}</th>
               </tr>
             </thead>
             <tbody>

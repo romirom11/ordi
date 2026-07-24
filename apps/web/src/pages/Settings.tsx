@@ -6,32 +6,37 @@ import { Link } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { Button, Input, Select, Card, Badge, PageHeader, EmptyState, Skeleton, cn } from '../components/ui';
 import { Plus, Copy } from 'lucide-react';
+import { ImportExportPanel } from '../components/ImportExportPanel';
+import { useT } from '../lib/i18n';
 
+// `label` is an i18n dictionary key, translated at render time.
 interface NavItem { id: string; label: string; perm: string }
 const NAV: NavItem[] = [
-  { id: 'workspace', label: 'Workspace', perm: 'settings.manage' },
-  { id: 'users', label: 'Users', perm: 'users.manage' },
-  { id: 'roles', label: 'Roles', perm: 'roles.manage' },
-  { id: 'custom-fields', label: 'Custom fields', perm: 'settings.manage' },
-  { id: 'finance', label: 'Finance', perm: 'finance.settings' },
-  { id: 'integrations', label: 'Integrations', perm: 'integrations.manage' },
-  { id: 'audit', label: 'Audit log', perm: 'audit.read' },
-  { id: 'events', label: 'Event queue', perm: 'audit.read' },
+  { id: 'workspace', label: 'dashboards.workspace', perm: 'settings.manage' },
+  { id: 'users', label: 'settings.users', perm: 'users.manage' },
+  { id: 'roles', label: 'settings.roles', perm: 'roles.manage' },
+  { id: 'custom-fields', label: 'settings.customFields', perm: 'settings.manage' },
+  { id: 'finance', label: 'nav.finance', perm: 'finance.settings' },
+  { id: 'integrations', label: 'settings.integrations', perm: 'integrations.manage' },
+  { id: 'audit', label: 'settings.auditLog', perm: 'audit.read' },
+  { id: 'events', label: 'settings.eventQueue', perm: 'audit.read' },
+  { id: 'import-export', label: 'settings.importExport', perm: 'settings.manage' },
 ];
 
 export function SettingsPage({ section }: { section?: string }) {
+  const t = useT();
   const can = useCan();
   const items = NAV.filter((n) => can(n.perm));
   const requested = section ?? 'workspace';
   const active = items.find((i) => i.id === requested) ?? items[0];
 
   if (!active) {
-    return <EmptyState title="No settings available" hint="You don't have permission to manage any workspace settings." />;
+    return <EmptyState title={t('settings.noneAvailable')} hint={t('settings.noneAvailableHint')} />;
   }
 
   return (
     <div>
-      <PageHeader title="Settings" />
+      <PageHeader title={t('nav.settings')} />
       <div className="flex">
         <aside className="w-52 shrink-0 border-r border-border p-3">
           <nav className="space-y-0.5">
@@ -41,7 +46,7 @@ export function SettingsPage({ section }: { section?: string }) {
                 to={`/settings/${i.id}`}
                 className={cn('block rounded-md px-2.5 py-1.5 text-sm', i.id === active.id ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/60')}
               >
-                {i.label}
+                {t(i.label)}
               </Link>
             ))}
           </nav>
@@ -55,6 +60,7 @@ export function SettingsPage({ section }: { section?: string }) {
           {active.id === 'integrations' && <IntegrationsPanel />}
           {active.id === 'audit' && <AuditPanel />}
           {active.id === 'events' && <DlqPanel />}
+          {active.id === 'import-export' && <ImportExportPanel />}
         </div>
       </div>
     </div>
@@ -62,6 +68,7 @@ export function SettingsPage({ section }: { section?: string }) {
 }
 
 function WorkspacePanel() {
+  const t = useT();
   const qc = useQueryClient();
   const ws = useQuery({ queryKey: ['workspace'], queryFn: () => api.get<{ name?: string; currency?: string }>('/settings/workspace') });
   const [name, setName] = useState('');
@@ -80,13 +87,13 @@ function WorkspacePanel() {
   if (ws.isLoading) return <Skeleton className="h-40 w-full max-w-lg" />;
   return (
     <Card className="max-w-lg p-5">
-      <div className="mb-4 text-sm font-medium">Workspace</div>
+      <div className="mb-4 text-sm font-medium">{t('dashboards.workspace')}</div>
       <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
-        <label className="block text-xs text-muted-foreground">Name<Input value={name} onChange={(e) => setName(e.target.value)} className="mt-1" /></label>
-        <label className="block text-xs text-muted-foreground">Default currency<Input value={currency} onChange={(e) => setCurrency(e.target.value)} className="mt-1 w-28" /></label>
+        <label className="block text-xs text-muted-foreground">{t('common.name')}<Input value={name} onChange={(e) => setName(e.target.value)} className="mt-1" /></label>
+        <label className="block text-xs text-muted-foreground">{t('settings.defaultCurrency')}<Input value={currency} onChange={(e) => setCurrency(e.target.value)} className="mt-1 w-28" /></label>
         <div className="flex items-center gap-3">
-          <Button type="submit" size="sm" disabled={save.isPending}>Save</Button>
-          {save.isSuccess && <span className="text-xs text-muted-foreground">Saved.</span>}
+          <Button type="submit" size="sm" disabled={save.isPending}>{t('common.save')}</Button>
+          {save.isSuccess && <span className="text-xs text-muted-foreground">{t('common.saved')}</span>}
         </div>
       </form>
     </Card>
@@ -97,6 +104,7 @@ interface UserRow { id: string; name?: string | null; email?: string | null; rol
 interface Role { id: string; name: string; isSystem?: boolean; permissions?: string[]; userCount?: number }
 
 function UsersPanel() {
+  const t = useT();
   const qc = useQueryClient();
   const users = useQuery({ queryKey: ['users'], queryFn: () => api.get<{ data: UserRow[] }>('/users') });
   const roles = useQuery({ queryKey: ['roles'], queryFn: () => api.get<{ data: Role[] }>('/roles') });
@@ -121,21 +129,21 @@ function UsersPanel() {
   return (
     <div className="max-w-3xl space-y-6">
       <Card className="p-5">
-        <div className="mb-3 text-sm font-medium">Invite user</div>
+        <div className="mb-3 text-sm font-medium">{t('settings.inviteUser')}</div>
         <form className="flex flex-wrap items-end gap-3" onSubmit={(e) => { e.preventDefault(); if (email && roleId) invite.mutate(); }}>
-          <label className="text-xs text-muted-foreground">Email<Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1 w-64" /></label>
-          <label className="text-xs text-muted-foreground">Role
+          <label className="text-xs text-muted-foreground">{t('auth.email')}<Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1 w-64" /></label>
+          <label className="text-xs text-muted-foreground">{t('settings.role')}
             <Select value={roleId} onChange={(e) => setRoleId(e.target.value)} className="mt-1 block h-9">
-              <option value="">Select role…</option>
+              <option value="">{t('common.select')}</option>
               {roleList.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </Select>
           </label>
-          <Button type="submit" size="sm" disabled={invite.isPending || !email || !roleId}><Plus size={14} /> Invite</Button>
+          <Button type="submit" size="sm" disabled={invite.isPending || !email || !roleId}><Plus size={14} /> {t('settings.invite')}</Button>
         </form>
         {inviteUrl && (
           <div className="mt-3 flex items-center gap-2 rounded-md bg-muted/60 px-3 py-2 text-sm">
             <span className="truncate font-mono text-xs">{inviteUrl}</span>
-            <button className="ml-auto rounded p-1 hover:bg-muted" title="Copy" onClick={() => navigator.clipboard?.writeText(inviteUrl)}><Copy size={13} /></button>
+            <button className="ml-auto rounded p-1 hover:bg-muted" title={t('common.copy')} onClick={() => navigator.clipboard?.writeText(inviteUrl)}><Copy size={13} /></button>
           </div>
         )}
       </Card>
@@ -147,15 +155,15 @@ function UsersPanel() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                <th className="px-4 py-2 font-medium">Name</th>
-                <th className="px-4 py-2 font-medium">Email</th>
-                <th className="px-4 py-2 font-medium">Role</th>
+                <th className="px-4 py-2 font-medium">{t('profile.name')}</th>
+                <th className="px-4 py-2 font-medium">{t('auth.email')}</th>
+                <th className="px-4 py-2 font-medium">{t('settings.role')}</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((u) => (
                 <tr key={u.id} className="border-b border-border last:border-0">
-                  <td className="px-4 py-2 font-medium">{u.name ?? '—'}{u.isActive === false && <span className="ml-2 text-xs text-muted-foreground">(inactive)</span>}</td>
+                  <td className="px-4 py-2 font-medium">{u.name ?? '—'}{u.isActive === false && <span className="ml-2 text-xs text-muted-foreground">({t('settings.inactive')})</span>}</td>
                   <td className="px-4 py-2 text-muted-foreground">{u.email ?? '—'}</td>
                   <td className="px-4 py-2">
                     <Select value={u.roleId ?? ''} onChange={(e) => changeRole.mutate({ id: u.id, roleId: e.target.value })} className="h-8 text-xs">
@@ -213,6 +221,7 @@ function normalizeCatalog(raw: any): { domain: string; perms: { key: string; lab
 }
 
 function RolesPanel() {
+  const t = useT();
   const qc = useQueryClient();
   const roles = useQuery({ queryKey: ['roles'], queryFn: () => api.get<{ data: Role[] }>('/roles') });
   const catalog = useQuery({ queryKey: ['rolesCatalog'], queryFn: () => api.get<any>('/roles/catalog') });
@@ -228,8 +237,8 @@ function RolesPanel() {
     <div className="max-w-4xl space-y-6">
       <Card className="p-4">
         <form className="flex items-end gap-3" onSubmit={(e) => { e.preventDefault(); if (newRole.trim()) create.mutate(); }}>
-          <label className="text-xs text-muted-foreground">New role<Input value={newRole} onChange={(e) => setNewRole(e.target.value)} placeholder="Role name" className="mt-1 w-56" /></label>
-          <Button type="submit" size="sm" disabled={create.isPending}><Plus size={14} /> Create role</Button>
+          <label className="text-xs text-muted-foreground">{t('settings.newRole')}<Input value={newRole} onChange={(e) => setNewRole(e.target.value)} placeholder={t('settings.roleNamePlaceholder')} className="mt-1 w-56" /></label>
+          <Button type="submit" size="sm" disabled={create.isPending}><Plus size={14} /> {t('settings.createRole')}</Button>
         </form>
       </Card>
 
@@ -242,6 +251,7 @@ function RolesPanel() {
 }
 
 function RoleEditor({ role, grouped }: { role: Role; grouped: { domain: string; perms: { key: string; label: string }[] }[] }) {
+  const t = useT();
   const qc = useQueryClient();
   const [perms, setPerms] = useState<Set<string>>(() => new Set(role.permissions ?? []));
   const disabled = !!role.isSystem;
@@ -260,10 +270,10 @@ function RoleEditor({ role, grouped }: { role: Role; grouped: { domain: string; 
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">{role.name}</span>
-          {role.isSystem && <Badge>system</Badge>}
-          {role.userCount != null && <span className="text-xs text-muted-foreground">{role.userCount} users</span>}
+          {role.isSystem && <Badge>{t('settings.system')}</Badge>}
+          {role.userCount != null && <span className="text-xs text-muted-foreground">{role.userCount} {t('settings.usersSuffix')}</span>}
         </div>
-        {!disabled && <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>Save</Button>}
+        {!disabled && <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>{t('common.save')}</Button>}
       </div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {grouped.map((g) => (
@@ -289,6 +299,7 @@ const ENTITY_TYPES = ['companies', 'contacts', 'deals', 'projects', 'tasks', 'in
 const FIELD_TYPES = ['text', 'number', 'date', 'select', 'multiselect', 'checkbox', 'url', 'user'];
 
 function CustomFieldsPanel() {
+  const t = useT();
   const qc = useQueryClient();
   const [entityType, setEntityType] = useState('companies');
   const fields = useQuery({ queryKey: ['customFields', entityType], queryFn: () => api.get<{ data: CustomField[] }>('/custom-fields' + qs({ entityType })) });
@@ -302,36 +313,36 @@ function CustomFieldsPanel() {
   return (
     <div className="max-w-3xl space-y-4">
       <div className="flex items-center gap-2">
-        <span className="text-sm text-muted-foreground">Entity</span>
+        <span className="text-sm text-muted-foreground">{t('settings.entity')}</span>
         <Select value={entityType} onChange={(e) => setEntityType(e.target.value)}>
-          {ENTITY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          {ENTITY_TYPES.map((et) => <option key={et} value={et}>{et}</option>)}
         </Select>
       </div>
       <Card className="p-4">
         <form className="flex flex-wrap items-end gap-3" onSubmit={(e) => { e.preventDefault(); if (form.key && form.label) create.mutate(); }}>
-          <label className="text-xs text-muted-foreground">Key<Input value={form.key} onChange={(e) => setForm((f) => ({ ...f, key: e.target.value }))} placeholder="budget" className="mt-1 w-40" /></label>
-          <label className="text-xs text-muted-foreground">Label<Input value={form.label} onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))} className="mt-1 w-48" /></label>
-          <label className="text-xs text-muted-foreground">Type
+          <label className="text-xs text-muted-foreground">{t('projects.key')}<Input value={form.key} onChange={(e) => setForm((f) => ({ ...f, key: e.target.value }))} placeholder="budget" className="mt-1 w-40" /></label>
+          <label className="text-xs text-muted-foreground">{t('settings.fieldLabel')}<Input value={form.label} onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))} className="mt-1 w-48" /></label>
+          <label className="text-xs text-muted-foreground">{t('dashboards.type')}
             <Select value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))} className="mt-1 block h-9">
-              {FIELD_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              {FIELD_TYPES.map((ft) => <option key={ft} value={ft}>{ft}</option>)}
             </Select>
           </label>
-          <Button type="submit" size="sm" disabled={create.isPending}><Plus size={14} /> Add field</Button>
+          <Button type="submit" size="sm" disabled={create.isPending}><Plus size={14} /> {t('settings.addField')}</Button>
         </form>
       </Card>
       <Card className="overflow-hidden">
         {fields.isLoading ? (
           <div className="p-4"><Skeleton className="h-24 w-full" /></div>
         ) : rows.length === 0 ? (
-          <div className="p-6 text-center text-sm text-muted-foreground">No custom fields on {entityType}.</div>
+          <div className="p-6 text-center text-sm text-muted-foreground">{t('settings.noCustomFields')}</div>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                <th className="px-4 py-2 font-medium">Key</th>
-                <th className="px-4 py-2 font-medium">Label</th>
-                <th className="px-4 py-2 font-medium">Type</th>
-                <th className="px-4 py-2 font-medium">Required</th>
+                <th className="px-4 py-2 font-medium">{t('projects.key')}</th>
+                <th className="px-4 py-2 font-medium">{t('settings.fieldLabel')}</th>
+                <th className="px-4 py-2 font-medium">{t('dashboards.type')}</th>
+                <th className="px-4 py-2 font-medium">{t('settings.required')}</th>
               </tr>
             </thead>
             <tbody>
@@ -340,7 +351,7 @@ function CustomFieldsPanel() {
                   <td className="px-4 py-2 font-mono text-xs">{f.key}</td>
                   <td className="px-4 py-2">{f.label ?? '—'}</td>
                   <td className="px-4 py-2 text-muted-foreground">{f.type ?? '—'}</td>
-                  <td className="px-4 py-2">{f.required ? 'Yes' : 'No'}</td>
+                  <td className="px-4 py-2">{f.required ? t('common.yes') : t('common.no')}</td>
                 </tr>
               ))}
             </tbody>
@@ -353,30 +364,31 @@ function CustomFieldsPanel() {
 
 interface TaxRate { id: string; name?: string | null; ratePercent?: number | string }
 function FinancePanel() {
+  const t = useT();
   const taxes = useQuery({ queryKey: ['taxRates'], queryFn: () => api.get<{ data: TaxRate[] }>('/tax-rates') });
   const rows = taxes.data?.data ?? [];
   return (
     <div className="max-w-2xl space-y-4">
       <Card className="overflow-hidden">
-        <div className="border-b border-border px-4 py-2 text-sm font-medium">Tax rates</div>
+        <div className="border-b border-border px-4 py-2 text-sm font-medium">{t('settings.taxRates')}</div>
         {taxes.isLoading ? (
           <div className="p-4"><Skeleton className="h-20 w-full" /></div>
         ) : rows.length === 0 ? (
-          <div className="p-6 text-center text-sm text-muted-foreground">No tax rates configured.</div>
+          <div className="p-6 text-center text-sm text-muted-foreground">{t('settings.noTaxRates')}</div>
         ) : (
           <table className="w-full text-sm">
             <tbody>
-              {rows.map((t) => (
-                <tr key={t.id} className="border-b border-border last:border-0">
-                  <td className="px-4 py-2">{t.name ?? '—'}</td>
-                  <td className="px-4 py-2 text-right tabular-nums">{Number(t.ratePercent ?? 0)}%</td>
+              {rows.map((tr) => (
+                <tr key={tr.id} className="border-b border-border last:border-0">
+                  <td className="px-4 py-2">{tr.name ?? '—'}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{Number(tr.ratePercent ?? 0)}%</td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </Card>
-      <p className="text-xs text-muted-foreground">Document numbering, reminder rules and email templates are configured here. Default currency is set under Workspace.</p>
+      <p className="text-xs text-muted-foreground">{t('settings.financeHint')}</p>
     </div>
   );
 }
@@ -384,6 +396,7 @@ function FinancePanel() {
 interface GitConnection { id: string; provider?: string | null; fullName?: string | null; status?: string | null; instanceUrl?: string | null }
 interface Webhook { id: string; url?: string | null; active?: boolean; eventTypes?: string[] }
 function IntegrationsPanel() {
+  const t = useT();
   const qc = useQueryClient();
   const connections = useQuery({ queryKey: ['gitConnections'], queryFn: () => api.get<{ data: GitConnection[] }>('/integrations/git/connections') });
   const webhooks = useQuery({ queryKey: ['webhooks'], queryFn: () => api.get<{ data: Webhook[] }>('/webhooks') });
@@ -403,9 +416,9 @@ function IntegrationsPanel() {
   return (
     <div className="max-w-3xl space-y-6">
       <Card className="p-4">
-        <div className="mb-3 text-sm font-medium">Git connections</div>
+        <div className="mb-3 text-sm font-medium">{t('settings.gitConnections')}</div>
         {connections.isLoading ? <Skeleton className="h-16 w-full" /> : conns.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No git connections yet.</p>
+          <p className="text-sm text-muted-foreground">{t('settings.noGitConnections')}</p>
         ) : (
           <div className="space-y-1">
             {conns.map((c) => (
@@ -417,35 +430,35 @@ function IntegrationsPanel() {
           </div>
         )}
         <form className="mt-3 flex flex-wrap items-end gap-2 border-t border-border pt-3" onSubmit={(e) => { e.preventDefault(); addConn.mutate(); }}>
-          <label className="text-xs text-muted-foreground">Provider
+          <label className="text-xs text-muted-foreground">{t('settings.provider')}
             <Select value={conn.provider} onChange={(e) => setConn((c) => ({ ...c, provider: e.target.value }))} className="mt-1 block h-9">
               {['github', 'gitlab', 'gitea'].map((p) => <option key={p} value={p}>{p}</option>)}
             </Select>
           </label>
-          <label className="text-xs text-muted-foreground">Instance URL<Input value={conn.instanceUrl} onChange={(e) => setConn((c) => ({ ...c, instanceUrl: e.target.value }))} placeholder="optional" className="mt-1 w-48" /></label>
-          <label className="text-xs text-muted-foreground">Token<Input value={conn.token} onChange={(e) => setConn((c) => ({ ...c, token: e.target.value }))} type="password" className="mt-1 w-40" /></label>
-          <Button type="submit" size="sm" disabled={addConn.isPending}><Plus size={14} /> Add</Button>
+          <label className="text-xs text-muted-foreground">{t('settings.instanceUrl')}<Input value={conn.instanceUrl} onChange={(e) => setConn((c) => ({ ...c, instanceUrl: e.target.value }))} placeholder={t('settings.optional')} className="mt-1 w-48" /></label>
+          <label className="text-xs text-muted-foreground">{t('settings.token')}<Input value={conn.token} onChange={(e) => setConn((c) => ({ ...c, token: e.target.value }))} type="password" className="mt-1 w-40" /></label>
+          <Button type="submit" size="sm" disabled={addConn.isPending}><Plus size={14} /> {t('common.add')}</Button>
         </form>
       </Card>
 
       <Card className="p-4">
-        <div className="mb-3 text-sm font-medium">Outgoing webhooks</div>
+        <div className="mb-3 text-sm font-medium">{t('settings.webhooks')}</div>
         {webhooks.isLoading ? <Skeleton className="h-16 w-full" /> : hooks.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No webhooks configured.</p>
+          <p className="text-sm text-muted-foreground">{t('settings.noWebhooks')}</p>
         ) : (
           <div className="space-y-1">
             {hooks.map((h) => (
               <div key={h.id} className="flex items-center justify-between rounded bg-muted/50 px-3 py-2 text-sm">
                 <span className="truncate font-mono text-xs">{h.url}</span>
-                <Badge color={h.active === false ? '#6b7280' : '#22c55e'}>{h.active === false ? 'off' : 'active'}</Badge>
+                <Badge color={h.active === false ? '#6b7280' : '#22c55e'}>{h.active === false ? t('settings.off') : t('settings.active')}</Badge>
               </div>
             ))}
           </div>
         )}
         <form className="mt-3 flex flex-wrap items-end gap-2 border-t border-border pt-3" onSubmit={(e) => { e.preventDefault(); if (hook.url) addHook.mutate(); }}>
           <label className="text-xs text-muted-foreground">URL<Input value={hook.url} onChange={(e) => setHook((h) => ({ ...h, url: e.target.value }))} placeholder="https://…" className="mt-1 w-64" /></label>
-          <label className="text-xs text-muted-foreground">Events<Input value={hook.eventTypes} onChange={(e) => setHook((h) => ({ ...h, eventTypes: e.target.value }))} placeholder="invoice.sent, payment.recorded" className="mt-1 w-56" /></label>
-          <Button type="submit" size="sm" disabled={addHook.isPending}><Plus size={14} /> Add</Button>
+          <label className="text-xs text-muted-foreground">{t('settings.events')}<Input value={hook.eventTypes} onChange={(e) => setHook((h) => ({ ...h, eventTypes: e.target.value }))} placeholder="invoice.sent, payment.recorded" className="mt-1 w-56" /></label>
+          <Button type="submit" size="sm" disabled={addHook.isPending}><Plus size={14} /> {t('common.add')}</Button>
         </form>
       </Card>
     </div>
@@ -457,6 +470,7 @@ function IntegrationsPanel() {
 interface AuditRow { id: string; entityType: string; entityId: string; actorId?: string | null; actorType?: string; action: string; diff?: Record<string, unknown>; sensitivity?: string; createdAt: string }
 
 function AuditPanel() {
+  const t = useT();
   const [entityType, setEntityType] = useState('');
   const { data, isLoading } = useQuery<{ data: AuditRow[] }>({
     queryKey: ['audit', entityType],
@@ -466,14 +480,14 @@ function AuditPanel() {
   return (
     <div className="max-w-4xl space-y-4">
       <div className="flex items-center gap-2">
-        <h2 className="text-base font-semibold">Audit log</h2>
+        <h2 className="text-base font-semibold">{t('settings.auditLog')}</h2>
         <Select value={entityType} onChange={(e) => setEntityType(e.target.value)} className="ml-auto">
-          <option value="">All entities</option>
-          {['company', 'contact', 'deal', 'project', 'task', 'invoice', 'quote', 'payment', 'employee', 'leave_request', 'user', 'compensation'].map((t) => <option key={t} value={t}>{t}</option>)}
+          <option value="">{t('settings.allEntities')}</option>
+          {['company', 'contact', 'deal', 'project', 'task', 'invoice', 'quote', 'payment', 'employee', 'leave_request', 'user', 'compensation'].map((et) => <option key={et} value={et}>{et}</option>)}
         </Select>
       </div>
       {isLoading ? <Skeleton className="h-40" /> : rows.length === 0 ? (
-        <EmptyState title="No audit records" hint="Mutations across the workspace appear here with redacted diffs." />
+        <EmptyState title={t('settings.noAuditRecords')} hint={t('settings.noAuditRecordsHint')} />
       ) : (
         <Card className="divide-y divide-border">
           {rows.map((r) => (
@@ -481,7 +495,7 @@ function AuditPanel() {
               <div className="flex items-center gap-2">
                 <Badge className="bg-muted text-muted-foreground">{r.entityType}</Badge>
                 <span className="font-medium">{r.action}</span>
-                {r.sensitivity === 'sensitive' && <Badge className="bg-destructive/10 text-destructive">sensitive</Badge>}
+                {r.sensitivity === 'sensitive' && <Badge className="bg-destructive/10 text-destructive">{t('settings.sensitive')}</Badge>}
                 <span className="ml-auto text-xs text-muted-foreground">{r.actorType ?? 'user'} · {new Date(r.createdAt).toLocaleString()}</span>
               </div>
               {r.diff && Object.keys(r.diff).length > 0 && (
@@ -500,6 +514,7 @@ function AuditPanel() {
 interface DlqRow { id: string; consumer: string; eventId: string; error: string; attempts: number; createdAt: string; payload?: Record<string, unknown> }
 
 function DlqPanel() {
+  const t = useT();
   const qc = useQueryClient();
   const { data, isLoading, isError } = useQuery<{ data: DlqRow[]; counts?: Record<string, number> }>({
     queryKey: ['dlq'],
@@ -513,13 +528,13 @@ function DlqPanel() {
   return (
     <div className="max-w-4xl space-y-4">
       <div>
-        <h2 className="text-base font-semibold">Event queue — dead letters</h2>
-        <p className="text-sm text-muted-foreground">Events that exhausted retries. Replay after fixing the underlying issue; delivery is idempotent.</p>
+        <h2 className="text-base font-semibold">{t('settings.dlqTitle')}</h2>
+        <p className="text-sm text-muted-foreground">{t('settings.dlqHint')}</p>
       </div>
       {isLoading ? <Skeleton className="h-32" /> : isError ? (
-        <EmptyState title="Requires settings.manage + audit.read" />
+        <EmptyState title={t('settings.dlqForbidden')} />
       ) : rows.length === 0 ? (
-        <EmptyState title="Queue is healthy" hint="No dead-lettered events. Failed handlers retry automatically with backoff before landing here." />
+        <EmptyState title={t('settings.queueHealthy')} hint={t('settings.queueHealthyHint')} />
       ) : (
         <Card className="divide-y divide-border">
           {rows.map((r) => (
@@ -532,7 +547,7 @@ function DlqPanel() {
                 </div>
                 <p className="mt-0.5 truncate text-xs text-destructive">{r.error}</p>
               </div>
-              <Button size="sm" variant="outline" disabled={replay.isPending} onClick={() => replay.mutate(r.id)}>Replay</Button>
+              <Button size="sm" variant="outline" disabled={replay.isPending} onClick={() => replay.mutate(r.id)}>{t('settings.replay')}</Button>
             </div>
           ))}
         </Card>
