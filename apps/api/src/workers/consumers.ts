@@ -11,6 +11,7 @@ import { queueEmail } from '../lib/email';
 import { hmacSha256 } from '../lib/crypto';
 import { writeActivity } from '../core/activity';
 import { logger } from '../lib/logger';
+import { env } from '../env';
 
 export interface Consumer {
   name: string;
@@ -155,7 +156,116 @@ const webhooks: Consumer = {
   },
 };
 
-export const consumers: Consumer[] = [sse, notifications, automations, webhooks];
+/**
+ * Slack notifications. For a subset of business events, post a human message to
+ * a Slack incoming webhook — the project's own webhook (projects.settings.
+ * slackWebhookUrl) when the event belongs to a project, otherwise the workspace
+ * webhook (workspace_settings.integrations.slackWebhookUrl). Skips silently when
+ * no webhook is configured. Delivery failures rethrow so the relay's retry/DLQ
+ * machinery applies.
+ */
+const SLACK_EVENTS = new Set([
+  'task.created', 'task.status_changed', 'comment.mentioned',
+  'deal.won', 'deal.lost', 'invoice.paid', 'project.completed',
+]);
+
+async function resolveSlackWebhook(projectId: string | null): Promise<string | null> {
+  const { db } = getDb();
+  if (projectId) {
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
+    const url = (project?.settings as { slackWebhookUrl?: string | null } | undefined)?.slackWebhookUrl;
+    if (url) return url;
+  }
+  const [ws] = await db.select().from(schema.workspaceSettings).where(eq(schema.workspaceSettings.id, 'workspace'));
+  return (ws?.integrations as { slackWebhookUrl?: string | null } | undefined)?.slackWebhookUrl ?? null;
+}
+
+/** Build the Slack message + the project it belongs to (for webhook resolution). */
+async function buildSlackMessage(ev: DomainEvent): Promise<{ text: string; projectId: string | null } | null> {
+  const { db } = getDb();
+  const p = ev.payload as any;
+  const app = env.appUrl.replace(/\/$/, '');
+  switch (ev.type) {
+    case 'task.created':
+    case 'task.status_changed': {
+      const projectId: string | null = p.projectId ?? null;
+      const taskId = ev.aggregateId;
+      const [task] = await db.select({ title: schema.tasks.title, statusId: schema.tasks.statusId })
+        .from(schema.tasks).where(eq(schema.tasks.id, taskId));
+      const title = task?.title ?? '';
+      const link = projectId ? `${app}/projects/${projectId}/tasks/${taskId}` : `${app}/my-tasks`;
+      if (ev.type === 'task.created') {
+        return { text: `:sparkles: New task *${p.ref ?? taskId}* — ${title}\n${link}`, projectId };
+      }
+      let statusName = '';
+      if (task?.statusId) {
+        const [st] = await db.select({ name: schema.taskStatuses.name })
+          .from(schema.taskStatuses).where(eq(schema.taskStatuses.id, task.statusId));
+        statusName = st?.name ?? '';
+      }
+      return { text: `:arrows_counterclockwise: Task *${p.ref ?? taskId}* → *${statusName}* — ${title}\n${link}`, projectId };
+    }
+    case 'comment.mentioned': {
+      // aggregateId is the comment id; derive the task/project for the deep link.
+      const [comment] = await db.select({ taskId: schema.comments.taskId })
+        .from(schema.comments).where(eq(schema.comments.id, ev.aggregateId));
+      let projectId: string | null = null;
+      let link = app;
+      if (comment?.taskId) {
+        const [task] = await db.select({ projectId: schema.tasks.projectId })
+          .from(schema.tasks).where(eq(schema.tasks.id, comment.taskId));
+        projectId = task?.projectId ?? null;
+        link = projectId ? `${app}/projects/${projectId}/tasks/${comment.taskId}` : app;
+      }
+      return { text: `:speech_balloon: You were mentioned in *${p.ref ?? 'a comment'}*\n${link}`, projectId };
+    }
+    case 'deal.won': {
+      const amount = p.amount ? ` (${p.currency ?? ''} ${p.amount})` : '';
+      return { text: `:tada: Deal won: *${p.title ?? ev.aggregateId}*${amount}\n${app}/deals`, projectId: null };
+    }
+    case 'deal.lost': {
+      const [deal] = await db.select({ title: schema.deals.title })
+        .from(schema.deals).where(eq(schema.deals.id, ev.aggregateId));
+      const reason = p.lostReason ? ` — ${p.lostReason}` : '';
+      return { text: `:disappointed: Deal lost: *${deal?.title ?? ev.aggregateId}*${reason}\n${app}/deals`, projectId: null };
+    }
+    case 'invoice.paid': {
+      return { text: `:moneybag: Invoice *${p.number ?? ev.aggregateId}* was paid\n${app}/finance/invoices/${ev.aggregateId}`, projectId: null };
+    }
+    case 'project.completed': {
+      const projectId = ev.aggregateId;
+      const [project] = await db.select({ name: schema.projects.name })
+        .from(schema.projects).where(eq(schema.projects.id, projectId));
+      return { text: `:checkered_flag: Project *${p.key ?? project?.name ?? projectId}* completed\n${app}/projects/${projectId}`, projectId };
+    }
+    default:
+      return null;
+  }
+}
+
+const slack: Consumer = {
+  name: 'slack',
+  async handle(ev) {
+    if (!SLACK_EVENTS.has(ev.type)) return;
+    const msg = await buildSlackMessage(ev);
+    if (!msg) return;
+    const webhook = await resolveSlackWebhook(msg.projectId);
+    if (!webhook) return; // not configured — skip
+    const res = await fetch(webhook, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: msg.text }),
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!res.ok) {
+      const detail = `slack webhook responded ${res.status}`;
+      logger.error({ event: ev.type, status: res.status }, detail);
+      throw new Error(detail); // relay retries / DLQs
+    }
+  },
+};
+
+export const consumers: Consumer[] = [sse, notifications, automations, webhooks, slack];
 
 export function logConsumers(): void {
   logger.info({ consumers: consumers.map((c) => c.name) }, 'event consumers registered');

@@ -240,5 +240,9 @@ export const workspaceSettings = pgTable('workspace_settings', {
   defaultBillable: boolean('default_billable').notNull().default(true),
   defaultEstimateUnit: text('default_estimate_unit').notNull().default('hours'),
   sensitiveAuditRetentionMonths: integer('sensitive_audit_retention_months').notNull().default(24),
+  /** Enabled workspace modules: { moduleKey: boolean }. Missing/true = enabled. */
+  modules: jsonb('modules').notNull().default({}),
+  /** Third-party integration config, e.g. { slackWebhookUrl }. Secrets masked in GET. */
+  integrations: jsonb('integrations').notNull().default({}),
   ...timestamps,
 });

@@ -121,3 +121,7 @@ export const MAX_SUBTASK_DEPTH = 5;
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 export const SOFT_LOCK_TTL_SECONDS = 120;
 export const BLOCKED_FILE_EXTENSIONS = ['exe', 'bat', 'cmd', 'sh', 'msi', 'com', 'scr', 'js', 'jar', 'app'];
+
+/** Workspace feature modules (PRD §14.7). Missing key or true = enabled. */
+export const MODULE_KEYS = ['crm', 'kb', 'time', 'finance', 'people', 'resourcing', 'dashboards'] as const;
+export type ModuleKey = (typeof MODULE_KEYS)[number];

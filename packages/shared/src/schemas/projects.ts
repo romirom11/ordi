@@ -36,6 +36,11 @@ export const projectUpdateSchema = z.object({
   description: z.string().nullable().optional(),
   estimateUnit: z.enum(ESTIMATE_UNITS).optional(),
   customFields: customFieldsSchema.optional(),
+  /** Per-project settings; merged (not replaced) with existing keys like estimateUnit. */
+  settings: z.object({
+    estimateUnit: z.enum(ESTIMATE_UNITS).optional(),
+    slackWebhookUrl: z.string().url().nullable().optional(),
+  }).partial().optional(),
   version: z.number().int().optional(),
 });
 

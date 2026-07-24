@@ -6,9 +6,12 @@ import {
   parseTaskRefs, type EventType,
 } from '@ordi/shared';
 import type { AppEnv } from '../../context';
+import { env } from '../../env';
 import { err } from '../../lib/errors';
 import { emit } from '../../core/events';
-import { hmacSha256 } from '../../lib/crypto';
+import { hmacSha256, encrypt, generateToken } from '../../lib/crypto';
+import { writeActivity } from '../../core/activity';
+import { verifyOAuthState, exchangeGithubCode } from '../integrations/oauth';
 
 /**
  * Public (unauthenticated) surface (PRD §11.2/11.3/11.8, §8.6, §12.3, §13.1).
@@ -274,6 +277,34 @@ export function publicRoutes() {
       createdFrom: 'form',
     });
     return c.json({ ok: true });
+  });
+
+  // ── GitHub OAuth callback (PRD §13.1) — public; GitHub redirects the browser here. ──
+  app.get('/integrations/git/oauth/callback', async (c) => {
+    const appUrl = env.appUrl.replace(/\/$/, '');
+    try {
+      const code = c.req.query('code');
+      const state = verifyOAuthState(c.req.query('state'));
+      if (!code || !state) return c.redirect(`${appUrl}/settings/integrations?git=error`);
+      const { token } = await exchangeGithubCode(code);
+      const { db } = getDb();
+      const id = ulid();
+      await db.insert(schema.gitConnections).values({
+        id,
+        provider: 'github',
+        credentials: encrypt(JSON.stringify({ token, tokenType: 'oauth' })),
+        webhookSecret: generateToken(),
+        status: 'connected',
+        createdBy: state.userId,
+      });
+      await writeActivity(db, {
+        entityType: 'git_connection', entityId: id, action: 'created',
+        after: { provider: 'github' }, actorId: state.userId, actorType: 'user',
+      });
+      return c.redirect(`${appUrl}/settings/integrations?git=connected`);
+    } catch {
+      return c.redirect(`${appUrl}/settings/integrations?git=error`);
+    }
   });
 
   // ── Incoming git webhook (PRD §13.1) — always 200 to avoid provider retries. ──

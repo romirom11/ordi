@@ -14,6 +14,9 @@ export const env = {
   appUrl: process.env.APP_URL ?? 'http://localhost:5173',
   apiUrl: process.env.API_URL ?? 'http://localhost:3000',
   authSecret: process.env.AUTH_SECRET ?? 'dev-insecure-secret-change-me',
+  /** GitHub OAuth app credentials for connecting git accounts (PRD §13.1). */
+  githubOAuthClientId: process.env.GITHUB_OAUTH_CLIENT_ID ?? '',
+  githubOAuthClientSecret: process.env.GITHUB_OAUTH_CLIENT_SECRET ?? '',
   /** 32-byte hex key for AES-256-GCM (git credentials, PRD §13.1). */
   encryptionKey: process.env.ENCRYPTION_KEY ?? '0'.repeat(64),
   smtpUrl: process.env.SMTP_URL ?? '',
