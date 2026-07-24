@@ -32,7 +32,7 @@ describe('/me reflects role permissions', () => {
   });
 });
 
-describe('permission matrix — finance is invisible to member/guest', () => {
+describe('permission matrix – finance is invisible to member/guest', () => {
   const cases: Array<[string, string, number[]]> = [
     ['owner', '/invoices', [200]],
     ['finance', '/invoices', [200]],
@@ -49,7 +49,7 @@ describe('permission matrix — finance is invisible to member/guest', () => {
   }
 });
 
-describe('permission matrix — people is invisible to member/guest', () => {
+describe('permission matrix – people is invisible to member/guest', () => {
   for (const role of ['member', 'guest']) {
     it(`${role} cannot read employees`, async () => {
       const res = await reqAs(users[role]!.cookie).get('/employees');

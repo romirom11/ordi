@@ -234,7 +234,7 @@ export function InvoiceDetailPage({ id }: { id: string }) {
             {items.length === 0 && <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">{t('finance.noLineItems')}</td></tr>}
             {items.map((it, i) => (
               <tr key={it.id ?? String(i)} className="border-b border-border/70 last:border-0">
-                <td className="px-4 py-2.5">{it.description ?? '—'}</td>
+                <td className="px-4 py-2.5">{it.description ?? '–'}</td>
                 <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{Number(it.quantity ?? 0)}</td>
                 <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{fmtMoney(it.unitPrice ?? 0, cur)}</td>
                 <td className="px-4 py-2.5 text-right font-medium tabular-nums">{fmtMoney(it.amount ?? Number(it.quantity ?? 0) * Number(it.unitPrice ?? 0), cur)}</td>

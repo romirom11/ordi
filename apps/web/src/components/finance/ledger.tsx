@@ -32,7 +32,7 @@ extendDict({
     'ledger.allAccounts': 'All accounts',
     'ledger.revenueAccount': 'Revenue account',
     'ledger.emptyJournal': 'No transactions yet',
-    'ledger.emptyJournalHint': 'Send an invoice, record a payment or add income — every money event lands here automatically.',
+    'ledger.emptyJournalHint': 'Send an invoice, record a payment or add income – every money event lands here automatically.',
     'ledger.postings': 'postings',
     'ledger.void': 'Void',
     'ledger.voided': 'Entry voided',
@@ -60,7 +60,7 @@ extendDict({
     'ledger.allAccounts': 'Усі рахунки',
     'ledger.revenueAccount': 'Рахунок доходу',
     'ledger.emptyJournal': 'Ще немає транзакцій',
-    'ledger.emptyJournalHint': 'Надішліть рахунок, зафіксуйте платіж або додайте дохід — кожна грошова подія зʼявиться тут автоматично.',
+    'ledger.emptyJournalHint': 'Надішліть рахунок, зафіксуйте платіж або додайте дохід – кожна грошова подія зʼявиться тут автоматично.',
     'ledger.postings': 'проведень',
     'ledger.void': 'Анулювати',
     'ledger.voided': 'Запис анульовано',
@@ -220,7 +220,7 @@ export function TransactionsTab() {
             ) : (
               <div className="flex items-baseline gap-3">
                 {incomeByCur.size === 0 ? (
-                  <span className="text-xl font-semibold tabular-nums text-muted-foreground">—</span>
+                  <span className="text-xl font-semibold tabular-nums text-muted-foreground">–</span>
                 ) : (
                   [...incomeByCur.entries()].map(([cur, v]) => (
                     <span key={cur} className="text-xl font-semibold tabular-nums text-success">{fmtMoney(v, cur)}</span>
@@ -295,7 +295,7 @@ export function TransactionsTab() {
                   />
                   <span className="w-16 shrink-0 text-xs text-muted-foreground tabular-nums">{fmtDate(tx.date)}</span>
                   <span className={cn('min-w-0 flex-1 truncate text-[13px] font-medium', isVoid && 'line-through decoration-faint')}>
-                    {tx.description || '—'}
+                    {tx.description || '–'}
                   </span>
                   {isVoid && <Badge className="bg-muted text-faint">{t('ledger.status.void')}</Badge>}
                   <SourceBadge sourceType={tx.sourceType} />

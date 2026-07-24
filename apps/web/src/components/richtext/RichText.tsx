@@ -1,6 +1,6 @@
 /**
  * Read-only renderer for tiptap JSON documents (PRD §9.3, §8.3).
- * A tiny recursive React renderer — no editor instance needed.
+ * A tiny recursive React renderer – no editor instance needed.
  * Handles null / plain-string / malformed bodies gracefully.
  */
 import type { ReactNode } from 'react';

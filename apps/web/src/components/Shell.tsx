@@ -55,11 +55,11 @@ interface NavDef {
   key: string; to: string; labelKey: string; icon: ReactNode;
   section: NavSection;
   perm?: string; anyAuth?: boolean;
-  /** Workspace module toggle key — hidden when modules[module] === false. */
+  /** Workspace module toggle key – hidden when modules[module] === false. */
   module?: string;
 }
 
-/** Stable nav catalog — user-defined order is stored as a flat list of keys. */
+/** Stable nav catalog – user-defined order is stored as a flat list of keys. */
 const NAV_DEFS: NavDef[] = [
   { key: 'dashboard', to: '/', labelKey: 'nav.dashboard', icon: <LayoutDashboard size={16} />, anyAuth: true, section: 'main' },
   { key: 'myTasks', to: '/my-tasks', labelKey: 'nav.myTasks', icon: <CheckSquare size={16} />, anyAuth: true, section: 'main' },
@@ -225,7 +225,7 @@ function ShellInner({ children }: { children: ReactNode }) {
     try { localStorage.setItem(NAV_ORDER_KEY, JSON.stringify(next)); } catch { /* private mode */ }
   };
 
-  /** Reorder — only within the same section. */
+  /** Reorder – only within the same section. */
   const onDropOn = (targetKey: string) => {
     if (!dragKey || dragKey === targetKey) return;
     if (sectionOf.get(dragKey) !== sectionOf.get(targetKey)) return;
@@ -257,7 +257,7 @@ function ShellInner({ children }: { children: ReactNode }) {
     { key: 'system', label: t('theme.system'), icon: <Monitor size={14} /> },
   ];
 
-  /** Reorder without dragging — the context-menu equivalent of drag & drop. */
+  /** Reorder without dragging – the context-menu equivalent of drag & drop. */
   const moveWithinSection = (key: string, delta: number) => {
     const def = NAV_DEFS.find((d) => d.key === key);
     if (!def) return;
@@ -392,7 +392,7 @@ function ShellInner({ children }: { children: ReactNode }) {
           </Tooltip>
         </div>
 
-        {/* Nav — grouped sections, drag to reorder within a section */}
+        {/* Nav – grouped sections, drag to reorder within a section */}
         <nav className="flex-1 overflow-y-auto px-2 pt-1">
           {SECTIONS.map((sec) => {
             const items = grouped.get(sec.key) ?? [];

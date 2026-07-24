@@ -100,7 +100,7 @@ export async function seedBaseline(db: Db, workspaceName = 'ordi'): Promise<{ ro
     ]);
   }
 
-  // Chart of accounts (double-entry ledger) — idempotent by account code.
+  // Chart of accounts (double-entry ledger) – idempotent by account code.
   await seedChartOfAccounts(db);
 
   // Default (workspace-wide) task types

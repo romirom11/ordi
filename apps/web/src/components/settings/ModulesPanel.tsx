@@ -74,7 +74,7 @@ export function ModulesPanel() {
   const patch = useMutation({
     mutationFn: (next: Record<ModuleKey, boolean>) => api.patch('/settings/workspace', { modules: next }),
     onSuccess: () => {
-      // Sidebar reads ['workspace-settings'] — invalidate so nav hides/shows live.
+      // Sidebar reads ['workspace-settings'] – invalidate so nav hides/shows live.
       qc.invalidateQueries({ queryKey: ['workspace-settings'] });
       toast(t('settings.moduleSaved'));
     },

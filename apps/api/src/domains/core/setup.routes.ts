@@ -11,7 +11,7 @@ import { hashPassword, generateToken } from '../../lib/crypto';
 import { seedBaseline } from '../../seed-baseline';
 
 /**
- * First-run setup (PRD §20). Public — mounted like /auth. Available only while
+ * First-run setup (PRD §20). Public – mounted like /auth. Available only while
  * the users table is empty; once an owner exists this is locked (403).
  */
 async function needsSetup(): Promise<boolean> {

@@ -1,5 +1,5 @@
 /**
- * Quick task creation (global "C" shortcut) — Linear-style "New issue" composer:
+ * Quick task creation (global "C" shortcut) – Linear-style "New issue" composer:
  * borderless title + rich-text description, a chip row of property pickers
  * (status / priority / assignees / project / labels / due date), a "create
  * more" switch and Cmd/Ctrl+Enter to create. `!high`-style tokens in the
@@ -112,7 +112,7 @@ function ToggleItem({ children, icon, checked, onToggle }: {
   );
 }
 
-/** Native date input inside a menu — picking a date applies it and closes. */
+/** Native date input inside a menu – picking a date applies it and closes. */
 function DatePickInput({ value, onSet, ariaLabel }: { value: string; onSet: (v: string) => void; ariaLabel: string }) {
   const close = useMenuClose();
   return (

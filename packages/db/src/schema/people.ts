@@ -189,7 +189,7 @@ export const allocations = pgTable('allocations', {
   userIdx: index('allocations_user_idx').on(t.userId),
 }));
 
-/** Versioned compensation (PRD §12.5) — sensitive, redacted in audit. */
+/** Versioned compensation (PRD §12.5) – sensitive, redacted in audit. */
 export const compensation = pgTable('compensation', {
   id: pk(),
   employeeId: text('employee_id').notNull().references(() => employees.id, { onDelete: 'cascade' }),

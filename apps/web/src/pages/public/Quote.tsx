@@ -83,7 +83,7 @@ export function PublicQuotePage({ token }: { token: string }) {
           <tbody>
             {items.map((it, i) => (
               <tr key={String(i)} className="border-b border-border last:border-0">
-                <td className="py-2">{it.description ?? '—'}</td>
+                <td className="py-2">{it.description ?? '–'}</td>
                 <td className="py-2 text-right tabular-nums">{Number(it.quantity ?? 0)}</td>
                 <td className="py-2 text-right tabular-nums">{fmtMoney(it.unitPrice ?? 0, cur)}</td>
                 <td className="py-2 text-right tabular-nums">{fmtMoney(it.amount ?? Number(it.quantity ?? 0) * Number(it.unitPrice ?? 0), cur)}</td>

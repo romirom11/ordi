@@ -52,7 +52,7 @@ export function DashboardsPage({ id }: { id?: string }) {
   return id ? <DashboardDetailView id={id} /> : <DashboardListView />;
 }
 
-/** Extra request per card (same pattern as ProjectProgress in Projects.tsx) — the list
+/** Extra request per card (same pattern as ProjectProgress in Projects.tsx) – the list
  * endpoint doesn't include widgets, but the detail endpoint (shared cache key) does. */
 function DashboardCardMeta({ id }: { id: string }) {
   const t = useT();
@@ -65,7 +65,7 @@ function DashboardCardMeta({ id }: { id: string }) {
   return (
     <span className="inline-flex items-center gap-1 tabular-nums">
       <LayoutGrid size={12} />
-      {q.isLoading ? '—' : `${n} ${t('dashboards.widgetsLabel')}`}
+      {q.isLoading ? '–' : `${n} ${t('dashboards.widgetsLabel')}`}
     </span>
   );
 }
@@ -350,7 +350,7 @@ function WidgetCard({ dashboardId, widget, index, deleting, onDelete }: {
     : widget.source ?? widget.widgetType;
 
   const points: { key: string; value: number }[] = (data.data?.data ?? []).map((p) => ({
-    key: p.key != null && p.key !== '' ? String(p.key) : '—',
+    key: p.key != null && p.key !== '' ? String(p.key) : '–',
     value: Number(p.value ?? 0),
   }));
   const forbidden = (data.data as { forbidden?: boolean } | undefined)?.forbidden === true;

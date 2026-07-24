@@ -80,7 +80,7 @@ function InstanceGate() {
 function Root() {
   const path = usePathname();
 
-  // Desktop build (tauri:// origin) has no same-origin API — require an
+  // Desktop build (tauri:// origin) has no same-origin API – require an
   // instance URL before anything else (PRD §18 first launch).
   if (isTauri && !getInstanceUrl()) {
     return <I18nProvider locale={guessLocale()}><InstanceGate /></I18nProvider>;
@@ -118,7 +118,7 @@ function AuthedApp() {
   );
 }
 
-// Reuse the existing root across Vite HMR re-evaluations of this module —
+// Reuse the existing root across Vite HMR re-evaluations of this module –
 // calling createRoot twice on the same container is a React error.
 const hotData = (import.meta as { hot?: { data: { root?: ReactDOM.Root } } }).hot?.data;
 const root = hotData?.root ?? ReactDOM.createRoot(document.getElementById('root')!);

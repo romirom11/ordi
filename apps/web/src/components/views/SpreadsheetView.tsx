@@ -87,7 +87,7 @@ export function SpreadsheetView({ tasks, statuses, projectId, onOpenTask }: {
   return (
     <div className="space-y-2">
       {selected.size > 0 && (
-        <p className="text-xs text-muted-foreground">{selected.size} selected — use the Status / Priority header to bulk edit.</p>
+        <p className="text-xs text-muted-foreground">{selected.size} selected – use the Status / Priority header to bulk edit.</p>
       )}
       <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <table className="w-full min-w-[720px] border-collapse text-sm">
@@ -130,7 +130,7 @@ export function SpreadsheetView({ tasks, statuses, projectId, onOpenTask }: {
                   <button onClick={() => onOpenTask(t.id)} title="Open task"
                     className="inline-flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground hover:text-foreground hover:underline">
                     <PriorityIcon priority={t.priority} size={12} />
-                    {t.ref ?? (t.number != null ? `#${t.number}` : '—')}
+                    {t.ref ?? (t.number != null ? `#${t.number}` : '–')}
                   </button>
                 </td>
                 <td className="px-1 py-1">

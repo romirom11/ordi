@@ -133,7 +133,7 @@ export function NewDealDialog({ open, onClose, lockedCompanyId, defaultStageId, 
     e.preventDefault();
     setError(null);
     if (!title.trim()) { setError(t('common.titleRequired')); return; }
-    if (!effectiveCompany) { setError(t('crm.client') + ' — ' + t('common.select')); return; }
+    if (!effectiveCompany) { setError(t('crm.client') + ' – ' + t('common.select')); return; }
     mut.mutate();
   };
 

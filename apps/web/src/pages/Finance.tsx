@@ -466,7 +466,7 @@ function DocTable({ rows, loading, kind, onRow, companies }: {
 }) {
   const t = useT();
   const tabs = useTabs();
-  // The list endpoints return companyId only — resolve names client-side.
+  // The list endpoints return companyId only – resolve names client-side.
   const companyName = (r: DocRow): string | null =>
     r.companyName ?? (r.companyId ? companies?.find((c) => c.id === r.companyId)?.name ?? null : null);
   if (loading) {

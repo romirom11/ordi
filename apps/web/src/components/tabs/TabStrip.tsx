@@ -1,5 +1,5 @@
 /**
- * TabStrip — Linear-style in-app tab bar rendered by Shell above the routed
+ * TabStrip – Linear-style in-app tab bar rendered by Shell above the routed
  * page. Tabs behave like browser tabs: click switches, × / middle-click
  * closes, + opens a new tab at '/', Alt+W closes the active tab and
  * Ctrl/Cmd+Shift+[ / ] cycle tabs.
@@ -203,7 +203,7 @@ export function TabStrip() {
           </button>
         </Tooltip>
       </div>
-      {/* Floating tip (bottom-left card) — appears once a second tab is opened. */}
+      {/* Floating tip (bottom-left card) – appears once a second tab is opened. */}
       {tabs.tabs.length > 1 && (
         <Hint id="tabs-new-tab">
           {t('tabs.newTabHint')}

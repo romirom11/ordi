@@ -189,7 +189,7 @@ export const ledgerPostingInputSchema = z.object({
   currency: z.string().length(3).optional(),
 });
 
-/** Manual journal entry — the service enforces balance (Σdebit == Σcredit). */
+/** Manual journal entry – the service enforces balance (Σdebit == Σcredit). */
 export const ledgerTransactionInputSchema = z.object({
   date: dateOnly,
   description: z.string().default(''),
@@ -198,7 +198,7 @@ export const ledgerTransactionInputSchema = z.object({
   postings: z.array(ledgerPostingInputSchema).min(2),
 });
 
-/** Manual income document — a convenience wrapper over a ledger transaction. */
+/** Manual income document – a convenience wrapper over a ledger transaction. */
 export const incomeInputSchema = z.object({
   date: dateOnly,
   amount: z.number().positive(),

@@ -1,6 +1,6 @@
 /**
  * Seed (DEV): baseline config (shared with first-run /setup) PLUS a set of demo
- * data — companies, deals, projects, tasks and extra users — so the app is
+ * data – companies, deals, projects, tasks and extra users – so the app is
  * immediately usable for local development (PRD §20 "сід демо-даних"). The
  * baseline-only part lives in seed-baseline.ts and is what production first-run
  * setup uses; everything below the baseline call here is the DEV-only demo path.

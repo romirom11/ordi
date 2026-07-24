@@ -1,6 +1,6 @@
 /**
  * Settings → Project types: fully user-configurable project types.
- * Each type carries two behaviours consumed by the API — "requires client"
+ * Each type carries two behaviours consumed by the API – "requires client"
  * (project must link a company) and "revenue source" (invoice eligibility +
  * profitability revenue).
  */
@@ -16,7 +16,7 @@ import { useT, extendDict } from '../../lib/i18n';
 extendDict({
   en: {
     'settings.projectTypes': 'Project types',
-    'settings.projectTypesDesc': 'Define your own project types and how each behaves — client link and revenue.',
+    'settings.projectTypesDesc': 'Define your own project types and how each behaves – client link and revenue.',
     'ptypes.new': 'New type',
     'ptypes.edit': 'Edit type',
     'ptypes.icon': 'Icon',
@@ -28,8 +28,8 @@ extendDict({
     'ptypes.revenue.none': 'No revenue',
     'ptypes.revenue.direct': 'Direct',
     'ptypes.revenueHint.client_billing': 'Revenue comes from invoices billed to the client.',
-    'ptypes.revenueHint.none': 'Pure cost — projects of this type never earn revenue.',
-    'ptypes.revenueHint.direct': 'Income is recorded directly (e.g. product sales) — ledger support coming.',
+    'ptypes.revenueHint.none': 'Pure cost – projects of this type never earn revenue.',
+    'ptypes.revenueHint.direct': 'Income is recorded directly (e.g. product sales) – ledger support coming.',
     'ptypes.default': 'Default',
     'ptypes.defaultHint': 'Preselected in the new-project dialog.',
     'ptypes.deleteTitle': 'Delete project type',
@@ -41,7 +41,7 @@ extendDict({
   },
   uk: {
     'settings.projectTypes': 'Типи проєктів',
-    'settings.projectTypesDesc': 'Визначте власні типи проєктів та їхню поведінку — звʼязок із клієнтом і дохід.',
+    'settings.projectTypesDesc': 'Визначте власні типи проєктів та їхню поведінку – звʼязок із клієнтом і дохід.',
     'ptypes.new': 'Новий тип',
     'ptypes.edit': 'Редагувати тип',
     'ptypes.icon': 'Іконка',
@@ -52,9 +52,9 @@ extendDict({
     'ptypes.revenue.client_billing': 'Рахунки клієнту',
     'ptypes.revenue.none': 'Без доходу',
     'ptypes.revenue.direct': 'Прямий',
-    'ptypes.revenueHint.client_billing': 'Дохід — з рахунків, виставлених клієнту.',
-    'ptypes.revenueHint.none': 'Лише витрати — проєкти цього типу не приносять доходу.',
-    'ptypes.revenueHint.direct': 'Дохід фіксується напряму (напр., продажі продукту) — журнал доходів згодом.',
+    'ptypes.revenueHint.client_billing': 'Дохід – з рахунків, виставлених клієнту.',
+    'ptypes.revenueHint.none': 'Лише витрати – проєкти цього типу не приносять доходу.',
+    'ptypes.revenueHint.direct': 'Дохід фіксується напряму (напр., продажі продукту) – журнал доходів згодом.',
     'ptypes.default': 'За замовчуванням',
     'ptypes.defaultHint': 'Обирається автоматично в діалозі нового проєкту.',
     'ptypes.deleteTitle': 'Видалити тип проєкту',

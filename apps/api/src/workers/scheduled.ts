@@ -96,8 +96,8 @@ function advanceInterval(date: string, interval: string): string {
 
 /**
  * Recurring payments (subscriptions): for active rows due today or earlier,
- * advance next_date past today, stamp last_created_at, and — when
- * auto_create_expense is set — materialise a matching expense row. Idempotent:
+ * advance next_date past today, stamp last_created_at, and – when
+ * auto_create_expense is set – materialise a matching expense row. Idempotent:
  * next_date is advanced beyond today so a re-run in the same day is a no-op.
  */
 export async function runRecurringPayments(): Promise<void> {
@@ -111,7 +111,7 @@ export async function runRecurringPayments(): Promise<void> {
   for (const rp of due) {
     if (rp.autoCreateExpense) {
       const expenseId = ulid();
-      const description = rp.vendor ? `${rp.name} — ${rp.vendor}` : rp.name;
+      const description = rp.vendor ? `${rp.name} – ${rp.vendor}` : rp.name;
       await db.insert(schema.expenses).values({
         id: expenseId,
         companyId: rp.companyId ?? null,
@@ -242,7 +242,7 @@ function addDays(date: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Atomic document numbering (PRD §11.3) — shared by services and recurring worker. */
+/** Atomic document numbering (PRD §11.3) – shared by services and recurring worker. */
 export async function nextNumber(docType: 'invoice' | 'quote'): Promise<string> {
   const { db } = getDb();
   const year = new Date().getUTCFullYear();

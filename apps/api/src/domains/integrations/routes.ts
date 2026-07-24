@@ -18,7 +18,7 @@ import {
 /**
  * Integrations domain (PRD §13): git connections/repositories, manual resync,
  * and outbound webhook subscriptions. Secrets and credentials are NEVER returned
- * in any response — credentials are stored AES-GCM encrypted, webhook secrets
+ * in any response – credentials are stored AES-GCM encrypted, webhook secrets
  * write-only.
  */
 export function integrationsRoutes() {
@@ -94,7 +94,7 @@ export function integrationsRoutes() {
     return c.json({ ok: true });
   });
 
-  // List channels (any authed member — powers the project settings channel picker).
+  // List channels (any authed member – powers the project settings channel picker).
   app.get('/integrations/slack/channels', async (c) => {
     const { db } = getDb();
     const [conn] = await db.select().from(schema.slackConnections)

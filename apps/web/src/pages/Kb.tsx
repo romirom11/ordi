@@ -38,7 +38,7 @@ extendDict({
     'kb.renamed': 'Page renamed',
     'kb.saved': 'Page saved',
     'kb.unsavedChanges': 'Unsaved changes',
-    'kb.conflict': 'This page changed elsewhere — refreshed with the latest version',
+    'kb.conflict': 'This page changed elsewhere – refreshed with the latest version',
     'kb.newSpaceHint': 'Spaces group related pages together.',
     'kb.copyLink': 'Copy link',
     'kb.linkCopied': 'Link copied',
@@ -73,7 +73,7 @@ extendDict({
     'kb.renamed': 'Сторінку перейменовано',
     'kb.saved': 'Сторінку збережено',
     'kb.unsavedChanges': 'Є незбережені зміни',
-    'kb.conflict': 'Сторінку змінили деінде — оновлено до останньої версії',
+    'kb.conflict': 'Сторінку змінили деінде – оновлено до останньої версії',
     'kb.newSpaceHint': 'Простори групують пов’язані сторінки.',
     'kb.copyLink': 'Копіювати посилання',
     'kb.linkCopied': 'Посилання скопійовано',
@@ -273,7 +273,7 @@ function SpaceSection({ space, active, activePageId, expanded, onToggle, onSelec
   });
 
   // Right-click menu mirrors the "…" dropdown (both must work). Spaces have
-  // no publish toggle (n/a) — only page rows do.
+  // no publish toggle (n/a) – only page rows do.
   const spaceCtxItems: ContextMenuEntry[] = [
     { key: 'newPage', label: t('kb.newPage'), icon: <Plus size={13} />, onSelect: () => onNewPage(space.id) },
     { key: 'access', label: t('kb.access'), icon: <Lock size={13} />, onSelect: () => onAccess(space) },
@@ -699,7 +699,7 @@ function PageDetailView({ pageId, spaceId, canWrite }: { pageId: string; spaceId
         <Breadcrumbs
           items={[
             { label: t('nav.knowledge'), to: '/kb', icon: <BookOpen size={13} /> },
-            { label: spaceName ?? '—', to: `/kb/${spaceId}` },
+            { label: spaceName ?? '–', to: `/kb/${spaceId}` },
             ...ancestors.map((a): BreadcrumbItem => ({ label: a.title || t('kb.untitled'), to: `/kb/${spaceId}/${a.id}` })),
             { label: title || t('kb.untitled') },
           ]}

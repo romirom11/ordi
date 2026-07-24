@@ -114,7 +114,7 @@ function isoDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/** Native date input inside a menu — picking a date applies it and closes the menu. */
+/** Native date input inside a menu – picking a date applies it and closes the menu. */
 function DatePickInput({ value, onSet, ariaLabel }: {
   value: string | null; onSet: (v: string) => void; ariaLabel: string;
 }) {
@@ -130,7 +130,7 @@ function DatePickInput({ value, onSet, ariaLabel }: {
   );
 }
 
-/** Numeric estimate input inside the menu — Enter applies and closes. */
+/** Numeric estimate input inside the menu – Enter applies and closes. */
 function EstimateInput({ onSubmit }: { onSubmit: (n: number) => void }) {
   const close = useMenuClose();
   const [draft, setDraft] = useState('');
@@ -225,7 +225,7 @@ export function PropertySidebar({ task, statuses, users, labels, onPatch, hasRep
           trigger={
             <Chip>
               <StatusIcon category={status?.category} color={status?.color} />
-              <span className="truncate">{status?.name ?? '—'}</span>
+              <span className="truncate">{status?.name ?? '–'}</span>
             </Chip>
           }
         >

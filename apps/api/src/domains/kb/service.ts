@@ -323,7 +323,7 @@ export async function getSpace(actor: Actor, id: string): Promise<SpaceRow> {
 }
 
 /**
- * Space editor, or a workspace admin holding kb.manage_spaces — the same fallback
+ * Space editor, or a workspace admin holding kb.manage_spaces – the same fallback
  * deleteSpace uses, so admins can manage orphaned spaces they are not members of.
  */
 async function assertSpaceEditorOrManager(actor: Actor, spaceId: string): Promise<void> {
@@ -892,7 +892,7 @@ export async function duplicatePage(actor: Actor, id: string, input: any): Promi
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Convert to task (PRD §9.3) — returns a prefilled payload, no cross-domain write.
+// Convert to task (PRD §9.3) – returns a prefilled payload, no cross-domain write.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function pageToTask(actor: Actor, id: string, input: any) {

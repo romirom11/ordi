@@ -3,7 +3,7 @@
  * tabs inside the app shell.
  *
  * Model: tabs = [{id, url, title}] + activeId, persisted to localStorage.
- * Semantics are browser-like — normal navigation rewrites the ACTIVE tab;
+ * Semantics are browser-like – normal navigation rewrites the ACTIVE tab;
  * Ctrl/Cmd/middle-click on internal links opens a new tab (see lib/router.tsx).
  * Pages call usePageTitle(title) to name the active tab; a fallback title is
  * derived from the URL until they do.
@@ -81,7 +81,7 @@ export function TabsProvider({ children }: { children: ReactNode }) {
 
   // Browser-like semantics: any normal navigation rewrites the ACTIVE tab.
   // This runs during render (render-phase state update) so it settles BEFORE
-  // page children mount — a page's usePageTitle() effect always runs after the
+  // page children mount – a page's usePageTitle() effect always runs after the
   // url sync and its registered title is never clobbered.
   const active = state.tabs.find((t) => t.id === state.activeId);
   if (active && active.url !== path) {
@@ -174,7 +174,7 @@ export function useTabs(): TabsApi | null {
 }
 
 /**
- * Register the active tab's title (and document.title). Pages call this —
+ * Register the active tab's title (and document.title). Pages call this –
  * PageHeader does it automatically for plain-string titles. Safe no-op when
  * TabsProvider is absent (public pages) or title is empty/undefined.
  */

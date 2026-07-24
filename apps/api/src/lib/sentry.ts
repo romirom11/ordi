@@ -1,5 +1,5 @@
 /**
- * Minimal Sentry reporter (PRD §19.4) — dependency-free. When SENTRY_DSN is set,
+ * Minimal Sentry reporter (PRD §19.4) – dependency-free. When SENTRY_DSN is set,
  * exceptions are posted to the Sentry store endpoint; otherwise no-ops. The full
  * SDK can replace this behind the same captureException interface.
  */

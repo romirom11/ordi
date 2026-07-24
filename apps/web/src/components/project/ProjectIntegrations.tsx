@@ -109,7 +109,7 @@ async function fetchConnectionRepos(connId: string): Promise<Repo[]> {
     const r = await api.get<{ data: Repo[] }>(`/integrations/git/connections/${connId}/repos`);
     return r.data ?? [];
   } catch {
-    // Endpoint not available (404/5xx) — use the registered repositories.
+    // Endpoint not available (404/5xx) – use the registered repositories.
     const r = await api.get<{ data: Repo[] }>(`/integrations/git/repositories${qs({ connectionId: connId })}`);
     return r.data ?? [];
   }
@@ -292,7 +292,7 @@ function ConnectRepoDialog({ projectId, open, onClose, boundIds }: {
                 trigger={
                   <span className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md border border-input px-2.5 text-[13px] transition-colors hover:border-border-strong">
                     <ProviderIcon provider={selectedConn?.provider} className="text-muted-foreground" />
-                    <span className="flex-1 truncate">{selectedConn ? (selectedConn.instanceUrl || selectedConn.provider) : '—'}</span>
+                    <span className="flex-1 truncate">{selectedConn ? (selectedConn.instanceUrl || selectedConn.provider) : '–'}</span>
                   </span>
                 }
               >

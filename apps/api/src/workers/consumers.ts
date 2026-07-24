@@ -1,6 +1,6 @@
 /**
  * Event consumers (PRD §3.3 subscribers): notifications, SSE, automations,
- * outbound webhooks. All idempotent — dedup is handled by the relay via
+ * outbound webhooks. All idempotent – dedup is handled by the relay via
  * processed_events, and each handler is safe to re-run.
  */
 import { getDb, schema, eq, and, desc } from '@ordi/db';
@@ -55,7 +55,7 @@ async function notify(userIds: string[], type: string, entityRef: string | null,
       cta: link ? { label: tr(locale, 'notify.cta'), url: link } : undefined,
     });
     // Let failures reach the relay so it retries and eventually dead-letters,
-    // exactly like the Slack consumer — silence used to hide broken delivery.
+    // exactly like the Slack consumer – silence used to hide broken delivery.
     await queueEmail({
       to: user.email,
       subject: tr(locale, `notify.${known}.subject`, vars),
@@ -256,7 +256,7 @@ async function buildSlackMessage(ev: DomainEvent): Promise<{ text: string; proje
       const title = task?.title ?? '';
       const link = projectId ? `${app}/projects/${projectId}/tasks/${taskId}` : `${app}/my-tasks`;
       if (ev.type === 'task.created') {
-        return { text: `:sparkles: New task *${p.ref ?? taskId}* — ${title}\n${link}`, projectId };
+        return { text: `:sparkles: New task *${p.ref ?? taskId}* – ${title}\n${link}`, projectId };
       }
       let statusName = '';
       if (task?.statusId) {
@@ -264,7 +264,7 @@ async function buildSlackMessage(ev: DomainEvent): Promise<{ text: string; proje
           .from(schema.taskStatuses).where(eq(schema.taskStatuses.id, task.statusId));
         statusName = st?.name ?? '';
       }
-      return { text: `:arrows_counterclockwise: Task *${p.ref ?? taskId}* → *${statusName}* — ${title}\n${link}`, projectId };
+      return { text: `:arrows_counterclockwise: Task *${p.ref ?? taskId}* → *${statusName}* – ${title}\n${link}`, projectId };
     }
     case 'comment.mentioned': {
       // aggregateId is the comment id; derive the task/project for the deep link.
@@ -287,7 +287,7 @@ async function buildSlackMessage(ev: DomainEvent): Promise<{ text: string; proje
     case 'deal.lost': {
       const [deal] = await db.select({ title: schema.deals.title })
         .from(schema.deals).where(eq(schema.deals.id, ev.aggregateId));
-      const reason = p.lostReason ? ` — ${p.lostReason}` : '';
+      const reason = p.lostReason ? ` – ${p.lostReason}` : '';
       return { text: `:disappointed: Deal lost: *${deal?.title ?? ev.aggregateId}*${reason}\n${app}/deals`, projectId: null };
     }
     case 'invoice.paid': {
@@ -311,7 +311,7 @@ const slack: Consumer = {
     const msg = await buildSlackMessage(ev);
     if (!msg) return;
     const target = await resolveSlackTarget(msg.projectId);
-    if (!target) return; // not configured — skip
+    if (!target) return; // not configured – skip
     if (target.kind === 'bot') {
       await postSlackMessage(target.token, target.channel, msg.text); // throws → relay retries / DLQs
       return;

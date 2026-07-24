@@ -17,7 +17,7 @@ export function verifyPassword(password: string, stored: string | null): boolean
   return derived.length === expected.length && timingSafeEqual(derived, expected);
 }
 
-/** Opaque tokens (sessions, API tokens, public tokens) — 128-bit min (PRD §19.1). */
+/** Opaque tokens (sessions, API tokens, public tokens) – 128-bit min (PRD §19.1). */
 export function generateToken(bytes = 24): string {
   return randomBytes(bytes).toString('base64url');
 }

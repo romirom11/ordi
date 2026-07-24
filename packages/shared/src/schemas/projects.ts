@@ -8,7 +8,7 @@ import {
 export const projectInputSchema = z.object({
   name: z.string().min(1),
   key: z.string().regex(/^[A-Z]{2,5}$/, '2-5 uppercase letters'),
-  /** Required — every project has a user-configurable type. "Type requires a client" is validated server-side against the type row. */
+  /** Required – every project has a user-configurable type. "Type requires a client" is validated server-side against the type row. */
   projectTypeId: idSchema,
   companyId: idSchema.nullable().optional(),
   templateSourceId: idSchema.nullable().optional(),
@@ -113,7 +113,7 @@ export const projectTypeInputSchema = z.object({
   position: z.number().int().default(0),
 });
 
-/** PATCH /project-types/order — full ordered list of type ids. */
+/** PATCH /project-types/order – full ordered list of type ids. */
 export const projectTypeOrderSchema = z.object({
   ids: z.array(idSchema).min(1),
 });

@@ -122,7 +122,7 @@ export function Switch({ checked, onChange, disabled, label }: {
   );
 }
 
-/** Animated checkbox — box fills, then the checkmark path draws (transitions.dev №25). */
+/** Animated checkbox – box fills, then the checkmark path draws (transitions.dev №25). */
 export function Checkbox({ checked, onChange, disabled }: { checked: boolean; onChange?: (v: boolean) => void; disabled?: boolean }) {
   return (
     <button
@@ -188,11 +188,11 @@ export function Kbd({ children }: { children: ReactNode }) {
   );
 }
 
-/** Breadcrumb trail — 13px links separated by chevrons; last item is the current page. */
+/** Breadcrumb trail – 13px links separated by chevrons; last item is the current page. */
 export interface BreadcrumbItem { label: ReactNode; to?: string; icon?: ReactNode }
 
 export function Breadcrumbs({ items, className }: { items: BreadcrumbItem[]; className?: string }) {
-  // A lone crumb for the current page only repeats the page title — render
+  // A lone crumb for the current page only repeats the page title – render
   // trails, not echoes. A lone parent link is a real trail, so it stays.
   if (items.length === 0 || (items.length === 1 && !items[0]!.to)) return null;
   return (
@@ -224,7 +224,7 @@ export function Breadcrumbs({ items, className }: { items: BreadcrumbItem[]; cla
   );
 }
 
-/** The one standard page content container — pages wrap their body in this. */
+/** The one standard page content container – pages wrap their body in this. */
 export function PageBody({ children, width = 'default', className }: {
   children: ReactNode; width?: 'default' | 'wide' | 'full'; className?: string;
 }) {
@@ -561,7 +561,7 @@ export function fmtMoney(amount: number | string, currency = 'USD'): string {
 }
 
 export function fmtDate(d?: string | null): string {
-  if (!d) return '—';
+  if (!d) return '–';
   const date = new Date(d);
   const sameYear = date.getFullYear() === new Date().getFullYear();
   return date.toLocaleDateString(appLocale(), sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });

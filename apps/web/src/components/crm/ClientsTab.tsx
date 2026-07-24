@@ -186,7 +186,7 @@ export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
                           </span>
                         </div>
                       ) : (
-                        <span className="text-xs text-faint">—</span>
+                        <span className="text-xs text-faint">–</span>
                       )}
                     </div>
                     <div className="flex justify-end">

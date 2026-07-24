@@ -9,7 +9,7 @@ import { extendDict, useT } from '../lib/i18n';
 
 extendDict({
   en: {
-    'setup.tagline': 'CRM, projects, knowledge base, time and finance — all in one place.',
+    'setup.tagline': 'CRM, projects, knowledge base, time and finance – all in one place.',
     'setup.step1Title': 'Create your workspace',
     'setup.step1Sub': 'This is the home for your whole team.',
     'setup.workspaceName': 'Workspace name',
@@ -33,7 +33,7 @@ extendDict({
     'setup.hidePassword': 'Hide password',
   },
   uk: {
-    'setup.tagline': 'CRM, проєкти, база знань, час і фінанси — в одному місці.',
+    'setup.tagline': 'CRM, проєкти, база знань, час і фінанси – в одному місці.',
     'setup.step1Title': 'Створіть робочий простір',
     'setup.step1Sub': 'Це домівка для всієї вашої команди.',
     'setup.workspaceName': 'Назва робочого простору',
@@ -182,7 +182,7 @@ export function SetupPage() {
         email: email.trim().toLowerCase(),
         password,
       });
-      // Desktop (tauri:// origin) cannot use same-site cookies — keep the token.
+      // Desktop (tauri:// origin) cannot use same-site cookies – keep the token.
       if (isTauri && res.sessionToken) setSessionToken(res.sessionToken);
       setSuccess(true);
       window.setTimeout(() => { window.location.href = '/'; }, 900);
@@ -232,7 +232,7 @@ export function SetupPage() {
 
         <form onSubmit={onSubmit}>
           <div className="relative" style={{ minHeight: 302 }}>
-            {/* Step 1 — workspace */}
+            {/* Step 1 – workspace */}
             <StepPanel index={0} current={step}>
               <div className="space-y-4">
                 <div className="text-center">
@@ -255,7 +255,7 @@ export function SetupPage() {
               </div>
             </StepPanel>
 
-            {/* Step 2 — owner account */}
+            {/* Step 2 – owner account */}
             <StepPanel index={1} current={step}>
               <div className="space-y-3.5">
                 <div className="text-center">
@@ -316,7 +316,7 @@ export function SetupPage() {
               </div>
             </StepPanel>
 
-            {/* Step 3 — submitting / success */}
+            {/* Step 3 – submitting / success */}
             <StepPanel index={2} current={step}>
               <div className="flex h-full min-h-[302px] flex-col items-center justify-center gap-4 text-center">
                 {success ? (

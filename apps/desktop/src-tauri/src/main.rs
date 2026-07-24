@@ -1,4 +1,4 @@
-// ordi desktop (Tauri 2) — wraps apps/web unchanged (PRD §18).
+// ordi desktop (Tauri 2) – wraps apps/web unchanged (PRD §18).
 // Native features: tray (config), OS notifications (invoked from the web layer
 // via the notification plugin), global quick-add shortcut (below), autostart,
 // deep links (ordi://…, handled by the web layer via plugin events), updater.

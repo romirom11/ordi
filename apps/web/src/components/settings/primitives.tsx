@@ -25,7 +25,7 @@ export function AnimatedRow({ index = 0, className, style, children, onClick }: 
 }
 
 /**
- * Shared building blocks for the settings area — a Linear-style slim layout:
+ * Shared building blocks for the settings area – a Linear-style slim layout:
  * section heading + one-line description, then borderless rows separated by
  * hairlines instead of heavy bordered boxes.
  */

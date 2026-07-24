@@ -14,7 +14,7 @@ export function projectColor(seed: string): string {
   return `hsl(${projectHue(seed)} 58% 52%)`;
 }
 
-/** Colored rounded square with the FolderKanban glyph — Linear-style project avatar. */
+/** Colored rounded square with the FolderKanban glyph – Linear-style project avatar. */
 export function ProjectIcon({ seed, size = 24, radius = 6, className }: {
   seed: string; size?: number; radius?: number; className?: string;
 }) {

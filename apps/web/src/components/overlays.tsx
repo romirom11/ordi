@@ -96,7 +96,7 @@ export function ConfirmDialog({ open, onClose, onConfirm, title, body, confirmLa
 interface MenuCtxType { close: () => void }
 const MenuCtx = createContext<MenuCtxType>({ close: () => {} });
 
-/** Close the nearest DropdownMenu — for custom controls (inputs, etc.) inside a menu. */
+/** Close the nearest DropdownMenu – for custom controls (inputs, etc.) inside a menu. */
 export function useMenuClose(): () => void {
   return useContext(MenuCtx).close;
 }
@@ -319,7 +319,7 @@ function ContextMenuList({ items, onDone, autoFocus }: {
 }
 
 /**
- * ContextMenu — Linear-style right-click menu. Wraps children; right-click
+ * ContextMenu – Linear-style right-click menu. Wraps children; right-click
  * opens a portal menu at the cursor (clamped to viewport) with the dropdown
  * visual language. One level of submenu, Esc/outside closes, ↑/↓+Enter navigate.
  */

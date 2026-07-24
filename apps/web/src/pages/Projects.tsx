@@ -99,7 +99,7 @@ function ProjectProgress({ id }: { id: string }) {
   if (tasksQ.isLoading || statusesQ.isLoading) return <div className="h-4 w-4 rounded-full bg-muted" />;
   const tasks = tasksQ.data ?? [];
   const statuses = statusesQ.data ?? [];
-  if (tasks.length === 0) return <span className="text-xs tabular-nums text-faint">—</span>;
+  if (tasks.length === 0) return <span className="text-xs tabular-nums text-faint">–</span>;
   const catOf = (sid: string) => statuses.find((s) => s.id === sid)?.category;
   const done = tasks.filter((t) => catOf(t.statusId) === 'done').length;
   const pct = Math.round((done / tasks.length) * 100);

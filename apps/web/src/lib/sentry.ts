@@ -1,5 +1,5 @@
 /**
- * Minimal Sentry reporter for the SPA (PRD §19.4) — dependency-free.
+ * Minimal Sentry reporter for the SPA (PRD §19.4) – dependency-free.
  * Enabled when VITE_SENTRY_DSN is set at build time.
  */
 

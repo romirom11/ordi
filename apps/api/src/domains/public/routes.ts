@@ -16,7 +16,7 @@ import { verifyOAuthState, exchangeGithubCode, exchangeSlackCode } from '../inte
 /**
  * Public (unauthenticated) surface (PRD §11.2/11.3/11.8, §8.6, §12.3, §13.1).
  * Mounted at app root `/` (the git webhook uses the full `/api/v1/...` path).
- * Unknown or expired tokens return 404 — existence is never leaked.
+ * Unknown or expired tokens return 404 – existence is never leaked.
  */
 
 // ── Simple in-memory rate limiter (per IP) for public form endpoints (PRD §8.6/§12.3). ──
@@ -99,7 +99,7 @@ export function publicRoutes() {
     });
   });
 
-  // ── Invoice PDF (stub — the app downloads the real artifact) ──
+  // ── Invoice PDF (stub – the app downloads the real artifact) ──
   app.get('/i/:token/pdf', async (c) => {
     return c.json({ message: 'Use the app to download PDF' }, 501);
   });
@@ -233,7 +233,7 @@ export function publicRoutes() {
     if (!settings || !settings.formEnabled) throw err.notFound();
 
     const body = intakeSubmitSchema.parse(await c.req.json());
-    // Honeypot: bots fill the hidden field — silently accept, create nothing.
+    // Honeypot: bots fill the hidden field – silently accept, create nothing.
     if (body.honeypot && body.honeypot.trim() !== '') return c.json({ ok: true });
     if (!rateLimitOk(`intake:${clientIp(c)}`)) throw err.rateLimited();
 
@@ -287,7 +287,7 @@ export function publicRoutes() {
     return c.json({ ok: true });
   });
 
-  // ── GitHub OAuth callback (PRD §13.1) — public; GitHub redirects the browser here. ──
+  // ── GitHub OAuth callback (PRD §13.1) – public; GitHub redirects the browser here. ──
   app.get('/integrations/git/oauth/callback', async (c) => {
     const appUrl = env.appUrl.replace(/\/$/, '');
     try {
@@ -315,7 +315,7 @@ export function publicRoutes() {
     }
   });
 
-  // ── Slack OAuth callback — public; Slack redirects the browser here. ──
+  // ── Slack OAuth callback – public; Slack redirects the browser here. ──
   app.get('/integrations/slack/oauth/callback', async (c) => {
     const appUrl = env.appUrl.replace(/\/$/, '');
     try {
@@ -345,7 +345,7 @@ export function publicRoutes() {
     }
   });
 
-  // ── Incoming git webhook (PRD §13.1) — always 200 to avoid provider retries. ──
+  // ── Incoming git webhook (PRD §13.1) – always 200 to avoid provider retries. ──
   app.post('/api/v1/integrations/git/:provider/webhook', async (c) => {
     try {
       const provider = c.req.param('provider');

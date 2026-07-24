@@ -3,7 +3,7 @@
  * when running inside Tauri (withGlobalTauri exposes window.__TAURI__), this
  * module wires the native extras: OS notifications, dock/taskbar badge, the
  * global quick-add shortcut event and ordi:// deep links. Every call is
- * best-effort — a missing plugin must never break the web app.
+ * best-effort – a missing plugin must never break the web app.
  */
 import { api } from './api';
 

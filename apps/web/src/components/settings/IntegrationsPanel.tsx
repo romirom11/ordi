@@ -19,7 +19,7 @@ extendDict({
     'settings.integrationsDesc': 'Connect GitHub and Slack, and send outgoing webhooks.',
     // GitHub
     'settings.githubTitle': 'GitHub',
-    'settings.githubDesc': 'Link repositories to projects — branches and PRs show up on tasks.',
+    'settings.githubDesc': 'Link repositories to projects – branches and PRs show up on tasks.',
     'settings.connectGithub': 'Connect GitHub',
     'settings.githubNotConfigured': 'OAuth is not configured. Set GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET in the server .env.',
     'settings.advancedToken': 'Advanced: connect with a token',
@@ -29,7 +29,7 @@ extendDict({
     'settings.tokenPlaceholder': 'ghp_…',
     'settings.instancePlaceholder': 'https://git.company.com',
     'settings.githubConnected': 'GitHub connected',
-    'settings.githubConnectError': 'Could not connect GitHub — please try again.',
+    'settings.githubConnectError': 'Could not connect GitHub – please try again.',
     'settings.deleteConnection': 'Remove connection',
     'settings.deleteConnectionBody': 'Remove this git connection? Linked repositories will stop syncing.',
     // Slack
@@ -43,7 +43,7 @@ extendDict({
     'settings.slackDisconnectTitle': 'Disconnect Slack',
     'settings.slackDisconnectBody': 'Disconnect Slack? Projects will stop sending notifications until you reconnect.',
     'settings.slackConnected': 'Slack connected',
-    'settings.slackConnectError': 'Could not connect Slack — please try again.',
+    'settings.slackConnectError': 'Could not connect Slack – please try again.',
     'settings.slackDisconnected': 'Slack disconnected',
     'settings.slackAdvanced': 'Advanced (legacy webhook)',
     'settings.slackWebhook': 'Default webhook URL',
@@ -65,17 +65,17 @@ extendDict({
     'settings.integrationsDesc': 'Підключіть GitHub і Slack та надсилайте вихідні вебхуки.',
     // GitHub
     'settings.githubTitle': 'GitHub',
-    'settings.githubDesc': 'Звʼяжіть репозиторії з проєктами — гілки та PR-и зʼявляться в задачах.',
+    'settings.githubDesc': 'Звʼяжіть репозиторії з проєктами – гілки та PR-и зʼявляться в задачах.',
     'settings.connectGithub': 'Підключити GitHub',
     'settings.githubNotConfigured': 'OAuth не налаштовано. Задайте GITHUB_OAUTH_CLIENT_ID і GITHUB_OAUTH_CLIENT_SECRET у .env серверу.',
     'settings.advancedToken': 'Розширено: підключення через токен',
     'settings.connectedGithub': 'GitHub підключено.',
-    'settings.repoLinkHint': 'Привʼязка репозиторіїв до проєкту — у налаштуваннях конкретного проєкту.',
+    'settings.repoLinkHint': 'Привʼязка репозиторіїв до проєкту – у налаштуваннях конкретного проєкту.',
     'settings.connect': 'Підключити',
     'settings.tokenPlaceholder': 'ghp_…',
     'settings.instancePlaceholder': 'https://git.company.com',
     'settings.githubConnected': 'GitHub підключено',
-    'settings.githubConnectError': 'Не вдалося підключити GitHub — спробуйте ще раз.',
+    'settings.githubConnectError': 'Не вдалося підключити GitHub – спробуйте ще раз.',
     'settings.deleteConnection': 'Видалити підключення',
     'settings.deleteConnectionBody': 'Видалити це git-підключення? Повʼязані репозиторії перестануть синхронізуватися.',
     // Slack
@@ -89,7 +89,7 @@ extendDict({
     'settings.slackDisconnectTitle': 'Відключити Slack',
     'settings.slackDisconnectBody': 'Відключити Slack? Проєкти перестануть надсилати сповіщення, доки ви не підключите знову.',
     'settings.slackConnected': 'Slack підключено',
-    'settings.slackConnectError': 'Не вдалося підключити Slack — спробуйте ще раз.',
+    'settings.slackConnectError': 'Не вдалося підключити Slack – спробуйте ще раз.',
     'settings.slackDisconnected': 'Slack відключено',
     'settings.slackAdvanced': 'Розширено (застарілий webhook)',
     'settings.slackWebhook': 'Типовий webhook URL',
@@ -348,7 +348,7 @@ function SlackCard() {
         )}
       </div>
 
-      {/* Not configured — env setup note */}
+      {/* Not configured – env setup note */}
       {status.isSuccess && !configured && (
         <div className="mt-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
           {t('settings.slackNotConfigured')}

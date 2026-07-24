@@ -17,7 +17,7 @@ export const REDACTED_FIELDS = new Set<string>([
   'personalAddress',
 ]);
 
-/** Entities considered sensitive (HR/compensation) — records get sensitivity=sensitive. */
+/** Entities considered sensitive (HR/compensation) – records get sensitivity=sensitive. */
 export const SENSITIVE_ENTITIES = new Set<string>([
   'compensation',
   'overhead_settings',

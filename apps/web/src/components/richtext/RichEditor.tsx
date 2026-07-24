@@ -1,13 +1,13 @@
 /**
- * Tiptap-based rich text editor (PRD §9.3, §8.3) — Notion/Linear-grade.
+ * Tiptap-based rich text editor (PRD §9.3, §8.3) – Notion/Linear-grade.
  *
  * No permanent toolbar: formatting happens through a "/" slash command menu
  * (slash.ts) and a selection bubble toolbar (below). Controlled-ish: emits
  * tiptap JSON via onChange; external value changes are applied only when the
  * editor is not focused (to avoid clobbering typing).
  *
- * Public API is intentionally stable — { value, onChange, placeholder?,
- * editable?, compact?, onSubmit? } + EMPTY_DOC — other pages depend on it.
+ * Public API is intentionally stable – { value, onChange, placeholder?,
+ * editable?, compact?, onSubmit? } + EMPTY_DOC – other pages depend on it.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useEditor, EditorContent, BubbleMenu, type Editor } from '@tiptap/react';
@@ -310,7 +310,7 @@ export function RichEditor({ value, onChange, placeholder, editable = true, comp
   }, [editor, editable]);
 
   // Compact (comments): bordered card with focus ring. Non-compact (page body):
-  // borderless, seamless — the page provides the surface context.
+  // borderless, seamless – the page provides the surface context.
   const wrapperClass = compact && !bare
     ? cn('w-full rounded-md border border-input bg-transparent text-sm', editable && 'focus-within:ring-2 focus-within:ring-ring/40')
     : 'w-full bg-transparent text-sm';

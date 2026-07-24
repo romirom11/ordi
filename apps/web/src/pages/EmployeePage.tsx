@@ -220,7 +220,7 @@ export function EmployeePage({ id }: { id: string }) {
           </div>
         </section>
 
-        {/* Compensation — only rendered when the viewer can read compensation */}
+        {/* Compensation – only rendered when the viewer can read compensation */}
         {canComp && (
           <section className="mb-6">
             <div className="mb-1 flex items-center justify-between">

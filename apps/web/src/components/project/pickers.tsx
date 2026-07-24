@@ -22,7 +22,7 @@ extendDict({
   },
 });
 
-/** Project status metadata — single source used by the header, rail and settings. */
+/** Project status metadata – single source used by the header, rail and settings. */
 export const PROJECT_STATUSES = ['active', 'paused', 'completed', 'archived'] as const;
 export type ProjectStatus = typeof PROJECT_STATUSES[number];
 export const STATUS_META: Record<string, { color: string; key: string }> = {

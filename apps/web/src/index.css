@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 /* ─────────────────────────────────────────────────────────────
-   Design tokens — Linear-inspired. Dark is the default theme;
+   Design tokens – Linear-inspired. Dark is the default theme;
    [data-theme="light"] overrides. Theme is applied to <html> by
    lib/theme.tsx before first paint.
    ───────────────────────────────────────────────────────────── */
@@ -162,7 +162,7 @@ body {
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes progress-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 
-/* Page content entrance — subtle rise+blur per transitions.dev page slide */
+/* Page content entrance – subtle rise+blur per transitions.dev page slide */
 .page-enter { animation: fade-in-up var(--duration-fast) var(--ease-smooth-out) both; }
 .anim-fade-in { animation: fade-in var(--duration-fast) var(--ease-smooth-out) both; }
 .anim-pop-in { animation: pop-in var(--duration-fast) var(--ease-smooth-out) both; }

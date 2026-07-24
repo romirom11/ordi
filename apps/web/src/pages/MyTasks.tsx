@@ -1,5 +1,5 @@
 /**
- * My Tasks — Linear-style full-width triage list grouped by due bucket:
+ * My Tasks – Linear-style full-width triage list grouped by due bucket:
  * Overdue / Today / This week / Later / Created by me (unassigned).
  * Items come from GET /me/tasks in snake_case.
  */

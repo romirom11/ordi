@@ -225,7 +225,7 @@ function ResourcingView() {
 
   const openAddFor = (userId?: string, weekStart?: string) => {
     const from = weekStart ?? rangeStart;
-    // API requires both dates — default to a 4-week window ending on a Sunday.
+    // API requires both dates – default to a 4-week window ending on a Sunday.
     setForm({ userId: userId ?? '', projectId: '', hoursPerWeek: '', fromDate: from, toDate: addDays(from, 27) });
     setShowForm(true);
     setFormError(null);
@@ -399,7 +399,7 @@ function LoadCell({ total, tone, absent, allocs, canWrite, projectName, onAdd, o
         <Plus size={11} />
       </button>
     ) : (
-      <span className="text-faint">—</span>
+      <span className="text-faint">–</span>
     );
   }
 

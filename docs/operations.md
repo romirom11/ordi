@@ -1,4 +1,4 @@
-# ordi — Operations runbook
+# ordi – Operations runbook
 
 Covers backup/restore with formal RPO/RTO targets (PRD §19.2), deployment, and
 monitoring. Written for a solo operator on Dokploy + Docker.
@@ -11,7 +11,7 @@ monitoring. Written for a solo operator on Dokploy + Docker.
 | **RTO** (max time to recover) | ≤ 1 hour | Rehearsed restore runbook (below), measured quarterly |
 | Attachments RPO | ~0 (replication lag) | S3 bucket versioning + cross-region replication |
 
-A plain nightly dump does NOT meet the RPO — WAL archiving is required.
+A plain nightly dump does NOT meet the RPO – WAL archiving is required.
 
 ## 2. Postgres PITR setup
 
@@ -36,7 +36,7 @@ AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...
 ```
 
-Base backup — run daily via cron (see `scripts/backup-base.sh`):
+Base backup – run daily via cron (see `scripts/backup-base.sh`):
 
 ```bash
 wal-g backup-push "$PGDATA"
@@ -45,7 +45,7 @@ wal-g delete retain FULL 14 --confirm   # keep 14 daily bases
 
 The `events`, `processed_events` and dead-letter tables live in the same DB, so
 an event committed before a crash survives restore exactly once (outbox +
-processed_events dedup) — no separate queue backup is needed (pg-boss schema
+processed_events dedup) – no separate queue backup is needed (pg-boss schema
 `pgboss` is also inside the same PITR perimeter).
 
 ## 3. Restore procedure (rehearse quarterly, measure RTO)
@@ -92,16 +92,16 @@ Alert on:
 - **Outbox lag**: `SELECT count(*) FROM events WHERE published_at IS NULL AND occurred_at < now() - interval '5 minutes';` > 0.
 - Disk usage on the DB volume > 80%.
 
-Errors: set `SENTRY_DSN` (API) and `VITE_SENTRY_DSN` (web build) — the built-in
+Errors: set `SENTRY_DSN` (API) and `VITE_SENTRY_DSN` (web build) – the built-in
 lightweight reporter posts exceptions to Sentry without extra dependencies.
-Logs are pino JSON on stdout with `request_id` — ship via Dokploy log driver.
+Logs are pino JSON on stdout with `request_id` – ship via Dokploy log driver.
 
 ## 6. Secrets
 
 All secrets come exclusively from env (PRD §19.1): `AUTH_SECRET`,
 `ENCRYPTION_KEY` (32-byte hex, AES-256-GCM for git credentials), `DATABASE_URL`,
 `SMTP_URL`, `S3_*`. Rotate `ENCRYPTION_KEY` by re-encrypting `git_connections`
-(reconnect integrations) — the key is never stored in the DB.
+(reconnect integrations) – the key is never stored in the DB.
 
 ## 7. Sensitive-audit retention (PRD §14.4)
 

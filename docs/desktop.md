@@ -1,14 +1,14 @@
-# ordi desktop — як це працює (внутрішня документація)
+# ordi desktop – як це працює (внутрішня документація)
 
-Десктоп-застосунок (Tauri 2, PRD §18) — це **той самий веб-SPA без жодного
+Десктоп-застосунок (Tauri 2, PRD §18) – це **той самий веб-SPA без жодного
 окремого UI-коду**. Tauri лише загортає збірку `apps/web/dist` у нативне вікно
 і додає системні можливості. Все «десктопне» у веб-коді ізольовано в одному
-модулі — `apps/web/src/lib/desktop.ts` — і вмикається тільки коли застосунок
+модулі – `apps/web/src/lib/desktop.ts` – і вмикається тільки коли застосунок
 реально працює всередині Tauri.
 
 ## 1. Як SPA розуміє, що вона в десктопі
 
-У `tauri.conf.json` увімкнено `app.withGlobalTauri: true` — Tauri інʼєктить
+У `tauri.conf.json` увімкнено `app.withGlobalTauri: true` – Tauri інʼєктить
 `window.__TAURI__` (core invoke, events, window API) прямо в сторінку, тому
 **жодних npm-залежностей Tauri у веб-пакеті немає**. Детекція:
 
@@ -17,7 +17,7 @@
 export const isTauri = '__TAURI__' in window || '__TAURI_INTERNALS__' in window;
 ```
 
-Кожен нативний виклик — best-effort у `try/catch`: відсутній плагін чи стара
+Кожен нативний виклик – best-effort у `try/catch`: відсутній плагін чи стара
 версія рантайму ніколи не ламає застосунок (і тим більше не впливає на веб).
 
 ## 2. Перший запуск: URL інстансу
@@ -25,7 +25,7 @@ export const isTauri = '__TAURI__' in window || '__TAURI_INTERNALS__' in window;
 У браузері SPA ходить на same-origin `/api/v1` (nginx проксіює на API). У
 Tauri same-origin API немає, тому:
 
-1. `main.tsx` при `isTauri && !getInstanceUrl()` рендерить **InstanceGate** —
+1. `main.tsx` при `isTauri && !getInstanceUrl()` рендерить **InstanceGate** –
    екран «Підключіться до вашого інстансу ordi» (локалізований uk/en).
 2. Введений URL валідується запитом `GET {url}/healthz` (таймаут 8 с).
 3. Успіх → URL зберігається в `localStorage['ordi:apiUrl']` → reload.
@@ -37,7 +37,7 @@ Tauri same-origin API немає, тому:
 
 ## 3. Автентифікація: чому Bearer, а не cookie
 
-Сесійна cookie має `SameSite=Lax` — з origin `tauri://localhost` (macOS) або
+Сесійна cookie має `SameSite=Lax` – з origin `tauri://localhost` (macOS) або
 `http://tauri.localhost` (Windows/Linux) вона крос-сайтова і **не буде
 надіслана**. Тому:
 
@@ -47,8 +47,8 @@ Tauri same-origin API немає, тому:
 - API-клієнт додає `Authorization: Bearer <token>` до кожного запиту, коли
   токен збережений.
 - Бекенд (`apps/api/src/core/auth.ts`): Bearer спершу шукається серед
-  API-токенів (SHA-256-хеш), а якщо не знайдено — серед **сесій** (це і є
-  десктопний випадок). Права — повний скоуп ролі, як у cookie-сесії.
+  API-токенів (SHA-256-хеш), а якщо не знайдено – серед **сесій** (це і є
+  десктопний випадок). Права – повний скоуп ролі, як у cookie-сесії.
 - `POST /auth/logout` відкликає сесію і з cookie, і з Bearer-заголовка;
   Shell при виході чистить `ordi:sessionToken`.
 
@@ -60,20 +60,20 @@ Windows/Linux додайте `http://tauri.localhost` в `CORS_ORIGINS` інст
 | Фіча (PRD §18) | Реалізація | Потік |
 |---|---|---|
 | OS-нотифікації | `lib/sse.ts` → `notifyDesktop()` | SSE-подія з каталогу (призначення, згадка, оплата, quote accepted, рішення по відпустці, PR merged) → `plugin:notification\|notify` |
-| Бейдж непрочитаних | `NotificationsBell.tsx` → `setBadge()` | зміна `unread` → `Window.setBadgeCount` (dock/таскбар; трей-іконка і тултіп — з конфігу) |
+| Бейдж непрочитаних | `NotificationsBell.tsx` → `setBadge()` | зміна `unread` → `Window.setBadgeCount` (dock/таскбар; трей-іконка і тултіп – з конфігу) |
 | Глобальний хоткей quick-add | Rust `main.rs` + `Shell.tsx` | `Cmd/Ctrl+Shift+O` зареєстрований у Rust (`setup`, best-effort) → показ/фокус вікна + emit `ordi://quick-add` → Shell відкриває модалку швидкого створення задачі |
 | Deep links `ordi://task/KLD-42` | конфіг `deep-link` + `lib/desktop.ts` | плагін емітить `deep-link://new-url` → парсинг `KEY-N` → `GET /search?q=KEY-N` → навігація на задачу |
-| Автозапуск | плагін `autostart` (Rust) | ініціалізований; вмикання — стандартний viклик плагіна |
-| Автооновлення | плагін `updater` + CI | підписані артефакти з релізів; endpoint і pubkey — у `tauri.conf.json → plugins.updater` |
+| Автозапуск | плагін `autostart` (Rust) | ініціалізований; вмикання – стандартний viклик плагіна |
+| Автооновлення | плагін `updater` + CI | підписані артефакти з релізів; endpoint і pubkey – у `tauri.conf.json → plugins.updater` |
 
 Rust-код (`apps/desktop/src-tauri/src/main.rs`) свідомо мінімальний: ініт
-плагінів + реєстрація хоткея з обробником. Уся логіка — у веб-шарі, щоб
+плагінів + реєстрація хоткея з обробником. Уся логіка – у веб-шарі, щоб
 дифи не потребували перекомпіляції нативної частини.
 
 ## 5. Іконки
 
 `apps/desktop/src-tauri/icons/` (32/128/128@2x/512 PNG, `icon.ico`,
-`icon.icns`) — згенеровані і **закомічені**; бандлеру нічого не треба
+`icon.icns`) – згенеровані і **закомічені**; бандлеру нічого не треба
 довантажувати. Перегенерація (чистий Node, без залежностей):
 
 ```bash
@@ -100,6 +100,6 @@ node scripts/gen-desktop-icons.mjs
   токен збережено → застосунок працює крос-оріджн, 0 помилок консолі.
 
 **Не перевірено тут** (немає GTK/WebKit-тулчейна): компіляція Rust і самі
-бінарники — це робить CI на тегу. Якщо перший прогін workflow десь
+бінарники – це робить CI на тегу. Якщо перший прогін workflow десь
 спіткнеться, правки очікуються точкові (версії плагінів/сигнатури), не
 архітектурні.

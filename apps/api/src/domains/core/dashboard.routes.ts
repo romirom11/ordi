@@ -112,7 +112,7 @@ export function dashboardRoutes() {
     return c.json({ ok: true });
   });
 
-  // Widget data — computed server-side with forced permission overlay (PRD §14.1).
+  // Widget data – computed server-side with forced permission overlay (PRD §14.1).
   app.get('/dashboards/:id/widgets/:widgetId/data', async (c) => {
     const actor = currentActor(c);
     const { db } = getDb();

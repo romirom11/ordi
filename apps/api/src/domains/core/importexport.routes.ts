@@ -309,7 +309,7 @@ export function importExportRoutes() {
 
     await db.transaction(async (tx) => {
       for (const v of valid) {
-        // number: 0 — the per-project number is assigned by a DB trigger.
+        // number: 0 – the per-project number is assigned by a DB trigger.
         await tx.insert(schema.tasks).values({ id: ulid(), ...v, number: 0, createdBy: actor.userId });
       }
     });

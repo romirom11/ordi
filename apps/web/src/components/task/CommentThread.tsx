@@ -20,7 +20,7 @@ extendDict({
     'task.activity.updated': 'updated this task',
     'task.activity.deleted': 'deleted this task',
     'task.activity.restored': 'restored this task',
-    'task.noActivity': 'No activity yet — start the conversation below.',
+    'task.noActivity': 'No activity yet – start the conversation below.',
   },
   uk: {
     'task.activity': 'Активність',
@@ -28,7 +28,7 @@ extendDict({
     'task.activity.updated': 'оновлює задачу',
     'task.activity.deleted': 'видаляє задачу',
     'task.activity.restored': 'відновлює задачу',
-    'task.noActivity': 'Активності поки немає — почніть обговорення нижче.',
+    'task.noActivity': 'Активності поки немає – почніть обговорення нижче.',
   },
 });
 

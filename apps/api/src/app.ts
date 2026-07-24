@@ -70,7 +70,7 @@ export function createApp() {
   app.route('/', publicRoutes());
   app.route('/api/v1', publicRoutes());
 
-  // OpenAPI contract (PRD §15.1) — public, static document
+  // OpenAPI contract (PRD §15.1) – public, static document
   app.get('/api/docs/openapi.json', (c) => c.json(openApiDoc as Record<string, unknown>));
   app.get('/api/docs', (c) => c.html(docsHtml));
 

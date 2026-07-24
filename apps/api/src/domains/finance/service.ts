@@ -107,7 +107,7 @@ async function assertClientProject(projectId: string): Promise<void> {
     .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
   if (!p) throw err.validation('Project not found');
   if (p.revenueSource !== 'client_billing') {
-    throw err.domain(`An invoice cannot be attached to a "${p.typeName}" project — its type does not bill a client (PRD §5.4)`, { projectId });
+    throw err.domain(`An invoice cannot be attached to a "${p.typeName}" project – its type does not bill a client (PRD §5.4)`, { projectId });
   }
 }
 
@@ -368,8 +368,8 @@ export async function invoiceFromTime(actor: Actor, input: any) {
     const rate = Number(r.hourly_rate);
     const hours = Number(r.duration_seconds) / 3600;
     let dimKey: string; let description: string;
-    if (input.grouping === 'user') { dimKey = `u:${r.user_id}`; description = `${r.user_name} — time`; }
-    else if (input.grouping === 'single') { dimKey = 'single'; description = `Billable time ${input.from} — ${input.to}`; }
+    if (input.grouping === 'user') { dimKey = `u:${r.user_id}`; description = `${r.user_name} – time`; }
+    else if (input.grouping === 'single') { dimKey = 'single'; description = `Billable time ${input.from} – ${input.to}`; }
     else { dimKey = `t:${r.task_id}`; description = r.task_title; }
     const key = `${dimKey}|${rate}`;
     const g = groups.get(key) ?? { description, hours: 0, rate, entryIds: [] };
@@ -1184,7 +1184,7 @@ function round2(n: number): number {
 }
 
 
-/** Money for email copy — Intl with a plain fallback for odd currency codes. */
+/** Money for email copy – Intl with a plain fallback for odd currency codes. */
 function formatMoney(amount: string | number | null, currency: string | null): string {
   const value = Number(amount ?? 0);
   const code = currency || 'USD';

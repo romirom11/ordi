@@ -1,5 +1,5 @@
 /** REST client for the MCP server: every call goes through the ordi API with the
- * agent's API token (PRD §16). No direct DB access — the token's scope is the
+ * agent's API token (PRD §16). No direct DB access – the token's scope is the
  * agent's permission boundary. */
 
 export interface OrdiClientConfig {

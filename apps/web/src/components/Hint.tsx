@@ -1,5 +1,5 @@
 /**
- * Hint — floating, dismissible tip cards for first-time users.
+ * Hint – floating, dismissible tip cards for first-time users.
  * Rendered via portal into a shared fixed stack at the bottom-left of the
  * viewport (clear of the sidebar and of the bottom-right Toaster), so multiple
  * mounted hints stack vertically instead of overlapping.
@@ -43,7 +43,7 @@ export function resetAllHints(): void {
 
 /**
  * Shared portal target: one fixed flex column at the bottom-left. All mounted
- * hints portal into it, so stacking is just DOM order — no measuring needed.
+ * hints portal into it, so stacking is just DOM order – no measuring needed.
  * Left offset clears the w-56 (14rem) sidebar; the Toaster owns bottom-right.
  */
 let hintRoot: HTMLElement | null = null;

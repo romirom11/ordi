@@ -3,7 +3,7 @@
  *
  * A second suggestion trigger (besides "@" user mentions in mention.ts):
  * typing "#" searches GET /search?q= (tasks, KB pages, companies, invoices)
- * and inserts an `entityMention` node — Mention.extend with its own char,
+ * and inserts an `entityMention` node – Mention.extend with its own char,
  * storing { id, kind, url, label }. Rendered as a clickable `.ordi-ref` chip;
  * click navigation is handled by delegated onClick on the prose containers
  * (RichEditor / RichText / RichBody).

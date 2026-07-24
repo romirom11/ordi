@@ -180,7 +180,7 @@ export function projectsRoutes() {
   });
 
   // ── Project types (workspace config, PRD §8.1) ──
-  // Readable by any authed user — the new-project dialog needs the list.
+  // Readable by any authed user – the new-project dialog needs the list.
   app.get('/project-types', async (c) => {
     const { db } = getDb();
     const rows = await db.select().from(schema.projectTypes).orderBy(asc(schema.projectTypes.position), asc(schema.projectTypes.createdAt));
@@ -222,11 +222,11 @@ export function projectsRoutes() {
     const { db } = getDb();
     const id = c.req.param('id');
     const [totalRow] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.projectTypes);
-    if ((totalRow?.n ?? 0) <= 1) throw err.domain('Cannot delete the last project type — at least one must remain.');
+    if ((totalRow?.n ?? 0) <= 1) throw err.domain('Cannot delete the last project type – at least one must remain.');
     const [usedRow] = await db.select({ n: sql<number>`count(*)::int` })
       .from(schema.projects).where(eq(schema.projects.projectTypeId, id));
     const used = usedRow?.n ?? 0;
-    if (used > 0) throw err.domain(`This type is used by ${used} project${used === 1 ? '' : 's'} — move them to another type first.`);
+    if (used > 0) throw err.domain(`This type is used by ${used} project${used === 1 ? '' : 's'} – move them to another type first.`);
     await db.delete(schema.projectTypes).where(eq(schema.projectTypes.id, id));
     return c.json({ ok: true });
   });

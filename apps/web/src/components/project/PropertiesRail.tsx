@@ -244,7 +244,7 @@ function LabelsRailPicker({ value, labels, onChange, disabled }: {
   );
 }
 
-/** Project type chip + dropdown (admins only) — mirrors the other rail pickers. */
+/** Project type chip + dropdown (admins only) – mirrors the other rail pickers. */
 function ProjectTypeRailPicker({ value, types, onSelect, disabled }: {
   value?: string | null; types: ProjectTypeLite[]; onSelect: (id: string) => void; disabled?: boolean;
 }) {

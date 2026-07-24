@@ -51,7 +51,7 @@ const EN: Dict = {
   'invite.heading': 'Join {workspace}',
   'invite.body': 'You have been invited to collaborate in {workspace} on ordi. Set up your account to get started.',
   'invite.cta': 'Accept invitation',
-  'invite.expiry': 'This invitation link is personal — do not forward it.',
+  'invite.expiry': 'This invitation link is personal – do not forward it.',
 
   'invoice.subject': 'Invoice {number} from {workspace}',
   'invoice.heading': 'Invoice {number}',
@@ -118,11 +118,11 @@ const UK: Dict = {
   'invite.heading': 'Приєднуйтесь до {workspace}',
   'invite.body': 'Вас запросили до спільної роботи в {workspace} на ordi. Створіть обліковий запис, щоб почати.',
   'invite.cta': 'Прийняти запрошення',
-  'invite.expiry': 'Це персональне посилання — не пересилайте його іншим.',
+  'invite.expiry': 'Це персональне посилання – не пересилайте його іншим.',
 
   'invoice.subject': 'Рахунок {number} від {workspace}',
   'invoice.heading': 'Рахунок {number}',
-  'invoice.body': 'Надсилаємо рахунок {number} на суму {amount}. Термін оплати — {dueDate}.',
+  'invoice.body': 'Надсилаємо рахунок {number} на суму {amount}. Термін оплати – {dueDate}.',
   'invoice.bodyNoDue': 'Надсилаємо рахунок {number} на суму {amount}.',
   'invoice.cta': 'Переглянути рахунок онлайн',
   'invoice.attached': 'PDF-копію додано до цього листа.',
@@ -139,7 +139,7 @@ const UK: Dict = {
   'reminder.body': 'Рахунок {number} на суму {amount} потрібно сплатити до {dueDate}.',
   'reminder.bodyOverdue': 'Рахунок {number} на суму {amount} мав бути сплачений до {dueDate} і досі не оплачений.',
   'reminder.cta': 'Переглянути рахунок',
-  'reminder.thanks': 'Якщо оплата вже в дорозі — просто проігноруйте цей лист.',
+  'reminder.thanks': 'Якщо оплата вже в дорозі – просто проігноруйте цей лист.',
 
   'intakeAccepted.subject': 'Вашу заявку прийнято',
   'intakeAccepted.heading': 'Заявку прийнято',
@@ -263,7 +263,7 @@ export function renderEmail(input: RenderInput): RenderedEmail {
     ...(cta ? ['', `${cta.label}: ${cta.url}`] : []),
     ...(note ? ['', note] : []),
     '',
-    '—',
+    '–',
     tr(locale, 'footer.sentBy', { workspace: branding.workspaceName }),
   ].join('\n');
 

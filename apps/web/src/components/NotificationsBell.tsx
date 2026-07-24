@@ -1,5 +1,5 @@
 /**
- * NotificationsBell — sidebar-footer "Inbox" item. Renders a nav-style row
+ * NotificationsBell – sidebar-footer "Inbox" item. Renders a nav-style row
  * (bell icon + label + unread badge); clicking opens the notifications panel
  * as a popover anchored bottom-left, opening upward.
  */

@@ -10,7 +10,7 @@ export const projectTypes = pgTable('project_types', {
   color: text('color').notNull().default('#6b7280'),
   /** Projects of this type must be linked to a client company. */
   requiresClient: boolean('requires_client').notNull().default(false),
-  /** client_billing | none | direct — drives invoice eligibility & profitability revenue. */
+  /** client_billing | none | direct – drives invoice eligibility & profitability revenue. */
   revenueSource: text('revenue_source').notNull().default('client_billing'),
   /** Preselected in the new-project dialog. */
   isDefault: boolean('is_default').notNull().default(false),

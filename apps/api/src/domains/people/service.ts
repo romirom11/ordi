@@ -789,7 +789,7 @@ export async function deleteAllocation(actor: Actor, id: string) {
   await writeActivity(db, { entityType: 'allocation', entityId: id, action: 'deleted', actorId: actor.userId, actorType: actor.actorType });
 }
 
-// ─── compensation (PRD §12.5) — people.read_compensation, audited on read ───
+// ─── compensation (PRD §12.5) – people.read_compensation, audited on read ───
 export async function listCompensation(actor: Actor, employeeId: string) {
   const { db } = getDb();
   await loadEmployee(employeeId);

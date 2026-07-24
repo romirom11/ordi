@@ -27,7 +27,7 @@ export function usersRoutes() {
   });
 
   // Lightweight directory for assignee pickers and @mentions: any authenticated
-  // user; only public fields (id, name, avatar) — no emails or role data.
+  // user; only public fields (id, name, avatar) – no emails or role data.
   app.get('/lookup', async (c) => {
     const { db } = getDb();
     const rows = await db.select({

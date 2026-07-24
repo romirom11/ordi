@@ -213,7 +213,7 @@ const GROUPS: NavGroup[] = [
       { id: 'finance', label: 'nav.finance', perm: 'finance.settings', icon: Wallet },
       { id: 'invoices', label: 'settings.invoices', perm: 'finance.settings', icon: Receipt },
       { id: 'integrations', label: 'settings.integrations', perm: 'integrations.manage', icon: Plug },
-      // Personal MCP/API tokens — available to every authenticated user, no perm gate.
+      // Personal MCP/API tokens – available to every authenticated user, no perm gate.
       { id: 'mcp', label: 'settings.mcp', icon: Bot },
     ],
   },
@@ -242,7 +242,7 @@ export function SettingsPage({ section }: { section?: string }) {
 
   return (
     <div className="flex flex-col">
-      {/* Slim trail only — each panel carries its own heading and description. */}
+      {/* Slim trail only – each panel carries its own heading and description. */}
       <div className="flex h-11 shrink-0 items-center border-b border-border px-4">
         <Breadcrumbs items={[{ label: t('nav.settings'), to: '/settings' }, { label: t(active.label) }]} />
       </div>

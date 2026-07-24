@@ -25,14 +25,14 @@ extendDict({
   en: {
     'task.copied': 'Copied',
     'task.copyRef': 'Copy ID',
-    'task.conflict': 'This task was updated elsewhere — reloaded the latest version.',
+    'task.conflict': 'This task was updated elsewhere – reloaded the latest version.',
     'task.backToProject': 'Back to project',
     'task.description': 'Description',
   },
   uk: {
     'task.copied': 'Скопійовано',
     'task.copyRef': 'Копіювати ID',
-    'task.conflict': 'Задачу оновили в іншому місці — завантажено останню версію.',
+    'task.conflict': 'Задачу оновили в іншому місці – завантажено останню версію.',
     'task.backToProject': 'Назад до проєкту',
     'task.description': 'Опис',
   },

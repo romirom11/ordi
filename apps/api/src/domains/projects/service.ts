@@ -109,12 +109,12 @@ async function resolveTypeCompany(projectTypeId: string, companyId: string | nul
 
 export async function createProject(actor: Actor, input: any): Promise<{ id: string; key: string }> {
   const { db } = getDb();
-  // Friendly duplicate-key guard — otherwise the unique index surfaces as a 500.
+  // Friendly duplicate-key guard – otherwise the unique index surfaces as a 500.
   const [dupe] = await db
     .select({ id: projects.id })
     .from(projects)
     .where(and(eq(projects.key, input.key), isNull(projects.deletedAt)));
-  if (dupe) throw err.domain(`Project key "${input.key}" is already in use — pick another key.`);
+  if (dupe) throw err.domain(`Project key "${input.key}" is already in use – pick another key.`);
   const { typeId, companyId } = await resolveTypeCompany(input.projectTypeId, input.companyId);
   const id = ulid();
   await db.insert(projects).values({
@@ -200,7 +200,7 @@ export async function updateProject(actor: Actor, id: string, input: any) {
     patch.projectTypeId = typeId;
     if (companyId !== before.companyId) patch.companyId = companyId;
   }
-  // Merge settings keys (never blindly replace — preserve estimateUnit etc.).
+  // Merge settings keys (never blindly replace – preserve estimateUnit etc.).
   if (input.estimateUnit !== undefined || input.settings !== undefined) {
     const merged: Record<string, unknown> = { ...(before.settings as Record<string, unknown>) };
     if (input.settings && typeof input.settings === 'object') {
@@ -831,7 +831,7 @@ export async function getIntakeSettings(actor: Actor, projectId: string) {
 }
 
 /**
- * The mailbox password never leaves the server — callers get `hasPassword`
+ * The mailbox password never leaves the server – callers get `hasPassword`
  * instead, and an update without one keeps whatever is stored.
  */
 function redactMailbox<T extends { mailbox?: unknown } | undefined>(settings: T): T {

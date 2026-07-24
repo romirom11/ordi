@@ -1,5 +1,5 @@
 /**
- * Permission catalog — the single source of truth for RBAC capabilities (PRD §4.2, §12.8).
+ * Permission catalog – the single source of truth for RBAC capabilities (PRD §4.2, §12.8).
  *
  * Format: `domain.action`. Unknown permission = denied (fail closed).
  * The role-editor UI is rendered from this catalog; the RBAC integration test

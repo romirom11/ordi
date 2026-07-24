@@ -183,7 +183,7 @@ export function PipelineTab() {
                       )}
                       <div className="mt-2 flex items-center justify-between">
                         <span className="text-[13px] font-semibold tabular-nums">
-                          {d.amount != null ? fmtMoney(d.amount, d.currency ?? 'USD') : '—'}
+                          {d.amount != null ? fmtMoney(d.amount, d.currency ?? 'USD') : '–'}
                         </span>
                         <div className="flex items-center gap-2">
                           {d.expectedCloseDate && (

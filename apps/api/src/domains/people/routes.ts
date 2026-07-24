@@ -288,7 +288,7 @@ export function peopleRoutes() {
     return c.json({ ok: true });
   });
 
-  // ── Compensation (PRD §12.5) — people.read_compensation ──
+  // ── Compensation (PRD §12.5) – people.read_compensation ──
   app.get('/employees/:id/compensation', guard('people.read_compensation'), async (c) =>
     c.json({ data: await svc.listCompensation(currentActor(c), c.req.param('id')) }));
 

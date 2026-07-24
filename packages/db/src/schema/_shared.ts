@@ -14,7 +14,7 @@ export const timestamps = {
 /** created_by is nullable for system-generated rows. */
 export const createdBy = () => text('created_by');
 
-/** Optimistic-locking version — incremented by a DB trigger on every UPDATE (PRD §3.4, §5.2). */
+/** Optimistic-locking version – incremented by a DB trigger on every UPDATE (PRD §3.4, §5.2). */
 export const version = () => integer('version').notNull().default(1);
 
 /** Soft delete marker (PRD §5.2). */

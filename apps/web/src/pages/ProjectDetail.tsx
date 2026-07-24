@@ -55,21 +55,21 @@ extendDict({
     'projects.byStatus': 'By status',
     'projects.general': 'General',
     'projects.access': 'Access',
-    'projects.conflict': 'This project changed elsewhere — reloaded the latest version.',
+    'projects.conflict': 'This project changed elsewhere – reloaded the latest version.',
     'projects.statusActive': 'Active',
     'projects.statusPaused': 'Paused',
     'projects.statusCompleted': 'Completed',
     'projects.statusArchived': 'Archived',
     'projects.newTaskInline': 'Add task…',
     'projects.noTasks': 'No tasks in this project yet',
-    'projects.noTasksHint': 'Create your first task — click + in a status group or press C.',
+    'projects.noTasksHint': 'Create your first task – click + in a status group or press C.',
     'projects.cycleDatesRequired': 'Pick start and end dates for the cycle.',
     'projects.cycleDatesOrder': 'The end date must be after the start date.',
-    'projects.aboutPlaceholder': 'Describe this project — goals, scope, context…',
+    'projects.aboutPlaceholder': 'Describe this project – goals, scope, context…',
     'projects.overviewEmpty': 'No tasks yet',
     'projects.loadFailed': 'Could not load this project.',
     'projects.properties': 'Properties',
-    'projects.overviewHint': 'This is the project page — describe the goals here, and add tasks in the Tasks tab.',
+    'projects.overviewHint': 'This is the project page – describe the goals here, and add tasks in the Tasks tab.',
     'projects.summaryPh': 'Add a short summary…',
     'projects.description': 'Description',
   },
@@ -91,17 +91,17 @@ extendDict({
     'projects.byStatus': 'За статусом',
     'projects.general': 'Загальні',
     'projects.access': 'Доступ',
-    'projects.conflict': 'Проєкт змінено деінде — завантажено найновішу версію.',
+    'projects.conflict': 'Проєкт змінено деінде – завантажено найновішу версію.',
     'projects.statusActive': 'Активний',
     'projects.statusPaused': 'Призупинено',
     'projects.statusCompleted': 'Завершено',
     'projects.statusArchived': 'Архів',
     'projects.newTaskInline': 'Додати задачу…',
     'projects.noTasks': 'У цьому проєкті ще немає задач',
-    'projects.noTasksHint': 'Створіть першу задачу — натисніть + у групі статусу або C на клавіатурі.',
+    'projects.noTasksHint': 'Створіть першу задачу – натисніть + у групі статусу або C на клавіатурі.',
     'projects.cycleDatesRequired': 'Оберіть дати початку та завершення циклу.',
     'projects.cycleDatesOrder': 'Дата завершення має бути після дати початку.',
-    'projects.aboutPlaceholder': 'Опишіть проєкт — цілі, обсяг, контекст…',
+    'projects.aboutPlaceholder': 'Опишіть проєкт – цілі, обсяг, контекст…',
     'projects.overviewEmpty': 'Задач поки немає',
     'projects.loadFailed': 'Не вдалося завантажити проєкт.',
     'projects.properties': 'Властивості',
@@ -274,7 +274,7 @@ function ProjectHeader({ project, loading, canWrite, canDelete, tab, onTab, onDe
       className="block border-b border-border"
     >
       {/* One slim bar: parent trail + identity on the left, section switcher on
-          the right. The name lives here only — no title echo below. */}
+          the right. The name lives here only – no title echo below. */}
       <div className="flex h-11 min-w-0 items-center gap-2 px-4">
         <Link
           to="/projects"
@@ -564,7 +564,7 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, onOpen }: 
 function QuickAdd({ seed, onAdd, placeholder, variant = 'row', inputRef, onDismiss }: {
   seed?: Record<string, unknown>; onAdd: (title: string, seed?: Record<string, unknown>) => void;
   placeholder: string; variant?: 'row' | 'card'; inputRef?: (el: HTMLInputElement | null) => void;
-  /** Called on Escape or on blur with an empty draft — lets the list hide the row again. */
+  /** Called on Escape or on blur with an empty draft – lets the list hide the row again. */
   onDismiss?: () => void;
 }) {
   const [title, setTitle] = useState('');

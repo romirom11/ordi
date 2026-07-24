@@ -1,6 +1,6 @@
 /**
  * Per-project access management: visibility (workspace/private) + members with
- * roles. Self-contained — runs its own queries and mutations. Embedded in the
+ * roles. Self-contained – runs its own queries and mutations. Embedded in the
  * project settings tab; renders read-only for non-managers.
  */
 import { useMemo, useState } from 'react';
@@ -34,7 +34,7 @@ extendDict({
     'access.updated': 'Access updated',
     'access.readOnly': 'You have read-only access to project settings.',
     'access.saveFailed': 'Could not save changes',
-    'access.conflict': 'Someone else made changes — reloaded latest.',
+    'access.conflict': 'Someone else made changes – reloaded latest.',
   },
   uk: {
     'access.title': 'Доступ',
@@ -56,7 +56,7 @@ extendDict({
     'access.updated': 'Доступ оновлено',
     'access.readOnly': 'Ви маєте доступ лише для читання до налаштувань проєкту.',
     'access.saveFailed': 'Не вдалося зберегти зміни',
-    'access.conflict': 'Хтось інший вніс зміни — завантажено найновіше.',
+    'access.conflict': 'Хтось інший вніс зміни – завантажено найновіше.',
   },
 });
 

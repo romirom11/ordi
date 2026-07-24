@@ -270,7 +270,7 @@ roles ──< role_permissions│              │      cycles ──┘  │   
 
 ### 5.3. Таблиці за доменами
 
-**core:** users (email, name, role_id, avatar, timezone, locale, is_active), sessions/accounts/verifications (Better Auth), api_tokens (user_id, name, hash, scopes JSONB, read_only, last_used_at, revoked_at), roles, role_permissions, custom_field_definitions (entity_type, key, label, type: text/number/date/select/multiselect/checkbox/url/user, options, required, position, show_in_list, is_sortable, indexed), activity_log (entity_type, entity_id, actor_id, actor_type: user|agent|system|integration, action, diff JSONB — з redaction чутливих полів, див. 14.4, sensitivity: normal|sensitive для політики зберігання), notifications (user_id, type, entity_ref, payload, read_at), events (outbox: type, aggregate_type, aggregate_id, payload, occurred_at, published_at), processed_events (consumer, event_id — дедуплікація обробки), notifications... attachments (entity_type, entity_id, file_key, filename, size, mime), saved_views (user_id nullable для shared, entity_type, name, filters JSONB, sort, layout, is_shared), webhook_subscriptions (url, secret, event_types[], active), webhook_deliveries (лог з retry-статусом, attempt, next_retry_at, status: pending/delivered/failed/dead), dashboards (owner_id, name, visibility: private|workspace), dashboard_widgets (dashboard_id, widget_type, source, config JSONB: фільтри/groupby/метрика, layout: x/y/w/h).
+**core:** users (email, name, role_id, avatar, timezone, locale, is_active), sessions/accounts/verifications (Better Auth), api_tokens (user_id, name, hash, scopes JSONB, read_only, last_used_at, revoked_at), roles, role_permissions, custom_field_definitions (entity_type, key, label, type: text/number/date/select/multiselect/checkbox/url/user, options, required, position, show_in_list, is_sortable, indexed), activity_log (entity_type, entity_id, actor_id, actor_type: user|agent|system|integration, action, diff JSONB – з redaction чутливих полів, див. 14.4, sensitivity: normal|sensitive для політики зберігання), notifications (user_id, type, entity_ref, payload, read_at), events (outbox: type, aggregate_type, aggregate_id, payload, occurred_at, published_at), processed_events (consumer, event_id – дедуплікація обробки), notifications... attachments (entity_type, entity_id, file_key, filename, size, mime), saved_views (user_id nullable для shared, entity_type, name, filters JSONB, sort, layout, is_shared), webhook_subscriptions (url, secret, event_types[], active), webhook_deliveries (лог з retry-статусом, attempt, next_retry_at, status: pending/delivered/failed/dead), dashboards (owner_id, name, visibility: private|workspace), dashboard_widgets (dashboard_id, widget_type, source, config JSONB: фільтри/groupby/метрика, layout: x/y/w/h).
 
 **crm:** companies (name, domain, status: lead/active/paused/archived, owner_id, billing_email, address JSONB, default_currency, payment_terms_days, portal_token, custom_fields), contacts (company_id, first/last name, email, phone, position, is_primary, custom_fields), deal_stages (name, position, probability, is_won, is_lost), deals (company_id, title, stage_id, amount, currency, expected_close_date, owner_id, lost_reason, custom_fields), notes (company_id, contact_id?, deal_id?, body JSON, pinned).
 
@@ -286,13 +286,13 @@ roles ──< role_permissions│              │      cycles ──┘  │   
 
 ### 5.4. Зафіксовані кардинальності (найдорожчі рішення)
 
-- **project N—1 company, nullable + `kind: client | internal`.** Клієнтський проєкт має company_id і kind=client. Внутрішній проєкт має company_id=NULL і kind=internal (без фіктивного клієнта). `kind` (не наявність company_id) є канонічним прапорцем для фільтрів, прав і звітів; company_id NULL просто відображає відсутність клієнта. Наслідки, зафіксовані явно: CRM-списки, aging і profitability-виручка працюють лише над kind=client (internal ніколи не протікає в клієнтські звіти); фінансова аналітика собівартості (11.10) враховує kind=internal проєкти як чисту вартість без revenue (саме це потрібно для overhead-обліку: внутрішній час це небіллабельна собівартість). Рахунок не можна привʼязати до internal-проєкту (валідація: invoice.project_id повинен вести на kind=client).
-- **project 1—N tasks; безпроєктних задач немає.** Оперативка й задачі, не привʼязані до клієнтської роботи, живуть у internal-проєкті (напр. "Inbox" або "Operations"), який є звичайним kind=internal проєктом без company_id, а не службовим винятком.
+- **project N–1 company, nullable + `kind: client | internal`.** Клієнтський проєкт має company_id і kind=client. Внутрішній проєкт має company_id=NULL і kind=internal (без фіктивного клієнта). `kind` (не наявність company_id) є канонічним прапорцем для фільтрів, прав і звітів; company_id NULL просто відображає відсутність клієнта. Наслідки, зафіксовані явно: CRM-списки, aging і profitability-виручка працюють лише над kind=client (internal ніколи не протікає в клієнтські звіти); фінансова аналітика собівартості (11.10) враховує kind=internal проєкти як чисту вартість без revenue (саме це потрібно для overhead-обліку: внутрішній час це небіллабельна собівартість). Рахунок не можна привʼязати до internal-проєкту (валідація: invoice.project_id повинен вести на kind=client).
+- **project 1–N tasks; безпроєктних задач немає.** Оперативка й задачі, не привʼязані до клієнтської роботи, живуть у internal-проєкті (напр. "Inbox" або "Operations"), який є звичайним kind=internal проєктом без company_id, а не службовим винятком.
 - task parent_id: дерево підзадач, максимум 5 рівнів (перевірка сервісом).
-- task N—N users (виконавці); task N—N labels; task N—N tasks (relations).
-- invoice N—1 company, N—1 project (nullable), N—1 quote (nullable); payment N—N немає: payment N—1 invoice, часткові оплати списком платежів.
-- contact N—1 company (людина у двох клієнтах = два записи; компроміс у 22).
-- kb_space N—1 project (nullable: workspace-простори існують без проєкту).
+- task N–N users (виконавці); task N–N labels; task N–N tasks (relations).
+- invoice N–1 company, N–1 project (nullable), N–1 quote (nullable); payment N–N немає: payment N–1 invoice, часткові оплати списком платежів.
+- contact N–1 company (людина у двох клієнтах = два записи; компроміс у 22).
+- kb_space N–1 project (nullable: workspace-простори існують без проєкту).
 
 ### 5.5. Кастомні поля: механіка
 
@@ -516,13 +516,13 @@ reminder_rules: зсуви від due_date (напр. -3, +1, +7, +14 днів),
 - **Utilization:** % біллабельних годин від доступних (з урахуванням відсутностей з 12.2) per людина/команда: показує, наскільки завантаження конвертується у виставлене.
 - **Звіти-конструктор:** profit згрупований за клієнтом/проєктом/періодом з фільтрами, як у Productive; експорт CSV; ці ж метрики доступні віджетами кастомних дашбордів (джерело "profitability", лише з finance.read_costs).
 
-Межа: це управлінська аналітика на основі cost rate і годин, а не бухгалтерський P&L і не payroll. Точні нарахування ЗП, податки, відомості — поза ordi (зовнішній інструмент), як і legal-частина Finance (11.1).
+Межа: це управлінська аналітика на основі cost rate і годин, а не бухгалтерський P&L і не payroll. Точні нарахування ЗП, податки, відомості – поза ordi (зовнішній інструмент), як і legal-частина Finance (11.1).
 
 ---
 
 ## 12. Модуль People (HR)
 
-Референс: Frappe HR (open-source HRMS: lifecycle, leaves, attendance, recruitment). Береться модель і термінологія, адаптовані під масштаб агенції. Свідомо НЕ береться: payroll-движок з формульними компонентами і регіональним податковим compliance (генерація зарплатних відомостей, слабів, податкові слаби) — це бухгалтерсько-юридична зона, яку ordi не покриває (та сама межа, що й у Finance, розділ 11.1). Зарплата в ordi присутня як атрибут вартості співробітника для аналітики (12.5 + 11.x), а не як розрахунковий движок нарахувань.
+Референс: Frappe HR (open-source HRMS: lifecycle, leaves, attendance, recruitment). Береться модель і термінологія, адаптовані під масштаб агенції. Свідомо НЕ береться: payroll-движок з формульними компонентами і регіональним податковим compliance (генерація зарплатних відомостей, слабів, податкові слаби) – це бухгалтерсько-юридична зона, яку ordi не покриває (та сама межа, що й у Finance, розділ 11.1). Зарплата в ordi присутня як атрибут вартості співробітника для аналітики (12.5 + 11.x), а не як розрахунковий движок нарахувань.
 
 Доступ до модуля керується окремим доменом permissions `people.*` (нижче), бо HR-дані чутливі й не мають бути видимі всім із доступом до проєктів.
 
@@ -553,19 +553,19 @@ reminder_rules: зсуви від due_date (напр. -3, +1, +7, +14 днів),
 
 Шар планування завантаження (аналог Resourcing у Productive, спрощений: повний capacity-planning з прогнозними плейсхолдерами не робимо, див. компроміс у 22). Тижневий вигляд хто на які проєкти алоцений, з урахуванням відсутностей (12.2). Джерело алокацій: призначення задач із дедлайнами + явні алокації (allocation: user, project, годин/тиждень, період). Мета: бачити перевантаження і вікна, і живити utilization-аналітику (11.10). Входить у 1.0 як повноцінний модуль; поза скоупом лишаються лише прогнозні плейсхолдери (алокація на ще-не-найнятого) і сценарне forecasting, що зафіксовано в компромісах.
 
-### 12.5. Компенсація співробітника (cost rate) — містковий підрозділ між People і Finance
+### 12.5. Компенсація співробітника (cost rate) – містковий підрозділ між People і Finance
 
-Тут живе твоє "бачити ЗП і витрати по ЗП". Це свідомо НЕ payroll (нарахування/слаби/податки), а вартісна ставка людини для розрахунку собівартості й прибутковості. Модель — з Productive (cost rate + overhead), не з Frappe payroll:
+Тут живе твоє "бачити ЗП і витрати по ЗП". Це свідомо НЕ payroll (нарахування/слаби/податки), а вартісна ставка людини для розрахунку собівартості й прибутковості. Модель – з Productive (cost rate + overhead), не з Frappe payroll:
 
 - **compensation** per співробітник: тип (місячна ЗП / годинна ставка / контракторський рейт), сума, валюта, період дії (versioned: історія змін ЗП з датами, тому собівартість минулих періодів рахується коректно). Видима лише за `people.read_compensation` (найвужче право, окреме від решти HR).
-- **Cost rate (годинна собівартість):** обчислюється з компенсації і норми годин (робочі години/тиждень з налаштувань). Для контрактора — прямий рейт. Cost rate — це те, що множиться на відпрацьовані години з модуля Time для собівартості.
+- **Cost rate (годинна собівартість):** обчислюється з компенсації і норми годин (робочі години/тиждень з налаштувань). Для контрактора – прямий рейт. Cost rate – це те, що множиться на відпрацьовані години з модуля Time для собівартості.
 - **Overhead (опційно):** company overhead per hour (фасіліті + внутрішні/небіллабельні витрати), як у Productive: конфігурована місячна база накладних розкидається на робочі години й додається поверх cost rate. Дає "справжню" собівартість години.
 
 Ці дані споживає фінансова аналітика (нижче) і собівартість проєкту. Самі суми ЗП ніде, крім карток за правом `people.read_compensation` і агрегованих звітів за правом `finance.read_costs`, не показуються.
 
 ### 12.6. HR-дашборд і звіти
 
-За правами: headcount (активні/у відпустці/нові/exits за період), майбутні відсутності (календар), відкриті вакансії і стан пайплайну кандидатів, найближчі кінці probation. Звіти: leave balances по команді, attendance-зведення (якщо ведеться), recruitment-воронка. Компенсаційні/costs-звіти — окремо, за `finance.read_costs` (12.5 + розділ 11.x).
+За правами: headcount (активні/у відпустці/нові/exits за період), майбутні відсутності (календар), відкриті вакансії і стан пайплайну кандидатів, найближчі кінці probation. Звіти: leave balances по команді, attendance-зведення (якщо ведеться), recruitment-воронка. Компенсаційні/costs-звіти – окремо, за `finance.read_costs` (12.5 + розділ 11.x).
 
 ### 12.7. Модель даних (People)
 
@@ -579,14 +579,14 @@ departments (name, parent_id), positions (title), employees (user_id?, first/las
 |---|---|
 | `people.read` | Базовий довідник співробітників, оргструктура, публічні поля |
 | `people.read_sensitive` | Persona-поля (д.н., адреса, документи), вилки ЗП у вакансіях |
-| `people.read_compensation` | Компенсація співробітників (ЗП, ставки) — найвужче |
+| `people.read_compensation` | Компенсація співробітників (ЗП, ставки) – найвужче |
 | `people.write` | Редагування карток, lifecycle |
 | `people.manage_leave` | Налаштування типів/квот/календарів |
 | `people.approve_leave` | Апрув заявок поза лінією менеджера |
 | `people.recruit` | Вакансії, кандидати, інтервʼю, найм |
 | `finance.read_costs` | Агреговані costs/ЗП-звіти й собівартість (у домені finance, бо це гроші) |
 
-Системні ролі оновлюються: Owner/Admin — все. Нова преднастроєна роль **HR** (people.* повністю крім read_compensation, яку дають вибірково). Роль **Finance** отримує `finance.read_costs` (бачить агреговані витрати на ЗП, але не обовʼязково поіменні ставки: read_compensation видається окремо). Member/guest — жодних people.*: розділ People відсутній у навігації.
+Системні ролі оновлюються: Owner/Admin – все. Нова преднастроєна роль **HR** (people.* повністю крім read_compensation, яку дають вибірково). Роль **Finance** отримує `finance.read_costs` (бачить агреговані витрати на ЗП, але не обовʼязково поіменні ставки: read_compensation видається окремо). Member/guest – жодних people.*: розділ People відсутній у навігації.
 
 Кожен доступ до compensation і read_sensitive додатково пишеться в audit (хто дивився ЗП).
 
@@ -657,7 +657,7 @@ In-app (дзвіночок, read/unread, перехід до сутності) +
 Повний diff небезпечний: без обмежень він продублює ЗП, персональні дані й секрети у вічну незмінну таблицю. Тому:
 
 - **Redaction-реєстр.** Поля, позначені чутливими (compensation.amount, employees.sensitive, salary_range у вакансіях, будь-які поля під people.read_compensation/read_sensitive), у diff НЕ пишуть значення. Пишеться лише факт зміни: `field: "compensation.amount", action: "changed"`, без старого/нового значення. Читач історії бачить, що ЗП змінили, коли і хто, але не суми.
-- **Токени й секрети — ніколи.** api_tokens.hash, webhook.secret, git-креденшели, паролі не потрапляють у diff за жодних умов (виключені на рівні серіалізатора, не лише redacted): для них навіть факт-запис не містить матеріалу.
+- **Токени й секрети – ніколи.** api_tokens.hash, webhook.secret, git-креденшели, паролі не потрапляють у diff за жодних умов (виключені на рівні серіалізатора, не лише redacted): для них навіть факт-запис не містить матеріалу.
 - **Позначка чутливості запису.** Записи, що стосуються HR/compensation-сутностей, мають `sensitivity: sensitive`. Це керує (а) видимістю (такі записи в загальній стрічці видно лише з people.read_sensitive/compensation, а не будь-кому з audit.read) і (б) політикою зберігання.
 - **Політика зберігання.** Звичайний audit зберігається безстроково (аудит бізнес-дій цінний). Sensitive-audit має окреме, коротше вікно зберігання (конфігурується, напр. 24 міс) з наступним прибиранням значень-фактів понад строк: мінімізація чутливого сліду. Сам факт доступу до compensation/sensitive-полів (перегляд, не лише зміна) теж пишеться в sensitive-audit (хто дивився ЗП), як зазначено в 12.8.
 
@@ -860,7 +860,7 @@ UI uk/en (i18n-ключі з першого дня); Intl для дат/чисе
 | Фінанси без пер-записних ACL | Не можна дати доступ до фінансів одного клієнта | Роль Finance або нічого; пер-клієнтний фінансовий доступ різко ускладнює модель заради рідкісного кейсу |
 | Легкий портал за токеном, без логіна клієнтів | Клієнт не має особистого кабінету з автентифікацією | Портал-токен покриває 90% цінності; повноцінний клієнтський логін = окремий великий модуль |
 | Вбудовані правила замість конструктора автоматизацій | Не можна малювати довільні сценарії в UI | Конструктор = найдорожча фіча класу; довільні сценарії робляться зовнішньо через вебхуки + API (n8n/агент) |
-| Contact N—1 company | Людина у двох клієнтах = два записи | Рідкісний кейс; many-to-many всюди дорожчий |
+| Contact N–1 company | Людина у двох клієнтах = два записи | Рідкісний кейс; many-to-many всюди дорожчий |
 | Optimistic locking (version) + soft-lock замість CRDT | Немає одночасного співредагування одного тексту | Команда ≤ 50; version-конфлікт (409) + soft-lock на KB/описах покривають реальний ризик втрат |
 | Один PDF-шаблон | Немає конструктора шаблонів | Бренд-шаблон достатній; конструктор Invoice Ninja = найменш цінна тут фіча |
 | Late fees відсутні | Пеня не нараховується автоматично | Нагадування покривають кейс; пеня в наших договорах рідкість |
@@ -975,7 +975,7 @@ UI uk/en (i18n-ключі з першого дня); Intl для дат/чисе
 | Фіча Frappe HR | ordi | Коментар |
 |---|---|---|
 | Employee lifecycle (онбординг → промоції/трансфери → exit) | ✅ | 12.1, онбординг-чеклісти auto-створюють задачі (як у Frappe) |
-| Leave types і policies (carry-forward, earned, LWP, half-day, encashment) | 🔧 | типи/квоти/carry-forward/half-day є (12.2); encashment (грошова компенсація невикористаних) — ні, бо це payroll |
+| Leave types і policies (carry-forward, earned, LWP, half-day, encashment) | 🔧 | типи/квоти/carry-forward/half-day є (12.2); encashment (грошова компенсація невикористаних) – ні, бо це payroll |
 | Leave requests з апрувами, баланси, календар | ✅ | 12.2 |
 | Holiday calendars регіональні | ✅ | 12.2 |
 | Recruitment: вакансії, кандидати, інтервʼю, найм | ✅ | 12.3, публічна careers-форма |
@@ -992,10 +992,10 @@ UI uk/en (i18n-ключі з першого дня); Intl для дат/чисе
 | Overhead per hour (фасіліті + внутрішні витрати) | ✅ | 12.5, опційно |
 | Project profitability (revenue − cost, маржа %) | ✅ | 11.10 |
 | Client profitability | ✅ | 11.10 |
-| Labor cost звіти (за людиною/командою/проєктом/клієнтом) | ✅ | 11.10 — це і є "витрати по ЗП" |
+| Labor cost звіти (за людиною/командою/проєктом/клієнтом) | ✅ | 11.10 – це і є "витрати по ЗП" |
 | Utilization (billable %) з урахуванням відсутностей | ✅ | 11.10 + 12.2 |
 | Custom rate cards (ставки за сервісом/клієнтом) | 🔧 | ставки пер-проєкт/пер-користувач (Time); повні rate cards за сервісами не робимо |
-| Budgets і budget burn з алертами | 🔧 | естімейти проєкту й прибутковість є; окремих бюджетів із burn-алертами в 1.0 немає — тригер: потреба фікс-бюджетного контролю |
+| Budgets і budget burn з алертами | 🔧 | естімейти проєкту й прибутковість є; окремих бюджетів із burn-алертами в 1.0 немає – тригер: потреба фікс-бюджетного контролю |
 | Resource scheduling / forecasting з плейсхолдерами | 🔧 | легкий Resourcing (12.4) без прогнозних плейсхолдерів |
 | Нативний MCP-сервер | ✅ | 16 |
 | Xero/QuickBooks-синк бухгалтерії | ❌ | бухгалтерія зовнішня; звʼязок через експорт/вебхуки |

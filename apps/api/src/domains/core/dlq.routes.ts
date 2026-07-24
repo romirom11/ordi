@@ -1,6 +1,6 @@
 /**
  * Dead-letter queue admin (PRD §3.3). An event is dead for a consumer when its
- * dead_letter_events row has attempts >= MAX (5) — the relay never retries it
+ * dead_letter_events row has attempts >= MAX (5) – the relay never retries it
  * automatically. Replay resets the retry state and re-opens the event in the
  * outbox; reprocess deliberately re-runs an already-processed (consumer, event)
  * pair. Both require audit.read AND settings.manage.

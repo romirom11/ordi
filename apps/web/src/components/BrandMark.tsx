@@ -1,10 +1,10 @@
 /**
- * The ordi product mark — distinct from a customer's workspace logo (which is
+ * The ordi product mark – distinct from a customer's workspace logo (which is
  * uploaded in Settings and shown in the sidebar).
  *
  * Every product-branded surface renders this component: login, the setup
  * wizard, the invite screen and the desktop instance gate. To swap in the real
- * artwork, replace the SVG below (or point `src` at an imported asset) — this
+ * artwork, replace the SVG below (or point `src` at an imported asset) – this
  * is the only file that needs to change.
  */
 import { cn } from './ui';

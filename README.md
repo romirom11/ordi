@@ -1,6 +1,6 @@
 # ordi
 
-**Agency operations platform** — one app, one database, one API for CRM, Projects,
+**Agency operations platform** – one app, one database, one API for CRM, Projects,
 Knowledge Base, Time, Finance and People (HR), with cross-cutting RBAC, an event
 bus, git integrations, search, notifications, audit and an MCP agent.
 
@@ -28,7 +28,7 @@ and refinements are logged in [`docs/architecture-decisions.md`](docs/architectu
 ```
 ordi/
 ├── apps/
-│   ├── api/        # Hono API — domain modules + pg-boss workers
+│   ├── api/        # Hono API – domain modules + pg-boss workers
 │   ├── web/        # React SPA
 │   └── desktop/    # Tauri wrapper of apps/web
 ├── packages/
@@ -86,7 +86,7 @@ pnpm db:seed       # seed roles + demo data
 ## MCP agent
 
 The MCP server exposes the API as agent tools (read + non-destructive actions).
-The agent's permissions equal its API-token scope — the same RBAC as a human.
+The agent's permissions equal its API-token scope – the same RBAC as a human.
 
 ```bash
 ORDI_API_URL=http://localhost:3000 ORDI_API_TOKEN=<token> pnpm --filter @ordi/mcp dev
@@ -95,7 +95,7 @@ Create a token in the app under **Settings → API tokens** (scope ⊆ your role
 
 ## Feature highlights
 
-- Tasks in 5 views: List, Board, Calendar, Timeline (Gantt), Spreadsheet — plus
+- Tasks in 5 views: List, Board, Calendar, Timeline (Gantt), Spreadsheet – plus
   saved views, drafts, cycles with burndown, intake (public form + IMAP).
 - Tiptap rich text with @mentions everywhere (tasks, KB, notes); KB versions,
   soft-locks, backlinks, Markdown export.
@@ -108,12 +108,12 @@ Create a token in the app under **Settings → API tokens** (scope ⊆ your role
   custom dashboards, uk/en UI, OpenAPI at `/api/docs`, CSV import/export,
   dead-letter admin with replay, TOTP 2FA, MCP agent (31 tools).
 
-Docs: [`docs/deployment.md`](docs/deployment.md) — production deployment
-(Dokploy / docker-compose); [`docs/operations.md`](docs/operations.md) —
+Docs: [`docs/deployment.md`](docs/deployment.md) – production deployment
+(Dokploy / docker-compose); [`docs/operations.md`](docs/operations.md) –
 backup/PITR (RPO ≤ 5 min, RTO ≤ 1 h), monitoring, restore runbook;
-[`docs/desktop.md`](docs/desktop.md) — how the desktop app works (instance URL,
+[`docs/desktop.md`](docs/desktop.md) – how the desktop app works (instance URL,
 bearer auth, native features, releases);
-[`docs/architecture-decisions.md`](docs/architecture-decisions.md) —
+[`docs/architecture-decisions.md`](docs/architecture-decisions.md) –
 engineering decisions log.
 
 ## Security & operations
@@ -128,4 +128,4 @@ engineering decisions log.
 
 ## License
 
-Proprietary — internal agency tool.
+Proprietary – internal agency tool.

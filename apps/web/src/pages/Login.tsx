@@ -41,7 +41,7 @@ export function LoginPage() {
       const res = await api.post<{ ok: boolean; sessionToken?: string }>(
         '/auth/login', { email, password, totp: totp || undefined },
       );
-      // Desktop (tauri:// origin) cannot use same-site cookies — keep the
+      // Desktop (tauri:// origin) cannot use same-site cookies – keep the
       // session token and send it as a bearer credential instead.
       if (isTauri && res.sessionToken) setSessionToken(res.sessionToken);
       window.location.href = '/';

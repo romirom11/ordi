@@ -1,7 +1,7 @@
 /**
  * IMAP intake polling (PRD §8.6). For every project with a configured intake
  * mailbox, fetch UNSEEN messages, turn each into a pending intake_items row
- * (source 'email') and mark it \Seen. A broken mailbox only logs a warning —
+ * (source 'email') and mark it \Seen. A broken mailbox only logs a warning –
  * it must never crash the worker.
  */
 import { ImapFlow } from 'imapflow';

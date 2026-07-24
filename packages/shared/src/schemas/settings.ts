@@ -27,7 +27,7 @@ export const invoiceSettingsSchema = z.object({
 });
 export type InvoiceSettings = z.infer<typeof invoiceSettingsSchema>;
 
-/** PATCH /settings/workspace — all fields optional. */
+/** PATCH /settings/workspace – all fields optional. */
 export const workspaceSettingsUpdateSchema = z.object({
   name: z.string().min(1).optional(),
   logo: z.string().nullable().optional(),

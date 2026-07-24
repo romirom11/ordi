@@ -6,7 +6,7 @@
  * ledger transaction. Invariant enforced on every write: a transaction has at
  * least two postings and Σ debit(amount_base) == Σ credit(amount_base) (2dp).
  *
- * Correction model: money is never edited in place — a mirrored `reversal`
+ * Correction model: money is never edited in place – a mirrored `reversal`
  * transaction negates the original, and the original is flagged status='void'.
  * Balance/revenue queries therefore sum over ALL transactions (reversals net
  * out); `void` is a journal display flag, not a filter.
@@ -199,7 +199,7 @@ export async function postInvoiceSent(actor: Actor | null, inv: InvoiceLike): Pr
 
 /** Invoice canceled after having been sent → mirrored reversal frees the receivable. */
 export async function reverseInvoice(actor: Actor | null, inv: { id: string; number: string }): Promise<void> {
-  await reverseSource(actor, 'invoice', inv.id, `Reversal — invoice ${inv.number} canceled`);
+  await reverseSource(actor, 'invoice', inv.id, `Reversal – invoice ${inv.number} canceled`);
 }
 
 /** Payment recorded → debit Bank / credit Accounts receivable. */
@@ -213,7 +213,7 @@ export async function postPayment(
   const [bank, ar] = await Promise.all([systemAccount(SYS.bank), systemAccount(SYS.receivable)]);
   await createTransaction(actor, {
     date: payment.date,
-    description: `Payment — invoice ${inv.number}`,
+    description: `Payment – invoice ${inv.number}`,
     sourceType: 'payment', sourceId: payment.id, projectId: inv.projectId, companyId: inv.companyId,
     postings: [
       { accountId: bank.id, direction: 'debit', amount: payment.amount, currency: payment.currency },
@@ -224,7 +224,7 @@ export async function postPayment(
 
 /** Payment deleted → mirrored reversal restores the receivable. */
 export async function reversePayment(actor: Actor | null, paymentId: string, invoiceNumber: string): Promise<void> {
-  await reverseSource(actor, 'payment', paymentId, `Reversal — payment on invoice ${invoiceNumber} deleted`);
+  await reverseSource(actor, 'payment', paymentId, `Reversal – payment on invoice ${invoiceNumber} deleted`);
 }
 
 interface ExpenseLike { id: string; amount: string; currency: string; date: string; description: string; categoryId: string | null; projectId: string | null; companyId: string | null }
@@ -259,12 +259,12 @@ export async function postExpense(actor: Actor | null, exp: ExpenseLike): Promis
 
 /** Expense (soft-)deleted → mirrored reversal. */
 export async function reverseExpense(actor: Actor | null, expenseId: string): Promise<void> {
-  await reverseSource(actor, 'expense', expenseId, 'Reversal — expense deleted');
+  await reverseSource(actor, 'expense', expenseId, 'Reversal – expense deleted');
 }
 
 /** Money-relevant expense edit → reverse the old posting, post the new state. */
 export async function repostExpense(actor: Actor | null, exp: ExpenseLike): Promise<void> {
-  await reverseSource(actor, 'expense', exp.id, 'Reversal — expense updated');
+  await reverseSource(actor, 'expense', exp.id, 'Reversal – expense updated');
   await postExpense(actor, exp);
 }
 
@@ -314,9 +314,9 @@ export async function voidTransaction(actor: Actor, id: string): Promise<{ rever
   if (!tx) throw err.notFound('Transaction not found');
   if (tx.status !== 'posted') throw err.domain('Transaction is already void');
   if (tx.sourceType && !['manual', 'income'].includes(tx.sourceType)) {
-    throw err.domain('This entry mirrors a document — cancel or delete the document instead', { sourceType: tx.sourceType });
+    throw err.domain('This entry mirrors a document – cancel or delete the document instead', { sourceType: tx.sourceType });
   }
-  const reversalId = await reverseTransaction(actor, tx, `Reversal — ${tx.description || 'entry'} voided`);
+  const reversalId = await reverseTransaction(actor, tx, `Reversal – ${tx.description || 'entry'} voided`);
   await writeActivity(db, { entityType: 'ledger_transaction', entityId: id, action: 'voided', after: { reversalId }, actorId: actor.userId, actorType: actor.actorType });
   return { reversalId };
 }
@@ -403,9 +403,9 @@ export async function deleteAccount(actor: Actor, id: string): Promise<void> {
   if (!acc) throw err.notFound('Account not found');
   if (acc.isSystem) throw err.domain('System accounts cannot be deleted');
   const [{ n: postings }] = await db.select({ n: sql<number>`count(*)` }).from(schema.ledgerPostings).where(eq(schema.ledgerPostings.accountId, id)) as any[];
-  if (Number(postings) > 0) throw err.domain('Account has ledger entries — archive it instead');
+  if (Number(postings) > 0) throw err.domain('Account has ledger entries – archive it instead');
   const [{ n: children }] = await db.select({ n: sql<number>`count(*)` }).from(schema.accounts).where(eq(schema.accounts.parentId, id)) as any[];
-  if (Number(children) > 0) throw err.domain('Account has sub-accounts — move or delete them first');
+  if (Number(children) > 0) throw err.domain('Account has sub-accounts – move or delete them first');
   await db.delete(schema.accounts).where(eq(schema.accounts.id, id));
   await writeActivity(db, { entityType: 'account', entityId: id, action: 'deleted', before: { name: acc.name }, actorId: actor.userId, actorType: actor.actorType });
 }

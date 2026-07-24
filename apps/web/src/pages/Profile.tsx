@@ -359,7 +359,7 @@ function TokensSection() {
                   {tok.readOnly && <Badge className="ml-2 bg-muted text-muted-foreground">{t('profile.readOnly')}</Badge>}
                   {tok.revoked && <Badge className="ml-2 bg-destructive/10 text-destructive">{t('profile.revoked')}</Badge>}
                 </td>
-                <td className="py-2 pr-3 font-mono text-xs text-muted-foreground">{tok.prefix ?? '—'}</td>
+                <td className="py-2 pr-3 font-mono text-xs text-muted-foreground">{tok.prefix ?? '–'}</td>
                 <td className="py-2 pr-3 tabular-nums">{tok.scopes?.length ?? 0}</td>
                 <td className="py-2 pr-3 text-muted-foreground">{tok.lastUsedAt ? fmtDate(tok.lastUsedAt) : t('profile.never')}</td>
                 <td className="py-2 text-right">
@@ -428,7 +428,7 @@ function TotpSection() {
   });
 
   if (totp.isLoading) return <Skeleton className="h-20 w-full" />;
-  // Endpoint missing (404) or errored — hide the section gracefully.
+  // Endpoint missing (404) or errored – hide the section gracefully.
   if (totp.isError || totp.data == null) return null;
 
   const enabled = totp.data.enabled;

@@ -1,5 +1,5 @@
 /**
- * Company (client) detail — rebuilt for the unified CRM.
+ * Company (client) detail – rebuilt for the unified CRM.
  * Header: big avatar, inline-editable name, status pill dropdown, domain link,
  * owner picker. Two columns: main sections (Deals · Contacts · Notes) + a side
  * properties card with linked projects.
@@ -272,7 +272,7 @@ function DealsSection({ companyId, canWrite }: { companyId: string; canWrite: bo
                 <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{d.title}</span>
                 {stage && <Badge color={color}>{stage.name}</Badge>}
                 <span className="w-24 text-right text-[13px] font-semibold tabular-nums">
-                  {d.amount != null ? fmtMoney(d.amount, d.currency ?? 'USD') : '—'}
+                  {d.amount != null ? fmtMoney(d.amount, d.currency ?? 'USD') : '–'}
                 </span>
               </div>
             );
@@ -410,7 +410,7 @@ function ContactsSection({ companyId, canWrite }: { companyId: string; canWrite:
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">
           {contacts.map((ct, i) => {
-            const name = [ct.firstName, ct.lastName].filter(Boolean).join(' ') || '—';
+            const name = [ct.firstName, ct.lastName].filter(Boolean).join(' ') || '–';
             return (
               <div key={ct.id} className={cn('flex items-center gap-3 px-3 py-2.5', i > 0 && 'border-t border-border')}>
                 <Avatar name={name} size={30} />
@@ -546,13 +546,13 @@ function PropertiesCard({ company, loading }: { company?: Company; loading: bool
           <PropRow label={t('crm.billingEmail')}>
             {company.billingEmail
               ? <a href={`mailto:${company.billingEmail}`} className="text-primary hover:underline">{company.billingEmail}</a>
-              : <span className="text-faint">—</span>}
+              : <span className="text-faint">–</span>}
           </PropRow>
-          <PropRow label={t('common.currency')}><span className="tabular-nums">{company.defaultCurrency || '—'}</span></PropRow>
+          <PropRow label={t('common.currency')}><span className="tabular-nums">{company.defaultCurrency || '–'}</span></PropRow>
           <PropRow label={t('crm.paymentTerms')}>
             {company.paymentTermsDays != null
               ? <span className="tabular-nums">{t('crm.paymentTermsValue').replace('{n}', String(company.paymentTermsDays))}</span>
-              : <span className="text-faint">—</span>}
+              : <span className="text-faint">–</span>}
           </PropRow>
           <PropRow label={t('crm.created')}>{fmtDate(company.createdAt)}</PropRow>
         </div>

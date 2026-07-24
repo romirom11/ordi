@@ -1,7 +1,7 @@
 /**
  * Public, client-facing invoice document (GET /i/:token).
  * Deliberately a light "paper" document on a subtle backdrop regardless of the
- * viewer's theme — branded with the workspace logo/name and the workspace
+ * viewer's theme – branded with the workspace logo/name and the workspace
  * accent color, and print-friendly. Consumes the nested public payload:
  *   { invoice, items, company, workspace, invoiceSettings, amountPaid, outstanding }
  */
@@ -134,7 +134,7 @@ export function PublicInvoicePage({ token }: { token: string }) {
               <tbody>
                 {items.map((it, i) => (
                   <tr key={String(i)} className="border-b border-slate-100">
-                    <td className="py-2.5 text-slate-800">{it.description ?? '—'}</td>
+                    <td className="py-2.5 text-slate-800">{it.description ?? '–'}</td>
                     <td className="py-2.5 text-right tabular-nums text-slate-600">{Number(it.quantity ?? 0)}</td>
                     <td className="py-2.5 text-right tabular-nums text-slate-600">{fmtMoney(it.unitPrice ?? 0, cur)}</td>
                     <td className="py-2.5 text-right font-medium tabular-nums text-slate-900">{fmtMoney(it.amount ?? Number(it.quantity ?? 0) * Number(it.unitPrice ?? 0), cur)}</td>

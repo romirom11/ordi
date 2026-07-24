@@ -28,7 +28,7 @@ extendDict({
     'time.task': 'Task',
     'time.taskRequired': 'Pick a task first.',
     'time.pickTask': 'Pick a task…',
-    'time.noMyTasks': 'No tasks assigned to you yet — create or pick up a task first.',
+    'time.noMyTasks': 'No tasks assigned to you yet – create or pick up a task first.',
     'time.durationRequired': 'Enter a duration in minutes.',
   },
   uk: {
@@ -48,7 +48,7 @@ extendDict({
     'time.task': 'Задача',
     'time.taskRequired': 'Спершу оберіть задачу.',
     'time.pickTask': 'Оберіть задачу…',
-    'time.noMyTasks': 'На вас ще немає задач — спершу створіть або візьміть задачу.',
+    'time.noMyTasks': 'На вас ще немає задач – спершу створіть або візьміть задачу.',
     'time.durationRequired': 'Вкажіть тривалість у хвилинах.',
   },
 });
@@ -93,7 +93,7 @@ function useMyTaskOptions(enabled: boolean): { id: string; label: string }[] {
   return out;
 }
 
-/** Task dropdown for time tracking — replaces the old raw "task id" input. */
+/** Task dropdown for time tracking – replaces the old raw "task id" input. */
 function TaskSelect({ value, onChange, open }: { value: string; onChange: (id: string) => void; open: boolean }) {
   const t = useT();
   const options = useMyTaskOptions(open);
@@ -502,9 +502,9 @@ function ReportsView() {
             )}
             {rows.map((r, i) => (
               <tr key={r.key ?? r.name ?? r.label ?? String(i)} className="row-enter border-b border-border transition-colors duration-150 last:border-0 hover:bg-muted/40" style={{ ['--i' as string]: Math.min(i, 10) }}>
-                <td className="px-4 py-2 font-medium">{r.label ?? r.name ?? r.key ?? '—'}</td>
+                <td className="px-4 py-2 font-medium">{r.label ?? r.name ?? r.key ?? '–'}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{hoursOf(r).toFixed(1)}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{r.billableAmount != null ? fmtMoney(r.billableAmount, r.currency ?? 'USD') : '—'}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{r.billableAmount != null ? fmtMoney(r.billableAmount, r.currency ?? 'USD') : '–'}</td>
               </tr>
             ))}
           </tbody>

@@ -1,7 +1,7 @@
 /**
  * Sub-tasks of a task rendered as a Linear-style checklist: the status icon
  * cycles todo→done, rows navigate to the sub-task's own page, quick-add at
- * the bottom. Sub-tasks ARE the checklist — no separate entity.
+ * the bottom. Sub-tasks ARE the checklist – no separate entity.
  */
 import { useState } from 'react';
 import { CornerDownLeft, Plus, Trash2 } from 'lucide-react';
