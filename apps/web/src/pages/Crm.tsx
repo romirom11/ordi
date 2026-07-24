@@ -8,7 +8,7 @@ import { Plus, Users, KanbanSquare } from 'lucide-react';
 import { useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { useT } from '../lib/i18n';
-import { Button, PageHeader, Breadcrumbs, Tabs } from '../components/ui';
+import { Button, PageHeader, Tabs } from '../components/ui';
 import { ClientsTab } from '../components/crm/ClientsTab';
 import { PipelineTab } from '../components/crm/PipelineTab';
 import { NewClientDialog, NewDealDialog } from '../components/crm/dialogs';
@@ -38,7 +38,6 @@ export function CrmPage({ tab }: { tab?: string }) {
     <div className="flex min-h-0 flex-1 flex-col">
       <PageHeader
         title={t('crm.title')}
-        breadcrumbs={<Breadcrumbs items={[{ label: t('crm.title') }]} />}
         actions={
           <div className="flex items-center gap-2">
             {canWriteCrm && (

@@ -4,7 +4,7 @@ import { api, qs, ApiError } from '../lib/api';
 import { useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { useTabs } from '../lib/tabs';
-import { Button, Input, Select, Card, PageHeader, Breadcrumbs, EmptyState, Skeleton, SegmentedControl, fmtMoney, fmtDate, cn } from '../components/ui';
+import { Button, Input, Select, Card, PageHeader, EmptyState, Skeleton, SegmentedControl, fmtMoney, fmtDate, cn } from '../components/ui';
 import { Dialog, ContextMenu, toast, type ContextMenuEntry } from '../components/overlays';
 import { Plus, Trash2, Wallet, AlertTriangle, CheckCircle2, Receipt, FileStack, Copy, ExternalLink, Link2 } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
@@ -121,7 +121,6 @@ export function FinancePage() {
     <div>
       <PageHeader
         title={t('nav.finance')}
-        breadcrumbs={<Breadcrumbs items={[{ label: t('nav.finance') }]} />}
         actions={<SegmentedControl options={tabs} value={tab} onChange={setTab} />}
       />
       {tab === 'dashboard' && <DashboardView />}
