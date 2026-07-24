@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { Button, cn } from '../ui';
+import { Button, PriorityIcon, cn } from '../ui';
 
 interface CalTask {
   id: string;
@@ -11,9 +11,6 @@ interface CalTask {
   dueDate?: string | null;
 }
 
-const PRIORITY_COLOR: Record<string, string> = {
-  urgent: '#ef4444', high: '#f97316', medium: '#eab308', low: '#3b82f6', none: '#9ca3af',
-};
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 function ymd(d: Date): string {
@@ -97,9 +94,8 @@ export function CalendarView({ tasks, projectKey, onOpenTask }: {
                 <div className="space-y-0.5">
                   {dayTasks.map((t) => (
                     <button key={t.id} onClick={() => onOpenTask(t.id)} title={t.title}
-                      className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-xs hover:bg-muted">
-                      <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: PRIORITY_COLOR[t.priority ?? 'none'] ?? PRIORITY_COLOR.none }} />
+                      className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-xs transition-colors duration-150 hover:bg-muted">
+                      <PriorityIcon priority={t.priority} size={11} />
                       {refLabel(t, projectKey) && (
                         <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{refLabel(t, projectKey)}</span>
                       )}
@@ -121,9 +117,8 @@ export function CalendarView({ tasks, projectKey, onOpenTask }: {
           <div className="flex flex-wrap gap-1.5 p-2">
             {unscheduled.map((t) => (
               <button key={t.id} onClick={() => onOpenTask(t.id)} title={t.title}
-                className="inline-flex max-w-64 items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted">
-                <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: PRIORITY_COLOR[t.priority ?? 'none'] ?? PRIORITY_COLOR.none }} />
+                className="inline-flex max-w-64 items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs transition-colors duration-150 hover:bg-muted">
+                <PriorityIcon priority={t.priority} size={12} />
                 {refLabel(t, projectKey) && (
                   <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{refLabel(t, projectKey)}</span>
                 )}

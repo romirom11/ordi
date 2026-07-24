@@ -2,9 +2,35 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../lib/api';
 import { useMe } from '../lib/auth';
-import { Button, Input, Select, Card, Badge, PageHeader, Skeleton, fmtDate } from '../components/ui';
+import { Button, Input, Select, Card, Badge, Switch, Checkbox, Avatar, PageHeader, Skeleton, fmtDate } from '../components/ui';
+import { toast } from '../components/overlays';
 import { Check, Copy, KeyRound, Plus, ShieldCheck, Trash2 } from 'lucide-react';
-import { useT } from '../lib/i18n';
+import { extendDict, useT } from '../lib/i18n';
+
+extendDict({
+  en: {
+    'profile.profileInfo': 'Profile',
+    'profile.preferences': 'Preferences',
+    'profile.security': 'Security',
+    'profile.saveFailedShort': 'Could not save changes.',
+    'profile.notifSaveFailed': 'Could not update notification preference.',
+    'profile.tokenCreated': 'API token created.',
+    'profile.tokenRevoked': 'Token revoked.',
+    'profile.twoFactorEnabled': 'Two-factor authentication enabled.',
+    'profile.twoFactorDisabled': 'Two-factor authentication disabled.',
+  },
+  uk: {
+    'profile.profileInfo': 'Профіль',
+    'profile.preferences': 'Налаштування',
+    'profile.security': 'Безпека',
+    'profile.saveFailedShort': 'Не вдалося зберегти зміни.',
+    'profile.notifSaveFailed': 'Не вдалося оновити налаштування сповіщень.',
+    'profile.tokenCreated': 'API-токен створено.',
+    'profile.tokenRevoked': 'Токен відкликано.',
+    'profile.twoFactorEnabled': 'Двофакторну автентифікацію увімкнено.',
+    'profile.twoFactorDisabled': 'Двофакторну автентифікацію вимкнено.',
+  },
+});
 
 interface ApiToken {
   id: string;
@@ -35,55 +61,111 @@ export function ProfilePage() {
   return (
     <div>
       <PageHeader title={t('profile.title')} subtitle={me.user.email} />
-      <div className="max-w-3xl space-y-4 p-6">
-        <ProfileSection />
+      <div className="max-w-2xl space-y-4 p-6">
+        <ProfileInfoCard />
+        <PreferencesCard />
         <NotificationsSection />
-        <TokensSection />
-        <TotpSection />
+        <div>
+          <h2 className="mb-2 px-0.5 text-xs font-semibold uppercase tracking-wide text-faint">{t('profile.security')}</h2>
+          <div className="space-y-4">
+            <TokensSection />
+            <TotpSection />
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
-function ProfileSection() {
+function SectionHeader({ title }: { title: string }) {
+  return <div className="mb-3 text-sm font-medium">{title}</div>;
+}
+
+function SaveRow({ dirty, pending, t }: { dirty: boolean; pending: boolean; t: (k: string) => string }) {
+  return (
+    <div className="flex items-center gap-3 pt-1">
+      <Button type="submit" size="sm" disabled={!dirty || pending}>
+        {t('common.save')}
+      </Button>
+    </div>
+  );
+}
+
+function ProfileInfoCard() {
   const t = useT();
   const me = useMe();
   const qc = useQueryClient();
-  const [form, setForm] = useState({ name: me.user.name, timezone: me.user.timezone, locale: me.user.locale as string });
+  const [name, setName] = useState(me.user.name);
+  const dirty = name.trim() !== me.user.name && name.trim().length > 0;
+
   const save = useMutation({
-    mutationFn: () => api.patch('/me', { name: form.name, timezone: form.timezone, locale: form.locale }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['me'] }),
+    mutationFn: () => api.patch('/me', { name: name.trim() }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['me'] });
+      toast(t('common.saved'));
+    },
+    onError: () => toast.error(t('profile.saveFailedShort')),
   });
 
   return (
     <Card className="p-4">
-      <div className="mb-3 text-sm font-medium">{t('profile.title')}</div>
+      <SectionHeader title={t('profile.profileInfo')} />
+      <div className="mb-4 flex items-center gap-3">
+        <Avatar name={me.user.name} src={me.user.avatar} size={56} />
+        <div className="min-w-0">
+          <div className="truncate text-[15px] font-semibold">{me.user.name}</div>
+          <div className="truncate text-sm text-muted-foreground">{me.user.email}</div>
+        </div>
+      </div>
       <form
-        className="grid grid-cols-1 gap-3 sm:grid-cols-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (form.name.trim()) save.mutate();
-        }}
+        className="max-w-xs space-y-1.5"
+        onSubmit={(e) => { e.preventDefault(); if (dirty) save.mutate(); }}
       >
-        <label className="text-xs text-muted-foreground">
-          {t('profile.name')}
-          <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className="mt-1" />
-        </label>
-        <label className="text-xs text-muted-foreground">
-          {t('profile.timezone')}
-          <Input value={form.timezone} onChange={(e) => setForm((f) => ({ ...f, timezone: e.target.value }))} placeholder="Europe/Kyiv" className="mt-1" />
-        </label>
-        <label className="text-xs text-muted-foreground">
-          {t('profile.language')}
-          <Select value={form.locale} onChange={(e) => setForm((f) => ({ ...f, locale: e.target.value }))} className="mt-1 block w-full">
+        <label className="block text-xs text-muted-foreground">{t('profile.name')}</label>
+        <Input value={name} onChange={(e) => setName(e.target.value)} />
+        <SaveRow dirty={dirty} pending={save.isPending} t={t} />
+      </form>
+    </Card>
+  );
+}
+
+function PreferencesCard() {
+  const t = useT();
+  const me = useMe();
+  const qc = useQueryClient();
+  const [timezone, setTimezone] = useState(me.user.timezone);
+  const [locale, setLocale] = useState<string>(me.user.locale);
+  const dirty = timezone.trim() !== me.user.timezone || locale !== me.user.locale;
+
+  const save = useMutation({
+    mutationFn: () => api.patch('/me', { timezone: timezone.trim(), locale }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['me'] });
+      toast(t('common.saved'));
+    },
+    onError: () => toast.error(t('profile.saveFailedShort')),
+  });
+
+  return (
+    <Card className="p-4">
+      <SectionHeader title={t('profile.preferences')} />
+      <form
+        className="grid max-w-md grid-cols-1 gap-3 sm:grid-cols-2"
+        onSubmit={(e) => { e.preventDefault(); if (dirty) save.mutate(); }}
+      >
+        <label className="space-y-1.5 text-xs text-muted-foreground">
+          <span className="block">{t('profile.language')}</span>
+          <Select value={locale} onChange={(e) => setLocale(e.target.value)} className="block w-full">
             <option value="uk">Українська</option>
             <option value="en">English</option>
           </Select>
         </label>
-        <div className="flex items-center gap-3 sm:col-span-3">
-          <Button type="submit" size="sm" disabled={save.isPending || !form.name.trim()}>{t('common.save')}</Button>
-          {save.isSuccess && <span className="flex items-center gap-1 text-xs text-muted-foreground"><Check size={13} /> {t('common.saved')}</span>}
-          {save.isError && <span className="text-xs text-destructive">{t('common.saveFailed')}</span>}
+        <label className="space-y-1.5 text-xs text-muted-foreground">
+          <span className="block">{t('profile.timezone')}</span>
+          <Input value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="Europe/Kyiv" />
+        </label>
+        <div className="sm:col-span-2">
+          <SaveRow dirty={dirty} pending={save.isPending} t={t} />
         </div>
       </form>
     </Card>
@@ -103,27 +185,27 @@ function NotificationsSection() {
   const save = useMutation({
     mutationFn: (next: Record<string, boolean>) => api.patch('/me', { emailNotificationPrefs: next }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['me'] }),
+    onError: () => toast.error(t('profile.notifSaveFailed')),
   });
 
-  const toggle = (type: string) => {
-    const next = { ...prefs, [type]: !prefs[type] };
+  const toggle = (type: string, checked: boolean) => {
+    const next = { ...prefs, [type]: checked };
     setPrefs(next);
     save.mutate(next);
   };
 
   return (
     <Card className="p-4">
-      <div className="mb-1 text-sm font-medium">{t('profile.emailNotifications')}</div>
-      <p className="mb-3 text-xs text-muted-foreground">{t('profile.emailNotificationsHint')}</p>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <SectionHeader title={t('profile.emailNotifications')} />
+      <p className="-mt-2 mb-3 text-xs text-muted-foreground">{t('profile.emailNotificationsHint')}</p>
+      <div className="grid grid-cols-1 gap-x-6 gap-y-2.5 sm:grid-cols-2">
         {NOTIFICATION_TYPES.map(({ type, label }) => (
-          <label key={type} className="flex cursor-pointer items-center gap-2 text-sm">
-            <input type="checkbox" className="accent-primary" checked={prefs[type] ?? true} onChange={() => toggle(type)} />
-            {t(label)}
+          <label key={type} className="flex cursor-pointer items-center justify-between gap-2 text-[13px]">
+            <span>{t(label)}</span>
+            <Switch checked={prefs[type] ?? true} onChange={(v) => toggle(type, v)} label={t(label)} />
           </label>
         ))}
       </div>
-      {save.isError && <p className="mt-2 text-xs text-destructive">{t('common.saveFailed')}</p>}
     </Card>
   );
 }
@@ -179,11 +261,17 @@ function TokensSection() {
       setScopes([]);
       setShowForm(false);
       qc.invalidateQueries({ queryKey: ['apiTokens'] });
+      toast(t('profile.tokenCreated'));
     },
+    onError: () => toast.error(t('profile.createTokenFailed')),
   });
   const revoke = useMutation({
     mutationFn: (id: string) => api.del(`/auth/tokens/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['apiTokens'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['apiTokens'] });
+      toast(t('profile.tokenRevoked'));
+    },
+    onError: () => toast.error(t('profile.revokeFailed')),
   });
 
   const toggleScope = (scope: string) => {
@@ -216,21 +304,21 @@ function TokensSection() {
           }}
         >
           <div className="flex items-end gap-3">
-            <label className="flex-1 text-xs text-muted-foreground">
-              {t('common.name')}
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('profile.tokenNamePlaceholder')} className="mt-1" />
+            <label className="flex-1 space-y-1.5 text-xs text-muted-foreground">
+              <span className="block">{t('common.name')}</span>
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('profile.tokenNamePlaceholder')} />
             </label>
-            <label className="flex h-9 cursor-pointer items-center gap-2 text-sm">
-              <input type="checkbox" className="accent-primary" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} />
+            <label className="flex h-8 cursor-pointer items-center gap-2 text-[13px]">
+              <Checkbox checked={readOnly} onChange={(v) => setReadOnly(v)} />
               {t('profile.readOnly')}
             </label>
           </div>
           <div>
             <div className="mb-1.5 text-xs text-muted-foreground">{t('profile.scopes')} ({scopes.length} {t('profile.selected')})</div>
-            <div className="grid max-h-40 grid-cols-2 gap-1 overflow-y-auto sm:grid-cols-3">
+            <div className="grid max-h-40 grid-cols-2 gap-1.5 overflow-y-auto sm:grid-cols-3">
               {me.permissions.map((p) => (
                 <label key={p} className="flex cursor-pointer items-center gap-1.5 text-xs">
-                  <input type="checkbox" className="accent-primary" checked={scopes.includes(p)} onChange={() => toggleScope(p)} />
+                  <Checkbox checked={scopes.includes(p)} onChange={() => toggleScope(p)} />
                   <span className="truncate">{p}</span>
                 </label>
               ))}
@@ -238,7 +326,6 @@ function TokensSection() {
           </div>
           <div className="flex items-center gap-3">
             <Button type="submit" size="sm" disabled={create.isPending || !name.trim() || scopes.length === 0}>{t('profile.createToken')}</Button>
-            {create.isError && <span className="text-xs text-destructive">{t('profile.createTokenFailed')}</span>}
           </div>
         </form>
       )}
@@ -274,7 +361,7 @@ function TokensSection() {
                 <td className="py-2 text-right">
                   {!tok.revoked && (
                     <button
-                      className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
+                      className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
                       title={t('profile.revokeToken')}
                       onClick={() => revoke.mutate(tok.id)}
                     >
@@ -287,7 +374,6 @@ function TokensSection() {
           </tbody>
         </table>
       )}
-      {revoke.isError && <p className="mt-2 text-xs text-destructive">{t('profile.revokeFailed')}</p>}
     </Card>
   );
 }
@@ -316,6 +402,7 @@ function TotpSection() {
   const startSetup = useMutation({
     mutationFn: () => api.post<TotpSetup>('/auth/totp/setup'),
     onSuccess: (res) => setSetup(res),
+    onError: () => toast.error(t('profile.setupFailed')),
   });
   const enable = useMutation({
     mutationFn: () => api.post('/auth/totp/enable', { code: enableCode }),
@@ -323,6 +410,7 @@ function TotpSection() {
       setSetup(null);
       setEnableCode('');
       qc.invalidateQueries({ queryKey: ['totp'] });
+      toast(t('profile.twoFactorEnabled'));
     },
   });
   const disable = useMutation({
@@ -331,6 +419,7 @@ function TotpSection() {
       setDisableCode('');
       setShowDisable(false);
       qc.invalidateQueries({ queryKey: ['totp'] });
+      toast(t('profile.twoFactorDisabled'));
     },
   });
 
@@ -350,10 +439,7 @@ function TotpSection() {
       <p className="mb-3 text-xs text-muted-foreground">{t('profile.twoFactorHint')}</p>
 
       {!enabled && !setup && (
-        <div className="flex items-center gap-3">
-          <Button size="sm" onClick={() => startSetup.mutate()} disabled={startSetup.isPending}>{t('profile.enable2fa')}</Button>
-          {startSetup.isError && <span className="text-xs text-destructive">{t('profile.setupFailed')}</span>}
-        </div>
+        <Button size="sm" onClick={() => startSetup.mutate()} disabled={startSetup.isPending}>{t('profile.enable2fa')}</Button>
       )}
 
       {!enabled && setup && (
@@ -373,14 +459,14 @@ function TotpSection() {
               if (enableCode.trim().length === 6) enable.mutate();
             }}
           >
-            <label className="text-xs text-muted-foreground">
-              {t('profile.sixDigitCode')}
+            <label className="space-y-1.5 text-xs text-muted-foreground">
+              <span className="block">{t('profile.sixDigitCode')}</span>
               <Input
                 value={enableCode}
                 onChange={(e) => setEnableCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                 inputMode="numeric"
                 placeholder="123456"
-                className="mt-1 w-28 font-mono tracking-widest"
+                className="w-28 font-mono tracking-widest"
               />
             </label>
             <Button type="submit" size="sm" disabled={enable.isPending || enableCode.length !== 6}>{t('profile.confirm')}</Button>
@@ -402,14 +488,14 @@ function TotpSection() {
             if (disableCode.trim().length === 6) disable.mutate();
           }}
         >
-          <label className="text-xs text-muted-foreground">
-            {t('profile.sixDigitCode')}
+          <label className="space-y-1.5 text-xs text-muted-foreground">
+            <span className="block">{t('profile.sixDigitCode')}</span>
             <Input
               value={disableCode}
               onChange={(e) => setDisableCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
               inputMode="numeric"
               placeholder="123456"
-              className="mt-1 w-28 font-mono tracking-widest"
+              className="w-28 font-mono tracking-widest"
             />
           </label>
           <Button type="submit" size="sm" variant="destructive" disabled={disable.isPending || disableCode.length !== 6}>{t('profile.disable')}</Button>

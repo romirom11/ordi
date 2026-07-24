@@ -1,21 +1,52 @@
-import { type ReactNode, useState, useEffect, useRef } from 'react';
+import { type ReactNode, useState, useEffect, useMemo, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
-  LayoutDashboard, CheckSquare, Building2, Handshake, FolderKanban, BookText,
+  LayoutDashboard, CheckSquare, Handshake, FolderKanban, BookText,
   Clock, Receipt, Users, Settings, Search, LogOut, LayoutGrid, CalendarRange,
+  SquarePen, Sun, Moon, Monitor, ChevronDown, GripVertical, User as UserIcon,
 } from 'lucide-react';
 import { Link, usePathname, useNavigate } from '../lib/router';
 import { useMe, useCan } from '../lib/auth';
 import { api, setSessionToken } from '../lib/api';
 import { useRealtime } from '../lib/sse';
 import { useT } from '../lib/i18n';
+import { useTheme, type ThemePref } from '../lib/theme';
 import { initDesktop } from '../lib/desktop';
-import { cn } from './ui';
+import { cn, Avatar, Kbd, Tooltip, IconButton } from './ui';
+import { DropdownMenu, MenuItem, MenuSeparator, MenuLabel, Toaster } from './overlays';
 import { CommandPalette } from './CommandPalette';
 import { TimerIndicator } from './TimerIndicator';
 import { NotificationsBell } from './NotificationsBell';
 import { QuickCreateTask } from './QuickCreateTask';
 
-interface NavItem { to: string; label: string; icon: ReactNode; perm?: string; anyAuth?: boolean }
+interface NavDef { key: string; to: string; labelKey: string; icon: ReactNode; perm?: string; anyAuth?: boolean }
+
+/** Stable nav catalog — user-defined order is stored as a list of keys. */
+const NAV_DEFS: NavDef[] = [
+  { key: 'dashboard', to: '/', labelKey: 'nav.dashboard', icon: <LayoutDashboard size={16} />, anyAuth: true },
+  { key: 'myTasks', to: '/my-tasks', labelKey: 'nav.myTasks', icon: <CheckSquare size={16} />, anyAuth: true },
+  { key: 'projects', to: '/projects', labelKey: 'nav.projects', icon: <FolderKanban size={16} />, anyAuth: true },
+  { key: 'crm', to: '/crm', labelKey: 'nav.crm', icon: <Handshake size={16} />, perm: 'crm.read' },
+  { key: 'kb', to: '/kb', labelKey: 'nav.knowledge', icon: <BookText size={16} />, perm: 'kb.read' },
+  { key: 'time', to: '/time', labelKey: 'nav.time', icon: <Clock size={16} />, perm: 'time.track' },
+  { key: 'finance', to: '/finance', labelKey: 'nav.finance', icon: <Receipt size={16} />, perm: 'finance.read' },
+  { key: 'people', to: '/people', labelKey: 'nav.people', icon: <Users size={16} />, perm: 'people.read' },
+  { key: 'resourcing', to: '/resourcing', labelKey: 'nav.resourcing', icon: <CalendarRange size={16} />, perm: 'projects.read' },
+  { key: 'dashboards', to: '/dashboards', labelKey: 'nav.dashboards', icon: <LayoutGrid size={16} />, anyAuth: true },
+];
+
+const NAV_ORDER_KEY = 'ordi:navOrder';
+
+function loadNavOrder(): string[] {
+  try {
+    const raw = localStorage.getItem(NAV_ORDER_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw) as unknown;
+      if (Array.isArray(arr) && arr.every((x) => typeof x === 'string')) return arr;
+    }
+  } catch { /* private mode */ }
+  return NAV_DEFS.map((n) => n.key);
+}
 
 function isTypingTarget(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement | null;
@@ -24,16 +55,28 @@ function isTypingTarget(e: KeyboardEvent): boolean {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable;
 }
 
+interface WorkspaceSettings { name?: string; logo?: string | null }
+
 export function Shell({ children }: { children: ReactNode }) {
   const me = useMe();
   const can = useCan();
   const path = usePathname();
   const navigate = useNavigate();
+  const t = useT();
+  const { pref: themePref, setPref: setThemePref } = useTheme();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
   const gChord = useRef<number>(0);
 
   useRealtime();
+
+  const wsQ = useQuery<WorkspaceSettings>({
+    queryKey: ['workspace-settings'],
+    queryFn: () => api.get<WorkspaceSettings>('/settings/workspace').catch(() => ({})),
+    staleTime: 5 * 60_000,
+  });
+  const wsName = wsQ.data?.name || 'ordi';
+  const wsLogo = wsQ.data?.logo || null;
 
   // Desktop (Tauri) native events: OS quick-add shortcut + ordi:// deep links.
   useEffect(() => initDesktop({
@@ -53,11 +96,10 @@ export function Shell({ children }: { children: ReactNode }) {
       if (e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e)) return;
       const key = e.key.toLowerCase();
 
-      // G-chord navigation (500ms window)
       if (gChord.current && Date.now() - gChord.current < 700) {
         gChord.current = 0;
         const map: Record<string, string> = {
-          d: '/', p: '/projects', c: '/companies', f: '/finance', k: '/kb', t: '/time', m: '/my-tasks',
+          d: '/', p: '/projects', c: '/crm', f: '/finance', k: '/kb', t: '/time', m: '/my-tasks',
         };
         const to = map[key];
         if (to) { e.preventDefault(); navigate(to); return; }
@@ -76,21 +118,37 @@ export function Shell({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [navigate]);
 
-  const t = useT();
-  const nav: NavItem[] = [
-    { to: '/', label: t('nav.dashboard'), icon: <LayoutDashboard size={17} />, anyAuth: true },
-    { to: '/my-tasks', label: t('nav.myTasks'), icon: <CheckSquare size={17} />, anyAuth: true },
-    { to: '/companies', label: t('nav.clients'), icon: <Building2 size={17} />, perm: 'crm.read' },
-    { to: '/deals', label: t('nav.deals'), icon: <Handshake size={17} />, perm: 'deals.read' },
-    { to: '/projects', label: t('nav.projects'), icon: <FolderKanban size={17} />, anyAuth: true },
-    { to: '/kb', label: t('nav.knowledge'), icon: <BookText size={17} />, perm: 'kb.read' },
-    { to: '/time', label: t('nav.time'), icon: <Clock size={17} />, perm: 'time.track' },
-    { to: '/finance', label: t('nav.finance'), icon: <Receipt size={17} />, perm: 'finance.read' },
-    { to: '/people', label: t('nav.people'), icon: <Users size={17} />, perm: 'people.read' },
-    { to: '/resourcing', label: t('nav.resourcing'), icon: <CalendarRange size={17} />, perm: 'projects.read' },
-    { to: '/dashboards', label: t('nav.dashboards'), icon: <LayoutGrid size={17} />, anyAuth: true },
-  ];
-  const visible = nav.filter((n) => n.anyAuth || (n.perm && can(n.perm)));
+  /* ── Reorderable nav ── */
+  const [order, setOrder] = useState<string[]>(loadNavOrder);
+  const [dragKey, setDragKey] = useState<string | null>(null);
+  const [overKey, setOverKey] = useState<string | null>(null);
+
+  const orderedNav = useMemo(() => {
+    const byKey = new Map(NAV_DEFS.map((n) => [n.key, n]));
+    const seen = new Set<string>();
+    const out: NavDef[] = [];
+    for (const k of order) {
+      const def = byKey.get(k);
+      if (def && !seen.has(k)) { out.push(def); seen.add(k); }
+    }
+    for (const def of NAV_DEFS) if (!seen.has(def.key)) out.push(def); // new items appended
+    return out.filter((n) => n.anyAuth || (n.perm && can(n.perm)));
+  }, [order, can]);
+
+  const commitOrder = (next: string[]) => {
+    setOrder(next);
+    try { localStorage.setItem(NAV_ORDER_KEY, JSON.stringify(next)); } catch { /* private mode */ }
+  };
+
+  const onDropOn = (targetKey: string) => {
+    if (!dragKey || dragKey === targetKey) return;
+    const full = orderedNav.map((n) => n.key);
+    const from = full.indexOf(dragKey);
+    const to = full.indexOf(targetKey);
+    if (from < 0 || to < 0) return;
+    full.splice(to, 0, ...full.splice(from, 1));
+    commitOrder(full);
+  };
 
   const logout = async () => {
     await api.post('/auth/logout').catch(() => {});
@@ -98,54 +156,146 @@ export function Shell({ children }: { children: ReactNode }) {
     window.location.href = '/login';
   };
 
+  const themeItems: { key: ThemePref; label: string; icon: ReactNode }[] = [
+    { key: 'dark', label: t('theme.dark'), icon: <Moon size={14} /> },
+    { key: 'light', label: t('theme.light'), icon: <Sun size={14} /> },
+    { key: 'system', label: t('theme.system'), icon: <Monitor size={14} /> },
+  ];
+
   return (
-    <div className="flex h-screen overflow-hidden">
-      <aside className="flex w-52 shrink-0 flex-col border-r border-border bg-card">
-        <div className="flex h-12 items-center gap-2 px-4 font-semibold">
-          <div className="grid h-6 w-6 place-items-center rounded bg-primary text-primary-foreground text-xs">o</div>
-          ordi
+    <div className="flex h-screen overflow-hidden bg-background">
+      <aside className="flex w-56 shrink-0 flex-col">
+        {/* Workspace header */}
+        <div className="flex items-center gap-1 px-3 pb-1 pt-3">
+          <DropdownMenu
+            width={210}
+            trigger={
+              <button className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors duration-150 hover:bg-muted">
+                {wsLogo ? (
+                  <img src={wsLogo} alt="" className="h-5 w-5 shrink-0 rounded-md object-cover" />
+                ) : (
+                  <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md bg-primary text-[11px] font-bold text-primary-foreground">
+                    {wsName.slice(0, 1).toUpperCase()}
+                  </span>
+                )}
+                <span className="truncate text-[13px] font-semibold">{wsName}</span>
+                <ChevronDown size={13} className="shrink-0 text-faint" />
+              </button>
+            }
+          >
+            <MenuLabel>{wsName}</MenuLabel>
+            {(can('settings.manage') || can('users.manage') || can('roles.manage')) && (
+              <MenuItem icon={<Settings size={14} />} onSelect={() => navigate('/settings')}>{t('nav.settings')}</MenuItem>
+            )}
+            <MenuItem icon={<UserIcon size={14} />} onSelect={() => navigate('/profile')}>{t('nav.profile')}</MenuItem>
+            <MenuSeparator />
+            <MenuLabel>{t('theme.title')}</MenuLabel>
+            {themeItems.map((it) => (
+              <MenuItem key={it.key} icon={it.icon} checked={themePref === it.key} onSelect={() => setThemePref(it.key)}>
+                {it.label}
+              </MenuItem>
+            ))}
+            <MenuSeparator />
+            <MenuItem icon={<LogOut size={14} />} danger onSelect={logout}>{t('nav.signOut')}</MenuItem>
+          </DropdownMenu>
+          <NotificationsBell />
         </div>
-        <button onClick={() => setPaletteOpen(true)}
-          className="mx-3 mb-2 flex h-8 items-center gap-2 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-muted">
-          <Search size={13} /> {t('nav.search')} <span className="ml-auto rounded bg-muted px-1">⌘K</span>
-        </button>
-        <nav className="flex-1 space-y-0.5 px-2">
-          {visible.map((n) => {
+
+        {/* Quick actions: new task + search */}
+        <div className="flex items-center gap-1.5 px-3 py-2">
+          <button
+            onClick={() => setQuickOpen(true)}
+            className={cn(
+              'flex h-7 flex-1 items-center gap-2 rounded-md border border-border bg-card px-2 text-[13px] font-medium shadow-sm',
+              'transition-all duration-150 ease-smooth-out hover:border-border-strong hover:bg-muted active:scale-[0.98]',
+            )}
+          >
+            <SquarePen size={14} className="text-muted-foreground" /> {t('tasks.newTask')}
+          </button>
+          <Tooltip label={<span className="flex items-center gap-1.5">{t('nav.search')} <Kbd>⌘K</Kbd></span>}>
+            <IconButton onClick={() => setPaletteOpen(true)} aria-label={t('nav.search')} className="border border-border bg-card shadow-sm hover:border-border-strong">
+              <Search size={14} />
+            </IconButton>
+          </Tooltip>
+        </div>
+
+        {/* Nav (drag to reorder) */}
+        <nav className="flex-1 space-y-px overflow-y-auto px-2 pt-1">
+          {orderedNav.map((n) => {
             const active = n.to === '/' ? path === '/' : path.startsWith(n.to);
             return (
-              <Link key={n.to} to={n.to}
-                className={cn('flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm', active ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/60')}>
-                {n.icon} {n.label}
-              </Link>
+              <div
+                key={n.key}
+                draggable
+                onDragStart={(e) => { setDragKey(n.key); e.dataTransfer.effectAllowed = 'move'; }}
+                onDragEnd={() => { setDragKey(null); setOverKey(null); }}
+                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (overKey !== n.key) setOverKey(n.key); }}
+                onDrop={(e) => { e.preventDefault(); onDropOn(n.key); setDragKey(null); setOverKey(null); }}
+                className={cn(
+                  'group/nav relative rounded-md transition-all duration-150',
+                  dragKey === n.key && 'opacity-40',
+                  overKey === n.key && dragKey && dragKey !== n.key && 'ring-1 ring-primary/50',
+                )}
+              >
+                <Link
+                  to={n.to}
+                  className={cn(
+                    'flex items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] transition-colors duration-150',
+                    active ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                  )}
+                >
+                  <span className={cn('transition-colors', active ? 'text-foreground' : 'text-faint group-hover/nav:text-muted-foreground')}>{n.icon}</span>
+                  <span className="flex-1 truncate">{t(n.labelKey)}</span>
+                  <GripVertical
+                    size={12}
+                    className="cursor-grab text-faint opacity-0 transition-opacity duration-150 group-hover/nav:opacity-60"
+                    aria-hidden
+                  />
+                </Link>
+              </div>
             );
           })}
         </nav>
-        <div className="border-t border-border p-2">
+
+        {/* Footer */}
+        <div className="space-y-1 p-2.5">
           <TimerIndicator />
           {(can('settings.manage') || can('users.manage') || can('roles.manage') || can('integrations.manage') || can('finance.settings')) && (
-            <Link to="/settings" className={cn('mt-1 flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-muted/60', path.startsWith('/settings') && 'bg-muted')}>
-              <Settings size={17} /> {t('nav.settings')}
+            <Link
+              to="/settings"
+              className={cn(
+                'flex items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] transition-colors duration-150',
+                path.startsWith('/settings') ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+              )}
+            >
+              <Settings size={16} className="text-faint" /> {t('nav.settings')}
             </Link>
           )}
-          <Link to="/profile" className={cn('mt-1 flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-muted/60', path.startsWith('/profile') && 'bg-muted')}>
-            <div className="grid h-5 w-5 place-items-center rounded-full bg-muted text-[10px]">{me.user.name.slice(0, 1)}</div>
+          <Link
+            to="/profile"
+            className={cn(
+              'flex items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] transition-colors duration-150',
+              path.startsWith('/profile') ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+            )}
+          >
+            <Avatar name={me.user.name} src={me.user.avatar} size={18} />
             <span className="truncate">{me.user.name}</span>
           </Link>
-          <button onClick={logout} className="mt-1 flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground hover:bg-muted/60">
-            <LogOut size={17} /> {t('nav.signOut')}
-          </button>
         </div>
       </aside>
 
-      <main className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex h-12 items-center justify-end gap-2 border-b border-border px-4">
-          <NotificationsBell />
+      {/* Content panel — Linear-style inset surface */}
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden py-2 pr-2">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-sm">
+          <div key={path.split('/')[1] || 'home'} className="page-enter flex min-h-0 flex-1 flex-col overflow-auto">
+            {children}
+          </div>
         </div>
-        <div className="flex-1 overflow-auto">{children}</div>
       </main>
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onNavigate={navigate} />
       <QuickCreateTask open={quickOpen} onClose={() => setQuickOpen(false)} />
+      <Toaster />
     </div>
   );
 }

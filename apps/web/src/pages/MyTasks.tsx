@@ -1,148 +1,164 @@
+/**
+ * My Tasks — Linear-style full-width triage list grouped by due bucket:
+ * Overdue / Today / This week / Later / Created by me (unassigned).
+ * Items come from GET /me/tasks in snake_case.
+ */
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, CalendarClock, CalendarRange, Inbox } from 'lucide-react';
+import {
+  AlertTriangle, CalendarClock, CalendarRange, CheckSquare, Inbox, UserRoundPlus,
+} from 'lucide-react';
 import type { ReactNode } from 'react';
 import { api } from '../lib/api';
 import { useNavigate } from '../lib/router';
-import { PageHeader, Skeleton, EmptyState, fmtDate, cn } from '../components/ui';
-import { useT } from '../lib/i18n';
+import {
+  Badge, EmptyState, PageHeader, PriorityIcon, Skeleton, StatusIcon, cn, fmtDate,
+} from '../components/ui';
+import { useT, extendDict } from '../lib/i18n';
 
-interface MyTask {
+extendDict({
+  en: {
+    'tasks.later': 'Later',
+    'tasks.createdByMe': 'Created by me · unassigned',
+    'tasks.countOne': 'task',
+    'tasks.countMany': 'tasks',
+  },
+  uk: {
+    'tasks.later': 'Пізніше',
+    'tasks.createdByMe': 'Створені мною · без виконавця',
+    'tasks.countOne': 'задача',
+    'tasks.countMany': 'задач',
+  },
+});
+
+interface MeTask {
   id: string;
-  taskId?: string;
-  projectId?: string;
-  projectKey?: string;
-  key?: string;
-  number?: number;
   title: string;
-  priority?: string;
-  dueDate?: string | null;
-  statusName?: string;
+  due_date: string | null;
+  priority: string;
+  number: number;
+  project_id: string;
+  key: string;
+  category: string;
+  status_name: string;
+  status_color: string;
+  ref: string;
 }
 
-const PRIORITY_COLOR: Record<string, string> = {
-  urgent: '#ef4444', high: '#f97316', medium: '#eab308', low: '#3b82f6', none: '#9ca3af',
-};
-
-function taskKey(t: MyTask): string {
-  if (t.key) return t.key;
-  if (t.projectKey && t.number != null) return `${t.projectKey}-${t.number}`;
-  return '';
+interface MeTasksResponse {
+  overdue: MeTask[];
+  today: MeTask[];
+  week: MeTask[];
+  later: MeTask[];
+  createdUnassigned: MeTask[];
 }
 
-function startOfDay(d: Date): number {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-}
+type SectionKey = keyof MeTasksResponse;
 
-type Bucket = 'overdue' | 'today' | 'week' | 'later';
-
-function bucketFor(t: MyTask): Bucket {
-  if (!t.dueDate) return 'later';
-  const due = startOfDay(new Date(t.dueDate));
-  const today = startOfDay(new Date());
-  const day = 86_400_000;
-  if (due < today) return 'overdue';
-  if (due === today) return 'today';
-  if (due <= today + 6 * day) return 'week';
-  return 'later';
-}
-
-function groupTasks(data: unknown): Record<Bucket, MyTask[]> {
-  const out: Record<Bucket, MyTask[]> = { overdue: [], today: [], week: [], later: [] };
-  // API may return a flat array, or a pre-grouped object.
-  if (Array.isArray(data)) {
-    for (const t of data as MyTask[]) out[bucketFor(t)].push(t);
-    return out;
-  }
-  const o = (data ?? {}) as Record<string, unknown>;
-  const map: Record<string, Bucket> = {
-    overdue: 'overdue', today: 'today', week: 'week', thisWeek: 'week', upcoming: 'week', later: 'later',
-  };
-  let matched = false;
-  for (const [k, v] of Object.entries(o)) {
-    const b = map[k];
-    if (b && Array.isArray(v)) { out[b].push(...(v as MyTask[])); matched = true; }
-  }
-  if (!matched) {
-    const arr = (o.tasks ?? o.items ?? []) as MyTask[];
-    if (Array.isArray(arr)) for (const t of arr) out[bucketFor(t)].push(t);
-  }
-  return out;
-}
-
-const SECTIONS: { key: Bucket; label: string; icon: ReactNode; accent?: boolean }[] = [
-  { key: 'overdue', label: 'common.overdue', icon: <AlertTriangle size={14} className="text-destructive" />, accent: true },
-  { key: 'today', label: 'common.today', icon: <CalendarClock size={14} /> },
-  { key: 'week', label: 'tasks.thisWeek', icon: <CalendarRange size={14} /> },
-  { key: 'later', label: 'tasks.later', icon: <Inbox size={14} /> },
+const SECTIONS: { key: SectionKey; labelKey: string; icon: ReactNode; accent?: boolean }[] = [
+  { key: 'overdue', labelKey: 'common.overdue', icon: <AlertTriangle size={13} />, accent: true },
+  { key: 'today', labelKey: 'common.today', icon: <CalendarClock size={13} /> },
+  { key: 'week', labelKey: 'tasks.thisWeek', icon: <CalendarRange size={13} /> },
+  { key: 'later', labelKey: 'tasks.later', icon: <Inbox size={13} /> },
+  { key: 'createdUnassigned', labelKey: 'tasks.createdByMe', icon: <UserRoundPlus size={13} /> },
 ];
+
+function isOverdue(due: string | null): boolean {
+  if (!due) return false;
+  return new Date(due).setHours(0, 0, 0, 0) < new Date().setHours(0, 0, 0, 0);
+}
+
+function LoadingRows() {
+  return (
+    <div className="px-6 py-4">
+      <Skeleton className="mb-3 h-4 w-28" />
+      <div className="space-y-1.5">
+        {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-8 w-full" />)}
+      </div>
+      <Skeleton className="mb-3 mt-6 h-4 w-24" />
+      <div className="space-y-1.5">
+        {[0, 1, 2].map((i) => <Skeleton key={i} className="h-8 w-full" />)}
+      </div>
+    </div>
+  );
+}
 
 export function MyTasksPage() {
   const t = useT();
   const navigate = useNavigate();
-  const { data, isLoading } = useQuery<unknown>({
-    queryKey: ['me', 'tasks'],
+
+  const { data, isLoading } = useQuery<MeTasksResponse>({
+    queryKey: ['me-tasks'],
     queryFn: () => api.get('/me/tasks'),
   });
 
-  const grouped = groupTasks(data);
-  const total = SECTIONS.reduce((n, s) => n + grouped[s.key].length, 0);
+  const sections = SECTIONS
+    .map((s) => ({ ...s, tasks: data?.[s.key] ?? [] }))
+    .filter((s) => s.tasks.length > 0);
+  const total = sections.reduce((n, s) => n + s.tasks.length, 0);
 
-  const open = (t: MyTask) => {
-    const pid = t.projectId;
-    const tid = t.taskId ?? t.id;
-    if (pid && tid) navigate(`/projects/${pid}/tasks/${tid}`);
-  };
+  let rowIndex = 0;
 
   return (
-    <div>
-      <PageHeader title={t('nav.myTasks')} subtitle={t('tasks.myTasksSubtitle')} />
-      <div className="mx-auto max-w-3xl p-6">
-        {isLoading ? (
-          <div className="space-y-2">
-            {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-10" />)}
-          </div>
-        ) : total === 0 ? (
-          <EmptyState
-            title={t('tasks.noneAssigned')}
-            hint={t('tasks.noneAssignedHint')}
-          />
-        ) : (
-          <div className="space-y-6">
-            {SECTIONS.map((s) => {
-              const tasks = grouped[s.key];
-              if (tasks.length === 0) return null;
-              return (
-                <section key={s.key}>
-                  <h2 className={cn('mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide',
-                    s.accent ? 'text-destructive' : 'text-muted-foreground')}>
-                    {s.icon} {t(s.label)}
-                    <span className="ml-1 rounded bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">{tasks.length}</span>
-                  </h2>
-                  <div className="overflow-hidden rounded-lg border border-border bg-card">
-                    {tasks.map((t, i) => (
-                      <button
-                        key={t.id}
-                        onClick={() => open(t)}
-                        className={cn('flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-muted',
-                          i > 0 && 'border-t border-border')}
-                      >
-                        <span className="inline-block h-2 w-2 shrink-0 rounded-full"
-                          style={{ backgroundColor: PRIORITY_COLOR[t.priority ?? 'none'] ?? PRIORITY_COLOR.none }} />
-                        {taskKey(t) && <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{taskKey(t)}</span>}
-                        <span className="flex-1 truncate">{t.title}</span>
-                        {t.statusName && <span className="shrink-0 text-xs text-muted-foreground">{t.statusName}</span>}
-                        <span className={cn('shrink-0 text-xs', s.accent ? 'text-destructive' : 'text-muted-foreground')}>
-                          {fmtDate(t.dueDate)}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              );
-            })}
-          </div>
-        )}
-      </div>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <PageHeader
+        title={t('nav.myTasks')}
+        subtitle={isLoading ? t('common.loading') : `${total} ${t(total === 1 ? 'tasks.countOne' : 'tasks.countMany')} · ${t('tasks.myTasksSubtitle')}`}
+      />
+
+      {isLoading ? (
+        <LoadingRows />
+      ) : total === 0 ? (
+        <EmptyState
+          icon={<CheckSquare size={20} />}
+          title={t('tasks.noneAssigned')}
+          hint={t('tasks.noneAssignedHint')}
+        />
+      ) : (
+        <div className="pb-8">
+          {sections.map((s) => (
+            <section key={s.key}>
+              <header
+                className={cn(
+                  'sticky top-0 z-10 flex h-8 items-center gap-1.5 border-b border-border bg-surface/95 px-6 backdrop-blur',
+                  'text-xs font-semibold uppercase tracking-wide',
+                  s.accent ? 'text-destructive' : 'text-muted-foreground',
+                )}
+              >
+                {s.icon}
+                <span>{t(s.labelKey)}</span>
+                <span className="font-normal tabular-nums text-faint">{s.tasks.length}</span>
+              </header>
+
+              {s.tasks.map((task) => {
+                const i = rowIndex++;
+                const overdue = s.key === 'overdue' || isOverdue(task.due_date);
+                return (
+                  <button
+                    key={task.id}
+                    onClick={() => navigate(`/projects/${task.project_id}/tasks/${task.id}`)}
+                    className="row-enter flex h-9 w-full cursor-pointer items-center gap-3 border-b border-border px-6 text-left transition-colors duration-150 hover:bg-muted"
+                    style={{ ['--i' as string]: Math.min(i, 10) }}
+                  >
+                    <PriorityIcon priority={task.priority} />
+                    <span className="w-14 shrink-0 font-mono text-[11px] text-faint">{task.ref}</span>
+                    <StatusIcon category={task.category} color={task.status_color} />
+                    <span className="min-w-0 flex-1 truncate text-[13px]">{task.title}</span>
+                    <Badge>{task.key}</Badge>
+                    <span
+                      className={cn(
+                        'w-16 shrink-0 text-right text-xs tabular-nums',
+                        overdue ? 'font-medium text-destructive' : 'text-muted-foreground',
+                      )}
+                    >
+                      {task.due_date ? fmtDate(task.due_date) : ''}
+                    </span>
+                  </button>
+                );
+              })}
+            </section>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -26,13 +26,19 @@ export function AcceptInvitePage() {
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [errorKey, setErrorKey] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+
+  function fail(message: string) {
+    setError(message);
+    setErrorKey((k) => k + 1);
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     if (password.length < 8) {
-      setError(t('auth.passwordMin'));
+      fail(t('auth.passwordMin'));
       return;
     }
     setSubmitting(true);
@@ -40,68 +46,82 @@ export function AcceptInvitePage() {
       await api.post('/auth/accept-invite', { token, name, password });
       window.location.href = '/login';
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : t('auth.acceptInviteFailed'));
+      fail(err instanceof ApiError ? err.message : t('auth.acceptInviteFailed'));
       setSubmitting(false);
     }
   }
 
   return (
-    <div className="grid min-h-screen place-items-center bg-muted/30 px-4">
-      <Card className="w-full max-w-sm p-6">
-        <div className="mb-6 flex items-center gap-2">
-          <div className="grid h-7 w-7 place-items-center rounded bg-primary text-sm text-primary-foreground">o</div>
-          <span className="text-lg font-semibold">ordi</span>
+    <div className="relative grid min-h-screen place-items-center overflow-hidden bg-background px-4">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{ background: 'radial-gradient(640px circle at 50% 32%, hsl(var(--primary) / 0.08), transparent 70%)' }}
+      />
+
+      <Card className="anim-pop-in relative w-full max-w-sm p-7 shadow-pop">
+        <div className="mb-7 flex flex-col items-center gap-3 text-center">
+          <div className="grid h-10 w-10 place-items-center rounded-lg bg-primary text-base font-semibold text-primary-foreground shadow-sm">o</div>
+          {!token || invite.isError ? null : (
+            <div>
+              <h1 className="text-base font-semibold">{t('auth.acceptInvite')}</h1>
+              {!invite.isLoading && (
+                <p className="text-sm text-muted-foreground">
+                  {t('auth.settingUp')} <span className="font-medium text-foreground">{invite.data?.email}</span>
+                  {invite.data?.roleName ? ` ${t('auth.asRole')} ${invite.data.roleName}` : ''}
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {!token ? (
-          <p className="text-sm text-destructive">{t('auth.inviteMissingToken')}</p>
+          <p className="text-center text-sm text-destructive">{t('auth.inviteMissingToken')}</p>
         ) : invite.isLoading ? (
           <div className="flex justify-center py-8"><Spinner /></div>
         ) : invite.isError ? (
-          <div className="space-y-2">
+          <div className="space-y-2 text-center">
             <h1 className="text-base font-semibold">{t('auth.inviteUnavailable')}</h1>
             <p className="text-sm text-muted-foreground">
               {t('auth.inviteInvalid')}
             </p>
           </div>
         ) : (
-          <>
-            <h1 className="mb-1 text-base font-semibold">{t('auth.acceptInvite')}</h1>
-            <p className="mb-5 text-sm text-muted-foreground">
-              {t('auth.settingUp')} <span className="font-medium text-foreground">{invite.data?.email}</span>
-              {invite.data?.roleName ? ` ${t('auth.asRole')} ${invite.data.roleName}` : ''}.
-            </p>
+          <form onSubmit={onSubmit} className="space-y-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">{t('auth.fullName')}</label>
+              <Input
+                autoFocus
+                required
+                disabled={submitting}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Jane Doe"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">{t('auth.password')}</label>
+              <Input
+                type="password"
+                autoComplete="new-password"
+                required
+                disabled={submitting}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={t('auth.passwordPlaceholder')}
+              />
+            </div>
 
-            <form onSubmit={onSubmit} className="space-y-3">
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">{t('auth.fullName')}</label>
-                <Input
-                  autoFocus
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Jane Doe"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">{t('auth.password')}</label>
-                <Input
-                  type="password"
-                  autoComplete="new-password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder={t('auth.passwordPlaceholder')}
-                />
-              </div>
+            {error && (
+              <p key={errorKey} style={{ animation: 'shake-x 300ms var(--ease-smooth-out)' }} className="text-sm text-destructive">
+                {error}
+              </p>
+            )}
 
-              {error && <p className="text-sm text-destructive">{error}</p>}
-
-              <Button type="submit" disabled={submitting} className="w-full">
-                {submitting ? <Spinner /> : t('auth.createAccount')}
-              </Button>
-            </form>
-          </>
+            <Button type="submit" disabled={submitting} className="w-full">
+              {submitting ? <Spinner /> : t('auth.createAccount')}
+            </Button>
+          </form>
         )}
       </Card>
     </div>

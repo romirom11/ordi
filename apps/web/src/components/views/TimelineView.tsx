@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { Button, cn } from '../ui';
+import { Button, PriorityIcon, cn } from '../ui';
 
 interface GanttStatus { id: string; category?: string }
 interface GanttTask {
@@ -19,10 +19,6 @@ const PX_PER_DAY = 12;
 const WEEKS = 13; // ~3 months
 const TOTAL_DAYS = WEEKS * 7;
 const NAME_W = 224; // px, matches w-56
-
-const PRIORITY_COLOR: Record<string, string> = {
-  urgent: '#ef4444', high: '#f97316', medium: '#eab308', low: '#3b82f6', none: '#9ca3af',
-};
 
 function parseDay(s: string): Date {
   const parts = s.slice(0, 10).split('-').map(Number);
@@ -125,9 +121,8 @@ export function TimelineView({ tasks, statuses, onOpenTask }: {
             return (
               <div key={t.id} className="relative z-10 flex h-9 items-center border-b border-border/60 last:border-b-0">
                 <button onClick={() => onOpenTask(t.id)} title={t.title}
-                  className="sticky left-0 z-10 flex h-full w-56 shrink-0 items-center gap-2 border-r border-border bg-card px-3 text-left text-sm hover:bg-muted">
-                  <span className="inline-block h-2 w-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: PRIORITY_COLOR[t.priority ?? 'none'] ?? PRIORITY_COLOR.none }} />
+                  className="sticky left-0 z-10 flex h-full w-56 shrink-0 items-center gap-2 border-r border-border bg-card px-3 text-left text-sm transition-colors duration-150 hover:bg-muted">
+                  <PriorityIcon priority={t.priority} size={14} />
                   <span className="truncate">{t.title}</span>
                 </button>
                 {visible && (
@@ -169,10 +164,9 @@ export function TimelineView({ tasks, statuses, onOpenTask }: {
           </h3>
           {undated.map((t, i) => (
             <button key={t.id} onClick={() => onOpenTask(t.id)}
-              className={cn('flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-muted', i > 0 && 'border-t border-border/60')}>
-              <span className="inline-block h-2 w-2 shrink-0 rounded-full"
-                style={{ backgroundColor: PRIORITY_COLOR[t.priority ?? 'none'] ?? PRIORITY_COLOR.none }} />
-              {t.number != null && <span className="shrink-0 font-mono text-[11px] text-muted-foreground">#{t.number}</span>}
+              className={cn('flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors duration-150 hover:bg-muted', i > 0 && 'border-t border-border/60')}>
+              <PriorityIcon priority={t.priority} size={14} />
+              {(t.ref || t.number != null) && <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{t.ref ?? `#${t.number}`}</span>}
               <span className="flex-1 truncate">{t.title}</span>
             </button>
           ))}

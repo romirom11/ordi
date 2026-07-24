@@ -1,7 +1,9 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import '@fontsource-variable/inter';
 import './index.css';
+import { applyStoredTheme, ThemeProvider } from './lib/theme';
 import { RouterProvider, usePathname } from './lib/router';
 import { useMeQuery, MeProvider } from './lib/auth';
 import { I18nProvider, guessLocale, rememberLocale } from './lib/i18n';
@@ -22,6 +24,7 @@ import { useT } from './lib/i18n';
 import { useState } from 'react';
 
 installErrorReporting();
+applyStoredTheme();
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
@@ -115,9 +118,11 @@ function AuthedApp() {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider>
-        <Root />
-      </RouterProvider>
+      <ThemeProvider>
+        <RouterProvider>
+          <Root />
+        </RouterProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   </React.StrictMode>,
 );

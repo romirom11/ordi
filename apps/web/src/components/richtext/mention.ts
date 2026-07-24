@@ -25,6 +25,25 @@ interface ApiUser {
   isActive?: boolean;
 }
 
+/** Two-letter initials, matching the app Avatar component. */
+function initialsFor(name: string): string {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]!.toUpperCase())
+      .join('') || '?'
+  );
+}
+
+/** Stable hue from a string, matching the app Avatar's colour scheme. */
+function hueFor(name: string): number {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+  return h;
+}
+
 let usersPromise: Promise<MentionUser[]> | null = null;
 
 function fetchUsers(): Promise<MentionUser[]> {
@@ -92,7 +111,17 @@ class MentionDropdown {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'ordi-mention-item' + (index === this.selected ? ' is-selected' : '');
-      btn.textContent = item.label;
+
+      const avatar = document.createElement('span');
+      avatar.className = 'ordi-mention-avatar';
+      avatar.style.backgroundColor = `hsl(${hueFor(item.label)} 45% 38%)`;
+      avatar.textContent = initialsFor(item.label);
+
+      const label = document.createElement('span');
+      label.className = 'ordi-mention-label';
+      label.textContent = item.label;
+
+      btn.append(avatar, label);
       btn.addEventListener('mousedown', (e) => {
         e.preventDefault();
         this.choose(index);

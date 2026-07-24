@@ -1,17 +1,62 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from '../lib/router';
 import { useCan } from '../lib/auth';
-import { api } from '../lib/api';
-import { Button, Input, Select, Card, Badge, Skeleton, fmtMoney, fmtDate, cn } from '../components/ui';
-import { ArrowLeft, Send, Download, Ban, Plus, ExternalLink } from 'lucide-react';
-import { useT } from '../lib/i18n';
+import { api, ApiError } from '../lib/api';
+import { Button, Input, Select, Card, Skeleton, fmtMoney, fmtDate, cn } from '../components/ui';
+import { Dialog, ConfirmDialog, toast } from '../components/overlays';
+import { ArrowLeft, Send, Download, Ban, Plus, ExternalLink, FilePlus2, Eye, Banknote } from 'lucide-react';
+import { useT, extendDict } from '../lib/i18n';
 
-const STATUS_COLORS: Record<string, string> = {
-  draft: '#6b7280', sent: '#3b82f6', viewed: '#8b5cf6', partially_paid: '#f59e0b',
-  paid: '#22c55e', canceled: '#ef4444',
+extendDict({
+  en: {
+    'finance.timeline': 'Timeline',
+    'finance.timelineCreated': 'Invoice created',
+    'finance.timelineSent': 'Sent to client',
+    'finance.timelineViewed': 'Viewed by client',
+    'finance.timelineCanceled': 'Canceled',
+    'finance.timelinePayment': 'Payment received',
+    'finance.invoiceCanceled': 'Invoice canceled',
+    'finance.cancelFailed': 'Could not cancel the invoice',
+    'finance.sendFailed': 'Could not send the invoice',
+    'finance.sent': 'Invoice sent',
+    'finance.paymentRecorded': 'Payment recorded',
+    'finance.status.draft': 'Draft',
+    'finance.status.sent': 'Sent',
+    'finance.status.viewed': 'Viewed',
+    'finance.status.partially_paid': 'Partially paid',
+    'finance.status.paid': 'Paid',
+    'finance.status.canceled': 'Canceled',
+  },
+  uk: {
+    'finance.timeline': 'Хронологія',
+    'finance.timelineCreated': 'Рахунок створено',
+    'finance.timelineSent': 'Надіслано клієнту',
+    'finance.timelineViewed': 'Переглянуто клієнтом',
+    'finance.timelineCanceled': 'Скасовано',
+    'finance.timelinePayment': 'Отримано оплату',
+    'finance.invoiceCanceled': 'Рахунок скасовано',
+    'finance.cancelFailed': 'Не вдалося скасувати рахунок',
+    'finance.sendFailed': 'Не вдалося надіслати рахунок',
+    'finance.sent': 'Рахунок надіслано',
+    'finance.paymentRecorded': 'Оплату зафіксовано',
+    'finance.status.draft': 'Чернетка',
+    'finance.status.sent': 'Надіслано',
+    'finance.status.viewed': 'Переглянуто',
+    'finance.status.partially_paid': 'Частково оплачено',
+    'finance.status.paid': 'Оплачено',
+    'finance.status.canceled': 'Скасовано',
+  },
+});
+
+const STATUS_TONE: Record<string, string> = {
+  draft: 'bg-muted text-muted-foreground',
+  sent: 'bg-primary/15 text-primary',
+  viewed: 'bg-primary/15 text-primary',
+  partially_paid: 'bg-warning/15 text-warning',
+  paid: 'bg-success/15 text-success',
+  canceled: 'bg-muted text-muted-foreground',
 };
-function statusColor(s?: string | null): string { return (s && STATUS_COLORS[s]) || '#6b7280'; }
 
 interface InvoiceItem { id?: string; description?: string | null; quantity?: number | string; unitPrice?: number | string; amount?: number | string }
 interface Payment { id: string; amount?: number | string; date?: string | null; method?: string | null; reference?: string | null }
@@ -33,6 +78,15 @@ interface Invoice {
   payments?: Payment[];
   notes?: string | null;
   terms?: string | null;
+  createdAt?: string | null;
+  sentAt?: string | null;
+  viewedAt?: string | null;
+}
+
+/** Today as YYYY-MM-DD (local); the API requires a payment date even when the field is left blank. */
+function todayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 export function InvoiceDetailPage({ id }: { id: string }) {
@@ -40,25 +94,49 @@ export function InvoiceDetailPage({ id }: { id: string }) {
   const qc = useQueryClient();
   const can = useCan();
   const [showPayment, setShowPayment] = useState(false);
+  const [showCancel, setShowCancel] = useState(false);
   const invoice = useQuery({ queryKey: ['invoice', id], queryFn: () => api.get<Invoice>(`/invoices/${id}`) });
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['invoice', id] });
     qc.invalidateQueries({ queryKey: ['invoices'] });
   };
-  const send = useMutation({ mutationFn: () => api.post(`/invoices/${id}/send`), onSuccess: invalidate });
-  const cancel = useMutation({ mutationFn: () => api.post(`/invoices/${id}/cancel`), onSuccess: invalidate });
+  const send = useMutation({
+    mutationFn: () => api.post(`/invoices/${id}/send`),
+    onSuccess: () => { toast(t('finance.sent')); invalidate(); },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('finance.sendFailed')),
+  });
+  const cancel = useMutation({
+    mutationFn: () => api.post(`/invoices/${id}/cancel`),
+    onSuccess: () => { setShowCancel(false); toast(t('finance.invoiceCanceled')); invalidate(); },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('finance.cancelFailed')),
+  });
   const [pay, setPay] = useState({ amount: '', date: '', method: 'bank' });
   const recordPayment = useMutation({
-    mutationFn: () => api.post(`/invoices/${id}/payments`, { amount: Number(pay.amount), date: pay.date || undefined, method: pay.method }),
+    mutationFn: () => api.post(`/invoices/${id}/payments`, {
+      amount: Number(pay.amount),
+      currency: invoice.data?.currency ?? 'USD',
+      date: pay.date || todayIso(),
+      method: pay.method,
+    }),
     onSuccess: () => {
       setShowPayment(false);
       setPay({ amount: '', date: '', method: 'bank' });
+      toast(t('finance.paymentRecorded'));
       invalidate();
     },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('finance.paymentFailed')),
   });
 
-  if (invoice.isLoading) return <div className="mx-auto max-w-4xl space-y-4 p-8"><Skeleton className="h-10 w-1/3" /><Skeleton className="h-48 w-full" /></div>;
+  if (invoice.isLoading) {
+    return (
+      <div className="mx-auto max-w-4xl space-y-4 p-8">
+        <Skeleton className="h-4 w-20" />
+        <Skeleton className="h-10 w-1/3" />
+        <Skeleton className="h-48 w-full" />
+      </div>
+    );
+  }
   if (invoice.isError || !invoice.data) return <div className="p-8 text-sm text-muted-foreground">{t('finance.invoiceNotFound')}</div>;
 
   const iv = invoice.data;
@@ -69,32 +147,35 @@ export function InvoiceDetailPage({ id }: { id: string }) {
   const items = iv.items ?? [];
   const payments = iv.payments ?? [];
   const cancelable = iv.status !== 'paid' && iv.status !== 'canceled';
+  const statusClass = STATUS_TONE[iv.status ?? 'draft'] ?? STATUS_TONE.draft;
+
+  const timeline = buildTimeline(iv, payments, t);
 
   return (
     <div className="mx-auto max-w-4xl p-8">
-      <Link to="/finance" className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline"><ArrowLeft size={14} /> {t('nav.finance')}</Link>
+      <Link to="/finance" className="mb-4 inline-flex items-center gap-1 text-[13px] text-muted-foreground transition-colors hover:text-foreground"><ArrowLeft size={14} /> {t('nav.finance')}</Link>
 
-      <div className="mb-6 flex items-start justify-between">
-        <div>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold">{iv.number ?? t('public.invoice')}</h1>
-            <Badge color={statusColor(iv.status)}>{iv.status ?? 'draft'}</Badge>
+            <h1 className="font-mono text-2xl font-semibold tracking-tight">{iv.number ?? t('public.invoice')}</h1>
+            <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium', statusClass)}>{t(`finance.status.${iv.status ?? 'draft'}`, (iv.status ?? 'draft').replace('_', ' '))}</span>
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {iv.companyId ? <Link to={`/companies/${iv.companyId}`} className="hover:underline">{iv.companyName ?? t('public.client')}</Link> : iv.companyName ?? t('public.client')}
+          <p className="mt-1.5 text-[13px] text-muted-foreground">
+            {iv.companyId ? <Link to={`/companies/${iv.companyId}`} className="hover:text-foreground hover:underline">{iv.companyName ?? t('public.client')}</Link> : iv.companyName ?? t('public.client')}
             {iv.dueDate && <> · {t('public.due')} {fmtDate(iv.dueDate)}</>}
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {can('finance.send') && <Button size="sm" variant="outline" onClick={() => send.mutate()} disabled={send.isPending}><Send size={14} /> {t('common.send')}</Button>}
           <Button size="sm" variant="outline" onClick={() => window.open(`/api/v1/invoices/${id}/pdf`, '_blank')}><Download size={14} /> PDF</Button>
-          {can('finance.payments') && outstanding > 0 && <Button size="sm" onClick={() => setShowPayment((v) => !v)}><Plus size={14} /> {t('finance.recordPayment')}</Button>}
-          {can('finance.write') && cancelable && <Button size="sm" variant="destructive" onClick={() => { if (confirm(t('finance.cancelInvoiceConfirm'))) cancel.mutate(); }} disabled={cancel.isPending}><Ban size={14} /> {t('common.cancel')}</Button>}
+          {can('finance.payments') && outstanding > 0 && <Button size="sm" onClick={() => setShowPayment(true)}><Plus size={14} /> {t('finance.recordPayment')}</Button>}
+          {can('finance.write') && cancelable && <Button size="sm" variant="destructive" onClick={() => setShowCancel(true)} disabled={cancel.isPending}><Ban size={14} /> {t('common.cancel')}</Button>}
         </div>
       </div>
 
       {iv.publicToken && (
-        <Card className="mb-6 flex items-center justify-between px-4 py-2 text-sm">
+        <Card className="mb-6 flex items-center justify-between px-4 py-2.5 text-[13px]">
           <span className="text-muted-foreground">{t('finance.publicLink')}</span>
           <a href={`/i/${iv.publicToken}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
             /i/{iv.publicToken} <ExternalLink size={13} />
@@ -102,25 +183,8 @@ export function InvoiceDetailPage({ id }: { id: string }) {
         </Card>
       )}
 
-      {showPayment && can('finance.payments') && (
-        <Card className="mb-6 p-4">
-          <div className="mb-3 text-sm font-medium">{t('finance.recordPayment')}</div>
-          <form className="flex flex-wrap items-end gap-3" onSubmit={(e) => { e.preventDefault(); if (Number(pay.amount) > 0) recordPayment.mutate(); }}>
-            <label className="text-xs text-muted-foreground">{t('public.amount')}<Input type="number" min={0} step="0.01" value={pay.amount} onChange={(e) => setPay((p) => ({ ...p, amount: e.target.value }))} className="mt-1 w-32" /></label>
-            <label className="text-xs text-muted-foreground">{t('common.date')}<Input type="date" value={pay.date} onChange={(e) => setPay((p) => ({ ...p, date: e.target.value }))} className="mt-1" /></label>
-            <label className="text-xs text-muted-foreground">{t('finance.method')}
-              <Select value={pay.method} onChange={(e) => setPay((p) => ({ ...p, method: e.target.value }))} className="mt-1 block h-9">
-                {['bank', 'card', 'cash', 'other'].map((m) => <option key={m} value={m}>{m}</option>)}
-              </Select>
-            </label>
-            <Button type="submit" size="sm" disabled={recordPayment.isPending}>{t('common.save')}</Button>
-            {recordPayment.isError && <span className="text-xs text-destructive">{t('finance.paymentFailed')}</span>}
-          </form>
-        </Card>
-      )}
-
       <Card className="mb-6 overflow-hidden">
-        <table className="w-full text-sm">
+        <table className="w-full text-[13px]">
           <thead>
             <tr className="border-b border-border text-left text-xs text-muted-foreground">
               <th className="px-4 py-2 font-medium">{t('public.description')}</th>
@@ -132,11 +196,11 @@ export function InvoiceDetailPage({ id }: { id: string }) {
           <tbody>
             {items.length === 0 && <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">{t('finance.noLineItems')}</td></tr>}
             {items.map((it, i) => (
-              <tr key={it.id ?? String(i)} className="border-b border-border last:border-0">
-                <td className="px-4 py-2">{it.description ?? '—'}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{Number(it.quantity ?? 0)}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{fmtMoney(it.unitPrice ?? 0, cur)}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{fmtMoney(it.amount ?? Number(it.quantity ?? 0) * Number(it.unitPrice ?? 0), cur)}</td>
+              <tr key={it.id ?? String(i)} className="border-b border-border/70 last:border-0">
+                <td className="px-4 py-2.5">{it.description ?? '—'}</td>
+                <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{Number(it.quantity ?? 0)}</td>
+                <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{fmtMoney(it.unitPrice ?? 0, cur)}</td>
+                <td className="px-4 py-2.5 text-right font-medium tabular-nums">{fmtMoney(it.amount ?? Number(it.quantity ?? 0) * Number(it.unitPrice ?? 0), cur)}</td>
               </tr>
             ))}
           </tbody>
@@ -144,37 +208,111 @@ export function InvoiceDetailPage({ id }: { id: string }) {
       </Card>
 
       <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <div className="border-b border-border px-4 py-2 text-sm font-medium">{t('finance.payments')}</div>
-          <div className="divide-y divide-border">
-            {payments.length === 0 && <p className="px-4 py-4 text-sm text-muted-foreground">{t('finance.noPayments')}</p>}
-            {payments.map((p) => (
-              <div key={p.id} className="flex items-center justify-between px-4 py-2 text-sm">
-                <span>{fmtDate(p.date)} · <span className="text-muted-foreground">{p.method ?? ''}</span></span>
-                <span className="tabular-nums">{fmtMoney(p.amount ?? 0, cur)}</span>
-              </div>
-            ))}
+        <Card className="overflow-hidden">
+          <div className="border-b border-border px-4 py-2.5 text-[13px] font-medium">{t('finance.timeline')}</div>
+          <div className="p-4">
+            {timeline.length === 0 ? (
+              <p className="text-[13px] text-muted-foreground">{t('finance.noPayments')}</p>
+            ) : (
+              <ul className="space-y-0">
+                {timeline.map((ev, i) => (
+                  <li key={i} className="relative flex gap-3 pb-4 last:pb-0">
+                    {i < timeline.length - 1 && <span className="absolute left-[11px] top-6 h-[calc(100%-8px)] w-px bg-border" aria-hidden />}
+                    <span className={cn('grid h-6 w-6 shrink-0 place-items-center rounded-full', ev.tone === 'success' ? 'bg-success/15 text-success' : ev.tone === 'destructive' ? 'bg-destructive/15 text-destructive' : 'bg-muted text-muted-foreground')}>
+                      {ev.icon}
+                    </span>
+                    <div className="min-w-0 flex-1 pt-0.5">
+                      <div className="text-[13px] font-medium">{ev.label}</div>
+                      {ev.date && <div className="text-xs text-muted-foreground tabular-nums">{fmtDate(ev.date)}</div>}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </Card>
         <Card className="p-4">
-          <dl className="space-y-1.5 text-sm">
+          <dl className="space-y-2 text-[13px]">
             <Row label={t('public.subtotal')} value={fmtMoney(iv.subtotal ?? 0, cur)} />
             <Row label={t('public.tax')} value={fmtMoney(iv.taxTotal ?? 0, cur)} />
-            <Row label={t('common.total')} value={fmtMoney(total, cur)} bold />
+            <div className="border-t border-border pt-2">
+              <Row label={t('common.total')} value={fmtMoney(total, cur)} bold />
+            </div>
             <Row label={t('public.paid')} value={fmtMoney(paid, cur)} />
-            <Row label={t('finance.outstanding')} value={fmtMoney(outstanding, cur)} bold accent={outstanding > 0} />
+            <div className="border-t border-border pt-2">
+              <Row label={t('finance.outstanding')} value={fmtMoney(outstanding, cur)} bold accent={outstanding > 0} />
+            </div>
           </dl>
         </Card>
       </div>
+
+      <Dialog open={showPayment} onClose={() => setShowPayment(false)} title={t('finance.recordPayment')} width={400}>
+        <form
+          className="space-y-3 px-4 pb-4 pt-1"
+          onSubmit={(e) => { e.preventDefault(); if (Number(pay.amount) > 0) recordPayment.mutate(); }}
+        >
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">{t('public.amount')}</label>
+              <Input autoFocus type="number" min={0} step="0.01" value={pay.amount} onChange={(e) => setPay((p) => ({ ...p, amount: e.target.value }))} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">{t('common.date')}</label>
+              <Input type="date" value={pay.date} onChange={(e) => setPay((p) => ({ ...p, date: e.target.value }))} />
+            </div>
+            <div className="col-span-2 space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">{t('finance.method')}</label>
+              <Select value={pay.method} onChange={(e) => setPay((p) => ({ ...p, method: e.target.value }))} className="block w-full">
+                {['bank', 'card', 'cash', 'other'].map((m) => <option key={m} value={m}>{m}</option>)}
+              </Select>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setShowPayment(false)}>{t('common.cancel')}</Button>
+            <Button type="submit" size="sm" disabled={recordPayment.isPending}>{t('common.save')}</Button>
+          </div>
+        </form>
+      </Dialog>
+
+      <ConfirmDialog
+        open={showCancel}
+        onClose={() => setShowCancel(false)}
+        onConfirm={() => cancel.mutate()}
+        title={t('common.cancel')}
+        body={t('finance.cancelInvoiceConfirm')}
+        confirmLabel={t('common.cancel')}
+        danger
+        pending={cancel.isPending}
+      />
     </div>
   );
+}
+
+interface TimelineEvent { label: string; date?: string | null; icon: ReactNode; tone?: 'success' | 'destructive' | 'muted' }
+
+function buildTimeline(iv: Invoice, payments: Payment[], t: (k: string, f?: string) => string): TimelineEvent[] {
+  const events: TimelineEvent[] = [];
+  events.push({ label: t('finance.timelineCreated'), date: iv.issueDate ?? iv.createdAt, icon: <FilePlus2 size={13} /> });
+  if (iv.sentAt) events.push({ label: t('finance.timelineSent'), date: iv.sentAt, icon: <Send size={13} /> });
+  if (iv.viewedAt) events.push({ label: t('finance.timelineViewed'), date: iv.viewedAt, icon: <Eye size={13} /> });
+  for (const p of payments) {
+    events.push({ label: `${t('finance.timelinePayment')} · ${fmtMoney(p.amount ?? 0, iv.currency ?? 'USD')}`, date: p.date, icon: <Banknote size={13} />, tone: 'success' });
+  }
+  if (iv.status === 'canceled') events.push({ label: t('finance.timelineCanceled'), icon: <Ban size={13} />, tone: 'destructive' });
+  events.sort((a, b) => {
+    if (!a.date && !b.date) return 0;
+    if (!a.date) return -1;
+    if (!b.date) return 1;
+    return new Date(a.date).getTime() - new Date(b.date).getTime();
+  });
+  return events;
 }
 
 function Row({ label, value, bold, accent }: { label: string; value: string; bold?: boolean; accent?: boolean }) {
   return (
     <div className="flex items-center justify-between">
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className={cn('tabular-nums', bold && 'font-semibold', accent && 'text-destructive')}>{value}</dd>
+      <dd className={cn('tabular-nums', bold ? 'text-base font-semibold' : 'font-medium', accent && 'text-destructive')}>{value}</dd>
     </div>
   );
 }

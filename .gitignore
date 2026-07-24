@@ -11,3 +11,8 @@ apps/desktop/src-tauri/target/
 *.tsbuildinfo
 .vite/
 tmp/
+
+# agent tooling (local)
+.agents/
+.claude/
+skills-lock.json

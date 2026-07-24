@@ -2,9 +2,31 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../lib/api';
 import { useNavigate } from '../lib/router';
-import { Button, Input, Select, Card, Badge, PageHeader, EmptyState, Skeleton, cn } from '../components/ui';
-import { ChevronLeft, LayoutDashboard, Lock, Plus, Trash2, Users } from 'lucide-react';
-import { useT } from '../lib/i18n';
+import {
+  Button, Input, Select, Card, Badge, IconButton, PageHeader, EmptyState, Skeleton, Spinner, ProgressBar, cn,
+} from '../components/ui';
+import { Dialog, ConfirmDialog, DropdownMenu, MenuItem, toast } from '../components/overlays';
+import { ChevronLeft, LayoutGrid, Lock, MoreHorizontal, Plus, Trash2, Users } from 'lucide-react';
+import { useT, extendDict } from '../lib/i18n';
+
+extendDict({
+  en: {
+    'dashboards.widgetsLabel': 'widgets',
+    'dashboards.widget': 'widget',
+    'dashboards.deleteWidgetBody': 'This widget and its configuration will be removed from the dashboard.',
+    'dashboards.widgetDeleted': 'Widget deleted',
+    'dashboards.widgetAdded': 'Widget added',
+    'dashboards.dashboardCreated': 'Dashboard created',
+  },
+  uk: {
+    'dashboards.widgetsLabel': 'віджетів',
+    'dashboards.widget': 'віджет',
+    'dashboards.deleteWidgetBody': 'Цей віджет і його налаштування буде видалено з дашборда.',
+    'dashboards.widgetDeleted': 'Віджет видалено',
+    'dashboards.widgetAdded': 'Віджет додано',
+    'dashboards.dashboardCreated': 'Дашборд створено',
+  },
+});
 
 interface DashboardSummary {
   id: string;
@@ -30,6 +52,24 @@ export function DashboardsPage({ id }: { id?: string }) {
   return id ? <DashboardDetailView id={id} /> : <DashboardListView />;
 }
 
+/** Extra request per card (same pattern as ProjectProgress in Projects.tsx) — the list
+ * endpoint doesn't include widgets, but the detail endpoint (shared cache key) does. */
+function DashboardCardMeta({ id }: { id: string }) {
+  const t = useT();
+  const q = useQuery({
+    queryKey: ['dashboard', id],
+    queryFn: () => api.get<DashboardDetail>(`/dashboards/${id}`),
+    staleTime: 30_000,
+  });
+  const n = q.data?.widgets?.length ?? 0;
+  return (
+    <span className="inline-flex items-center gap-1 tabular-nums">
+      <LayoutGrid size={12} />
+      {q.isLoading ? '—' : `${n} ${t('dashboards.widgetsLabel')}`}
+    </span>
+  );
+}
+
 function DashboardListView() {
   const t = useT();
   const qc = useQueryClient();
@@ -48,8 +88,10 @@ function DashboardListView() {
       setName('');
       setShowForm(false);
       qc.invalidateQueries({ queryKey: ['dashboards'] });
+      toast(t('dashboards.dashboardCreated'));
       if (d?.id) navigate('/dashboards/' + d.id);
     },
+    onError: () => toast.error(t('dashboards.createFailed')),
   });
 
   const dashboards = list.data?.data ?? [];
@@ -59,63 +101,68 @@ function DashboardListView() {
       <PageHeader
         title={t('nav.dashboards')}
         subtitle={t('dashboards.subtitle')}
-        actions={<Button size="sm" onClick={() => setShowForm((s) => !s)}><Plus size={14} /> {t('dashboards.newDashboard')}</Button>}
+        actions={<Button size="sm" onClick={() => setShowForm(true)}><Plus size={14} /> {t('dashboards.newDashboard')}</Button>}
       />
-      <div className="p-6">
-        {showForm && (
-          <Card className="mb-4 max-w-lg p-4">
-            <form
-              className="flex items-end gap-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (name.trim()) create.mutate();
-              }}
-            >
-              <label className="flex-1 text-xs text-muted-foreground">
-                {t('common.name')}
-                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('dashboards.namePlaceholder')} className="mt-1" autoFocus />
-              </label>
-              <label className="text-xs text-muted-foreground">
-                {t('dashboards.visibility')}
-                <Select value={visibility} onChange={(e) => setVisibility(e.target.value as 'private' | 'workspace')} className="mt-1 block">
-                  <option value="private">{t('dashboards.private')}</option>
-                  <option value="workspace">{t('dashboards.workspace')}</option>
-                </Select>
-              </label>
-              <Button type="submit" disabled={create.isPending || !name.trim()}>{t('common.create')}</Button>
-            </form>
-            {create.isError && <p className="mt-2 text-xs text-destructive">{t('dashboards.createFailed')}</p>}
-          </Card>
-        )}
 
+      <Dialog open={showForm} onClose={() => setShowForm(false)} title={t('dashboards.newDashboard')} width={420}>
+        <form
+          className="space-y-3 px-4 pb-4 pt-1"
+          onSubmit={(e) => { e.preventDefault(); if (name.trim()) create.mutate(); }}
+        >
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">{t('common.name')}</label>
+            <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t('dashboards.namePlaceholder')} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">{t('dashboards.visibility')}</label>
+            <Select value={visibility} onChange={(e) => setVisibility(e.target.value as 'private' | 'workspace')} className="w-full">
+              <option value="private">{t('dashboards.private')}</option>
+              <option value="workspace">{t('dashboards.workspace')}</option>
+            </Select>
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setShowForm(false)}>{t('common.cancel')}</Button>
+            <Button type="submit" size="sm" disabled={create.isPending || !name.trim()}>{create.isPending ? <Spinner /> : t('common.create')}</Button>
+          </div>
+        </form>
+      </Dialog>
+
+      <div className="p-6">
         {list.isLoading ? (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {[0, 1, 2].map((i) => <Skeleton key={i} className="h-24 w-full" />)}
+            {[0, 1, 2].map((i) => <Skeleton key={i} className="h-28 w-full" />)}
           </div>
         ) : list.isError ? (
-          <p className="text-sm text-destructive">{t('dashboards.loadFailed')}</p>
+          <EmptyState title={t('dashboards.loadFailed')} />
         ) : dashboards.length === 0 ? (
           <EmptyState
+            icon={<LayoutGrid size={20} />}
             title={t('dashboards.empty')}
             hint={t('dashboards.emptyHint')}
             action={<Button size="sm" onClick={() => setShowForm(true)}><Plus size={14} /> {t('dashboards.newDashboard')}</Button>}
           />
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {dashboards.map((d) => (
+            {dashboards.map((d, i) => (
               <button
                 key={d.id}
-                className="text-left"
+                className="row-enter text-left"
+                style={{ ['--i' as string]: Math.min(i, 10) }}
                 onClick={() => navigate('/dashboards/' + d.id)}
               >
-                <Card className="flex h-24 flex-col justify-between p-4 transition-colors hover:bg-muted/50">
-                  <div className="flex items-center gap-2 font-medium">
-                    <LayoutDashboard size={15} className="text-muted-foreground" />
-                    <span className="truncate">{d.name}</span>
+                <Card className="flex h-28 flex-col justify-between p-4 transition-colors duration-150 hover:border-border-strong hover:bg-muted/40">
+                  <div className="flex items-center gap-2.5">
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+                      <LayoutGrid size={16} />
+                    </span>
+                    <span className="min-w-0 truncate text-[13px] font-medium">{d.name}</span>
                   </div>
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    {d.visibility === 'workspace' ? <Users size={12} /> : <Lock size={12} />}
-                    {d.visibility === 'workspace' ? t('dashboards.workspace') : t('dashboards.private')}
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <DashboardCardMeta id={d.id} />
+                    <span className="inline-flex items-center gap-1">
+                      {d.visibility === 'workspace' ? <Users size={12} /> : <Lock size={12} />}
+                      {d.visibility === 'workspace' ? t('dashboards.workspace') : t('dashboards.private')}
+                    </span>
                   </div>
                 </Card>
               </button>
@@ -149,17 +196,23 @@ function DashboardDetailView({ id }: { id: string }) {
     onSuccess: () => {
       setShowAdd(false);
       qc.invalidateQueries({ queryKey: ['dashboard', id] });
+      toast(t('dashboards.widgetAdded'));
     },
+    onError: () => toast.error(t('dashboards.addWidgetFailed')),
   });
   const deleteWidget = useMutation({
     mutationFn: (widgetId: string) => api.del(`/dashboards/${id}/widgets/${widgetId}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['dashboard', id] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['dashboard', id] });
+      toast(t('dashboards.widgetDeleted'));
+    },
+    onError: () => toast.error(t('dashboards.dataFailed')),
   });
 
   if (dash.isLoading) {
     return (
       <div>
-        <PageHeader title={<Skeleton className="h-6 w-48" />} />
+        <PageHeader title={<Skeleton className="h-5 w-48" />} />
         <div className="grid grid-cols-12 gap-3 p-6">
           {[0, 1, 2].map((i) => (
             <div key={i} style={{ gridColumn: 'span 4' }}><Skeleton className="h-56 w-full" /></div>
@@ -174,6 +227,7 @@ function DashboardDetailView({ id }: { id: string }) {
       <div>
         <PageHeader title={t('nav.dashboard')} />
         <EmptyState
+          icon={<LayoutGrid size={20} />}
           title={status === 403 ? t('dashboards.noAccess') : status === 404 ? t('dashboards.notFound') : t('dashboards.loadOneFailed')}
           action={<Button variant="outline" size="sm" onClick={() => navigate('/dashboards')}><ChevronLeft size={14} /> {t('dashboards.all')}</Button>}
         />
@@ -187,78 +241,83 @@ function DashboardDetailView({ id }: { id: string }) {
     <div>
       <PageHeader
         title={
-          <span className="flex items-center gap-2">
-            <button className="rounded p-1 text-muted-foreground hover:bg-muted" onClick={() => navigate('/dashboards')} title={t('dashboards.all')}>
+          <span className="flex items-center gap-1.5">
+            <IconButton size="sm" onClick={() => navigate('/dashboards')} title={t('dashboards.all')}>
               <ChevronLeft size={16} />
-            </button>
-            {dash.data.name}
+            </IconButton>
+            <span className="truncate">{dash.data.name}</span>
           </span>
         }
         subtitle={dash.data.visibility === 'workspace' ? t('dashboards.visibleToWorkspace') : t('dashboards.private')}
-        actions={<Button size="sm" onClick={() => setShowAdd((s) => !s)}><Plus size={14} /> {t('dashboards.addWidget')}</Button>}
+        actions={<Button size="sm" onClick={() => setShowAdd(true)}><Plus size={14} /> {t('dashboards.addWidget')}</Button>}
       />
-      <div className="p-6">
-        {showAdd && (
-          <Card className="mb-4 max-w-3xl p-4">
-            <div className="mb-3 text-sm font-medium">{t('dashboards.addWidget')}</div>
-            <form
-              className="flex flex-wrap items-end gap-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                addWidget.mutate();
-              }}
-            >
-              <label className="text-xs text-muted-foreground">
-                {t('dashboards.type')}
-                <Select value={wForm.widgetType} onChange={(e) => setWForm((f) => ({ ...f, widgetType: e.target.value }))} className="mt-1 block">
-                  <option value="bar">{t('dashboards.typeBar')}</option>
-                  <option value="line">{t('dashboards.typeLine')}</option>
-                  <option value="pie">{t('dashboards.typePie')}</option>
-                  <option value="number">{t('dashboards.typeNumber')}</option>
-                  <option value="table">{t('dashboards.typeTable')}</option>
-                </Select>
-              </label>
-              <label className="text-xs text-muted-foreground">
-                {t('dashboards.source')}
-                <Select value={wForm.source} onChange={(e) => setWForm((f) => ({ ...f, source: e.target.value }))} className="mt-1 block">
-                  <option value="tasks">{t('common.tasks')}</option>
-                  <option value="invoices">{t('finance.invoices')}</option>
-                  <option value="deals">{t('nav.deals')}</option>
-                </Select>
-              </label>
-              <label className="text-xs text-muted-foreground">
-                {t('time.groupBy')}
-                <Input
-                  value={wForm.groupBy}
-                  onChange={(e) => setWForm((f) => ({ ...f, groupBy: e.target.value }))}
-                  placeholder="status / priority / assignee"
-                  className="mt-1 w-48"
-                />
-              </label>
-              <label className="text-xs text-muted-foreground">
-                {t('dashboards.metric')}
-                <Select value={wForm.metric} onChange={(e) => setWForm((f) => ({ ...f, metric: e.target.value }))} className="mt-1 block">
-                  <option value="count">{t('dashboards.metricCount')}</option>
-                  <option value="sum_amount">{t('dashboards.metricSumAmount')}</option>
-                  <option value="sum_estimate">{t('dashboards.metricSumEstimate')}</option>
-                </Select>
-              </label>
-              <Button type="submit" disabled={addWidget.isPending}>{t('common.add')}</Button>
-            </form>
-            {addWidget.isError && <p className="mt-2 text-xs text-destructive">{t('dashboards.addWidgetFailed')}</p>}
-          </Card>
-        )}
 
+      <Dialog open={showAdd} onClose={() => setShowAdd(false)} title={t('dashboards.addWidget')} width={560}>
+        <form
+          className="flex flex-wrap items-end gap-3 px-4 pb-4 pt-1"
+          onSubmit={(e) => { e.preventDefault(); addWidget.mutate(); }}
+        >
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">{t('dashboards.type')}</label>
+            <Select value={wForm.widgetType} onChange={(e) => setWForm((f) => ({ ...f, widgetType: e.target.value }))}>
+              <option value="bar">{t('dashboards.typeBar')}</option>
+              <option value="line">{t('dashboards.typeLine')}</option>
+              <option value="pie">{t('dashboards.typePie')}</option>
+              <option value="number">{t('dashboards.typeNumber')}</option>
+              <option value="table">{t('dashboards.typeTable')}</option>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">{t('dashboards.source')}</label>
+            <Select value={wForm.source} onChange={(e) => setWForm((f) => ({ ...f, source: e.target.value }))}>
+              <option value="tasks">{t('common.tasks')}</option>
+              <option value="invoices">{t('finance.invoices')}</option>
+              <option value="deals">{t('nav.deals')}</option>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">{t('time.groupBy')}</label>
+            <Input
+              value={wForm.groupBy}
+              onChange={(e) => setWForm((f) => ({ ...f, groupBy: e.target.value }))}
+              placeholder="status / priority / assignee"
+              className="w-44"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">{t('dashboards.metric')}</label>
+            <Select value={wForm.metric} onChange={(e) => setWForm((f) => ({ ...f, metric: e.target.value }))}>
+              <option value="count">{t('dashboards.metricCount')}</option>
+              <option value="sum_amount">{t('dashboards.metricSumAmount')}</option>
+              <option value="sum_estimate">{t('dashboards.metricSumEstimate')}</option>
+            </Select>
+          </div>
+          <div className="ml-auto flex gap-2 pt-1">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setShowAdd(false)}>{t('common.cancel')}</Button>
+            <Button type="submit" size="sm" disabled={addWidget.isPending}>{addWidget.isPending ? <Spinner /> : t('common.add')}</Button>
+          </div>
+        </form>
+      </Dialog>
+
+      <div className="p-6">
         {widgets.length === 0 ? (
           <EmptyState
+            icon={<LayoutGrid size={20} />}
             title={t('dashboards.noWidgets')}
             hint={t('dashboards.noWidgetsHint')}
             action={<Button size="sm" onClick={() => setShowAdd(true)}><Plus size={14} /> {t('dashboards.addWidget')}</Button>}
           />
         ) : (
           <div className="grid grid-cols-12 gap-3">
-            {widgets.map((w) => (
-              <WidgetCard key={w.id} dashboardId={id} widget={w} onDelete={() => deleteWidget.mutate(w.id)} />
+            {widgets.map((w, i) => (
+              <WidgetCard
+                key={w.id}
+                dashboardId={id}
+                widget={w}
+                index={i}
+                deleting={deleteWidget.isPending && deleteWidget.variables === w.id}
+                onDelete={() => deleteWidget.mutate(w.id)}
+              />
             ))}
           </div>
         )}
@@ -267,8 +326,11 @@ function DashboardDetailView({ id }: { id: string }) {
   );
 }
 
-function WidgetCard({ dashboardId, widget, onDelete }: { dashboardId: string; widget: Widget; onDelete: () => void }) {
+function WidgetCard({ dashboardId, widget, index, deleting, onDelete }: {
+  dashboardId: string; widget: Widget; index: number; deleting: boolean; onDelete: () => void;
+}) {
   const t = useT();
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const w = Math.min(Math.max(widget.layout?.w ?? 4, 2), 12);
   const h = widget.layout?.h ?? 3;
   const data = useQuery({
@@ -294,31 +356,41 @@ function WidgetCard({ dashboardId, widget, onDelete }: { dashboardId: string; wi
   const forbidden = (data.data as { forbidden?: boolean } | undefined)?.forbidden === true;
 
   return (
-    <div style={{ gridColumn: `span ${w}`, minHeight: h * 80 }}>
+    <div className="row-enter" style={{ gridColumn: `span ${w}`, minHeight: h * 80, ['--i' as string]: Math.min(index, 10) }}>
       <Card className="flex h-full flex-col p-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="truncate text-xs font-medium capitalize">{title}</span>
-        <div className="flex items-center gap-1.5">
-          <Badge className="bg-muted uppercase text-muted-foreground">{widget.widgetType}</Badge>
-          <button className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive" title={t('dashboards.deleteWidget')} onClick={onDelete}>
-            <Trash2 size={13} />
-          </button>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <span className="truncate text-[13px] font-medium capitalize">{title}</span>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Badge className="bg-muted text-[10px] uppercase tracking-wide text-muted-foreground">{widget.widgetType}</Badge>
+            <DropdownMenu align="end" trigger={<IconButton size="sm" title={t('people.actions')}><MoreHorizontal size={14} /></IconButton>}>
+              <MenuItem icon={<Trash2 size={13} />} danger onSelect={() => setConfirmOpen(true)}>{t('dashboards.deleteWidget')}</MenuItem>
+            </DropdownMenu>
+          </div>
         </div>
-      </div>
-      <div className="min-h-0 flex-1">
-        {data.isLoading ? (
-          <Skeleton className="h-full min-h-16 w-full" />
-        ) : forbidden ? (
-          <p className="py-4 text-center text-xs text-muted-foreground">{t('dashboards.widgetForbidden')}</p>
-        ) : data.isError ? (
-          <p className="py-4 text-center text-xs text-destructive">{t('dashboards.dataFailed')}</p>
-        ) : points.length === 0 ? (
-          <p className="py-4 text-center text-xs text-muted-foreground">{t('dashboards.noData')}</p>
-        ) : (
-          <WidgetBody type={widget.widgetType} points={points} />
-        )}
-      </div>
+        <div className="min-h-0 flex-1">
+          {data.isLoading ? (
+            <Skeleton className="h-full min-h-16 w-full" />
+          ) : forbidden ? (
+            <p className="py-4 text-center text-xs text-muted-foreground">{t('dashboards.widgetForbidden')}</p>
+          ) : data.isError ? (
+            <p className="py-4 text-center text-xs text-destructive">{t('dashboards.dataFailed')}</p>
+          ) : points.length === 0 ? (
+            <p className="py-4 text-center text-xs text-muted-foreground">{t('dashboards.noData')}</p>
+          ) : (
+            <WidgetBody type={widget.widgetType} points={points} />
+          )}
+        </div>
       </Card>
+      <ConfirmDialog
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={() => { onDelete(); setConfirmOpen(false); }}
+        title={t('dashboards.deleteWidget')}
+        body={t('dashboards.deleteWidgetBody')}
+        confirmLabel={t('common.delete')}
+        danger
+        pending={deleting}
+      />
     </div>
   );
 }
@@ -328,7 +400,7 @@ function WidgetBody({ type, points }: { type: string; points: { key: string; val
     const total = points.reduce((a, p) => a + p.value, 0);
     return (
       <div className="flex h-full items-center justify-center">
-        <span className="text-4xl font-semibold tabular-nums">{Number.isInteger(total) ? total : total.toFixed(2)}</span>
+        <span className="text-4xl font-bold tabular-nums">{Number.isInteger(total) ? total : total.toFixed(2)}</span>
       </div>
     );
   }
@@ -367,17 +439,14 @@ function WidgetBody({ type, points }: { type: string; points: { key: string; val
   // 'bar' and 'line' (line renders as bar fallback)
   const max = Math.max(...points.map((p) => p.value), 1);
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       {points.map((p, i) => (
-        <div key={p.key + i} className="flex items-center gap-2 text-xs">
-          <span className="w-24 shrink-0 truncate text-muted-foreground" title={p.key}>{p.key}</span>
-          <div className="h-4 flex-1 rounded-sm bg-muted/50">
-            <div
-              className="h-full rounded-sm"
-              style={{ width: `${Math.max((p.value / max) * 100, 1)}%`, backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}
-            />
+        <div key={p.key + i} className="space-y-1">
+          <div className="flex items-center justify-between gap-2 text-xs">
+            <span className="min-w-0 truncate text-muted-foreground" title={p.key}>{p.key}</span>
+            <span className="shrink-0 tabular-nums font-medium">{p.value}</span>
           </div>
-          <span className="w-12 text-right tabular-nums">{p.value}</span>
+          <ProgressBar value={(p.value / max) * 100} color={CHART_COLORS[i % CHART_COLORS.length]} />
         </div>
       ))}
     </div>

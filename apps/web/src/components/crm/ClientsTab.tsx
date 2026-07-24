@@ -1,0 +1,157 @@
+/**
+ * CRM → Clients: full-width company table with per-client open-deal rollups,
+ * search + status chips, staggered row entrance. Row click → company detail.
+ */
+import { useEffect, useMemo, useState } from 'react';
+import { Search, Building2 } from 'lucide-react';
+import { useNavigate } from '../../lib/router';
+import { useT } from '../../lib/i18n';
+import { Avatar, Button, Input, EmptyState, Skeleton, Tooltip, cn, fmtMoney } from '../ui';
+import {
+  COMPANY_STATUSES, StatusPill, useAllDeals, useCompanies, useDealStages, useUsersLookup,
+  type Deal, type Stage,
+} from './shared';
+
+function useDebounced<T>(value: T, delay = 250): T {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setV(value), delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+  return v;
+}
+
+interface Rollup { open: number; value: number; currency: string }
+
+function rollupDeals(deals: Deal[], stages: Stage[]): Map<string, Rollup> {
+  const openStage = new Set(stages.filter((s) => !s.isWon && !s.isLost).map((s) => s.id));
+  const map = new Map<string, Rollup>();
+  for (const d of deals) {
+    if (!d.companyId || !openStage.has(d.stageId)) continue;
+    const cur = map.get(d.companyId) ?? { open: 0, value: 0, currency: d.currency ?? 'USD' };
+    cur.open += 1;
+    cur.value += Number(d.amount ?? 0);
+    map.set(d.companyId, cur);
+  }
+  return map;
+}
+
+export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
+  const t = useT();
+  const navigate = useNavigate();
+  const [q, setQ] = useState('');
+  const [status, setStatus] = useState('');
+  const debouncedQ = useDebounced(q);
+
+  const companiesQ = useCompanies(debouncedQ, status);
+  const dealsQ = useAllDeals();
+  const stagesQ = useDealStages();
+  const usersQ = useUsersLookup();
+
+  const companies = companiesQ.data ?? [];
+  const rollup = useMemo(
+    () => rollupDeals(dealsQ.data ?? [], stagesQ.data ?? []),
+    [dealsQ.data, stagesQ.data],
+  );
+  const userMap = useMemo(() => new Map((usersQ.data ?? []).map((u) => [u.id, u])), [usersQ.data]);
+
+  const chips: { key: string; label: string }[] = [
+    { key: '', label: t('common.all') },
+    ...COMPANY_STATUSES.map((s) => ({ key: s, label: t(`crm.status.${s}`) })),
+  ];
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-6 py-2.5">
+        <div className="relative w-full max-w-xs">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('crm.searchClients')} className="pl-8" />
+        </div>
+        <div className="flex items-center gap-1">
+          {chips.map((c) => (
+            <button
+              key={c.key || 'all'}
+              onClick={() => setStatus(c.key)}
+              className={cn(
+                'h-7 rounded-md px-2.5 text-xs font-medium transition-colors duration-150',
+                status === c.key ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+              )}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto">
+        {companiesQ.isLoading ? (
+          <div className="space-y-px p-3">
+            {[0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-12 rounded-md" />)}
+          </div>
+        ) : companies.length === 0 ? (
+          <EmptyState
+            icon={<Building2 size={20} />}
+            title={debouncedQ || status ? t('crm.noMatch') : t('crm.empty')}
+            hint={debouncedQ || status ? t('crm.noMatchHint') : t('crm.emptyHint')}
+            action={!debouncedQ && !status ? <Button size="sm" onClick={onNewClient}>{t('crm.newClient')}</Button> : undefined}
+          />
+        ) : (
+          <div className="px-3 py-2">
+            {/* Header row */}
+            <div className="grid grid-cols-[minmax(0,1fr)_130px_170px_40px] items-center gap-3 px-3 pb-1.5 text-[11px] font-medium uppercase tracking-wide text-faint">
+              <span>{t('common.name')}</span>
+              <span>{t('common.status')}</span>
+              <span className="text-right">{t('crm.colDeals')}</span>
+              <span className="text-right">{t('crm.owner')}</span>
+            </div>
+            <div className="space-y-px">
+              {companies.map((c, i) => {
+                const r = rollup.get(c.id);
+                const owner = c.ownerId ? userMap.get(c.ownerId) : undefined;
+                return (
+                  <div
+                    key={c.id}
+                    onClick={() => navigate(`/companies/${c.id}`)}
+                    style={{ ['--i' as string]: Math.min(i, 10) }}
+                    className="row-enter group grid cursor-pointer grid-cols-[minmax(0,1fr)_130px_170px_40px] items-center gap-3 rounded-md px-3 py-2 transition-colors duration-150 hover:bg-muted"
+                  >
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <Avatar name={c.name} size={26} />
+                      <div className="min-w-0">
+                        <div className="truncate text-[13px] font-medium">{c.name}</div>
+                        <div className="truncate text-xs text-faint">{c.domain || t('crm.noDomain')}</div>
+                      </div>
+                    </div>
+                    <div><StatusPill status={c.status} /></div>
+                    <div className="text-right">
+                      {r ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <span className="text-[13px] font-semibold tabular-nums">{fmtMoney(r.value, r.currency)}</span>
+                          <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded bg-muted px-1 text-[11px] font-medium tabular-nums text-muted-foreground">
+                            {r.open}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-faint">—</span>
+                      )}
+                    </div>
+                    <div className="flex justify-end">
+                      {owner ? (
+                        <Tooltip label={owner.name} side="top">
+                          <Avatar name={owner.name} src={owner.avatar} size={22} />
+                        </Tooltip>
+                      ) : (
+                        <span className="grid h-[22px] w-[22px] place-items-center rounded-full border border-dashed border-border-strong text-[10px] text-faint">?</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
