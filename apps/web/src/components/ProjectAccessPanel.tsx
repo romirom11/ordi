@@ -10,6 +10,7 @@ import { api, ApiError } from '../lib/api';
 import { useT, extendDict } from '../lib/i18n';
 import { Avatar, Badge, Button, IconButton, SegmentedControl, Select, Skeleton, Spinner, Switch, cn } from './ui';
 import { ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, toast } from './overlays';
+import { AnimatedRow } from './settings/primitives';
 
 extendDict({
   en: {
@@ -175,7 +176,7 @@ export function ProjectAccessPanel({ projectId, canManage }: { projectId: string
             {memberList.map((m, i) => {
               const u = userById.get(m.userId);
               return (
-                <div key={m.userId} className="row-enter flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-0" style={{ ['--i' as string]: Math.min(i, 10) }}>
+                <AnimatedRow key={m.userId} index={i} className="flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-0">
                   <Avatar name={u?.name ?? m.userId} src={u?.avatar} size={26} />
                   <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{u?.name ?? m.userId}</span>
 
@@ -204,7 +205,7 @@ export function ProjectAccessPanel({ projectId, canManage }: { projectId: string
                       <Trash2 size={14} />
                     </IconButton>
                   )}
-                </div>
+                </AnimatedRow>
               );
             })}
           </div>

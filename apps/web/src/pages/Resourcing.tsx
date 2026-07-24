@@ -135,7 +135,7 @@ function ResourcingView() {
     },
   });
   const users = useQuery({
-    queryKey: ['users'],
+    queryKey: ['users', 'resourcing'],
     queryFn: async (): Promise<{ data: UserRow[] }> => {
       try {
         return await api.get<{ data: UserRow[] }>('/users');
@@ -146,7 +146,7 @@ function ResourcingView() {
     },
   });
   const projects = useQuery({
-    queryKey: ['projects'],
+    queryKey: ['projects', 'resourcing'],
     queryFn: async (): Promise<{ data: ProjectRow[] }> => {
       try {
         return await api.get<{ data: ProjectRow[] }>('/projects');

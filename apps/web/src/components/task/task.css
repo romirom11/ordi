@@ -1,3 +1,25 @@
+/* ────────────────────────────────────────────────────────────────────────────
+   Fallback utilities: the running dev server holds a stale tailwind config
+   cache that predates the design tokens (surface/elevated/faint/border-strong/
+   shadow-pop…), so Tailwind never emitted these classes. The rules below are
+   byte-for-byte what Tailwind v3 would generate from tailwind.config.js —
+   they become harmless duplicates after the next dev-server restart.
+   ──────────────────────────────────────────────────────────────────────────── */
+.bg-surface { background-color: hsl(var(--surface)); }
+.bg-surface\/95 { background-color: hsl(var(--surface) / 0.95); }
+.bg-elevated { background-color: hsl(var(--elevated)); }
+.\[\&\>option\]\:bg-elevated > option { background-color: hsl(var(--elevated)); }
+.text-faint { color: hsl(var(--faint)); }
+.placeholder\:text-faint::placeholder { color: hsl(var(--faint)); }
+.border-border-strong { border-color: hsl(var(--border-strong)); }
+.hover\:border-border-strong:hover { border-color: hsl(var(--border-strong)); }
+.bg-border-strong { background-color: hsl(var(--border-strong)); }
+.decoration-border-strong { text-decoration-color: hsl(var(--border-strong)); }
+.shadow-pop { box-shadow: var(--shadow-pop); }
+.hover\:shadow-pop:hover { box-shadow: var(--shadow-pop); }
+.shadow-modal { box-shadow: var(--shadow-modal); }
+.ease-smooth-out { transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1); }
+
 /* Task page: make the description RichEditor borderless (Linear-style flow text). */
 .task-desc > div {
   border: none;

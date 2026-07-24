@@ -14,7 +14,7 @@ import {
 } from '../components/ui';
 import { Dialog, ConfirmDialog, DropdownMenu, MenuItem, toast } from '../components/overlays';
 import { ImportExportPanel } from '../components/ImportExportPanel';
-import { SectionHead, SettingRow, Field, RowList } from '../components/settings/primitives';
+import { SectionHead, SettingRow, Field, RowList, AnimatedRow } from '../components/settings/primitives';
 import { downscaleImage } from '../components/settings/image';
 import { useT } from '../lib/i18n';
 import { extendDict } from '../lib/i18n';
@@ -196,7 +196,7 @@ export function SettingsPage({ section }: { section?: string }) {
           </nav>
         </aside>
         <div className="min-w-0 flex-1 overflow-y-auto">
-          <div key={active.id} className="page-enter mx-auto max-w-2xl px-8 py-6">
+          <div key={active.id} className="anim-fade-in mx-auto max-w-2xl px-8 py-6">
             {active.id === 'workspace' && <WorkspacePanel />}
             {active.id === 'users' && <UsersPanel />}
             {active.id === 'roles' && <RolesPanel />}
@@ -414,7 +414,7 @@ function UsersPanel() {
       ) : (
         <RowList>
           {rows.map((u, i) => (
-            <div key={u.id} className="row-enter flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-0" style={{ ['--i' as string]: Math.min(i, 10) }}>
+            <AnimatedRow key={u.id} index={i} className="flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-0">
               <Avatar name={u.name} src={u.avatar} size={28} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
@@ -439,7 +439,7 @@ function UsersPanel() {
                   <MenuItem icon={<Trash2 size={14} />} danger onSelect={() => setActive.mutate({ id: u.id, active: false })}>{t('settings.deactivate')}</MenuItem>
                 )}
               </DropdownMenu>
-            </div>
+            </AnimatedRow>
           ))}
         </RowList>
       )}
@@ -546,11 +546,11 @@ function RolesPanel() {
       ) : (
         <RowList>
           {roleList.map((role, i) => (
-            <button
+            <AnimatedRow
               key={role.id}
+              index={i}
               onClick={() => setSelectedId(role.id)}
-              className="row-enter flex w-full items-center gap-3 border-b border-border px-3 py-3 text-left transition-colors last:border-0 hover:bg-muted/50"
-              style={{ ['--i' as string]: Math.min(i, 10) }}
+              className="flex w-full cursor-pointer items-center gap-3 border-b border-border px-3 py-3 text-left transition-colors last:border-0 hover:bg-muted/50"
             >
               <div className="grid h-8 w-8 place-items-center rounded-md bg-muted text-muted-foreground">
                 {role.isSystem ? <Lock size={15} /> : <Shield size={15} />}
@@ -566,7 +566,7 @@ function RolesPanel() {
                 </div>
               </div>
               <ChevronRight size={16} className="text-faint" />
-            </button>
+            </AnimatedRow>
           ))}
         </RowList>
       )}

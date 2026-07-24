@@ -1,5 +1,28 @@
-import type { ReactNode } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 import { cn } from '../ui';
+
+/**
+ * A staggered list row that self-cleans: it plays `.row-enter` on mount, then
+ * drops the class once the animation ends. This matters because the shared
+ * keyframe settles on `filter: blur(0)`, and a lingering filter promotes the
+ * row to its own composited layer that can visually paint over portalled
+ * dialogs/menus. Clearing it after entry keeps the motion but avoids the glitch.
+ */
+export function AnimatedRow({ index = 0, className, style, children, onClick }: {
+  index?: number; className?: string; style?: CSSProperties; children: ReactNode; onClick?: () => void;
+}) {
+  const [done, setDone] = useState(false);
+  return (
+    <div
+      onClick={onClick}
+      onAnimationEnd={() => setDone(true)}
+      className={cn(!done && 'row-enter', className)}
+      style={done ? style : { ...style, ['--i' as string]: Math.min(index, 10) }}
+    >
+      {children}
+    </div>
+  );
+}
 
 /**
  * Shared building blocks for the settings area — a Linear-style slim layout:
