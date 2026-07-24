@@ -435,7 +435,7 @@ function DocTable({ rows, loading, kind, onRow }: { rows: DocRow[]; loading: boo
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       {rows.map((r, i) => {
-        const overdue = kind === 'invoice' && (r.isOverdue || r.status === 'overdue');
+        const overdue = kind === 'invoice' && (r.isOverdue || r.is_overdue || r.status === 'overdue');
         return (
           <div
             key={r.id}
