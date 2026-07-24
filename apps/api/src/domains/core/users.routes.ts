@@ -9,6 +9,7 @@ import { generateToken } from '../../lib/crypto';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { queueEmail } from '../../lib/email';
+import { asLocale, loadBranding, renderEmail, tr } from '../../lib/email-templates';
 import { env } from '../../env';
 
 export function usersRoutes() {
@@ -47,10 +48,23 @@ export function usersRoutes() {
       id, email: body.email.toLowerCase(), name: body.name, roleId: body.roleId, token,
       expiresAt: new Date(Date.now() + 7 * 24 * 3600_000), createdBy: actor.userId,
     });
+    const inviteUrl = `${env.appUrl}/accept-invite?token=${token}`;
+    const branding = await loadBranding();
+    const locale = asLocale(actor.locale);
+    const vars = { workspace: branding.workspaceName };
+    const rendered = renderEmail({
+      locale,
+      branding,
+      heading: tr(locale, 'invite.heading', vars),
+      paragraphs: [tr(locale, 'invite.body', vars)],
+      cta: { label: tr(locale, 'invite.cta'), url: inviteUrl },
+      note: tr(locale, 'invite.expiry'),
+    });
     await queueEmail({
       to: body.email,
-      subject: 'You have been invited to ordi',
-      body: `Accept your invite: ${env.appUrl}/accept-invite?token=${token}`,
+      subject: tr(locale, 'invite.subject', vars),
+      body: rendered.text,
+      html: rendered.html,
     });
     return c.json({ id, inviteUrl: `${env.appUrl}/accept-invite?token=${token}` }, 201);
   });

@@ -19,6 +19,7 @@ import { writeActivity } from '../../core/activity';
 import { emit } from '../../core/events';
 import { assertVersion } from '../../core/locking';
 import { queueEmail } from '../../lib/email';
+import { asLocale, loadBranding, renderEmail, tr, type EmailLocale } from '../../lib/email-templates';
 import { nextNumber } from '../../workers/scheduled';
 import { env } from '../../env';
 import { renderInvoicePdf, renderQuotePdf } from './pdf';
@@ -231,21 +232,40 @@ export async function sendInvoice(actor: Actor, id: string, opts: { to?: string;
   const pdf = renderInvoicePdf(inv as any, items as any, company as any, workspace as any);
 
   const isFirstSend = inv.status === 'draft';
-  if (isFirstSend) {
-    assertTransition(INVOICE_TRANSITIONS, inv.status, 'sent');
-    await db.update(schema.invoices).set({ status: 'sent', sentAt: new Date() })
-      .where(and(eq(schema.invoices.id, id), eq(schema.invoices.version, inv.version)));
-  }
+  if (isFirstSend) assertTransition(INVOICE_TRANSITIONS, inv.status, 'sent');
 
   const to = opts.to ?? company.billingEmail;
   const link = `${env.appUrl}/i/${inv.publicToken}`;
+  // Send first: marking the invoice "sent" before delivery succeeds would leave
+  // the status lying about reality whenever SMTP fails.
   if (to) {
+    const branding = await loadBranding();
+    const locale = asLocale(inv.language);
+    const vars = {
+      number: inv.number, workspace: branding.workspaceName,
+      amount: formatMoney(inv.total, inv.currency),
+      dueDate: inv.dueDate ? formatDate(inv.dueDate, locale) : '',
+    };
+    const rendered = renderEmail({
+      locale,
+      branding,
+      heading: tr(locale, 'invoice.heading', vars),
+      paragraphs: [opts.body ?? tr(locale, inv.dueDate ? 'invoice.body' : 'invoice.bodyNoDue', vars)],
+      cta: { label: tr(locale, 'invoice.cta'), url: link },
+      note: tr(locale, 'invoice.attached'),
+    });
     await queueEmail({
       to,
-      subject: opts.subject ?? `Invoice ${inv.number}`,
-      body: opts.body ?? `Please find invoice ${inv.number} attached. View online: ${link}`,
+      subject: opts.subject ?? tr(locale, 'invoice.subject', vars),
+      body: rendered.text,
+      html: rendered.html,
       attachments: [{ filename: `${inv.number}.pdf`, content: pdf, contentType: 'application/pdf' }],
     });
+  }
+
+  if (isFirstSend) {
+    await db.update(schema.invoices).set({ status: 'sent', sentAt: new Date() })
+      .where(and(eq(schema.invoices.id, id), eq(schema.invoices.version, inv.version)));
   }
   await writeActivity(db, { entityType: 'invoice', entityId: id, action: 'sent', before: { status: inv.status }, after: { status: 'sent', to }, actorId: actor.userId, actorType: actor.actorType });
   await emit({ type: 'invoice.sent', aggregateType: 'invoice', aggregateId: id, payload: { number: inv.number, companyId: inv.companyId, to }, actorId: actor.userId, actorType: actor.actorType });
@@ -555,19 +575,34 @@ export async function sendQuote(actor: Actor, id: string, opts: { to?: string; s
   const items = await db.select().from(schema.quoteItems).where(eq(schema.quoteItems.quoteId, id)).orderBy(schema.quoteItems.position);
   const pdf = renderQuotePdf(q as any, items as any, company as any, workspace as any);
 
-  if (q.status === 'draft') {
-    assertTransition(QUOTE_TRANSITIONS, q.status, 'sent');
-    await db.update(schema.quotes).set({ status: 'sent' }).where(and(eq(schema.quotes.id, id), eq(schema.quotes.version, q.version)));
-  }
+  const isFirstSend = q.status === 'draft';
+  if (isFirstSend) assertTransition(QUOTE_TRANSITIONS, q.status, 'sent');
+
   const to = opts.to ?? company.billingEmail;
   const link = `${env.appUrl}/q/${q.publicToken}`;
   if (to) {
+    const branding = await loadBranding();
+    const locale = asLocale(q.language);
+    const vars = { number: q.number, workspace: branding.workspaceName, amount: formatMoney(q.total, q.currency) };
+    const rendered = renderEmail({
+      locale,
+      branding,
+      heading: tr(locale, 'quote.heading', vars),
+      paragraphs: [opts.body ?? tr(locale, 'quote.body', vars)],
+      cta: { label: tr(locale, 'quote.cta'), url: link },
+      note: tr(locale, 'quote.attached'),
+    });
     await queueEmail({
       to,
-      subject: opts.subject ?? `Quote ${q.number}`,
-      body: opts.body ?? `Please find quote ${q.number} attached. View online: ${link}`,
+      subject: opts.subject ?? tr(locale, 'quote.subject', vars),
+      body: rendered.text,
+      html: rendered.html,
       attachments: [{ filename: `${q.number}.pdf`, content: pdf, contentType: 'application/pdf' }],
     });
+  }
+
+  if (isFirstSend) {
+    await db.update(schema.quotes).set({ status: 'sent' }).where(and(eq(schema.quotes.id, id), eq(schema.quotes.version, q.version)));
   }
   await writeActivity(db, { entityType: 'quote', entityId: id, action: 'sent', before: { status: q.status }, after: { status: 'sent', to }, actorId: actor.userId, actorType: actor.actorType });
   return getQuote(id);
@@ -1077,4 +1112,22 @@ function addDays(date: string, days: number): string {
 }
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+
+/** Money for email copy — Intl with a plain fallback for odd currency codes. */
+function formatMoney(amount: string | number | null, currency: string | null): string {
+  const value = Number(amount ?? 0);
+  const code = currency || 'USD';
+  try {
+    return new Intl.NumberFormat('en', { style: 'currency', currency: code }).format(value);
+  } catch {
+    return `${value.toFixed(2)} ${code}`;
+  }
+}
+
+function formatDate(date: string, locale: EmailLocale): string {
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return date;
+  return d.toLocaleDateString(locale === 'uk' ? 'uk-UA' : 'en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 }

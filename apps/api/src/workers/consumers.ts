@@ -8,6 +8,7 @@ import { ulid } from 'ulid';
 import type { DomainEvent } from '@ordi/shared';
 import { broadcaster } from '../core/events';
 import { queueEmail } from '../lib/email';
+import { appLink, asLocale, loadBranding, renderEmail, tr, type Branding } from '../lib/email-templates';
 import { hmacSha256, decrypt } from '../lib/crypto';
 import { postSlackMessage } from '../domains/integrations/oauth';
 import { writeActivity } from '../core/activity';
@@ -23,6 +24,8 @@ async function notify(userIds: string[], type: string, entityRef: string | null,
   if (!userIds.length) return;
   const { db } = getDb();
   const unique = [...new Set(userIds)].filter(Boolean);
+  let branding: Branding | null = null;
+
   for (const userId of unique) {
     await db.insert(schema.notifications).values({
       id: ulid(), userId, type, entityRef, payload,
@@ -30,23 +33,61 @@ async function notify(userIds: string[], type: string, entityRef: string | null,
     // email dubbing per user prefs
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId));
     const prefs = (user?.emailNotificationPrefs as Record<string, boolean>) ?? {};
-    if (user && prefs[type] !== false && prefs.__all !== false) {
-      queueEmail({ to: user.email, subject: notificationSubject(type, payload), body: JSON.stringify(payload) }).catch(() => {});
-    }
+    if (!user || prefs[type] === false || prefs.__all === false) continue;
+
+    branding ??= await loadBranding();
+    const locale = asLocale(user.locale);
+    const vars = {
+      ref: (payload.ref as string) ?? entityRef ?? '',
+      title: (payload.title as string) ?? '',
+      status: (payload.statusName as string) ?? '',
+      actor: (payload.actorName as string) ?? tr(locale, 'notify.someone'),
+      decision: (payload.decision as string) ?? '',
+      workspace: branding.workspaceName,
+    };
+    const known = NOTIFY_KEYS.has(type) ? type : 'generic';
+    const link = notificationLink(type, payload);
+    const { html, text } = renderEmail({
+      locale,
+      branding,
+      heading: tr(locale, `notify.${known}.heading`, vars),
+      paragraphs: [tr(locale, `notify.${known}.body`, vars)],
+      cta: link ? { label: tr(locale, 'notify.cta'), url: link } : undefined,
+    });
+    // Let failures reach the relay so it retries and eventually dead-letters,
+    // exactly like the Slack consumer — silence used to hide broken delivery.
+    await queueEmail({
+      to: user.email,
+      subject: tr(locale, `notify.${known}.subject`, vars),
+      body: text,
+      html,
+    });
   }
 }
 
-function notificationSubject(type: string, payload: Record<string, unknown>): string {
-  const ref = (payload.ref as string) ?? '';
+const NOTIFY_KEYS = new Set([
+  'task.assigned', 'comment.mentioned', 'task.status_changed',
+  'invoice.paid', 'quote.accepted', 'leave.requested', 'leave.decided',
+]);
+
+/** Deep link for a notification, mirroring the Slack consumer's targets. */
+function notificationLink(type: string, payload: Record<string, unknown>): string | null {
+  const projectId = payload.projectId as string | undefined;
+  const taskId = (payload.taskId as string | undefined) ?? (payload.id as string | undefined);
   switch (type) {
-    case 'task.assigned': return `Assigned to ${ref}`;
-    case 'comment.mentioned': return `You were mentioned in ${ref}`;
-    case 'task.status_changed': return `Status changed: ${ref}`;
-    case 'invoice.paid': return `Invoice paid: ${ref}`;
-    case 'quote.accepted': return `Quote accepted: ${ref}`;
-    case 'leave.requested': return `Leave request pending`;
-    case 'leave.decided': return `Leave request ${payload.decision}`;
-    default: return `ordi notification`;
+    case 'task.assigned':
+    case 'task.status_changed':
+    case 'comment.mentioned':
+      return projectId && taskId ? appLink(`/projects/${projectId}/tasks/${taskId}`) : appLink('/my-tasks');
+    case 'invoice.paid':
+      return payload.invoiceId ? appLink(`/finance/invoices/${payload.invoiceId as string}`) : appLink('/finance');
+    case 'quote.accepted':
+      return appLink('/finance');
+    case 'leave.requested':
+    case 'leave.decided':
+      return appLink('/people');
+    default:
+      return null;
   }
 }
 
