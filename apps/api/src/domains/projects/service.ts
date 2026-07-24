@@ -16,8 +16,9 @@ import { emit } from '../../core/events';
 import { assertVersion } from '../../core/locking';
 import { assertProject, accessibleProjectIds } from '../../core/access';
 import { buildCustomFieldFilter } from '../../core/customfields';
-import { generateToken } from '../../lib/crypto';
+import { encrypt, generateToken } from '../../lib/crypto';
 import { queueEmail } from '../../lib/email';
+import { asLocale, loadBranding, renderEmail, tr } from '../../lib/email-templates';
 import { page } from '../../lib/http';
 
 const { tasks, projects, taskStatuses, taskAssignees, taskLabels, projectMembers, cycles } = schema;
@@ -774,7 +775,7 @@ export async function acceptIntake(actor: Actor, itemId: string, input: any) {
   const { db } = getDb();
   await db.update(schema.intakeItems).set({ status: 'accepted', createdTaskId: task.id }).where(eq(schema.intakeItems.id, itemId));
   if (item.requesterEmail) {
-    await queueEmail({ to: item.requesterEmail, subject: 'Your request was accepted', body: `Your request "${item.title}" has been accepted and is being worked on.` });
+    await sendIntakeMail(item.requesterEmail, 'intakeAccepted', item.title, null);
   }
   return { taskId: task.id, ref: task.ref };
 }
@@ -786,7 +787,7 @@ export async function declineIntake(actor: Actor, itemId: string, input: any) {
   const { db } = getDb();
   await db.update(schema.intakeItems).set({ status: 'declined', declineReason: input.reason ?? '' }).where(eq(schema.intakeItems.id, itemId));
   if (input.notify && item.requesterEmail) {
-    await queueEmail({ to: item.requesterEmail, subject: 'Update on your request', body: `Your request "${item.title}" was not accepted.${input.reason ? ` Reason: ${input.reason}` : ''}` });
+    await sendIntakeMail(item.requesterEmail, 'intakeDeclined', item.title, input.reason ?? null);
   }
   return { ok: true };
 }
@@ -796,7 +797,19 @@ export async function getIntakeSettings(actor: Actor, projectId: string) {
   const { db } = getDb();
   const [settings] = await db.select().from(schema.intakeSettings).where(eq(schema.intakeSettings.projectId, projectId));
   if (!settings) throw err.notFound('Intake settings not found');
-  return settings;
+  return redactMailbox(settings);
+}
+
+/**
+ * The mailbox password never leaves the server — callers get `hasPassword`
+ * instead, and an update without one keeps whatever is stored.
+ */
+function redactMailbox<T extends { mailbox?: unknown } | undefined>(settings: T): T {
+  if (!settings) return settings;
+  const mailbox = settings.mailbox as Record<string, unknown> | null | undefined;
+  if (!mailbox) return settings;
+  const { pass, ...rest } = mailbox;
+  return { ...settings, mailbox: { ...rest, hasPassword: Boolean(pass) } };
 }
 
 export async function updateIntakeSettings(actor: Actor, projectId: string, input: any) {
@@ -804,10 +817,23 @@ export async function updateIntakeSettings(actor: Actor, projectId: string, inpu
   const { db } = getDb();
   const patch: Record<string, unknown> = {};
   if (input.formEnabled !== undefined) patch.formEnabled = input.formEnabled;
-  if (input.mailbox !== undefined) patch.mailbox = input.mailbox;
+  if (input.mailbox !== undefined) {
+    if (input.mailbox === null) {
+      patch.mailbox = null;
+    } else {
+      const [current] = await db.select().from(schema.intakeSettings).where(eq(schema.intakeSettings.projectId, projectId));
+      const stored = (current?.mailbox ?? null) as Record<string, unknown> | null;
+      const { hasPassword: _ignored, pass, ...rest } = input.mailbox as Record<string, unknown>;
+      // Credentials are encrypted at rest, like git and Slack tokens.
+      const nextPass = typeof pass === 'string' && pass.length > 0
+        ? encrypt(pass)
+        : (stored?.pass ?? null);
+      patch.mailbox = { ...rest, ...(nextPass ? { pass: nextPass } : {}) };
+    }
+  }
   if (Object.keys(patch).length) await db.update(schema.intakeSettings).set(patch).where(eq(schema.intakeSettings.projectId, projectId));
   const [settings] = await db.select().from(schema.intakeSettings).where(eq(schema.intakeSettings.projectId, projectId));
-  return settings;
+  return redactMailbox(settings);
 }
 
 // ─────────────────────────── My tasks (PRD §8.5) ───────────────────────────
@@ -848,4 +874,19 @@ export async function myTasks(actor: Actor) {
     later: rows.filter((t) => !t.due_date || t.due_date > weekEnd),
     createdUnassigned: (createdUnassigned as any[]).map(withRef),
   };
+}
+
+/** Intake decision mail to an external requester (workspace default locale). */
+async function sendIntakeMail(to: string, kind: 'intakeAccepted' | 'intakeDeclined', title: string, reason: string | null): Promise<void> {
+  const branding = await loadBranding();
+  const locale = asLocale(undefined);
+  const paragraphs = [tr(locale, `${kind}.body`, { title })];
+  if (reason) paragraphs.push(tr(locale, 'intake.reason', { reason }));
+  const rendered = renderEmail({
+    locale,
+    branding,
+    heading: tr(locale, `${kind}.heading`),
+    paragraphs,
+  });
+  await queueEmail({ to, subject: tr(locale, `${kind}.subject`), body: rendered.text, html: rendered.html });
 }

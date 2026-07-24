@@ -7,6 +7,7 @@ import { ulid } from 'ulid';
 import { computeDocumentTotals } from '@ordi/shared';
 import { emit } from '../core/events';
 import { queueEmail } from '../lib/email';
+import { appLink, asLocale, loadBranding, renderEmail, tr } from '../lib/email-templates';
 import { logger } from '../lib/logger';
 
 function today(): string {
@@ -148,14 +149,34 @@ export async function runReminders(): Promise<void> {
         .where(and(eq(schema.reminderLog.invoiceId, inv.id), eq(schema.reminderLog.ruleId, rule.id)));
       if (already) continue;
       const [company] = await db.select().from(schema.companies).where(eq(schema.companies.id, inv.companyId));
-      await db.insert(schema.reminderLog).values({ id: ulid(), invoiceId: inv.id, ruleId: rule.id }).onConflictDoNothing();
       if (company?.billingEmail) {
+        const branding = await loadBranding();
+        const locale = asLocale(inv.language);
+        const overdue = inv.dueDate < today();
+        const vars = {
+          number: inv.number,
+          workspace: branding.workspaceName,
+          amount: `${inv.total} ${inv.currency}`,
+          dueDate: inv.dueDate,
+        };
+        const rendered = renderEmail({
+          locale,
+          branding,
+          heading: tr(locale, 'reminder.heading', vars),
+          paragraphs: [tr(locale, overdue ? 'reminder.bodyOverdue' : 'reminder.body', vars)],
+          cta: { label: tr(locale, 'reminder.cta'), url: appLink(`/i/${inv.publicToken}`) },
+          note: tr(locale, 'reminder.thanks'),
+        });
         await queueEmail({
           to: company.billingEmail,
-          subject: `Reminder: invoice ${inv.number}`,
-          body: `Invoice ${inv.number} total ${inv.total} ${inv.currency} due ${inv.dueDate}.`,
+          subject: tr(locale, overdue ? 'reminder.subjectOverdue' : 'reminder.subject', vars),
+          body: rendered.text,
+          html: rendered.html,
         });
       }
+      // Logged only after a successful send, so a failed reminder is retried
+      // on the next run instead of being silently marked as delivered.
+      await db.insert(schema.reminderLog).values({ id: ulid(), invoiceId: inv.id, ruleId: rule.id }).onConflictDoNothing();
     }
     if (inv.dueDate < today() && inv.status !== 'paid') {
       await emit({ type: 'invoice.overdue', aggregateType: 'invoice', aggregateId: inv.id, payload: { ref: inv.number } });

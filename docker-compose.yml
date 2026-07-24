@@ -43,6 +43,7 @@ services:
       S3_BUCKET: ordi
       S3_ACCESS_KEY: ordi
       S3_SECRET_KEY: ordi-secret
+      # Local development: SMTP_URL: smtp://mailpit:1025
       SMTP_URL: ${SMTP_URL:-}
     depends_on:
       db:
@@ -58,6 +59,14 @@ services:
       - api
     ports:
       - "8080:80"
+
+  # Local mail catcher — point SMTP_URL at it to see real rendered email
+  # without sending anything outside. UI: http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "1025:1025"
+      - "8025:8025"
 
 volumes:
   db_data:

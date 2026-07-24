@@ -9,17 +9,28 @@ import { simpleParser } from 'mailparser';
 import { getDb, schema, isNotNull } from '@ordi/db';
 import { ulid } from 'ulid';
 import { logger } from '../lib/logger';
+import { decrypt } from '../lib/crypto';
 
 interface MailboxConfig {
   host: string;
   port?: number;
   secure?: boolean;
   user: string;
-  pass: string; // plaintext in dev
+  /** AES-GCM ciphertext (legacy rows may still hold plaintext). */
+  pass: string;
   folder?: string;
 }
 
 const CONNECT_TIMEOUT_MS = 10_000;
+
+/** Mailbox passwords are stored encrypted; rows written before that are plain. */
+function readSecret(value: string): string {
+  try {
+    return decrypt(value);
+  } catch {
+    return value;
+  }
+}
 
 async function pollMailbox(projectId: string, cfg: MailboxConfig): Promise<number> {
   const { db } = getDb();
@@ -28,7 +39,7 @@ async function pollMailbox(projectId: string, cfg: MailboxConfig): Promise<numbe
     host: cfg.host,
     port: cfg.port ?? (secure ? 993 : 143),
     secure,
-    auth: { user: cfg.user, pass: cfg.pass },
+    auth: { user: cfg.user, pass: readSecret(cfg.pass) },
     logger: false,
     connectionTimeout: CONNECT_TIMEOUT_MS,
     greetingTimeout: CONNECT_TIMEOUT_MS,
