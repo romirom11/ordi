@@ -99,6 +99,25 @@ export const expenseInputSchema = z.object({
 
 export const expenseCategoryInputSchema = z.object({ name: z.string().min(1) });
 
+/** Recurring payment / subscription the workspace pays regularly. */
+export const RECURRING_PAYMENT_INTERVALS = ['weekly', 'monthly', 'quarterly', 'yearly'] as const;
+export const recurringPaymentInputSchema = z.object({
+  name: z.string().min(1),
+  vendor: z.string().nullable().optional(),
+  companyId: idSchema.nullable().optional(),
+  amount: z.number().positive(),
+  currency: z.string().length(3).default('USD'),
+  interval: z.enum(RECURRING_PAYMENT_INTERVALS),
+  nextDate: z.string(),
+  category: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  isActive: z.boolean().default(true),
+  autoCreateExpense: z.boolean().default(false),
+});
+export const recurringPaymentUpdateSchema = recurringPaymentInputSchema.partial().extend({
+  version: z.number().int().optional(),
+});
+
 export const taxRateInputSchema = z.object({
   name: z.string().min(1),
   ratePercent: z.number().min(0).max(100),

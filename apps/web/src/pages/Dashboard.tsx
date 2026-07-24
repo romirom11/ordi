@@ -8,6 +8,7 @@ import {
 import { api } from '../lib/api';
 import { useNavigate } from '../lib/router';
 import { useMe, useCan } from '../lib/auth';
+import { usePageTitle } from '../lib/tabs';
 import { Card, Kbd, PageHeader, Skeleton, EmptyState, PriorityIcon, ProgressBar, fmtMoney, fmtDate, fmtRelative, cn } from '../components/ui';
 import { extendDict, useT } from '../lib/i18n';
 
@@ -27,6 +28,45 @@ extendDict({
     'onboarding.team': 'Invite your team',
     'onboarding.client': 'Add your first client',
     'onboarding.progress': '{done} of {total} done',
+    'activity.verb.created': 'created',
+    'activity.verb.updated': 'updated',
+    'activity.verb.deleted': 'deleted',
+    'activity.verb.viewed': 'viewed',
+    'activity.verb.member_added': 'added a member to',
+    'activity.verb.member_removed': 'removed a member from',
+    'activity.verb.status_changed': 'changed the status of',
+    'activity.verb.stage_changed': 'moved',
+    'activity.verb.payment_recorded': 'recorded a payment on',
+    'activity.verb.moved': 'moved',
+    'activity.verb.archived': 'archived',
+    'activity.verb.restored': 'restored',
+    'activity.verb.published': 'published',
+    'activity.verb.commented': 'commented on',
+    'activity.verb.sent': 'sent',
+    'activity.verb.paid': 'paid',
+    'activity.noun.task': 'a task',
+    'activity.noun.project': 'a project',
+    'activity.noun.deal': 'a deal',
+    'activity.noun.invoice': 'an invoice',
+    'activity.noun.quote': 'a quote',
+    'activity.noun.recurring_invoice': 'a subscription',
+    'activity.noun.expense': 'an expense',
+    'activity.noun.credit_note': 'a credit note',
+    'activity.noun.contact': 'a contact',
+    'activity.noun.company': 'a client',
+    'activity.noun.comment': 'a comment',
+    'activity.noun.employee': 'an employee profile',
+    'activity.noun.leave_request': 'a leave request',
+    'activity.noun.applicant': 'an applicant',
+    'activity.noun.job_opening': 'a job opening',
+    'activity.noun.allocation': 'an allocation',
+    'activity.noun.time_entry': 'a time entry',
+    'activity.noun.compensation': 'compensation',
+    'activity.noun.kb_page': 'a knowledge page',
+    'activity.noun.kb_space': 'a knowledge space',
+    'activity.noun.kb_page_comment': 'a page comment',
+    'activity.noun.cycle': 'a cycle',
+    'activity.noun.user': 'a user',
   },
   uk: {
     'dashboard.myOpenTasks': 'Мої відкриті задачі',
@@ -43,6 +83,62 @@ extendDict({
     'onboarding.team': 'Запросіть команду',
     'onboarding.client': 'Додайте першого клієнта',
     'onboarding.progress': 'Виконано {done} з {total}',
+    'activity.verb.created': 'створено',
+    'activity.verb.updated': 'оновлено',
+    'activity.verb.deleted': 'видалено',
+    'activity.verb.viewed': 'переглянуто',
+    'activity.verb.member_added': 'додано учасника до',
+    'activity.verb.member_removed': 'вилучено учасника з',
+    'activity.verb.status_changed': 'змінено статус',
+    'activity.verb.stage_changed': 'переміщено',
+    'activity.verb.payment_recorded': 'зафіксовано платіж за',
+    'activity.verb.payment_recorded.you': 'зафіксували платіж за',
+    'activity.verb.moved': 'переміщено',
+    'activity.verb.archived': 'архівовано',
+    'activity.verb.restored': 'відновлено',
+    'activity.verb.published': 'опубліковано',
+    'activity.verb.commented': 'прокоментовано',
+    'activity.verb.sent': 'надіслано',
+    'activity.verb.paid': 'оплачено',
+    // 2nd-person forms used after the "Ви" prefix ("Ви створили…").
+    'activity.verb.created.you': 'створили',
+    'activity.verb.updated.you': 'оновили',
+    'activity.verb.deleted.you': 'видалили',
+    'activity.verb.viewed.you': 'переглянули',
+    'activity.verb.member_added.you': 'додали учасника до',
+    'activity.verb.member_removed.you': 'вилучили учасника з',
+    'activity.verb.status_changed.you': 'змінили статус',
+    'activity.verb.stage_changed.you': 'перемістили',
+    'activity.verb.moved.you': 'перемістили',
+    'activity.verb.archived.you': 'архівували',
+    'activity.verb.restored.you': 'відновили',
+    'activity.verb.published.you': 'опублікували',
+    'activity.verb.commented.you': 'прокоментували',
+    'activity.verb.sent.you': 'надіслали',
+    'activity.verb.paid.you': 'оплатили',
+    'activity.noun.task': 'задачу',
+    'activity.noun.project': 'проєкт',
+    'activity.noun.deal': 'угоду',
+    'activity.noun.invoice': 'рахунок',
+    'activity.noun.quote': 'кошторис',
+    'activity.noun.recurring_invoice': 'підписку',
+    'activity.noun.expense': 'витрату',
+    'activity.noun.credit_note': 'кредит-ноту',
+    'activity.noun.contact': 'контакт',
+    'activity.noun.company': 'клієнта',
+    'activity.noun.comment': 'коментар',
+    'activity.noun.employee': 'профіль співробітника',
+    'activity.noun.leave_request': 'запит на відпустку',
+    'activity.noun.applicant': 'кандидата',
+    'activity.noun.job_opening': 'вакансію',
+    'activity.noun.allocation': 'алокацію',
+    'activity.noun.time_entry': 'запис часу',
+    'activity.noun.compensation': 'компенсацію',
+    'activity.noun.kb_page': 'сторінку бази знань',
+    'activity.noun.kb_space': 'простір бази знань',
+    'activity.noun.kb_page_comment': 'коментар до сторінки',
+    'activity.noun.cycle': 'цикл',
+    'activity.noun.user': 'користувача',
   },
 });
 
@@ -72,7 +168,7 @@ function CheckCircle({ done }: { done: boolean }) {
           style={{
             strokeDasharray: 12,
             strokeDashoffset: done ? 0 : 12,
-            transition: 'stroke-dashoffset 350ms cubic-bezier(0.22, 1, 0.36, 1)',
+            transition: 'stroke-dashoffset var(--duration-medium) var(--ease-smooth-out)',
           }}
         />
       </svg>
@@ -289,11 +385,15 @@ function humanize(s?: string): string {
   return (s ?? '').replace(/_/g, ' ').trim();
 }
 
-function activityText(a: ActivityItem): string {
-  const verb = humanize(a.action) || 'updated';
-  const noun = humanize(a.entityType);
+function activityText(a: ActivityItem, t: (k: string, fallback?: string) => string, isYou: boolean): string {
+  const action = a.action || 'updated';
+  const base = t(`activity.verb.${action}`, humanize(action));
+  // After a "You/Ви" prefix some locales need a different verb form.
+  const verb = isYou ? t(`activity.verb.${action}.you`, base) : base;
+  const noun = a.entityType ? t(`activity.noun.${a.entityType}`, humanize(a.entityType)) : '';
   const text = noun ? `${verb} ${noun}` : verb;
-  return text.charAt(0).toUpperCase() + text.slice(1);
+  // Standalone sentence starts with a capital; after "You " it stays lowercase.
+  return isYou ? text : text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /* ───────────────────────── Page ───────────────────────── */
@@ -302,6 +402,9 @@ export function DashboardPage() {
   const t = useT();
   const me = useMe();
   const navigate = useNavigate();
+  // Tab/window title should say "Dashboard", not the greeting headline.
+  // (Runs after PageHeader's registration, so this one wins.)
+  usePageTitle(t('nav.dashboard'));
 
   const dash = useQuery<DashboardData>({
     queryKey: ['dashboard'],
@@ -461,7 +564,7 @@ export function DashboardPage() {
                     </span>
                     <span className="flex-1 truncate">
                       {a.actorId === me.user.id && <span className="font-medium">{t('dashboard.you')} </span>}
-                      <span className="text-muted-foreground">{activityText(a)}</span>
+                      <span className="text-muted-foreground">{activityText(a, t, a.actorId === me.user.id)}</span>
                     </span>
                     <span className="shrink-0 text-xs text-faint">{fmtRelative(a.createdAt)}</span>
                   </li>

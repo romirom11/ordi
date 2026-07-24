@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, qs, ApiError } from '../lib/api';
 import { useCan } from '../lib/auth';
-import { Button, IconButton, Input, Select, Card, Avatar, PageHeader, EmptyState, Skeleton, cn } from '../components/ui';
+import { Button, IconButton, Input, Select, Card, Avatar, PageHeader, PageBody, Breadcrumbs, EmptyState, Skeleton, appLocale, cn } from '../components/ui';
 import { Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator, toast } from '../components/overlays';
 import { ChevronLeft, ChevronRight, Plus, Trash2, Users } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
@@ -17,6 +17,10 @@ extendDict({
     'resourcing.thisWeekShort': 'Now',
     'resourcing.addForUser': 'Add allocation',
     'resourcing.allocationDeleted': 'Allocation removed',
+    'resourcing.pickUserProject': 'Pick a person and a project.',
+    'resourcing.hoursRequired': 'Enter hours per week.',
+    'resourcing.datesRequired': 'Pick the from and to dates.',
+    'resourcing.datesOrder': 'The end date must be after the start date.',
   },
   uk: {
     'resourcing.emptyRange': 'У цьому діапазоні нікого не розподілено',
@@ -27,6 +31,10 @@ extendDict({
     'resourcing.thisWeekShort': 'Зараз',
     'resourcing.addForUser': 'Додати розподіл',
     'resourcing.allocationDeleted': 'Розподіл видалено',
+    'resourcing.pickUserProject': 'Оберіть людину та проєкт.',
+    'resourcing.hoursRequired': 'Вкажіть години на тиждень.',
+    'resourcing.datesRequired': 'Оберіть дати початку та завершення.',
+    'resourcing.datesOrder': 'Дата завершення має бути після дати початку.',
   },
 });
 
@@ -77,14 +85,14 @@ function overlapsWeek(from: string | null | undefined, to: string | null | undef
   return true;
 }
 function shortDate(iso: string): string {
-  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return new Date(iso + 'T00:00:00').toLocaleDateString(appLocale(), { month: 'short', day: 'numeric' });
 }
 function weekRangeLabel(ws: string): string {
   const start = new Date(ws + 'T00:00:00');
   const end = new Date(addDays(ws, 6) + 'T00:00:00');
   const sameMonth = start.getMonth() === end.getMonth();
-  const startStr = start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  const endStr = end.toLocaleDateString(undefined, sameMonth ? { day: 'numeric' } : { month: 'short', day: 'numeric' });
+  const startStr = start.toLocaleDateString(appLocale(), { month: 'short', day: 'numeric' });
+  const endStr = end.toLocaleDateString(appLocale(), sameMonth ? { day: 'numeric' } : { month: 'short', day: 'numeric' });
   return `${startStr}–${endStr}`;
 }
 
@@ -172,6 +180,7 @@ function ResourcingView() {
 
   const [form, setForm] = useState({ userId: '', projectId: '', hoursPerWeek: '', fromDate: '', toDate: '' });
   const [showForm, setShowForm] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const addAllocation = useMutation({
     mutationFn: () =>
       api.post('/allocations', {
@@ -215,8 +224,11 @@ function ResourcingView() {
   const userIds = [...new Set(rangeAllocations.map((a) => a.userId))].sort((a, b) => userName(a).localeCompare(userName(b)));
 
   const openAddFor = (userId?: string, weekStart?: string) => {
-    setForm({ userId: userId ?? '', projectId: '', hoursPerWeek: '', fromDate: weekStart ?? rangeStart, toDate: '' });
+    const from = weekStart ?? rangeStart;
+    // API requires both dates — default to a 4-week window ending on a Sunday.
+    setForm({ userId: userId ?? '', projectId: '', hoursPerWeek: '', fromDate: from, toDate: addDays(from, 27) });
     setShowForm(true);
+    setFormError(null);
   };
 
   const isLoading = allocations.isLoading || users.isLoading || projects.isLoading || leaves.isLoading;
@@ -226,9 +238,10 @@ function ResourcingView() {
       <PageHeader
         title={t('nav.resourcing')}
         subtitle={t('resourcing.subtitle')}
+        breadcrumbs={<Breadcrumbs items={[{ label: t('nav.resourcing') }]} />}
         actions={canWrite && <Button size="sm" onClick={() => openAddFor()}><Plus size={14} /> {t('resourcing.addAllocation')}</Button>}
       />
-      <div className="p-6">
+      <PageBody width="full">
         <div className="mb-3 flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-1.5">
             <IconButton size="sm" onClick={() => setRangeStart(addDays(rangeStart, -7))} aria-label="Previous"><ChevronLeft size={15} /></IconButton>
@@ -313,14 +326,19 @@ function ResourcingView() {
             </div>
           </Card>
         )}
-      </div>
+      </PageBody>
 
       <Dialog open={showForm} onClose={() => setShowForm(false)} title={t('resourcing.addAllocation')} width={440}>
         <form
           className="space-y-3 px-4 pb-4 pt-1"
           onSubmit={(e) => {
             e.preventDefault();
-            if (form.userId && form.projectId && Number(form.hoursPerWeek) > 0 && form.fromDate) addAllocation.mutate();
+            setFormError(null);
+            if (!form.userId || !form.projectId) { setFormError(t('resourcing.pickUserProject')); return; }
+            if (!(Number(form.hoursPerWeek) > 0)) { setFormError(t('resourcing.hoursRequired')); return; }
+            if (!form.fromDate || !form.toDate) { setFormError(t('resourcing.datesRequired')); return; }
+            if (form.toDate < form.fromDate) { setFormError(t('resourcing.datesOrder')); return; }
+            addAllocation.mutate();
           }}
         >
           <div className="grid grid-cols-2 gap-3">
@@ -352,7 +370,9 @@ function ResourcingView() {
               <Input type="date" value={form.toDate} onChange={(e) => setForm((f) => ({ ...f, toDate: e.target.value }))} />
             </div>
           </div>
-          {addAllocation.isError && <p className="text-xs text-destructive">{t('resourcing.addFailed')}</p>}
+          {(formError || addAllocation.isError) && (
+            <p className="text-xs text-destructive">{formError ?? t('resourcing.addFailed')}</p>
+          )}
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="ghost" size="sm" onClick={() => setShowForm(false)}>{t('common.cancel')}</Button>
             <Button type="submit" size="sm" disabled={addAllocation.isPending}>{t('common.add')}</Button>

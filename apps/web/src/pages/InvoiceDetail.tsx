@@ -3,10 +3,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { api, ApiError } from '../lib/api';
-import { Button, Input, Select, Card, Skeleton, fmtMoney, fmtDate, cn } from '../components/ui';
+import { Button, Input, Select, Card, Breadcrumbs, Skeleton, fmtMoney, fmtDate, cn } from '../components/ui';
 import { Dialog, ConfirmDialog, toast } from '../components/overlays';
-import { ArrowLeft, Send, Download, Ban, Plus, ExternalLink, FilePlus2, Eye, Banknote } from 'lucide-react';
+import { Send, Download, Ban, Plus, ExternalLink, FilePlus2, Eye, Banknote, Landmark } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
+import { useWorkspaceSettings } from '../components/finance/workspace';
 
 extendDict({
   en: {
@@ -27,6 +28,8 @@ extendDict({
     'finance.status.partially_paid': 'Partially paid',
     'finance.status.paid': 'Paid',
     'finance.status.canceled': 'Canceled',
+    'finance.paymentDetails': 'Payment details',
+    'finance.notes': 'Notes',
   },
   uk: {
     'finance.timeline': 'Хронологія',
@@ -46,6 +49,8 @@ extendDict({
     'finance.status.partially_paid': 'Частково оплачено',
     'finance.status.paid': 'Оплачено',
     'finance.status.canceled': 'Скасовано',
+    'finance.paymentDetails': 'Реквізити для оплати',
+    'finance.notes': 'Примітки',
   },
 });
 
@@ -96,6 +101,7 @@ export function InvoiceDetailPage({ id }: { id: string }) {
   const [showPayment, setShowPayment] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
   const invoice = useQuery({ queryKey: ['invoice', id], queryFn: () => api.get<Invoice>(`/invoices/${id}`) });
+  const wsQ = useWorkspaceSettings();
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['invoice', id] });
@@ -149,27 +155,61 @@ export function InvoiceDetailPage({ id }: { id: string }) {
   const cancelable = iv.status !== 'paid' && iv.status !== 'canceled';
   const statusClass = STATUS_TONE[iv.status ?? 'draft'] ?? STATUS_TONE.draft;
 
+  const brand = wsQ.data;
+  const settings = brand?.invoiceSettings ?? {};
+  const accent = settings.accentColor || undefined;
+  const showLogo = settings.showLogo !== false && !!brand?.logo;
+  const accentText = accent ? { color: accent } : undefined;
+
   const timeline = buildTimeline(iv, payments, t);
 
   return (
     <div className="mx-auto max-w-4xl p-8">
-      <Link to="/finance" className="mb-4 inline-flex items-center gap-1 text-[13px] text-muted-foreground transition-colors hover:text-foreground"><ArrowLeft size={14} /> {t('nav.finance')}</Link>
+      <Breadcrumbs
+        className="mb-4"
+        items={[
+          { label: t('nav.finance'), to: '/finance' },
+          { label: iv.number ?? t('public.invoice') },
+        ]}
+      />
+
+      {/* Branded document header */}
+      <div className="mb-3 flex items-center gap-3">
+        {showLogo && <img src={brand!.logo!} alt="" className="h-9 w-auto max-w-[160px] object-contain" />}
+        {brand?.name && <span className="text-[15px] font-semibold">{brand.name}</span>}
+      </div>
+      <div className="mb-4 h-1 w-full rounded-full" style={{ backgroundColor: accent ?? 'hsl(var(--border))' }} />
 
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-3">
-            <h1 className="font-mono text-2xl font-semibold tracking-tight">{iv.number ?? t('public.invoice')}</h1>
-            <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium', statusClass)}>{t(`finance.status.${iv.status ?? 'draft'}`, (iv.status ?? 'draft').replace('_', ' '))}</span>
+            <h1 className="font-mono text-2xl font-semibold tracking-tight" style={accentText}>{iv.number ?? t('public.invoice')}</h1>
+            <span
+              className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium', !accent && statusClass)}
+              style={accent && iv.status !== 'canceled' ? { backgroundColor: accent + '22', color: accent } : undefined}
+            >{t(`finance.status.${iv.status ?? 'draft'}`, (iv.status ?? 'draft').replace('_', ' '))}</span>
           </div>
           <p className="mt-1.5 text-[13px] text-muted-foreground">
             {iv.companyId ? <Link to={`/companies/${iv.companyId}`} className="hover:text-foreground hover:underline">{iv.companyName ?? t('public.client')}</Link> : iv.companyName ?? t('public.client')}
+            {iv.issueDate && <> · {t('public.issued')} {fmtDate(iv.issueDate)}</>}
             {iv.dueDate && <> · {t('public.due')} {fmtDate(iv.dueDate)}</>}
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {can('finance.send') && <Button size="sm" variant="outline" onClick={() => send.mutate()} disabled={send.isPending}><Send size={14} /> {t('common.send')}</Button>}
           <Button size="sm" variant="outline" onClick={() => window.open(`/api/v1/invoices/${id}/pdf`, '_blank')}><Download size={14} /> PDF</Button>
-          {can('finance.payments') && outstanding > 0 && <Button size="sm" onClick={() => setShowPayment(true)}><Plus size={14} /> {t('finance.recordPayment')}</Button>}
+          {can('finance.payments') && outstanding > 0 && (
+            <Button
+              size="sm"
+              onClick={() => {
+                // Prefill with the outstanding amount and today's date.
+                setPay((p) => ({ ...p, amount: String(outstanding), date: todayIso() }));
+                setShowPayment(true);
+              }}
+            >
+              <Plus size={14} /> {t('finance.recordPayment')}
+            </Button>
+          )}
           {can('finance.write') && cancelable && <Button size="sm" variant="destructive" onClick={() => setShowCancel(true)} disabled={cancel.isPending}><Ban size={14} /> {t('common.cancel')}</Button>}
         </div>
       </div>
@@ -245,6 +285,23 @@ export function InvoiceDetailPage({ id }: { id: string }) {
           </dl>
         </Card>
       </div>
+
+      {/* Branding: notes / footer + payment details */}
+      {(iv.notes || settings.footerNote) && (
+        <div className="mt-6 text-[13px] text-muted-foreground">
+          {iv.notes && <p className="mb-1">{iv.notes}</p>}
+          {settings.footerNote && <p className="whitespace-pre-line">{settings.footerNote}</p>}
+        </div>
+      )}
+
+      {settings.paymentDetails && (
+        <Card className="mt-6 p-4">
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-faint">
+            <Landmark size={13} /> {t('finance.paymentDetails')}
+          </div>
+          <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-foreground/90">{settings.paymentDetails}</pre>
+        </Card>
+      )}
 
       <Dialog open={showPayment} onClose={() => setShowPayment(false)} title={t('finance.recordPayment')} width={400}>
         <form

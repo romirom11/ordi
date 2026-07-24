@@ -47,3 +47,19 @@ export const gitWebhookDeliveries = pgTable('git_webhook_deliveries', {
   provider: text('provider').notNull(),
   receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Workspace Slack connection (OAuth v2, Linear-style). Single-row semantics:
+ * a reconnect replaces the existing row. The bot token is stored as an AES-GCM
+ * encrypted blob in a jsonb column (same at-rest pattern as git credentials) and
+ * is NEVER returned in any response.
+ */
+export const slackConnections = pgTable('slack_connections', {
+  id: pk(),
+  teamId: text('team_id').notNull(),
+  teamName: text('team_name').notNull().default(''),
+  botToken: jsonb('bot_token').notNull().default({}), // AES-GCM encrypted blob, never returned
+  scope: text('scope').notNull().default(''),
+  createdBy: createdBy(),
+  ...timestamps,
+});

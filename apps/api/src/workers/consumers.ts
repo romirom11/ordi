@@ -3,12 +3,13 @@
  * outbound webhooks. All idempotent — dedup is handled by the relay via
  * processed_events, and each handler is safe to re-run.
  */
-import { getDb, schema, eq, and } from '@ordi/db';
+import { getDb, schema, eq, and, desc } from '@ordi/db';
 import { ulid } from 'ulid';
 import type { DomainEvent } from '@ordi/shared';
 import { broadcaster } from '../core/events';
 import { queueEmail } from '../lib/email';
-import { hmacSha256 } from '../lib/crypto';
+import { hmacSha256, decrypt } from '../lib/crypto';
+import { postSlackMessage } from '../domains/integrations/oauth';
 import { writeActivity } from '../core/activity';
 import { logger } from '../lib/logger';
 import { env } from '../env';
@@ -158,26 +159,45 @@ const webhooks: Consumer = {
 
 /**
  * Slack notifications. For a subset of business events, post a human message to
- * a Slack incoming webhook — the project's own webhook (projects.settings.
- * slackWebhookUrl) when the event belongs to a project, otherwise the workspace
- * webhook (workspace_settings.integrations.slackWebhookUrl). Skips silently when
- * no webhook is configured. Delivery failures rethrow so the relay's retry/DLQ
- * machinery applies.
+ * Slack. Resolution order (Linear-style, webhooks kept as legacy fallback):
+ *   1. project settings.slackChannelId + workspace bot token → chat.postMessage
+ *   2. project settings.slackWebhookUrl (legacy incoming webhook)
+ *   3. workspace_settings.integrations.slackWebhookUrl (legacy)
+ *   4. skip silently
+ * Delivery failures rethrow so the relay's retry/DLQ machinery applies.
  */
 const SLACK_EVENTS = new Set([
   'task.created', 'task.status_changed', 'comment.mentioned',
   'deal.won', 'deal.lost', 'invoice.paid', 'project.completed',
 ]);
 
-async function resolveSlackWebhook(projectId: string | null): Promise<string | null> {
+type SlackTarget =
+  | { kind: 'bot'; channel: string; token: string }
+  | { kind: 'webhook'; url: string }
+  | null;
+
+async function workspaceBotToken(): Promise<string | null> {
+  const { db } = getDb();
+  const [conn] = await db.select().from(schema.slackConnections)
+    .orderBy(desc(schema.slackConnections.createdAt)).limit(1);
+  if (!conn) return null;
+  try { return decrypt(conn.botToken as string); } catch { return null; }
+}
+
+async function resolveSlackTarget(projectId: string | null): Promise<SlackTarget> {
   const { db } = getDb();
   if (projectId) {
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
-    const url = (project?.settings as { slackWebhookUrl?: string | null } | undefined)?.slackWebhookUrl;
-    if (url) return url;
+    const settings = (project?.settings as { slackChannelId?: string | null; slackWebhookUrl?: string | null } | undefined) ?? {};
+    if (settings.slackChannelId) {
+      const token = await workspaceBotToken();
+      if (token) return { kind: 'bot', channel: settings.slackChannelId, token };
+    }
+    if (settings.slackWebhookUrl) return { kind: 'webhook', url: settings.slackWebhookUrl };
   }
   const [ws] = await db.select().from(schema.workspaceSettings).where(eq(schema.workspaceSettings.id, 'workspace'));
-  return (ws?.integrations as { slackWebhookUrl?: string | null } | undefined)?.slackWebhookUrl ?? null;
+  const url = (ws?.integrations as { slackWebhookUrl?: string | null } | undefined)?.slackWebhookUrl;
+  return url ? { kind: 'webhook', url } : null;
 }
 
 /** Build the Slack message + the project it belongs to (for webhook resolution). */
@@ -249,9 +269,13 @@ const slack: Consumer = {
     if (!SLACK_EVENTS.has(ev.type)) return;
     const msg = await buildSlackMessage(ev);
     if (!msg) return;
-    const webhook = await resolveSlackWebhook(msg.projectId);
-    if (!webhook) return; // not configured — skip
-    const res = await fetch(webhook, {
+    const target = await resolveSlackTarget(msg.projectId);
+    if (!target) return; // not configured — skip
+    if (target.kind === 'bot') {
+      await postSlackMessage(target.token, target.channel, msg.text); // throws → relay retries / DLQs
+      return;
+    }
+    const res = await fetch(target.url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: msg.text }),

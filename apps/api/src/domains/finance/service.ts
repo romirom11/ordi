@@ -5,7 +5,7 @@
  * `computeProfitability`/`utilization`. Status changes validate the transition maps.
  */
 import {
-  getDb, schema, eq, and, isNull, desc, inArray, gte, lte, sql,
+  getDb, schema, eq, and, isNull, asc, desc, inArray, gte, lte, sql,
 } from '@ordi/db';
 import { ulid } from 'ulid';
 import {
@@ -650,6 +650,115 @@ export async function deleteRecurring(actor: Actor, id: string) {
   const { db } = getDb();
   await db.delete(schema.recurringInvoices).where(eq(schema.recurringInvoices.id, id));
   await writeActivity(db, { entityType: 'recurring_invoice', entityId: id, action: 'deleted', actorId: actor.userId, actorType: actor.actorType });
+}
+
+// ─── Recurring payments / subscriptions ─────────────────────────────────────
+/** Advance a YYYY-MM-DD date by one recurring-payment interval (UTC). */
+export function advanceRecurringDate(date: string, interval: string): string {
+  const d = new Date(date + 'T00:00:00Z');
+  if (interval === 'weekly') d.setUTCDate(d.getUTCDate() + 7);
+  else if (interval === 'monthly') d.setUTCMonth(d.getUTCMonth() + 1);
+  else if (interval === 'quarterly') d.setUTCMonth(d.getUTCMonth() + 3);
+  else if (interval === 'yearly') d.setUTCFullYear(d.getUTCFullYear() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Per-interval monthly-equivalent factor for summary normalization. */
+function monthlyFactor(interval: string): number {
+  switch (interval) {
+    case 'weekly': return 52 / 12;
+    case 'monthly': return 1;
+    case 'quarterly': return 1 / 3;
+    case 'yearly': return 1 / 12;
+    default: return 1;
+  }
+}
+
+export async function listRecurringPayments(params: { active?: string }) {
+  const { db } = getDb();
+  const activeFilter = params.active === undefined
+    ? undefined
+    : eq(schema.recurringPayments.isActive, params.active === 'true' || params.active === '1');
+  return db.select().from(schema.recurringPayments).where(and(
+    isNull(schema.recurringPayments.deletedAt),
+    activeFilter,
+  )).orderBy(asc(schema.recurringPayments.nextDate));
+}
+
+async function loadRecurringPayment(id: string) {
+  const { db } = getDb();
+  const [row] = await db.select().from(schema.recurringPayments)
+    .where(and(eq(schema.recurringPayments.id, id), isNull(schema.recurringPayments.deletedAt)));
+  if (!row) throw err.notFound('Recurring payment not found');
+  return row;
+}
+
+export async function createRecurringPayment(actor: Actor, input: any): Promise<string> {
+  const { db } = getDb();
+  const id = ulid();
+  await db.insert(schema.recurringPayments).values({
+    id,
+    name: input.name,
+    vendor: input.vendor ?? null,
+    companyId: input.companyId ?? null,
+    amount: String(input.amount),
+    currency: input.currency ?? 'USD',
+    interval: input.interval,
+    nextDate: input.nextDate,
+    category: input.category ?? null,
+    notes: input.notes ?? null,
+    isActive: input.isActive ?? true,
+    autoCreateExpense: input.autoCreateExpense ?? false,
+    createdBy: actor.userId,
+  });
+  await writeActivity(db, { entityType: 'recurring_payment', entityId: id, action: 'created', after: input, actorId: actor.userId, actorType: actor.actorType });
+  return id;
+}
+
+export async function updateRecurringPayment(actor: Actor, id: string, input: any) {
+  const { db } = getDb();
+  const before = await loadRecurringPayment(id);
+  assertVersion(before, input.version, before);
+  const patch: Record<string, unknown> = {};
+  for (const k of ['name', 'vendor', 'companyId', 'currency', 'interval', 'nextDate', 'category', 'notes', 'isActive', 'autoCreateExpense']) {
+    if (input[k] !== undefined) patch[k] = input[k];
+  }
+  if (input.amount !== undefined) patch.amount = String(input.amount);
+  await db.update(schema.recurringPayments).set(patch)
+    .where(and(eq(schema.recurringPayments.id, id), eq(schema.recurringPayments.version, before.version)));
+  await writeActivity(db, { entityType: 'recurring_payment', entityId: id, action: 'updated', before, after: patch, actorId: actor.userId, actorType: actor.actorType });
+  return loadRecurringPayment(id);
+}
+
+export async function deleteRecurringPayment(actor: Actor, id: string) {
+  const { db } = getDb();
+  await loadRecurringPayment(id);
+  await db.update(schema.recurringPayments).set({ deletedAt: new Date() }).where(eq(schema.recurringPayments.id, id));
+  await writeActivity(db, { entityType: 'recurring_payment', entityId: id, action: 'deleted', actorId: actor.userId, actorType: actor.actorType });
+}
+
+/** Monthly-normalized totals per currency + upcoming payments in the next 30 days. */
+export async function recurringPaymentsSummary() {
+  const { db } = getDb();
+  const rows = await db.select().from(schema.recurringPayments).where(and(
+    isNull(schema.recurringPayments.deletedAt),
+    eq(schema.recurringPayments.isActive, true),
+  ));
+  const monthlyTotal: Record<string, number> = {};
+  for (const r of rows) {
+    const amt = Number(r.amount) * monthlyFactor(r.interval);
+    monthlyTotal[r.currency] = Math.round(((monthlyTotal[r.currency] ?? 0) + amt) * 100) / 100;
+  }
+  const now = new Date();
+  const horizon = new Date(now.getTime());
+  horizon.setUTCDate(horizon.getUTCDate() + 30);
+  const todayStr = now.toISOString().slice(0, 10);
+  const horizonStr = horizon.toISOString().slice(0, 10);
+  const upcoming = rows
+    .filter((r) => r.nextDate >= todayStr && r.nextDate <= horizonStr)
+    .sort((a, b) => a.nextDate.localeCompare(b.nextDate))
+    .map((r) => ({ id: r.id, name: r.name, amount: Number(r.amount), currency: r.currency, date: r.nextDate }));
+  return { monthlyTotal, upcoming };
 }
 
 // ─── Expenses ─────────────────────────────────────────────────────────────────

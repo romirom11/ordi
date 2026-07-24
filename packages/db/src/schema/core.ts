@@ -244,5 +244,7 @@ export const workspaceSettings = pgTable('workspace_settings', {
   modules: jsonb('modules').notNull().default({}),
   /** Third-party integration config, e.g. { slackWebhookUrl }. Secrets masked in GET. */
   integrations: jsonb('integrations').notNull().default({}),
+  /** Invoice branding: { accentColor?, footerNote?, paymentDetails?, showLogo? }. */
+  invoiceSettings: jsonb('invoice_settings').notNull().default({}),
   ...timestamps,
 });

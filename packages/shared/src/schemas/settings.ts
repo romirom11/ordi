@@ -18,6 +18,15 @@ export const integrationsSchema = z.object({
   slackWebhookUrl: z.string().url().nullable().optional(),
 });
 
+/** Invoice branding rendered on the public invoice page and PDF. */
+export const invoiceSettingsSchema = z.object({
+  accentColor: z.string().max(32).nullable().optional(),
+  footerNote: z.string().max(2000).nullable().optional(),
+  paymentDetails: z.string().max(4000).nullable().optional(),
+  showLogo: z.boolean().optional(),
+});
+export type InvoiceSettings = z.infer<typeof invoiceSettingsSchema>;
+
 /** PATCH /settings/workspace — all fields optional. */
 export const workspaceSettingsUpdateSchema = z.object({
   name: z.string().min(1).optional(),
@@ -30,4 +39,5 @@ export const workspaceSettingsUpdateSchema = z.object({
   sensitiveAuditRetentionMonths: z.number().int().optional(),
   modules: modulesSchema.optional(),
   integrations: integrationsSchema.optional(),
+  invoiceSettings: invoiceSettingsSchema.optional(),
 });

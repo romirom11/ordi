@@ -35,14 +35,22 @@ extendDict({
     // Slack
     'settings.slackTitle': 'Slack',
     'settings.slackDesc': 'Get notified about events (tasks, deals, invoices) in Slack.',
+    'settings.connectSlack': 'Connect Slack',
+    'settings.slackNotConfigured': 'OAuth is not configured. Set SLACK_CLIENT_ID and SLACK_CLIENT_SECRET in the server .env.',
+    'settings.slackConnectedTo': 'Connected to {team}',
+    'settings.slackChannelHint': 'The notification channel is chosen in each project’s settings.',
+    'settings.slackDisconnect': 'Disconnect',
+    'settings.slackDisconnectTitle': 'Disconnect Slack',
+    'settings.slackDisconnectBody': 'Disconnect Slack? Projects will stop sending notifications until you reconnect.',
+    'settings.slackConnected': 'Slack connected',
+    'settings.slackConnectError': 'Could not connect Slack — please try again.',
+    'settings.slackDisconnected': 'Slack disconnected',
+    'settings.slackAdvanced': 'Advanced (legacy webhook)',
     'settings.slackWebhook': 'Default webhook URL',
     'settings.slackPlaceholder': 'https://hooks.slack.com/services/…',
     'settings.slackNeedsManage': 'Requires the “Manage settings” permission to edit.',
     'settings.slackSaved': 'Slack webhook saved',
     'settings.slackRemoved': 'Slack webhook removed',
-    'settings.slackStep1': 'In Slack, create an Incoming Webhook (api.slack.com/messaging/webhooks).',
-    'settings.slackStep2': 'Paste the URL here.',
-    'settings.slackStep3': 'For a specific project’s channel, set a webhook in that project’s settings.',
     // Webhooks
     'settings.webhooksDesc': 'Send a signed POST to your endpoint when events happen.',
     'settings.addWebhook': 'Add webhook',
@@ -73,14 +81,22 @@ extendDict({
     // Slack
     'settings.slackTitle': 'Slack',
     'settings.slackDesc': 'Отримуйте сповіщення про події (задачі, угоди, інвойси) у Slack.',
+    'settings.connectSlack': 'Підключити Slack',
+    'settings.slackNotConfigured': 'OAuth не налаштовано. Задайте SLACK_CLIENT_ID і SLACK_CLIENT_SECRET у .env серверу.',
+    'settings.slackConnectedTo': 'Підключено до {team}',
+    'settings.slackChannelHint': 'Канал для сповіщень обирається в налаштуваннях кожного проєкту.',
+    'settings.slackDisconnect': 'Відключити',
+    'settings.slackDisconnectTitle': 'Відключити Slack',
+    'settings.slackDisconnectBody': 'Відключити Slack? Проєкти перестануть надсилати сповіщення, доки ви не підключите знову.',
+    'settings.slackConnected': 'Slack підключено',
+    'settings.slackConnectError': 'Не вдалося підключити Slack — спробуйте ще раз.',
+    'settings.slackDisconnected': 'Slack відключено',
+    'settings.slackAdvanced': 'Розширено (застарілий webhook)',
     'settings.slackWebhook': 'Типовий webhook URL',
     'settings.slackPlaceholder': 'https://hooks.slack.com/services/…',
     'settings.slackNeedsManage': 'Для редагування потрібен дозвіл «Керування налаштуваннями».',
     'settings.slackSaved': 'Slack webhook збережено',
     'settings.slackRemoved': 'Slack webhook видалено',
-    'settings.slackStep1': 'У Slack створіть Incoming Webhook (api.slack.com/messaging/webhooks).',
-    'settings.slackStep2': 'Вставте URL сюди.',
-    'settings.slackStep3': 'Для каналу конкретного проєкту — задайте webhook у налаштуваннях проєкту.',
     // Webhooks
     'settings.webhooksDesc': 'Надсилаємо підписаний POST на ваш ендпоінт, коли стаються події.',
     'settings.addWebhook': 'Додати вебхук',
@@ -258,11 +274,45 @@ function GitHubCard() {
 
 /* ─────────────── Slack ─────────────── */
 
+interface SlackStatus { configured: boolean; connected: boolean; teamName?: string | null }
+
 function SlackCard() {
   const t = useT();
   const can = useCan();
   const qc = useQueryClient();
-  const canManage = can('settings.manage');
+  const canManage = can('integrations.manage') || can('settings.manage');
+
+  const status = useQuery({ queryKey: ['slackStatus'], queryFn: () => api.get<SlackStatus>('/integrations/slack/status') });
+  const configured = status.data?.configured;
+  const connected = status.data?.connected;
+  const teamName = status.data?.teamName;
+
+  const [connecting, setConnecting] = useState(false);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  const connect = async () => {
+    setConnecting(true);
+    try {
+      const { url } = await api.get<{ url: string }>('/integrations/slack/oauth/start');
+      window.location.href = url;
+    } catch {
+      setConnecting(false);
+      toast.error(t('settings.slackConnectError'));
+    }
+  };
+
+  const disconnect = useMutation({
+    mutationFn: () => api.del('/integrations/slack'),
+    onSuccess: () => {
+      setConfirmDisconnect(false);
+      qc.invalidateQueries({ queryKey: ['slackStatus'] });
+      toast(t('settings.slackDisconnected'));
+    },
+    onError: () => { setConfirmDisconnect(false); toast.error(t('settings.saveFailed')); },
+  });
+
+  // Legacy webhook (advanced accordion)
   const ws = useQuery({
     queryKey: ['workspace-settings-full'],
     queryFn: () => api.get<WorkspaceFull>('/settings/workspace?full=1'),
@@ -270,8 +320,7 @@ function SlackCard() {
   const stored = ws.data?.integrations?.slackWebhookUrl ?? '';
   const [value, setValue] = useState('');
   useEffect(() => { setValue(stored); }, [stored]);
-
-  const save = useMutation({
+  const saveWebhook = useMutation({
     mutationFn: (url: string | null) => api.patch('/settings/workspace', { integrations: { slackWebhookUrl: url } }),
     onSuccess: (_r, url) => {
       qc.invalidateQueries({ queryKey: ['workspace-settings-full'] });
@@ -280,8 +329,7 @@ function SlackCard() {
     },
     onError: () => toast.error(t('settings.saveFailed')),
   });
-
-  const dirty = value.trim() !== (stored ?? '');
+  const webhookDirty = value.trim() !== (stored ?? '');
 
   return (
     <Card className="p-4">
@@ -293,38 +341,89 @@ function SlackCard() {
           <div className="text-[13px] font-semibold">{t('settings.slackTitle')}</div>
           <p className="mt-0.5 text-xs text-muted-foreground">{t('settings.slackDesc')}</p>
         </div>
+        {canManage && configured && !connected && (
+          <Button size="sm" onClick={connect} disabled={connecting}>
+            {connecting ? <Spinner /> : <Slack size={14} />} {t('settings.connectSlack')}
+          </Button>
+        )}
       </div>
 
-      <div className="mt-3">
-        <Field label={t('settings.slackWebhook')}>
-          <div className="flex items-center gap-2">
-            <Input
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              placeholder={t('settings.slackPlaceholder')}
-              disabled={!canManage || ws.isLoading}
-              className="flex-1 font-mono text-[11px]"
-            />
-            {canManage && dirty && (
-              <Button size="sm" onClick={() => save.mutate(value.trim() || null)} disabled={save.isPending}>
-                {save.isPending ? <Spinner /> : null} {t('common.save')}
-              </Button>
-            )}
-            {canManage && !dirty && stored && (
-              <Button size="sm" variant="ghost" onClick={() => save.mutate(null)} disabled={save.isPending}>
-                <Trash2 size={14} /> {t('settings.remove')}
+      {/* Not configured — env setup note */}
+      {status.isSuccess && !configured && (
+        <div className="mt-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          {t('settings.slackNotConfigured')}
+        </div>
+      )}
+
+      {/* Connected state */}
+      {connected && (
+        <div className="mt-3">
+          <div className="flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-2.5">
+            <span className="flex items-center gap-2 text-[13px] font-medium">
+              <span className="h-1.5 w-1.5 rounded-full bg-success" />
+              {t('settings.slackConnectedTo').replace('{team}', teamName || 'Slack')}
+            </span>
+            {canManage && (
+              <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setConfirmDisconnect(true)}>
+                <Trash2 size={14} /> {t('settings.slackDisconnect')}
               </Button>
             )}
           </div>
-        </Field>
-        {!canManage && <p className="mt-1.5 text-[11px] text-faint">{t('settings.slackNeedsManage')}</p>}
+          <p className="mt-2 text-[11px] text-faint">{t('settings.slackChannelHint')}</p>
+        </div>
+      )}
+
+      {/* Advanced: legacy webhook accordion */}
+      <div className="mt-3 border-t border-border pt-3">
+        <button
+          type="button"
+          onClick={() => setAdvancedOpen((o) => !o)}
+          aria-expanded={advancedOpen}
+          className="flex items-center gap-1 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronRight size={14} className={cn('transition-transform duration-[250ms] ease-smooth-out', advancedOpen && 'rotate-90')} />
+          {t('settings.slackAdvanced')}
+        </button>
+        <div className={cn('grid transition-[grid-template-rows] duration-[250ms] ease-smooth-out', advancedOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')}>
+          <div className="overflow-hidden">
+            <div className="pt-3">
+              <Field label={t('settings.slackWebhook')}>
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={value}
+                    onChange={(e) => setValue(e.target.value)}
+                    placeholder={t('settings.slackPlaceholder')}
+                    disabled={!canManage || ws.isLoading}
+                    className="flex-1 font-mono text-[11px]"
+                  />
+                  {canManage && webhookDirty && (
+                    <Button size="sm" onClick={() => saveWebhook.mutate(value.trim() || null)} disabled={saveWebhook.isPending}>
+                      {saveWebhook.isPending ? <Spinner /> : null} {t('common.save')}
+                    </Button>
+                  )}
+                  {canManage && !webhookDirty && stored && (
+                    <Button size="sm" variant="ghost" onClick={() => saveWebhook.mutate(null)} disabled={saveWebhook.isPending}>
+                      <Trash2 size={14} /> {t('settings.remove')}
+                    </Button>
+                  )}
+                </div>
+              </Field>
+              {!canManage && <p className="mt-1.5 text-[11px] text-faint">{t('settings.slackNeedsManage')}</p>}
+            </div>
+          </div>
+        </div>
       </div>
 
-      <ol className="mt-3 space-y-1 text-xs text-muted-foreground">
-        <li className="flex gap-2"><span className="text-faint">1.</span> {t('settings.slackStep1')}</li>
-        <li className="flex gap-2"><span className="text-faint">2.</span> {t('settings.slackStep2')}</li>
-        <li className="flex gap-2"><span className="text-faint">3.</span> {t('settings.slackStep3')}</li>
-      </ol>
+      <ConfirmDialog
+        open={confirmDisconnect}
+        onClose={() => setConfirmDisconnect(false)}
+        onConfirm={() => disconnect.mutate()}
+        title={t('settings.slackDisconnectTitle')}
+        body={t('settings.slackDisconnectBody')}
+        confirmLabel={t('settings.slackDisconnect')}
+        danger
+        pending={disconnect.isPending}
+      />
     </Card>
   );
 }
@@ -456,10 +555,14 @@ export function IntegrationsPanel() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const git = params.get('git');
+    const slack = params.get('slack');
     if (git === 'connected') toast(t('settings.githubConnected'));
     else if (git === 'error') toast.error(t('settings.githubConnectError'));
-    if (git) {
+    if (slack === 'connected') toast(t('settings.slackConnected'));
+    else if (slack === 'error') toast.error(t('settings.slackConnectError'));
+    if (git || slack) {
       params.delete('git');
+      params.delete('slack');
       const q = params.toString();
       window.history.replaceState(null, '', window.location.pathname + (q ? `?${q}` : '') + window.location.hash);
     }

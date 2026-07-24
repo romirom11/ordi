@@ -7,14 +7,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Building2, ChevronLeft, ChevronDown, Plus, Mail, Phone, Star, Pin, Globe, Check,
-  FolderKanban, Handshake,
+  Building2, ChevronDown, Plus, Mail, Phone, Star, Pin, Globe, Check,
+  FolderKanban, Handshake, Receipt,
 } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
-import { Link } from '../lib/router';
+import { Link, useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import {
-  Avatar, Badge, Button, Card, EmptyState, IconButton, Skeleton, Spinner, Tooltip,
+  Avatar, Badge, Breadcrumbs, Button, Card, EmptyState, IconButton, Skeleton, Spinner, Tooltip,
   cn, fmtMoney, fmtDate,
 } from '../components/ui';
 import { DropdownMenu, MenuItem, MenuLabel, toast } from '../components/overlays';
@@ -26,6 +26,7 @@ import {
   type Company, type Contact, type Deal, type Stage,
 } from '../components/crm/shared';
 import { AddContactDialog, NewDealDialog } from '../components/crm/dialogs';
+import { useWorkspaceSettings, financeEnabled } from '../components/finance/workspace';
 
 interface Note { id: string; body?: unknown; createdAt?: string; authorName?: string; pinned?: boolean }
 interface Project { id: string; name: string; key?: string | null; status?: string | null }
@@ -68,9 +69,13 @@ export function CompanyDetailPage({ id }: { id: string }) {
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Breadcrumb + header */}
       <div className="border-b border-border px-6 pb-4 pt-3">
-        <Link to="/crm/clients" className="mb-3 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
-          <ChevronLeft size={13} /> {t('crm.backToCrm')}
-        </Link>
+        <Breadcrumbs
+          className="mb-3"
+          items={[
+            { label: t('crm.title'), to: '/crm/clients' },
+            { label: c?.name ?? '…' },
+          ]}
+        />
         <div className="flex items-start gap-4">
           {c ? <Avatar name={c.name} size={48} className="text-base" /> : <Skeleton className="h-12 w-12 rounded-full" />}
           <div className="min-w-0 flex-1">
@@ -129,6 +134,7 @@ export function CompanyDetailPage({ id }: { id: string }) {
         <div className="mx-auto grid max-w-6xl gap-6 p-6 lg:grid-cols-[minmax(0,1fr)_300px]">
           <div className="space-y-8">
             {can('deals.read') && <DealsSection companyId={id} canWrite={can('deals.write')} />}
+            <InvoicesSection companyId={id} />
             <ContactsSection companyId={id} canWrite={canWrite} />
             <NotesSection companyId={id} canWrite={canWrite} />
           </div>
@@ -277,6 +283,106 @@ function DealsSection({ companyId, canWrite }: { companyId: string; canWrite: bo
         </div>
       )}
       <NewDealDialog open={adding} onClose={() => setAdding(false)} lockedCompanyId={companyId} onCreated={() => dealsQ.refetch()} />
+    </section>
+  );
+}
+
+/* ─────────────── Invoices (finance-gated) ─────────────── */
+
+interface InvoiceRow {
+  id: string;
+  number?: string | null;
+  status?: string | null;
+  issueDate?: string | null;
+  total?: number | string | null;
+  amountPaid?: number | string | null;
+  currency?: string | null;
+  isOverdue?: boolean;
+}
+
+const INV_TONE: Record<string, string> = {
+  draft: 'bg-muted text-muted-foreground',
+  sent: 'bg-primary/15 text-primary',
+  viewed: 'bg-primary/15 text-primary',
+  partially_paid: 'bg-warning/15 text-warning',
+  paid: 'bg-success/15 text-success',
+  canceled: 'bg-muted text-muted-foreground',
+  overdue: 'bg-destructive/15 text-destructive',
+};
+
+function InvoiceStatusPill({ status, overdue }: { status?: string | null; overdue?: boolean }) {
+  const t = useT();
+  const key = overdue ? 'overdue' : status ?? 'draft';
+  return (
+    <span className={cn('inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium', INV_TONE[key] ?? INV_TONE.draft)}>
+      {t(`finance.status.${key}`, key.replace('_', ' '))}
+    </span>
+  );
+}
+
+function InvoicesSection({ companyId }: { companyId: string }) {
+  const t = useT();
+  const can = useCan();
+  const navigate = useNavigate();
+  const wsQ = useWorkspaceSettings();
+
+  const enabled = financeEnabled(wsQ.data) && can('finance.read');
+
+  const invoicesQ = useQuery<InvoiceRow[]>({
+    queryKey: ['invoices', 'company', companyId],
+    queryFn: () => api.get<{ data: InvoiceRow[] }>(`/invoices${qs({ companyId })}`).then((r) => r.data),
+    enabled,
+  });
+
+  // Only render once we know finance is enabled and the user can read it.
+  if (wsQ.isLoading || !enabled) return null;
+
+  const invoices = invoicesQ.data ?? [];
+  const currency = invoices[0]?.currency ?? 'USD';
+  const outstanding = invoices.reduce((sum, iv) => {
+    if (iv.status === 'canceled') return sum;
+    return sum + (Number(iv.total ?? 0) - Number(iv.amountPaid ?? 0));
+  }, 0);
+
+  return (
+    <section>
+      <SectionHeader
+        icon={<Receipt size={15} />}
+        title={t('crm.invoices')}
+        count={invoices.length}
+        action={can('finance.write') && (
+          <Link to="/finance">
+            <Button variant="outline" size="xs"><Plus size={13} /> {t('crm.newInvoice')}</Button>
+          </Link>
+        )}
+      />
+      {invoicesQ.isLoading ? (
+        <div className="space-y-1">{[0, 1].map((i) => <Skeleton key={i} className="h-11 rounded-md" />)}</div>
+      ) : invoices.length === 0 ? (
+        <EmptyState icon={<Receipt size={18} />} title={t('crm.noInvoices')} hint={t('crm.noInvoicesHint')} />
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-border">
+          {invoices.map((iv, i) => {
+            const overdue = iv.isOverdue || iv.status === 'overdue';
+            return (
+              <div
+                key={iv.id}
+                onClick={() => navigate(`/finance/invoices/${iv.id}`)}
+                className={cn('flex cursor-pointer items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/50', i > 0 && 'border-t border-border')}
+              >
+                <span className="w-24 shrink-0 truncate font-mono text-[11px] text-muted-foreground">{iv.number ?? iv.id.slice(0, 8)}</span>
+                <InvoiceStatusPill status={iv.status} overdue={overdue} />
+                <span className="min-w-0 flex-1 truncate text-right text-xs text-muted-foreground tabular-nums">{fmtDate(iv.issueDate)}</span>
+                <span className="w-24 shrink-0 text-right text-[13px] font-semibold tabular-nums">{fmtMoney(iv.total ?? 0, iv.currency ?? 'USD')}</span>
+              </div>
+            );
+          })}
+          <div className="flex items-center justify-between border-t border-border bg-muted/20 px-3 py-2 text-[13px]">
+            <span className="text-muted-foreground">{t('crm.totalOutstanding')}</span>
+            <span className={cn('font-semibold tabular-nums', outstanding > 0 && 'text-destructive')}>{fmtMoney(outstanding, currency)}</span>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

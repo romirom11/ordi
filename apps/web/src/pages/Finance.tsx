@@ -3,10 +3,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, qs, ApiError } from '../lib/api';
 import { useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
+import { useTabs } from '../lib/tabs';
 import { Button, Input, Select, Card, PageHeader, EmptyState, Skeleton, SegmentedControl, fmtMoney, fmtDate, cn } from '../components/ui';
-import { Dialog, toast } from '../components/overlays';
-import { Plus, Trash2, Wallet, AlertTriangle, CheckCircle2, Receipt, FileStack } from 'lucide-react';
+import { Dialog, ContextMenu, toast, type ContextMenuEntry } from '../components/overlays';
+import { Plus, Trash2, Wallet, AlertTriangle, CheckCircle2, Receipt, FileStack, Copy, ExternalLink, Link2 } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
+import { SubscriptionsTab } from '../components/finance/subscriptions';
 
 extendDict({
   en: {
@@ -22,6 +24,10 @@ extendDict({
     'finance.status.declined': 'Declined',
     'finance.status.expired': 'Expired',
     'finance.status.open': 'Open',
+    'finance.openInNewTab': 'Open in new tab',
+    'finance.copyLink': 'Copy link',
+    'finance.copyPublicLink': 'Copy public link',
+    'finance.linkCopied': 'Link copied',
   },
   uk: {
     'finance.newExpense': 'Нова витрата',
@@ -36,8 +42,16 @@ extendDict({
     'finance.status.declined': 'Відхилено',
     'finance.status.expired': 'Прострочено (пропозиція)',
     'finance.status.open': 'Відкрито',
+    'finance.openInNewTab': 'Відкрити в новій вкладці',
+    'finance.copyLink': 'Скопіювати посилання',
+    'finance.copyPublicLink': 'Скопіювати публічне посилання',
+    'finance.linkCopied': 'Посилання скопійовано',
   },
 });
+
+function copyToClipboard(text: string, msg: string) {
+  navigator.clipboard?.writeText(text).then(() => toast(msg)).catch(() => toast.error(msg));
+}
 
 type Tone = 'faint' | 'primary' | 'success' | 'warning' | 'destructive';
 const STATUS_TONE: Record<string, Tone> = {
@@ -75,6 +89,7 @@ interface Company { id: string; name: string; defaultCurrency?: string }
 interface DocRow {
   id: string;
   number?: string | null;
+  companyId?: string | null;
   companyName?: string | null;
   status?: string | null;
   total?: number | string | null;
@@ -83,6 +98,7 @@ interface DocRow {
   validUntil?: string | null;
   isOverdue?: boolean;
   is_overdue?: boolean;
+  publicToken?: string | null;
 }
 interface Expense { id: string; description?: string | null; category?: string | null; amount?: number | string; currency?: string; date?: string | null; projectName?: string | null }
 interface ProfitRow {
@@ -90,7 +106,7 @@ interface ProfitRow {
   laborCost?: number | string; expenseCost?: number | string;
   margin?: number | string; marginPct?: number | string; marginPercent?: number | string; currency?: string;
 }
-type Tab = 'dashboard' | 'invoices' | 'quotes' | 'expenses';
+type Tab = 'dashboard' | 'invoices' | 'quotes' | 'expenses' | 'subscriptions';
 
 export function FinancePage() {
   const t = useT();
@@ -100,14 +116,19 @@ export function FinancePage() {
     { key: 'invoices', label: t('finance.invoices') },
     { key: 'quotes', label: t('finance.quotes') },
     { key: 'expenses', label: t('finance.expenses') },
+    { key: 'subscriptions', label: t('subs.title') },
   ];
   return (
     <div>
-      <PageHeader title={t('nav.finance')} actions={<SegmentedControl options={tabs} value={tab} onChange={setTab} />} />
+      <PageHeader
+        title={t('nav.finance')}
+        actions={<SegmentedControl options={tabs} value={tab} onChange={setTab} />}
+      />
       {tab === 'dashboard' && <DashboardView />}
       {tab === 'invoices' && <InvoicesView />}
       {tab === 'quotes' && <QuotesView />}
       {tab === 'expenses' && <ExpensesView />}
+      {tab === 'subscriptions' && <SubscriptionsTab />}
     </div>
   );
 }
@@ -369,7 +390,7 @@ function InvoicesView() {
         </Select>
         {can('finance.write') && <Button size="sm" className="ml-auto" onClick={() => setShowForm(true)}><Plus size={14} /> {t('finance.newInvoice')}</Button>}
       </div>
-      <DocTable rows={rows} loading={invoices.isLoading} kind="invoice" onRow={(id) => navigate(`/finance/invoices/${id}`)} />
+      <DocTable rows={rows} loading={invoices.isLoading} kind="invoice" companies={companies.data?.data} onRow={(id) => navigate(`/finance/invoices/${id}`)} />
 
       {can('finance.write') && (
         <Dialog open={showForm} onClose={() => setShowForm(false)} title={t('finance.newInvoice')} width={560}>
@@ -414,7 +435,7 @@ function QuotesView() {
         </Select>
         {can('finance.write') && <Button size="sm" className="ml-auto" onClick={() => setShowForm(true)}><Plus size={14} /> {t('finance.newQuote')}</Button>}
       </div>
-      <DocTable rows={rows} loading={quotes.isLoading} kind="quote" />
+      <DocTable rows={rows} loading={quotes.isLoading} kind="quote" companies={companies.data?.data} />
 
       {can('finance.write') && (
         <Dialog open={showForm} onClose={() => setShowForm(false)} title={t('finance.newQuote')} width={560}>
@@ -425,8 +446,14 @@ function QuotesView() {
   );
 }
 
-function DocTable({ rows, loading, kind, onRow }: { rows: DocRow[]; loading: boolean; kind: 'invoice' | 'quote'; onRow?: (id: string) => void }) {
+function DocTable({ rows, loading, kind, onRow, companies }: {
+  rows: DocRow[]; loading: boolean; kind: 'invoice' | 'quote'; onRow?: (id: string) => void; companies?: Company[];
+}) {
   const t = useT();
+  const tabs = useTabs();
+  // The list endpoints return companyId only — resolve names client-side.
+  const companyName = (r: DocRow): string | null =>
+    r.companyName ?? (r.companyId ? companies?.find((c) => c.id === r.companyId)?.name ?? null : null);
   if (loading) {
     return (
       <div className="overflow-hidden rounded-xl border border-border">
@@ -450,9 +477,9 @@ function DocTable({ rows, loading, kind, onRow }: { rows: DocRow[]; loading: boo
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       {rows.map((r, i) => {
         const overdue = kind === 'invoice' && (r.isOverdue || r.is_overdue || r.status === 'overdue');
-        return (
+        const detailUrl = `/finance/invoices/${r.id}`;
+        const row = (
           <div
-            key={r.id}
             role={onRow ? 'button' : undefined}
             tabIndex={onRow ? 0 : undefined}
             onClick={onRow ? () => onRow(r.id) : undefined}
@@ -465,7 +492,7 @@ function DocTable({ rows, loading, kind, onRow }: { rows: DocRow[]; loading: boo
             style={{ ['--i' as string]: Math.min(i, 10) }}
           >
             <span className="w-28 shrink-0 truncate font-mono text-xs text-muted-foreground">{r.number ?? r.id.slice(0, 8)}</span>
-            <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{r.companyName ?? '—'}</span>
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{companyName(r) ?? '—'}</span>
             <StatusPill status={r.status} overdue={overdue} />
             <span className="w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
               {fmtDate(kind === 'invoice' ? r.dueDate : r.validUntil)}
@@ -473,6 +500,15 @@ function DocTable({ rows, loading, kind, onRow }: { rows: DocRow[]; loading: boo
             <span className="w-24 shrink-0 text-right text-[13px] font-semibold tabular-nums">{fmtMoney(r.total ?? 0, r.currency ?? 'USD')}</span>
           </div>
         );
+        if (kind !== 'invoice' || !onRow) return <div key={r.id}>{row}</div>;
+        const menu: ContextMenuEntry[] = [
+          { key: 'open', label: t('finance.openInNewTab'), icon: <ExternalLink size={14} />, onSelect: () => tabs?.openInNewTab(detailUrl) },
+          { key: 'copy', label: t('finance.copyLink'), icon: <Copy size={14} />, onSelect: () => copyToClipboard(`${window.location.origin}${detailUrl}`, t('finance.linkCopied')) },
+          ...(r.publicToken
+            ? [{ key: 'copyPublic', label: t('finance.copyPublicLink'), icon: <Link2 size={14} />, onSelect: () => copyToClipboard(`${window.location.origin}/i/${r.publicToken}`, t('finance.linkCopied')) } as ContextMenuEntry]
+            : []),
+        ];
+        return <ContextMenu key={r.id} items={menu}>{row}</ContextMenu>;
       })}
     </div>
   );
@@ -519,7 +555,9 @@ function ExpensesView() {
               <span className="w-16 shrink-0 text-xs text-muted-foreground tabular-nums">{fmtDate(e.date)}</span>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[13px] font-medium">{e.description ?? '—'}</div>
-                <div className="truncate text-xs text-muted-foreground">{[e.category, e.projectName].filter(Boolean).join(' · ') || '—'}</div>
+                {(e.category || e.projectName) && (
+                  <div className="truncate text-xs text-muted-foreground">{[e.category, e.projectName].filter(Boolean).join(' · ')}</div>
+                )}
               </div>
               <span className="shrink-0 text-[13px] font-semibold tabular-nums">{fmtMoney(e.amount ?? 0, e.currency ?? 'USD')}</span>
             </div>

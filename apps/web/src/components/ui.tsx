@@ -1,6 +1,8 @@
 import { clsx } from 'clsx';
-import { forwardRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes, type CSSProperties } from 'react';
+import { forwardRef, Fragment, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes, type CSSProperties } from 'react';
+import { ChevronRight } from 'lucide-react';
 import { usePageTitle } from '../lib/tabs';
+import { Link } from '../lib/router';
 
 export function cn(...args: Parameters<typeof clsx>): string {
   return clsx(...args);
@@ -107,14 +109,14 @@ export function Switch({ checked, onChange, disabled, label }: {
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        'relative inline-flex h-[18px] w-[30px] shrink-0 items-center rounded-full transition-colors duration-200',
+        'relative inline-flex h-[18px] w-[30px] shrink-0 items-center rounded-full transition-colors duration-150',
         checked ? 'bg-primary' : 'bg-border-strong',
         disabled && 'pointer-events-none opacity-50',
       )}
     >
       <span
         className="absolute left-[2px] h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform"
-        style={{ transform: checked ? 'translateX(12px)' : 'translateX(0)', transitionDuration: '350ms', transitionTimingFunction: 'cubic-bezier(0.34, 1.35, 0.64, 1)' }}
+        style={{ transform: checked ? 'translateX(12px)' : 'translateX(0)', transitionDuration: 'var(--duration-medium)', transitionTimingFunction: 'var(--ease-bounce)' }}
       />
     </button>
   );
@@ -142,7 +144,7 @@ export function Checkbox({ checked, onChange, disabled }: { checked: boolean; on
           style={{
             strokeDasharray: 12,
             strokeDashoffset: checked ? 0 : 12,
-            transition: 'stroke-dashoffset 350ms cubic-bezier(0.22, 1, 0.36, 1)',
+            transition: 'stroke-dashoffset var(--duration-medium) var(--ease-smooth-out)',
           }}
         />
       </svg>
@@ -154,7 +156,14 @@ export function Checkbox({ checked, onChange, disabled }: { checked: boolean; on
 
 export function Card({ className, children, onClick }: { className?: string; children: ReactNode; onClick?: () => void }) {
   return (
-    <div onClick={onClick} className={cn('rounded-lg border border-border bg-card text-card-foreground', className)}>
+    <div
+      onClick={onClick}
+      className={cn(
+        'rounded-lg border border-border bg-card text-card-foreground',
+        onClick && 'cursor-pointer transition-colors duration-150 hover:border-border-strong',
+        className,
+      )}
+    >
       {children}
     </div>
   );
@@ -179,12 +188,71 @@ export function Kbd({ children }: { children: ReactNode }) {
   );
 }
 
-export function PageHeader({ title, actions, subtitle }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode }) {
+/** Breadcrumb trail — 13px links separated by chevrons; last item is the current page. */
+export interface BreadcrumbItem { label: ReactNode; to?: string; icon?: ReactNode }
+
+export function Breadcrumbs({ items, className }: { items: BreadcrumbItem[]; className?: string }) {
+  // A lone crumb only repeats the page title — render trails, not echoes.
+  if (items.length < 2) return null;
+  return (
+    <nav aria-label="Breadcrumb" className={cn('flex min-w-0 items-center gap-1 text-[13px]', className)}>
+      {items.map((it, i) => {
+        const last = i === items.length - 1;
+        const inner = (
+          <>
+            {it.icon && <span className="shrink-0 text-muted-foreground [&>svg]:block">{it.icon}</span>}
+            <span className="truncate">{it.label}</span>
+          </>
+        );
+        return (
+          <Fragment key={i}>
+            {i > 0 && <ChevronRight size={12} className="shrink-0 text-faint" aria-hidden />}
+            {last ? (
+              <span className="flex min-w-0 items-center gap-1 font-medium text-foreground">{inner}</span>
+            ) : it.to ? (
+              <Link
+                to={it.to}
+                className="flex min-w-0 items-center gap-1 text-muted-foreground transition-colors duration-150 hover:text-foreground"
+              >
+                {inner}
+              </Link>
+            ) : (
+              <span className="flex min-w-0 items-center gap-1 text-muted-foreground">{inner}</span>
+            )}
+          </Fragment>
+        );
+      })}
+    </nav>
+  );
+}
+
+/** The one standard page content container — pages wrap their body in this. */
+export function PageBody({ children, width = 'default', className }: {
+  children: ReactNode; width?: 'default' | 'wide' | 'full'; className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        'w-full px-6 py-6',
+        width === 'default' && 'mx-auto max-w-3xl',
+        width === 'wide' && 'mx-auto max-w-5xl',
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+export function PageHeader({ title, actions, subtitle, breadcrumbs }: {
+  title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; breadcrumbs?: ReactNode;
+}) {
   // Name the active in-app tab after this page (no-op outside TabsProvider).
   usePageTitle(typeof title === 'string' ? title : undefined);
   return (
     <div className="flex min-h-[52px] items-center justify-between gap-3 border-b border-border px-6 py-2.5">
       <div className="min-w-0">
+        {breadcrumbs && <div className="mb-0.5 text-xs">{breadcrumbs}</div>}
         <h1 className="truncate text-[15px] font-semibold leading-tight">{title}</h1>
         {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
       </div>
@@ -251,7 +319,7 @@ export function AvatarGroup({ users, size = 20, max = 4 }: {
       {shown.map((u, i) => (
         <span
           key={u.id}
-          className="rounded-full ring-2 ring-card transition-transform duration-300 ease-smooth-out hover:-translate-y-0.5 hover:scale-105"
+          className="rounded-full ring-2 ring-card transition-transform duration-[350ms] [transition-timing-function:var(--ease-bounce-strong)] hover:-translate-y-0.5 hover:scale-105 hover:duration-150 hover:[transition-timing-function:var(--ease-smooth-out)]"
           style={{ marginLeft: i === 0 ? 0 : -Math.round(size / 3), zIndex: i + 1 }}
         >
           <Avatar name={u.name} src={u.avatar} size={size} />
@@ -385,7 +453,7 @@ export function ProgressRing({ value, size = 16, stroke = 2.5, color, className 
         cx={size / 2} cy={size / 2} r={r} fill="none"
         stroke={color ?? 'hsl(var(--primary))'} strokeWidth={stroke} strokeLinecap="round"
         strokeDasharray={circ} strokeDashoffset={circ * (1 - pct / 100)}
-        style={{ transition: 'stroke-dashoffset 500ms cubic-bezier(0.22, 1, 0.36, 1)' }}
+        style={{ transition: 'stroke-dashoffset var(--duration-very-slow) var(--ease-smooth-out)' }}
       />
     </svg>
   );
@@ -401,7 +469,7 @@ export function Tooltip({ label, children, side = 'top' }: { label: ReactNode; c
         role="tooltip"
         className={cn(
           'pointer-events-none absolute z-50 whitespace-nowrap rounded-md bg-elevated px-2 py-1 text-xs text-foreground shadow-pop',
-          'opacity-0 transition-opacity duration-150 ease-out group-hover/tt:opacity-100 group-hover/tt:delay-500',
+          'opacity-0 transition-opacity duration-150 ease-out group-hover/tt:opacity-100 group-hover/tt:delay-[80ms]',
           side === 'top' && 'bottom-full left-1/2 mb-1.5 -translate-x-1/2',
           side === 'bottom' && 'top-full left-1/2 mt-1.5 -translate-x-1/2',
           side === 'right' && 'left-full top-1/2 ml-1.5 -translate-y-1/2',
@@ -476,10 +544,21 @@ export function SegmentedControl<T extends string>({ options, value, onChange, c
 
 /* ───────────────────────── Formatters ───────────────────────── */
 
+/** BCP-47 locale matching the APP language (not the browser), for date/number formatting. */
+export function appLocale(): string | undefined {
+  try {
+    const l = localStorage.getItem('ordi:locale');
+    if (l === 'uk') return 'uk-UA';
+    if (l === 'en') return 'en-US';
+  } catch { /* SSR / private mode */ }
+  return undefined;
+}
+
 const money = new Map<string, Intl.NumberFormat>();
 export function fmtMoney(amount: number | string, currency = 'USD'): string {
-  const key = currency;
-  if (!money.has(key)) money.set(key, new Intl.NumberFormat(undefined, { style: 'currency', currency }));
+  const loc = appLocale();
+  const key = `${loc ?? ''}:${currency}`;
+  if (!money.has(key)) money.set(key, new Intl.NumberFormat(loc, { style: 'currency', currency }));
   return money.get(key)!.format(Number(amount));
 }
 
@@ -487,7 +566,7 @@ export function fmtDate(d?: string | null): string {
   if (!d) return '—';
   const date = new Date(d);
   const sameYear = date.getFullYear() === new Date().getFullYear();
-  return date.toLocaleDateString(undefined, sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
+  return date.toLocaleDateString(appLocale(), sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 export function fmtRelative(d?: string | null): string {

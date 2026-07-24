@@ -3,8 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, qs, ApiError } from '../lib/api';
 import { useCan } from '../lib/auth';
 import {
-  Button, IconButton, Input, Textarea, Card, PageHeader, EmptyState, Skeleton,
-  SegmentedControl, fmtMoney, cn,
+  Button, IconButton, Input, Textarea, Card, PageHeader, PageBody, Breadcrumbs, EmptyState, Skeleton,
+  SegmentedControl, Select, fmtMoney, appLocale, cn,
 } from '../components/ui';
 import { Dialog, toast } from '../components/overlays';
 import { ChevronLeft, ChevronRight, Plus, Play, Square, Clock, Timer } from 'lucide-react';
@@ -25,6 +25,11 @@ extendDict({
     'time.taskIdRequired': 'Task ID is required',
     'time.optionalNote': 'Note (optional)',
     'time.today': 'Today',
+    'time.task': 'Task',
+    'time.taskRequired': 'Pick a task first.',
+    'time.pickTask': 'Pick a task…',
+    'time.noMyTasks': 'No tasks assigned to you yet — create or pick up a task first.',
+    'time.durationRequired': 'Enter a duration in minutes.',
   },
   uk: {
     'time.timerIdle': 'Таймер не запущено',
@@ -40,6 +45,11 @@ extendDict({
     'time.taskIdRequired': 'Потрібен ID задачі',
     'time.optionalNote': 'Нотатка (необов’язково)',
     'time.today': 'Сьогодні',
+    'time.task': 'Задача',
+    'time.taskRequired': 'Спершу оберіть задачу.',
+    'time.pickTask': 'Оберіть задачу…',
+    'time.noMyTasks': 'На вас ще немає задач — спершу створіть або візьміть задачу.',
+    'time.durationRequired': 'Вкажіть тривалість у хвилинах.',
   },
 });
 
@@ -58,6 +68,45 @@ interface MyWeek { weekStart?: string; days?: DayGroup[]; entries?: TimeEntry[];
 interface ReportRow { key?: string; label?: string; name?: string; hours?: number | string; seconds?: number | string; billableAmount?: number | string; currency?: string }
 interface ActiveTimer { userId?: string; taskId: string; startedAt: string; note?: string | null; elapsedSeconds: number }
 interface TaskLite { id: string; ref?: string | null; title?: string | null }
+
+interface MyTaskLite { id: string; title: string; ref?: string | null; key?: string | null; number?: number | null }
+interface MeTasksBuckets { overdue?: MyTaskLite[]; today?: MyTaskLite[]; week?: MyTaskLite[]; later?: MyTaskLite[] }
+
+/** The user's open tasks, flattened for the timer/entry task pickers. */
+function useMyTaskOptions(enabled: boolean): { id: string; label: string }[] {
+  const q = useQuery({
+    queryKey: ['me', 'tasks'],
+    queryFn: () => api.get<MeTasksBuckets>('/me/tasks'),
+    enabled,
+    staleTime: 30_000,
+  });
+  const seen = new Set<string>();
+  const out: { id: string; label: string }[] = [];
+  for (const bucket of [q.data?.overdue, q.data?.today, q.data?.week, q.data?.later]) {
+    for (const task of bucket ?? []) {
+      if (seen.has(task.id)) continue;
+      seen.add(task.id);
+      const ref = task.ref ?? (task.key && task.number != null ? `${task.key}-${task.number}` : '');
+      out.push({ id: task.id, label: ref ? `${ref} · ${task.title}` : task.title });
+    }
+  }
+  return out;
+}
+
+/** Task dropdown for time tracking — replaces the old raw "task id" input. */
+function TaskSelect({ value, onChange, open }: { value: string; onChange: (id: string) => void; open: boolean }) {
+  const t = useT();
+  const options = useMyTaskOptions(open);
+  if (open && options.length === 0) {
+    return <p className="rounded-md border border-dashed border-border px-2.5 py-2 text-xs text-muted-foreground">{t('time.noMyTasks')}</p>;
+  }
+  return (
+    <Select value={value} onChange={(e) => onChange(e.target.value)} className="w-full">
+      <option value="">{t('time.pickTask')}</option>
+      {options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+    </Select>
+  );
+}
 
 function mondayOf(d: Date): Date {
   const date = new Date(d);
@@ -92,7 +141,17 @@ function entryDate(e: TimeEntry): string {
 function dayLabel(iso: string): string {
   const today = isoDate(new Date());
   if (iso === today) return '';
-  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  return new Date(iso + 'T00:00:00').toLocaleDateString(appLocale(), { weekday: 'long', month: 'short', day: 'numeric' });
+}
+/** Human, locale-aware week range, e.g. "20 Jul – 26 Jul" / "20 лип – 26 лип". */
+function weekRangeLabel(weekStart: string): string {
+  const start = new Date(weekStart + 'T00:00:00');
+  const end = new Date(weekStart + 'T00:00:00');
+  end.setDate(end.getDate() + 6);
+  const sameMonth = start.getMonth() === end.getMonth();
+  const startStr = start.toLocaleDateString(appLocale(), { month: 'short', day: 'numeric' });
+  const endStr = end.toLocaleDateString(appLocale(), sameMonth ? { day: 'numeric' } : { month: 'short', day: 'numeric' });
+  return `${startStr} – ${endStr}`;
 }
 
 export function TimePage() {
@@ -110,6 +169,7 @@ export function TimePage() {
     <div>
       <PageHeader
         title={t('nav.time')}
+        breadcrumbs={<Breadcrumbs items={[{ label: t('nav.time') }]} />}
         actions={<SegmentedControl options={tabs} value={tab} onChange={setTab} />}
       />
       {tab === 'week' ? <MyWeekView /> : <ReportsView />}
@@ -208,13 +268,13 @@ function TimerHero({ onChange }: { onChange: () => void }) {
           onSubmit={(e) => {
             e.preventDefault();
             setFormError(null);
-            if (!taskId.trim()) { setFormError(t('time.taskIdRequired')); return; }
+            if (!taskId.trim()) { setFormError(t('time.taskRequired')); return; }
             start.mutate();
           }}
         >
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">{t('time.taskId')}</label>
-            <Input autoFocus value={taskId} onChange={(e) => setTaskId(e.target.value)} placeholder="task id" />
+            <label className="text-xs font-medium text-muted-foreground">{t('time.task')}</label>
+            <TaskSelect value={taskId} onChange={setTaskId} open={showStart} />
           </div>
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">{t('time.optionalNote')}</label>
@@ -248,6 +308,7 @@ function MyWeekView() {
   };
 
   const [showAdd, setShowAdd] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
   const [form, setForm] = useState({ taskId: '', date: weekStart, minutes: '', note: '' });
   const addEntry = useMutation({
     mutationFn: () =>
@@ -286,13 +347,13 @@ function MyWeekView() {
   };
 
   return (
-    <div className="p-6">
+    <PageBody>
       <TimerHero onChange={invalidateTime} />
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-1.5">
           <IconButton size="sm" onClick={() => shift(-7)} aria-label="Previous week"><ChevronLeft size={15} /></IconButton>
-          <span className="min-w-[7rem] text-center text-[13px] font-medium tabular-nums">{t('time.weekOf')} {weekStart}</span>
+          <span className="min-w-[8.5rem] text-center text-[13px] font-medium tabular-nums">{weekRangeLabel(weekStart)}</span>
           <IconButton size="sm" onClick={() => shift(7)} aria-label="Next week"><ChevronRight size={15} /></IconButton>
         </div>
         <button className="text-xs text-muted-foreground transition-colors hover:text-foreground" onClick={() => setWeekStart(isoDate(mondayOf(new Date())))}>{t('tasks.thisWeek')}</button>
@@ -341,8 +402,9 @@ function MyWeekView() {
                   {entries.map((e) => (
                     <div key={e.id} className="flex items-center gap-3 px-4 py-2.5 transition-colors duration-150 hover:bg-muted/40">
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-[13px] font-medium">{e.taskRef ?? e.projectName ?? t('time.entry')}</div>
-                        {e.note && <div className="truncate text-xs text-muted-foreground">{e.note}</div>}
+                        {/* Fall back to the note as the primary line instead of a literal "Entry". */}
+                        <div className="truncate text-[13px] font-medium">{e.taskRef ?? e.projectName ?? e.note ?? t('time.entry')}</div>
+                        {e.note && (e.taskRef || e.projectName) && <div className="truncate text-xs text-muted-foreground">{e.note}</div>}
                       </div>
                       <span className="shrink-0 font-mono text-[13px] tabular-nums text-muted-foreground">{fmtDur(Number(e.durationSeconds))}</span>
                     </div>
@@ -359,14 +421,17 @@ function MyWeekView() {
           className="space-y-3 px-4 pb-4 pt-1"
           onSubmit={(e) => {
             e.preventDefault();
-            if (form.taskId && Number(form.minutes) > 0) addEntry.mutate();
+            setAddError(null);
+            if (!form.taskId) { setAddError(t('time.taskRequired')); return; }
+            if (!(Number(form.minutes) > 0)) { setAddError(t('time.durationRequired')); return; }
+            addEntry.mutate();
           }}
         >
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">{t('time.task')}</label>
+            <TaskSelect value={form.taskId} onChange={(id) => setForm((f) => ({ ...f, taskId: id }))} open={showAdd} />
+          </div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">{t('time.taskId')}</label>
-              <Input autoFocus value={form.taskId} onChange={(e) => setForm((f) => ({ ...f, taskId: e.target.value }))} placeholder="task id" />
-            </div>
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">{t('common.date')}</label>
               <Input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} />
@@ -380,14 +445,16 @@ function MyWeekView() {
               <Input value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} />
             </div>
           </div>
-          {addEntry.isError && <p className="text-xs text-destructive">{t('time.addEntryFailed')}</p>}
+          {(addError || addEntry.isError) && (
+            <p className="text-xs text-destructive">{addError ?? t('time.addEntryFailed')}</p>
+          )}
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="ghost" size="sm" onClick={() => setShowAdd(false)}>{t('common.cancel')}</Button>
             <Button type="submit" size="sm" disabled={addEntry.isPending}><Plus size={13} /> {t('time.addEntry')}</Button>
           </div>
         </form>
       </Dialog>
-    </div>
+    </PageBody>
   );
 }
 
@@ -404,7 +471,7 @@ function ReportsView() {
   const hoursOf = (r: ReportRow): number => (r.hours != null ? Number(r.hours) : r.seconds != null ? Number(r.seconds) / 3600 : 0);
 
   return (
-    <div className="p-6">
+    <PageBody>
       <div className="mb-4 flex items-center gap-2">
         <span className="text-xs text-muted-foreground">{t('time.groupBy')}</span>
         <SegmentedControl
@@ -443,6 +510,6 @@ function ReportsView() {
           </tbody>
         </table>
       </Card>
-    </div>
+    </PageBody>
   );
 }

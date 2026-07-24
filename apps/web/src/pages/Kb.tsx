@@ -4,14 +4,16 @@ import { useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { api, ApiError } from '../lib/api';
 import {
-  Button, IconButton, Input, Card, Badge, EmptyState, Skeleton, Spinner, fmtDate, cn,
+  Button, IconButton, Input, Card, Badge, Breadcrumbs, EmptyState, Skeleton, Spinner, fmtDate, cn,
+  type BreadcrumbItem,
 } from '../components/ui';
 import { Dialog, DropdownMenu, MenuItem, toast } from '../components/overlays';
 import {
   Plus, History, FileText, ChevronRight, RotateCcw, Folder, FolderOpen,
-  MoreHorizontal, Pencil, Globe, EyeOff, BookOpen, FileQuestion,
+  MoreHorizontal, Pencil, Globe, EyeOff, BookOpen, FileQuestion, Lock,
 } from 'lucide-react';
 import { RichEditor, EMPTY_DOC } from '../components/richtext/RichEditor';
+import { SpaceAccessDialog, type AccessSpace } from '../components/kb/SpaceAccessDialog';
 import { useT, extendDict } from '../lib/i18n';
 
 extendDict({
@@ -55,7 +57,7 @@ extendDict({
   },
 });
 
-interface Space { id: string; name: string; icon?: string | null }
+interface Space { id: string; name: string; icon?: string | null; visibility?: string; version?: number }
 interface FlatPage { id: string; title: string; parentId: string | null; position?: number; published?: boolean; version?: number }
 interface PageNode extends FlatPage { children: PageNode[] }
 interface PageDetail { id: string; title: string; body: unknown; spaceId: string; updatedAt?: string; version?: number; published?: boolean }
@@ -82,7 +84,7 @@ function Caret({ open, visible = true }: { open: boolean; visible?: boolean }) {
         <ChevronRight
           size={12}
           className="text-faint"
-          style={{ transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 200ms var(--ease-smooth-out)' }}
+          style={{ transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform var(--duration-fast) var(--ease-smooth-out)' }}
         />
       )}
     </span>
@@ -167,9 +169,9 @@ function PageTree({ nodes, spaceId, activeId, depth, canWrite, expandedPages, on
   );
 }
 
-function SpaceSection({ space, active, activePageId, expanded, onToggle, onSelect, canWrite, onNewPage, actions }: {
+function SpaceSection({ space, active, activePageId, expanded, onToggle, onSelect, canWrite, onNewPage, onAccess, actions }: {
   space: Space; active: boolean; activePageId?: string; expanded: boolean; onToggle: () => void; onSelect: () => void;
-  canWrite: boolean; onNewPage: (spaceId: string) => void; actions: TreeActions;
+  canWrite: boolean; onNewPage: (spaceId: string) => void; onAccess: (space: Space) => void; actions: TreeActions;
 }) {
   const t = useT();
   const pagesQ = useQuery({
@@ -213,15 +215,22 @@ function SpaceSection({ space, active, activePageId, expanded, onToggle, onSelec
         </span>
         {expanded ? <FolderOpen size={14} className="shrink-0 text-faint" /> : <Folder size={14} className="shrink-0 text-faint" />}
         <span className="min-w-0 flex-1 truncate">{space.name}</span>
+        {space.visibility === 'private' && (
+          <span className="shrink-0 text-faint" title={t('kb.visPrivate')}><Lock size={11} /></span>
+        )}
         {canWrite && (
-          <IconButton
-            size="sm"
-            className="opacity-0 transition-opacity duration-150 group-hover:opacity-100"
-            title={t('kb.newPage')}
-            onClick={(e) => { e.stopPropagation(); onNewPage(space.id); }}
-          >
-            <Plus size={13} />
-          </IconButton>
+          <span className="flex shrink-0 items-center opacity-0 transition-opacity duration-150 group-hover:opacity-100" onClick={(e) => e.stopPropagation()}>
+            <IconButton size="sm" title={t('kb.newPage')} onClick={(e) => { e.stopPropagation(); onNewPage(space.id); }}>
+              <Plus size={13} />
+            </IconButton>
+            <DropdownMenu
+              align="end"
+              trigger={<IconButton size="sm" title={t('common.actions')}><MoreHorizontal size={13} /></IconButton>}
+            >
+              <MenuItem icon={<Plus size={13} />} onSelect={() => onNewPage(space.id)}>{t('kb.newPage')}</MenuItem>
+              <MenuItem icon={<Lock size={13} />} onSelect={() => onAccess(space)}>{t('kb.access')}</MenuItem>
+            </DropdownMenu>
+          </span>
         )}
       </div>
       <AccordionPanel open={expanded}>
@@ -279,6 +288,7 @@ export function KbPage({ spaceId, pageId }: { spaceId?: string; pageId?: string 
     if (spaceId) setExpandedSpaces((prev) => (prev.has(spaceId) ? prev : new Set(prev).add(spaceId)));
   }, [spaceId]);
 
+  const [accessSpace, setAccessSpace] = useState<Space | null>(null);
   const [newSpaceOpen, setNewSpaceOpen] = useState(false);
   const createSpace = useMutation({
     mutationFn: (name: string) => api.post<Space>('/spaces', { name }),
@@ -371,6 +381,7 @@ export function KbPage({ spaceId, pageId }: { spaceId?: string; pageId?: string 
               onSelect={() => navigate(`/kb/${s.id}`)}
               canWrite={canWrite}
               onNewPage={(sid) => setNewPageCtx({ spaceId: sid, parentId: null })}
+              onAccess={setAccessSpace}
               actions={treeActions}
             />
           ))}
@@ -415,6 +426,13 @@ export function KbPage({ spaceId, pageId }: { spaceId?: string; pageId?: string 
         initial={renameCtx?.page.title}
         pending={renamePage.isPending}
       />
+      {accessSpace && (
+        <SpaceAccessDialog
+          open
+          onClose={() => setAccessSpace(null)}
+          space={(spaces.data?.data.find((s) => s.id === accessSpace.id) ?? accessSpace) as AccessSpace}
+        />
+      )}
     </div>
   );
 }
@@ -502,19 +520,14 @@ function PageDetailView({ pageId, spaceId, canWrite }: { pageId: string; spaceId
   return (
     <div className="mx-auto max-w-3xl px-8 py-6">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <nav className="flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted-foreground">
-          <span className="truncate">{spaceName ?? '—'}</span>
-          {ancestors.map((a) => (
-            <span key={a.id} className="flex items-center gap-1 truncate">
-              <ChevronRight size={11} className="shrink-0 text-faint" />
-              <span className="truncate">{a.title || t('kb.untitled')}</span>
-            </span>
-          ))}
-          <span className="flex items-center gap-1 truncate">
-            <ChevronRight size={11} className="shrink-0 text-faint" />
-            <span className="truncate font-medium text-foreground">{title || t('kb.untitled')}</span>
-          </span>
-        </nav>
+        <Breadcrumbs
+          items={[
+            { label: t('nav.knowledge'), to: '/kb', icon: <BookOpen size={13} /> },
+            { label: spaceName ?? '—', to: `/kb/${spaceId}` },
+            ...ancestors.map((a): BreadcrumbItem => ({ label: a.title || t('kb.untitled'), to: `/kb/${spaceId}/${a.id}` })),
+            { label: title || t('kb.untitled') },
+          ]}
+        />
         <div className="flex shrink-0 items-center gap-2">
           {page.data.published && <Badge className="bg-success/15 text-success">{t('kb.published')}</Badge>}
           <IconButton

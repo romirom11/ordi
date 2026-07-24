@@ -1,19 +1,19 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  List, Columns3, CalendarDays, GanttChart, Table2, Plus, ChevronDown,
-  LayoutDashboard, ListChecks, Repeat, Settings2, CalendarClock,
+  List, Columns3, CalendarDays, GanttChart, Table2, Plus,
+  LayoutDashboard, ListChecks, Repeat, CalendarClock, Settings,
 } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
-import { useNavigate } from '../lib/router';
+import { useNavigate, useSearchParams } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import {
-  Button, Input, Card, Badge, Skeleton, EmptyState, Spinner, AvatarGroup,
-  StatusIcon, PriorityIcon, ProgressBar, Tabs, SegmentedControl,
+  Button, IconButton, Input, Card, Badge, Skeleton, EmptyState, Spinner, AvatarGroup,
+  StatusIcon, PriorityIcon, ProgressBar, SegmentedControl, Breadcrumbs, PageBody,
   fmtDate, cn,
 } from '../components/ui';
-import { DropdownMenu, MenuItem, MenuLabel, Dialog, toast } from '../components/overlays';
+import { Dialog, toast } from '../components/overlays';
 import { CalendarView } from '../components/views/CalendarView';
 import { TimelineView } from '../components/views/TimelineView';
 import { SpreadsheetView } from '../components/views/SpreadsheetView';
@@ -24,6 +24,7 @@ import { ProjectIcon } from '../components/project/ProjectIcon';
 import { PropertiesRail } from '../components/project/PropertiesRail';
 import { InlineHint } from '../components/project/InlineHint';
 import { ProjectIntegrations } from '../components/project/ProjectIntegrations';
+import { ProjectContextMenu, TaskContextMenu } from '../components/project/contextMenus';
 import { PROJECT_STATUSES, STATUS_META, type UserLite } from '../components/project/pickers';
 import { useT, extendDict } from '../lib/i18n';
 
@@ -54,6 +55,8 @@ extendDict({
     'projects.newTaskInline': 'Add task…',
     'projects.noTasks': 'No tasks in this project yet',
     'projects.noTasksHint': 'Create your first task — click + in a status group or press C.',
+    'projects.cycleDatesRequired': 'Pick start and end dates for the cycle.',
+    'projects.cycleDatesOrder': 'The end date must be after the start date.',
     'projects.aboutPlaceholder': 'Describe this project — goals, scope, context…',
     'projects.overviewEmpty': 'No tasks yet',
     'projects.loadFailed': 'Could not load this project.',
@@ -86,6 +89,8 @@ extendDict({
     'projects.newTaskInline': 'Додати задачу…',
     'projects.noTasks': 'У цьому проєкті ще немає задач',
     'projects.noTasksHint': 'Створіть першу задачу — натисніть + у групі статусу або C на клавіатурі.',
+    'projects.cycleDatesRequired': 'Оберіть дати початку та завершення циклу.',
+    'projects.cycleDatesOrder': 'Дата завершення має бути після дати початку.',
     'projects.aboutPlaceholder': 'Опишіть проєкт — цілі, обсяг, контекст…',
     'projects.overviewEmpty': 'Задач поки немає',
     'projects.loadFailed': 'Не вдалося завантажити проєкт.',
@@ -129,11 +134,16 @@ type Tab = typeof TABS[number];
 export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
   const t = useT();
   const navigate = useNavigate();
+  const params = useSearchParams();
   const qc = useQueryClient();
   const can = useCan();
   const canWrite = can('projects.write') || can('projects.create');
+  const canDelete = can('projects.delete');
   const isAdmin = can('projects.write');
-  const [tab, setTab] = useState<Tab>('overview');
+
+  const rawSection = params.get('section') ?? '';
+  const tab: Tab = (TABS as readonly string[]).includes(rawSection) ? (rawSection as Tab) : 'overview';
+  const setTab = (next: Tab) => navigate(next === 'overview' ? `/projects/${id}` : `/projects/${id}?section=${next}`);
 
   const projectQ = useQuery<Project>({ queryKey: ['project', id], queryFn: () => api.get<Project>(`/projects/${id}`) });
   const statusesQ = useQuery<TaskStatus[]>({
@@ -167,24 +177,18 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
     },
   });
 
-  const tabDefs: { key: Tab; label: string; icon: ReactNode }[] = [
-    { key: 'overview', label: t('projects.overview'), icon: <LayoutDashboard size={14} /> },
-    { key: 'tasks', label: t('common.tasks'), icon: <ListChecks size={14} /> },
-    { key: 'cycles', label: t('projects.cycles'), icon: <Repeat size={14} /> },
-    { key: 'settings', label: t('nav.settings'), icon: <Settings2 size={14} /> },
-  ];
-
   return (
     <div className="page-enter flex h-full flex-col">
       <ProjectHeader
         project={project}
         loading={projectQ.isLoading}
         canWrite={canWrite}
+        canDelete={canDelete}
+        tab={tab}
+        onTab={setTab}
+        onDeleted={() => navigate('/projects')}
         onPatch={(b) => patchProject.mutate(b)}
       />
-      <div className="border-b border-border px-6">
-        <Tabs tabs={tabDefs} value={tab} onChange={setTab} className="pt-1" />
-      </div>
 
       <div className="flex-1 overflow-auto">
         {tab === 'overview' && <OverviewTab id={id} statuses={statuses} project={project} users={users} canWrite={canWrite} onPatch={(b) => patchProject.mutate(b)} />}
@@ -198,8 +202,9 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
 
 /* ───────────────────────── Header ───────────────────────── */
 
-function ProjectHeader({ project, loading, canWrite, onPatch }: {
-  project?: Project; loading: boolean; canWrite: boolean;
+function ProjectHeader({ project, loading, canWrite, canDelete, tab, onTab, onDeleted, onPatch }: {
+  project?: Project; loading: boolean; canWrite: boolean; canDelete: boolean;
+  tab: Tab; onTab: (t: Tab) => void; onDeleted: () => void;
   onPatch: (body: Record<string, unknown>) => void;
 }) {
   const t = useT();
@@ -208,71 +213,95 @@ function ProjectHeader({ project, loading, canWrite, onPatch }: {
 
   if (loading || !project) {
     return (
-      <div className="flex items-center gap-2.5 px-6 pt-4">
-        <Skeleton className="h-[26px] w-[26px] rounded-md" />
-        <Skeleton className="h-6 w-56" />
+      <div className="border-b border-border px-6 pb-2.5 pt-3">
+        <Skeleton className="mb-2 h-3 w-40" />
+        <div className="flex items-center gap-2.5">
+          <Skeleton className="h-[26px] w-[26px] rounded-md" />
+          <Skeleton className="h-6 w-56" />
+        </div>
+        <div className="mt-2.5 flex gap-4">
+          <Skeleton className="h-4 w-16" /><Skeleton className="h-4 w-12" /><Skeleton className="h-4 w-14" />
+        </div>
       </div>
     );
   }
 
-  const meta = STATUS_META[project.status] ?? { color: '#8a8f98', key: '' };
   const commitName = () => {
     setEditingName(false);
     const v = nameDraft.trim();
     if (v && v !== project.name) onPatch({ name: v });
   };
 
+  const sections: { key: Tab; label: string; icon: ReactNode }[] = [
+    { key: 'overview', label: t('projects.overview'), icon: <LayoutDashboard size={14} /> },
+    { key: 'tasks', label: t('common.tasks'), icon: <ListChecks size={14} /> },
+    { key: 'cycles', label: t('projects.cycles'), icon: <Repeat size={14} /> },
+  ];
+
   return (
-    <div className="flex min-w-0 items-center gap-2 px-6 pt-4">
-      <ProjectIcon seed={project.key || project.id} size={26} radius={7} />
-      {editingName ? (
-        <input
-          autoFocus
-          value={nameDraft}
-          onChange={(e) => setNameDraft(e.target.value)}
-          onBlur={commitName}
-          onKeyDown={(e) => { if (e.key === 'Enter') commitName(); if (e.key === 'Escape') setEditingName(false); }}
-          className="min-w-0 flex-1 rounded-md border border-primary/60 bg-transparent px-1.5 py-0.5 text-lg font-semibold outline-none focus:ring-2 focus:ring-ring/25"
+    <ProjectContextMenu
+      project={{ id: project.id, name: project.name, key: project.key, status: project.status, version: project.version }}
+      canWrite={canWrite}
+      canDelete={canDelete}
+      onDeleted={onDeleted}
+      className="block border-b border-border"
+    >
+      <div className="px-6 pb-2 pt-3">
+        <Breadcrumbs
+          className="mb-1"
+          items={[{ label: t('nav.projects'), to: '/projects' }, { label: project.name }]}
         />
-      ) : (
-        <h1
-          onClick={() => { if (canWrite) { setNameDraft(project.name); setEditingName(true); } }}
-          className={cn('truncate rounded-md px-1.5 py-0.5 text-lg font-semibold leading-tight -ml-1.5',
-            canWrite && 'cursor-text hover:bg-muted')}
-        >
-          {project.name}
-        </h1>
-      )}
+        <div className="flex min-w-0 items-center gap-2">
+          <ProjectIcon seed={project.key || project.id} size={26} radius={7} />
+          {editingName ? (
+            <input
+              autoFocus
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onBlur={commitName}
+              onKeyDown={(e) => { if (e.key === 'Enter') commitName(); if (e.key === 'Escape') setEditingName(false); }}
+              className="min-w-0 flex-1 rounded-md border border-primary/60 bg-transparent px-1.5 py-0.5 text-lg font-semibold outline-none focus:ring-2 focus:ring-ring/25"
+            />
+          ) : (
+            <h1
+              onClick={() => { if (canWrite) { setNameDraft(project.name); setEditingName(true); } }}
+              className={cn('truncate rounded-md px-1.5 py-0.5 text-lg font-semibold leading-tight -ml-1.5',
+                canWrite && 'cursor-text hover:bg-muted')}
+            >
+              {project.name}
+            </h1>
+          )}
 
-      <span className="shrink-0 font-mono text-[11px] text-faint">{project.key}</span>
+          <span className="shrink-0 font-mono text-[11px] text-faint">{project.key}</span>
 
-      {/* Status pill */}
-      {canWrite ? (
-        <DropdownMenu
-          trigger={
-            <span className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-border bg-card px-2 py-0.5 text-xs font-medium transition-colors hover:bg-muted">
-              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: meta.color }} />
-              <span className="text-muted-foreground">{meta.key ? t(meta.key) : project.status}</span>
-              <ChevronDown size={12} className="text-faint" />
-            </span>
-          }
-          align="start" width={170}
-        >
-          <MenuLabel>{t('common.status')}</MenuLabel>
-          {PROJECT_STATUSES.map((s) => (
-            <MenuItem key={s} checked={project.status === s} onSelect={() => { if (s !== project.status) onPatch({ status: s }); }}
-              icon={<span className="h-2 w-2 rounded-full" style={{ backgroundColor: STATUS_META[s]!.color }} />}>
-              {t(STATUS_META[s]!.key)}
-            </MenuItem>
+          <IconButton
+            size="sm"
+            aria-label={t('nav.settings')}
+            onClick={() => onTab('settings')}
+            className={cn('ml-auto', tab === 'settings' && 'bg-muted text-foreground')}
+          >
+            <Settings size={16} />
+          </IconButton>
+        </div>
+
+        {/* Quiet section nav — not a second tab bar. */}
+        <nav className="mt-2 flex items-center gap-5">
+          {sections.map((s) => (
+            <button
+              key={s.key}
+              onClick={() => onTab(s.key)}
+              className={cn(
+                'flex items-center gap-1.5 text-[13px] transition-colors duration-150',
+                tab === s.key ? 'font-medium text-foreground' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <span className={cn('[&>svg]:block', tab === s.key ? 'text-foreground' : 'text-faint')}>{s.icon}</span>
+              {s.label}
+            </button>
           ))}
-        </DropdownMenu>
-      ) : (
-        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-2 py-0.5 text-xs font-medium">
-          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: meta.color }} />
-          <span className="text-muted-foreground">{meta.key ? t(meta.key) : project.status}</span>
-        </span>
-      )}
-    </div>
+        </nav>
+      </div>
+    </ProjectContextMenu>
   );
 }
 
@@ -351,7 +380,7 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, onOpen }: 
   const loading = statusesLoading || tasksQ.isLoading;
 
   return (
-    <div className="p-6">
+    <PageBody width="full">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <SegmentedControl
           options={TASK_VIEWS.map((tv) => ({ key: tv.key, label: t(tv.labelKey), icon: <tv.icon size={14} />, title: t(tv.labelKey) }))}
@@ -366,17 +395,18 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, onOpen }: 
         <div className="space-y-2">{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-9" />)}</div>
       ) : statuses.length === 0 ? (
         <EmptyState icon={<ListChecks size={20} />} title={t('projects.noWorkflow')} hint={t('projects.noWorkflowHint')} />
-      ) : tasks.length === 0 && view !== 'board' && view !== 'spreadsheet' ? (
+      ) : tasks.length === 0 && (!canWrite || view === 'calendar' || view === 'timeline') ? (
+        // Writers see the list/board with inline "+ add" rows instead of a dead end.
         <EmptyState
           icon={<ListChecks size={20} />}
           title={t('projects.noTasks')}
           hint={canWrite ? t('projects.noTasksHint') : undefined}
         />
       ) : view === 'list' ? (
-        <ListView statuses={statuses} byStatus={byStatus} onOpen={onOpen} canWrite={canWrite} projectKey={projectKey}
+        <ListView projectId={id} statuses={statuses} byStatus={byStatus} onOpen={onOpen} canWrite={canWrite} projectKey={projectKey}
           resolveUsers={resolveUsers} onAdd={(title, statusId) => addTask.mutate({ title, statusId })} />
       ) : view === 'board' ? (
-        <BoardView statuses={statuses} byStatus={byStatus} onOpen={onOpen} canWrite={canWrite} projectKey={projectKey}
+        <BoardView projectId={id} statuses={statuses} byStatus={byStatus} onOpen={onOpen} canWrite={canWrite} projectKey={projectKey}
           resolveUsers={resolveUsers} onAdd={(title, statusId) => addTask.mutate({ title, statusId })}
           onMove={(taskId, statusId, version) => move.mutate({ taskId, statusId, version })} />
       ) : view === 'calendar' ? (
@@ -386,7 +416,7 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, onOpen }: 
       ) : (
         <SpreadsheetView tasks={tasks} statuses={statuses} projectId={id} onOpenTask={onOpen} />
       )}
-    </div>
+    </PageBody>
   );
 }
 
@@ -412,8 +442,8 @@ function QuickAdd({ statusId, onAdd, placeholder, variant = 'row' }: {
 
 /* ---- List view (grouped by status) ---- */
 
-function ListView({ statuses, byStatus, onOpen, canWrite, projectKey, resolveUsers, onAdd }: {
-  statuses: TaskStatus[]; byStatus: (sid: string) => Task[]; onOpen: (tid: string) => void;
+function ListView({ projectId, statuses, byStatus, onOpen, canWrite, projectKey, resolveUsers, onAdd }: {
+  projectId: string; statuses: TaskStatus[]; byStatus: (sid: string) => Task[]; onOpen: (tid: string) => void;
   canWrite: boolean; projectKey?: string; resolveUsers: (ids?: string[]) => UserLite[];
   onAdd: (title: string, statusId?: string) => void;
 }) {
@@ -435,22 +465,31 @@ function ListView({ statuses, byStatus, onOpen, canWrite, projectKey, resolveUse
                 const assignees = resolveUsers(task.assigneeIds);
                 const overdue = isOverdue(task.dueDate, s.category);
                 return (
-                  <button
+                  <TaskContextMenu
                     key={task.id}
-                    onClick={() => onOpen(task.id)}
-                    className={cn('flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors duration-150 hover:bg-muted/60',
-                      i > 0 && 'border-t border-border')}
+                    task={task}
+                    projectId={projectId}
+                    projectKey={projectKey}
+                    statuses={statuses}
+                    canWrite={canWrite}
                   >
-                    <PriorityIcon priority={task.priority} size={15} />
-                    {refLabel(task, projectKey) && (
-                      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{refLabel(task, projectKey)}</span>
-                    )}
-                    <span className="flex-1 truncate text-[13px]">{task.title}</span>
-                    {task.dueDate && (
-                      <span className={cn('shrink-0 text-xs tabular-nums', overdue ? 'text-destructive' : 'text-muted-foreground')}>{fmtDate(task.dueDate)}</span>
-                    )}
-                    {assignees.length > 0 && <AvatarGroup users={assignees} size={20} max={3} />}
-                  </button>
+                    <button
+                      onClick={() => onOpen(task.id)}
+                      className={cn('row-enter flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors duration-150 hover:bg-muted/60',
+                        i > 0 && 'border-t border-border')}
+                      style={{ ['--i' as string]: Math.min(i, 10) }}
+                    >
+                      <PriorityIcon priority={task.priority} size={15} />
+                      {refLabel(task, projectKey) && (
+                        <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{refLabel(task, projectKey)}</span>
+                      )}
+                      <span className="flex-1 truncate text-[13px]">{task.title}</span>
+                      {task.dueDate && (
+                        <span className={cn('shrink-0 text-xs tabular-nums', overdue ? 'text-destructive' : 'text-muted-foreground')}>{fmtDate(task.dueDate)}</span>
+                      )}
+                      {assignees.length > 0 && <AvatarGroup users={assignees} size={20} max={3} />}
+                    </button>
+                  </TaskContextMenu>
                 );
               })}
               {canWrite && (
@@ -468,8 +507,8 @@ function ListView({ statuses, byStatus, onOpen, canWrite, projectKey, resolveUse
 
 /* ---- Board view (drag & drop) ---- */
 
-function BoardView({ statuses, byStatus, onOpen, canWrite, projectKey, resolveUsers, onAdd, onMove }: {
-  statuses: TaskStatus[]; byStatus: (sid: string) => Task[]; onOpen: (tid: string) => void;
+function BoardView({ projectId, statuses, byStatus, onOpen, canWrite, projectKey, resolveUsers, onAdd, onMove }: {
+  projectId: string; statuses: TaskStatus[]; byStatus: (sid: string) => Task[]; onOpen: (tid: string) => void;
   canWrite: boolean; projectKey?: string; resolveUsers: (ids?: string[]) => UserLite[];
   onAdd: (title: string, statusId?: string) => void;
   onMove: (taskId: string, statusId: string, version?: number) => void;
@@ -513,32 +552,41 @@ function BoardView({ statuses, byStatus, onOpen, canWrite, projectKey, resolveUs
                 const assignees = resolveUsers(task.assigneeIds);
                 const overdue = isOverdue(task.dueDate, s.category);
                 return (
-                  <div
+                  <TaskContextMenu
                     key={task.id}
-                    draggable={canWrite}
-                    onDragStart={(e) => { setDragId(task.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/task-id', task.id); }}
-                    onDragEnd={() => { setDragId(null); setOverCol(null); }}
-                    onClick={() => onOpen(task.id)}
-                    className={cn(
-                      'cursor-pointer rounded-lg border border-border bg-card p-2.5 text-left shadow-sm transition-all duration-150 hover:border-border-strong',
-                      canWrite && 'active:cursor-grabbing',
-                      dragId === task.id && 'opacity-40',
-                    )}
+                    task={task}
+                    projectId={projectId}
+                    projectKey={projectKey}
+                    statuses={statuses}
+                    canWrite={canWrite}
+                    className="block"
                   >
-                    <div className="flex items-start gap-1.5">
-                      <span className="mt-0.5"><PriorityIcon priority={task.priority} size={14} /></span>
-                      <span className="flex-1 text-[13px] leading-snug">{task.title}</span>
-                    </div>
-                    <div className="mt-2 flex items-center gap-2">
-                      {refLabel(task, projectKey) && (
-                        <span className="font-mono text-[11px] text-muted-foreground">{refLabel(task, projectKey)}</span>
+                    <div
+                      draggable={canWrite}
+                      onDragStart={(e) => { setDragId(task.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/task-id', task.id); }}
+                      onDragEnd={() => { setDragId(null); setOverCol(null); }}
+                      onClick={() => onOpen(task.id)}
+                      className={cn(
+                        'cursor-pointer rounded-lg border border-border bg-card p-2.5 text-left shadow-sm transition-all duration-150 hover:border-border-strong',
+                        canWrite && 'active:cursor-grabbing',
+                        dragId === task.id && 'opacity-40',
                       )}
-                      {task.dueDate && (
-                        <span className={cn('text-[11px] tabular-nums', overdue ? 'text-destructive' : 'text-muted-foreground')}>{fmtDate(task.dueDate)}</span>
-                      )}
-                      {assignees.length > 0 && <span className="ml-auto"><AvatarGroup users={assignees} size={18} max={3} /></span>}
+                    >
+                      <div className="flex items-start gap-1.5">
+                        <span className="mt-0.5"><PriorityIcon priority={task.priority} size={14} /></span>
+                        <span className="flex-1 text-[13px] leading-snug">{task.title}</span>
+                      </div>
+                      <div className="mt-2 flex items-center gap-2">
+                        {refLabel(task, projectKey) && (
+                          <span className="font-mono text-[11px] text-muted-foreground">{refLabel(task, projectKey)}</span>
+                        )}
+                        {task.dueDate && (
+                          <span className={cn('text-[11px] tabular-nums', overdue ? 'text-destructive' : 'text-muted-foreground')}>{fmtDate(task.dueDate)}</span>
+                        )}
+                        {assignees.length > 0 && <span className="ml-auto"><AvatarGroup users={assignees} size={18} max={3} /></span>}
+                      </div>
                     </div>
-                  </div>
+                  </TaskContextMenu>
                 );
               })}
               {canWrite && (
@@ -556,6 +604,20 @@ function BoardView({ statuses, byStatus, onOpen, canWrite, projectKey, resolveUs
 
 /* ───────────────────────── Overview tab ───────────────────────── */
 
+/** description column is text: parse stored tiptap JSON, wrap legacy plain text. */
+function parseProjectDoc(raw: unknown): unknown {
+  if (!raw) return EMPTY_DOC;
+  if (typeof raw === 'object') return raw;
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') return parsed;
+    } catch { /* legacy plain text */ }
+    return { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: raw }] }] };
+  }
+  return EMPTY_DOC;
+}
+
 function OverviewTab({ id, statuses, project, users, canWrite, onPatch }: {
   id: string; statuses: TaskStatus[]; project?: Project; users: UserLite[]; canWrite: boolean;
   onPatch: (body: Record<string, unknown>) => void;
@@ -564,11 +626,13 @@ function OverviewTab({ id, statuses, project, users, canWrite, onPatch }: {
   const { data, isLoading } = useQuery<Task[]>({ queryKey: ['tasks', id], queryFn: () => api.get<{ data: Task[] }>(`/tasks${qs({ projectId: id })}`).then((r) => r.data) });
   const tasks = data ?? [];
 
-  // Debounced description editor.
+  // Debounced description editor. The API stores the description as a string
+  // column, so the tiptap doc travels JSON-serialized (legacy plain text is
+  // wrapped into a paragraph).
   const [doc, setDoc] = useState<unknown>(EMPTY_DOC);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    setDoc(project?.description ?? EMPTY_DOC);
+    setDoc(parseProjectDoc(project?.description));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project?.id]);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
@@ -577,11 +641,11 @@ function OverviewTab({ id, statuses, project, users, canWrite, onPatch }: {
     setDoc(next);
     if (!canWrite) return;
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => { onPatch({ description: next }); }, 900);
+    timer.current = setTimeout(() => { onPatch({ description: JSON.stringify(next) }); }, 900);
   };
 
   return (
-    <div className="mx-auto grid max-w-[1200px] gap-8 p-6 lg:grid-cols-[minmax(0,1fr)_260px]">
+    <PageBody width="wide" className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_260px]">
       {/* Left: pure document */}
       <div className="order-2 min-w-0 space-y-4 lg:order-1">
         <InlineHint id="project-overview">{t('projects.overviewHint')}</InlineHint>
@@ -608,7 +672,7 @@ function OverviewTab({ id, statuses, project, users, canWrite, onPatch }: {
           <div className="space-y-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-8" />)}</div>
         )}
       </div>
-    </div>
+    </PageBody>
   );
 }
 
@@ -636,28 +700,37 @@ function CyclesTab({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
 
   const reset = () => { setName(''); setStart(''); setEnd(''); setGoal(''); setError(null); };
+  // Prefill a sensible two-week window when the dialog opens.
+  useEffect(() => {
+    if (!adding) return;
+    const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    setStart((s) => s || iso(new Date()));
+    setEnd((s) => s || iso(new Date(Date.now() + 13 * 86_400_000)));
+  }, [adding]);
   const mut = useMutation({
     mutationFn: () => api.post('/cycles', { projectId: id, name, startDate: start || undefined, endDate: end || undefined, goal: goal || undefined }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['cycles', id] }); setAdding(false); reset(); },
-    onError: (e) => { const m = e instanceof ApiError ? e.message : t('projects.createCycleFailed'); setError(m); toast.error(m); },
+    onError: (e) => { setError(e instanceof ApiError ? e.message : t('projects.createCycleFailed')); },
   });
 
   const cycles = data ?? [];
 
   return (
-    <div className="max-w-3xl p-6">
+    <PageBody width="wide">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-sm font-semibold">{t('projects.cycles')}</h2>
         {canWrite && <Button size="sm" variant="outline" onClick={() => setAdding(true)}><Plus size={14} /> {t('projects.newCycle')}</Button>}
       </div>
 
       {isLoading ? (
-        <div className="grid gap-3 sm:grid-cols-2">{[0, 1].map((i) => <Skeleton key={i} className="h-28" />)}</div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-28" />)}</div>
       ) : cycles.length === 0 ? (
-        <EmptyState icon={<CalendarClock size={20} />} title={t('projects.noCycles')} hint={t('projects.noCyclesHint')}
-          action={canWrite ? <Button size="sm" variant="outline" onClick={() => setAdding(true)}><Plus size={14} /> {t('projects.newCycle')}</Button> : undefined} />
+        <div className="rounded-xl border border-dashed border-border py-16">
+          <EmptyState icon={<CalendarClock size={20} />} title={t('projects.noCycles')} hint={t('projects.noCyclesHint')}
+            action={canWrite ? <Button size="sm" variant="outline" onClick={() => setAdding(true)}><Plus size={14} /> {t('projects.newCycle')}</Button> : undefined} />
+        </div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {cycles.map((c) => {
             const pct = cyclePercent(c);
             return (
@@ -689,7 +762,17 @@ function CyclesTab({ id }: { id: string }) {
       )}
 
       <Dialog open={adding} onClose={() => { setAdding(false); reset(); }} title={t('projects.newCycle')} width={440}>
-        <form onSubmit={(e: FormEvent) => { e.preventDefault(); setError(null); if (!name.trim()) { setError(t('common.nameRequired')); return; } mut.mutate(); }} className="space-y-3 px-4 pb-4 pt-1">
+        <form
+          onSubmit={(e: FormEvent) => {
+            e.preventDefault();
+            setError(null);
+            if (!name.trim()) { setError(t('common.nameRequired')); return; }
+            if (!start || !end) { setError(t('projects.cycleDatesRequired')); return; }
+            if (end < start) { setError(t('projects.cycleDatesOrder')); return; }
+            mut.mutate();
+          }}
+          className="space-y-3 px-4 pb-4 pt-1"
+        >
           <Input autoFocus placeholder={t('projects.cycleNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} />
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1"><label className="text-xs text-muted-foreground">{t('projects.start')}</label><Input type="date" value={start} onChange={(e) => setStart(e.target.value)} /></div>
@@ -703,7 +786,7 @@ function CyclesTab({ id }: { id: string }) {
           </div>
         </form>
       </Dialog>
-    </div>
+    </PageBody>
   );
 }
 
@@ -735,7 +818,7 @@ function SettingsTab({ project, isAdmin, onPatch, pending }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project?.id]);
 
-  if (!project) return <div className="p-6"><Skeleton className="h-40" /></div>;
+  if (!project) return <PageBody><Skeleton className="h-40" /></PageBody>;
 
   const saveName = () => {
     setError(null);
@@ -744,7 +827,7 @@ function SettingsTab({ project, isAdmin, onPatch, pending }: {
   };
 
   return (
-    <div className="max-w-2xl space-y-8 p-6">
+    <PageBody className="space-y-8">
       {/* General */}
       <section>
         <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('projects.general')}</h2>
@@ -790,6 +873,6 @@ function SettingsTab({ project, isAdmin, onPatch, pending }: {
         version={project.version}
         canManage={canManageIntegrations}
       />
-    </div>
+    </PageBody>
   );
 }

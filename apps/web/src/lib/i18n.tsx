@@ -890,7 +890,7 @@ const uk: Dict = {
   'time.addEntry': 'Додати запис',
   'time.addEntryFailed': 'Не вдалося додати запис',
   'time.addManualEntry': 'Додати ручний запис',
-  'time.billable': 'Біллабельний',
+  'time.billable': 'Оплачуваний',
   'time.durationMinutes': 'Тривалість (хв)',
   'time.entry': 'Запис',
   'time.groupBy': 'Групувати за',
@@ -931,7 +931,7 @@ const uk: Dict = {
   'finance.profitabilityByProject': 'Прибутковість за проєктами',
   'finance.receivablesAging': 'Старіння дебіторки',
   'finance.revenue': 'Дохід',
-  'finance.unbilledHint': 'Біллабельний час, ще не включений у рахунок.',
+  'finance.unbilledHint': 'Оплачуваний час, який ще не виставлено в рахунок.',
   'finance.unbilledHours': 'Невиставлені години',
   // people (page)
   'people.applicant': 'Кандидат',

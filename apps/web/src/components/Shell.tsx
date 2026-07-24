@@ -317,7 +317,6 @@ function ShellInner({ children }: { children: ReactNode }) {
             <MenuSeparator />
             <MenuItem icon={<LogOut size={14} />} danger onSelect={logout}>{t('nav.signOut')}</MenuItem>
           </DropdownMenu>
-          <NotificationsBell />
         </div>
 
         {/* Quick actions: new task + search */}
@@ -390,17 +389,7 @@ function ShellInner({ children }: { children: ReactNode }) {
         {/* Footer */}
         <div className="space-y-1 p-2.5">
           <TimerIndicator />
-          {(can('settings.manage') || can('users.manage') || can('roles.manage') || can('integrations.manage') || can('finance.settings')) && (
-            <Link
-              to="/settings"
-              className={cn(
-                'flex items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] transition-colors duration-150',
-                path.startsWith('/settings') ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-              )}
-            >
-              <Settings size={16} className="text-faint" /> {t('nav.settings')}
-            </Link>
-          )}
+          <NotificationsBell />
           <Link
             to="/profile"
             className={cn(

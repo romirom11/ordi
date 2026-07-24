@@ -174,6 +174,34 @@ export const expenses = pgTable('expenses', {
   projectIdx: index('expenses_project_idx').on(t.projectId),
 }));
 
+/**
+ * Recurring payments / subscriptions (vendor bills the workspace pays regularly).
+ * A daily job advances next_date by `interval` and optionally materialises an
+ * expense row. Amount stored as string (numeric). Soft-deleted + optimistic version.
+ */
+export const recurringPayments = pgTable('recurring_payments', {
+  id: pk(),
+  name: text('name').notNull(),
+  vendor: text('vendor'),
+  companyId: text('company_id').references(() => companies.id),
+  amount: money('amount').notNull(),
+  currency: text('currency').notNull().default('USD'),
+  interval: text('interval').notNull(), // weekly | monthly | quarterly | yearly
+  nextDate: text('next_date').notNull(),
+  category: text('category'),
+  notes: text('notes'),
+  isActive: boolean('is_active').notNull().default(true),
+  autoCreateExpense: boolean('auto_create_expense').notNull().default(false),
+  lastCreatedAt: timestamp('last_created_at', { withTimezone: true }),
+  createdBy: createdBy(),
+  ...timestamps,
+  version: version(),
+  deletedAt: deletedAt(),
+}, (t) => ({
+  activeIdx: index('recurring_payments_active_idx').on(t.isActive),
+  nextDateIdx: index('recurring_payments_next_date_idx').on(t.nextDate),
+}));
+
 export const reminderRules = pgTable('reminder_rules', {
   id: pk(),
   offsetDays: integer('offset_days').notNull(),

@@ -5,12 +5,14 @@
  */
 import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock } from 'lucide-react';
+import { CalendarClock, ExternalLink, ArrowRightLeft, Trash2 } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { useNavigate } from '../../lib/router';
+import { useTabs } from '../../lib/tabs';
+import { useCan } from '../../lib/auth';
 import { useT } from '../../lib/i18n';
 import { Avatar, EmptyState, Skeleton, Tooltip, cn, fmtMoney, fmtDate } from '../ui';
-import { toast } from '../overlays';
+import { ContextMenu, ConfirmDialog, toast, type ContextMenuEntry } from '../overlays';
 import { LostReasonDialog } from './dialogs';
 import { useAllDeals, useCompanies, useDealStages, useUsersLookup, type Deal, type Stage } from './shared';
 
@@ -18,6 +20,10 @@ export function PipelineTab() {
   const t = useT();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const tabs = useTabs();
+  const can = useCan();
+  const canDelete = can('deals.delete');
+  const canWrite = can('deals.write');
 
   const stagesQ = useDealStages();
   const dealsQ = useAllDeals();
@@ -32,6 +38,38 @@ export function PipelineTab() {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overStage, setOverStage] = useState<string | null>(null);
   const [lostFor, setLostFor] = useState<{ deal: Deal; stageId: string } | null>(null);
+  const [toDelete, setToDelete] = useState<Deal | null>(null);
+
+  const del = useMutation({
+    mutationFn: (id: string) => api.del(`/deals/${id}`),
+    onSuccess: () => { setToDelete(null); qc.invalidateQueries({ queryKey: ['deals'] }); toast(t('crm.dealDeleted')); },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
+  });
+
+  const dealMenu = (d: Deal): ContextMenuEntry[] => {
+    const items: ContextMenuEntry[] = [];
+    if (canWrite) {
+      items.push({
+        key: 'move', label: t('crm.moveToStage'), icon: <ArrowRightLeft size={14} />,
+        children: stages.map((s) => ({
+          key: s.id, label: s.name, disabled: s.id === d.stageId,
+          onSelect: () => {
+            if (s.id === d.stageId) return;
+            if (s.isLost) { setLostFor({ deal: d, stageId: s.id }); return; }
+            move.mutate({ id: d.id, stageId: s.id, version: d.version });
+          },
+        })),
+      });
+    }
+    if (d.companyId) {
+      items.push({ key: 'open', label: t('crm.openCompany'), icon: <ExternalLink size={14} />, onSelect: () => tabs?.openInNewTab(`/companies/${d.companyId}`) });
+    }
+    if (canDelete) {
+      if (items.length) items.push({ type: 'separator' });
+      items.push({ key: 'delete', label: t('common.delete'), icon: <Trash2 size={14} />, danger: true, onSelect: () => setToDelete(d) });
+    }
+    return items;
+  };
 
   const move = useMutation({
     mutationFn: (v: { id: string; stageId: string; lostReason?: string; version?: number }) =>
@@ -124,8 +162,8 @@ export function PipelineTab() {
                   const company = d.companyId ? companyMap.get(d.companyId) : undefined;
                   const owner = d.ownerId ? userMap.get(d.ownerId) : undefined;
                   return (
+                    <ContextMenu key={d.id} items={dealMenu(d)}>
                     <div
-                      key={d.id}
                       draggable
                       onDragStart={(e) => { setDraggingId(d.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', d.id); }}
                       onDragEnd={() => { setDraggingId(null); setOverStage(null); }}
@@ -157,6 +195,7 @@ export function PipelineTab() {
                         </div>
                       </div>
                     </div>
+                    </ContextMenu>
                   );
                 })}
               </div>
@@ -174,6 +213,17 @@ export function PipelineTab() {
           move.mutate({ id: lostFor.deal.id, stageId: lostFor.stageId, lostReason: reason || undefined, version: lostFor.deal.version });
           setLostFor(null);
         }}
+      />
+
+      <ConfirmDialog
+        open={!!toDelete}
+        onClose={() => setToDelete(null)}
+        onConfirm={() => toDelete && del.mutate(toDelete.id)}
+        title={t('crm.deleteDealTitle')}
+        body={toDelete ? t('crm.deleteDealBody').replace('{name}', toDelete.title) : ''}
+        confirmLabel={t('common.delete')}
+        danger
+        pending={del.isPending}
       />
     </div>
   );

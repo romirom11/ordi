@@ -40,6 +40,8 @@ export const projectUpdateSchema = z.object({
   settings: z.object({
     estimateUnit: z.enum(ESTIMATE_UNITS).optional(),
     slackWebhookUrl: z.string().url().nullable().optional(),
+    /** Preferred Slack channel id for this project (Slack app posts here). */
+    slackChannelId: z.string().nullable().optional(),
   }).partial().optional(),
   version: z.number().int().optional(),
 });

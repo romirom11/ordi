@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../lib/api';
 import { useMe } from '../lib/auth';
-import { Button, Input, Select, Card, Badge, Switch, Checkbox, Avatar, PageHeader, Skeleton, fmtDate } from '../components/ui';
+import { Button, Input, Select, Card, Badge, Switch, Checkbox, Avatar, PageHeader, PageBody, Breadcrumbs, Skeleton, fmtDate } from '../components/ui';
 import { toast } from '../components/overlays';
 import { Check, Copy, KeyRound, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import { extendDict, useT } from '../lib/i18n';
@@ -60,8 +60,12 @@ export function ProfilePage() {
   const me = useMe();
   return (
     <div>
-      <PageHeader title={t('profile.title')} subtitle={me.user.email} />
-      <div className="max-w-2xl space-y-4 p-6">
+      <PageHeader
+        title={t('profile.title')}
+        subtitle={me.user.email}
+        breadcrumbs={<Breadcrumbs items={[{ label: t('profile.title') }]} />}
+      />
+      <PageBody className="space-y-4">
         <ProfileInfoCard />
         <PreferencesCard />
         <NotificationsSection />
@@ -72,7 +76,7 @@ export function ProfilePage() {
             <TotpSection />
           </div>
         </div>
-      </div>
+      </PageBody>
     </div>
   );
 }

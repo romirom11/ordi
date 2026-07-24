@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import {
   invoiceInputSchema, invoiceUpdateSchema, sendDocumentSchema, paymentInputSchema, creditNoteInputSchema,
   invoiceFromTimeSchema, quoteInputSchema, quoteUpdateSchema, recurringInvoiceInputSchema,
+  recurringPaymentInputSchema, recurringPaymentUpdateSchema,
   expenseInputSchema, expenseCategoryInputSchema, taxRateInputSchema, reminderRuleInputSchema,
   emailTemplateInputSchema, numberSequenceInputSchema, profitabilityQuerySchema,
 } from '@ordi/shared';
@@ -160,6 +161,29 @@ export function financeRoutes() {
 
   app.delete('/recurring-invoices/:id', guard('finance.write'), async (c) => {
     await svc.deleteRecurring(currentActor(c), c.req.param('id'));
+    return c.json({ ok: true });
+  });
+
+  // ── Recurring payments / subscriptions ──
+  app.get('/recurring-payments/summary', guard('finance.read'), async (c) =>
+    c.json(await svc.recurringPaymentsSummary()));
+
+  app.get('/recurring-payments', guard('finance.read'), async (c) =>
+    c.json({ data: await svc.listRecurringPayments({ active: c.req.query('active') }) }));
+
+  app.post('/recurring-payments', guard('finance.write'), async (c) => {
+    const body = recurringPaymentInputSchema.parse(await c.req.json());
+    const id = await svc.createRecurringPayment(currentActor(c), body);
+    return c.json({ id }, 201);
+  });
+
+  app.patch('/recurring-payments/:id', guard('finance.write'), async (c) => {
+    const body = recurringPaymentUpdateSchema.parse(await c.req.json());
+    return c.json(await svc.updateRecurringPayment(currentActor(c), c.req.param('id'), body));
+  });
+
+  app.delete('/recurring-payments/:id', guard('finance.write'), async (c) => {
+    await svc.deleteRecurringPayment(currentActor(c), c.req.param('id'));
     return c.json({ ok: true });
   });
 

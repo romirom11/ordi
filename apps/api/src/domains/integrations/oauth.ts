@@ -73,6 +73,112 @@ export async function exchangeGithubCode(code: string): Promise<{ token: string;
   return { token: data.access_token, tokenType: data.token_type ?? 'oauth' };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Slack OAuth v2 (workspace connection). Reuses the same HMAC-signed `state`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Bot scopes requested from Slack (read channels + post messages). */
+export const SLACK_SCOPES = 'channels:read,groups:read,chat:write';
+
+export function slackOAuthConfigured(): boolean {
+  return Boolean(env.slackClientId && env.slackClientSecret);
+}
+
+/** The redirect URL registered with the Slack app. */
+export function slackCallbackUrl(): string {
+  return `${env.apiUrl.replace(/\/$/, '')}/api/v1/integrations/slack/oauth/callback`;
+}
+
+export function buildSlackAuthorizeUrl(state: string): string {
+  const params = new URLSearchParams({
+    client_id: env.slackClientId,
+    scope: SLACK_SCOPES,
+    state,
+    redirect_uri: slackCallbackUrl(),
+  });
+  return `https://slack.com/oauth/v2/authorize?${params.toString()}`;
+}
+
+export interface SlackConnectionResult {
+  teamId: string;
+  teamName: string;
+  botToken: string;
+  scope: string;
+}
+
+/** Exchange an OAuth code for a bot token via oauth.v2.access. Throws on failure. */
+export async function exchangeSlackCode(code: string): Promise<SlackConnectionResult> {
+  const res = await fetch('https://slack.com/api/oauth.v2.access', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: env.slackClientId,
+      client_secret: env.slackClientSecret,
+      code,
+      redirect_uri: slackCallbackUrl(),
+    }).toString(),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`slack token exchange failed: ${res.status}`);
+  const data = (await res.json()) as {
+    ok?: boolean; error?: string; access_token?: string; scope?: string;
+    team?: { id?: string; name?: string };
+  };
+  if (!data.ok || !data.access_token) throw new Error(`slack token exchange error: ${data.error ?? 'no access_token'}`);
+  return {
+    teamId: data.team?.id ?? '',
+    teamName: data.team?.name ?? '',
+    botToken: data.access_token,
+    scope: data.scope ?? '',
+  };
+}
+
+export interface SlackChannel { id: string; name: string; isPrivate: boolean }
+
+/** List channels via conversations.list (cursor-follow, capped ~600). Throws on API error. */
+export async function listSlackChannels(botToken: string): Promise<SlackChannel[]> {
+  const out: SlackChannel[] = [];
+  let cursor: string | undefined;
+  for (let pageNo = 0; pageNo < 3; pageNo++) {
+    const params = new URLSearchParams({
+      types: 'public_channel,private_channel',
+      limit: '200',
+      exclude_archived: 'true',
+    });
+    if (cursor) params.set('cursor', cursor);
+    const res = await fetch(`https://slack.com/api/conversations.list?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${botToken}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new Error(`slack conversations.list failed: ${res.status}`);
+    const data = (await res.json()) as {
+      ok?: boolean; error?: string;
+      channels?: Array<{ id: string; name: string; is_private?: boolean }>;
+      response_metadata?: { next_cursor?: string };
+    };
+    if (!data.ok) throw new Error(`slack conversations.list error: ${data.error ?? 'unknown'}`);
+    for (const ch of data.channels ?? []) {
+      out.push({ id: ch.id, name: ch.name, isPrivate: Boolean(ch.is_private) });
+    }
+    cursor = data.response_metadata?.next_cursor || undefined;
+    if (!cursor) break;
+  }
+  return out;
+}
+
+/** Post a message to a channel via chat.postMessage. Throws on API error. */
+export async function postSlackMessage(botToken: string, channel: string, text: string): Promise<void> {
+  const res = await fetch('https://slack.com/api/chat.postMessage', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json; charset=utf-8', Authorization: `Bearer ${botToken}` },
+    body: JSON.stringify({ channel, text }),
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!res.ok) throw new Error(`slack chat.postMessage failed: ${res.status}`);
+  const data = (await res.json()) as { ok?: boolean; error?: string };
+  if (!data.ok) throw new Error(`slack chat.postMessage error: ${data.error ?? 'unknown'}`);
+}
+
 export interface ProviderRepo { externalId: string; fullName: string; defaultBranch: string }
 
 /** List the connected user's repositories (github.com or a GHE instance). */
