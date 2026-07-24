@@ -158,7 +158,7 @@ export function TabStrip() {
         >
           {tabs.tabs.map(renderTab)}
         </div>
-        <Tooltip label={t('tabs.newTab')}>
+        <Tooltip label={t('tabs.newTab')} side="bottom">
           <button
             aria-label={t('tabs.newTab')}
             onClick={tabs.newTab}
