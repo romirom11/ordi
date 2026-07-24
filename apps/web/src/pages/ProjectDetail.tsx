@@ -21,7 +21,10 @@ import { RichEditor, EMPTY_DOC } from '../components/richtext/RichEditor';
 import { ProjectAccessPanel } from '../components/ProjectAccessPanel';
 import { ProjectIcon } from '../components/project/ProjectIcon';
 import { PropertiesRail } from '../components/project/PropertiesRail';
-import { InlineHint } from '../components/project/InlineHint';
+import { ProjectResources, type ProjectLink } from '../components/project/ProjectResources';
+import { ProjectUpdates } from '../components/project/ProjectUpdates';
+import { ProjectMilestones } from '../components/project/ProjectMilestones';
+import { ProjectActivity } from '../components/project/ProjectActivity';
 import { ProjectIntegrations } from '../components/project/ProjectIntegrations';
 import { ProjectContextMenu, TaskContextMenu } from '../components/project/contextMenus';
 import { PROJECT_STATUSES, STATUS_META, type UserLite } from '../components/project/pickers';
@@ -67,6 +70,8 @@ extendDict({
     'projects.loadFailed': 'Could not load this project.',
     'projects.properties': 'Properties',
     'projects.overviewHint': 'This is the project page — describe the goals here, and add tasks in the Tasks tab.',
+    'projects.summaryPh': 'Add a short summary…',
+    'projects.description': 'Description',
   },
   uk: {
     'projects.noLead': 'Без керівника',
@@ -101,6 +106,8 @@ extendDict({
     'projects.loadFailed': 'Не вдалося завантажити проєкт.',
     'projects.properties': 'Властивості',
     'projects.overviewHint': 'Це сторінка проєкту: опишіть тут цілі, а задачі додавайте у вкладці Tasks.',
+    'projects.summaryPh': 'Короткий підсумок…',
+    'projects.description': 'Опис',
   },
 });
 
@@ -109,6 +116,7 @@ interface Project {
   companyId?: string | null; companyName?: string | null; description?: unknown;
   leadId?: string | null; startDate?: string | null; targetDate?: string | null;
   visibility?: string; version?: number; settings?: Record<string, unknown>;
+  summary?: string; priority?: string; links?: ProjectLink[]; labelIds?: string[];
 }
 interface TaskStatus {
   id: string; name: string; category?: string; color?: string; position?: number; isDefault?: boolean;
@@ -171,7 +179,11 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
 
   const patchProject = useMutation({
     mutationFn: (body: Record<string, unknown>) => api.patch(`/projects/${id}`, { ...body, version: project?.version }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['project', id] }); qc.invalidateQueries({ queryKey: ['projects'] }); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', id] });
+      qc.invalidateQueries({ queryKey: ['projects'] });
+      qc.invalidateQueries({ queryKey: ['project-audit', id] });
+    },
     onError: (e) => {
       if (e instanceof ApiError && (e.status === 409 || e.code === 'conflict')) {
         qc.invalidateQueries({ queryKey: ['project', id] });
@@ -196,7 +208,17 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
       />
 
       <div className="flex-1 overflow-auto">
-        {tab === 'overview' && <OverviewTab id={id} statuses={statuses} project={project} users={users} canWrite={canWrite} onPatch={(b) => patchProject.mutate(b)} />}
+        {tab === 'overview' && (
+          <OverviewTab
+            id={id}
+            project={project}
+            users={users}
+            canWrite={canWrite}
+            isAdmin={isAdmin}
+            onPatch={(b) => patchProject.mutate(b)}
+            onManageMembers={() => setTab('settings')}
+          />
+        )}
         {tab === 'tasks' && <TasksTab id={id} statuses={statuses} statusesLoading={statusesQ.isLoading} projectKey={project?.key} users={users} onOpen={openTask} />}
         {tab === 'cycles' && <CyclesTab id={id} />}
         {tab === 'settings' && <SettingsTab project={project} isAdmin={isAdmin} onPatch={(b) => patchProject.mutate(b)} pending={patchProject.isPending} />}
@@ -852,13 +874,40 @@ function parseProjectDoc(raw: unknown): unknown {
   return EMPTY_DOC;
 }
 
-function OverviewTab({ id, statuses, project, users, canWrite, onPatch }: {
-  id: string; statuses: TaskStatus[]; project?: Project; users: UserLite[]; canWrite: boolean;
-  onPatch: (body: Record<string, unknown>) => void;
+/** Borderless one-line summary under the header, Linear-style. */
+function SummaryInput({ project, canWrite, onPatch }: {
+  project: Project; canWrite: boolean; onPatch: (body: Record<string, unknown>) => void;
 }) {
   const t = useT();
-  const { data, isLoading } = useQuery<Task[]>({ queryKey: ['tasks', id], queryFn: () => api.get<{ data: Task[] }>(`/tasks${qs({ projectId: id })}`).then((r) => r.data) });
-  const tasks = data ?? [];
+  const [draft, setDraft] = useState(project.summary ?? '');
+  useEffect(() => { setDraft(project.summary ?? ''); }, [project.id, project.summary]);
+  const commit = () => {
+    const v = draft.trim();
+    if (v !== (project.summary ?? '')) onPatch({ summary: v });
+  };
+  if (!canWrite) {
+    return project.summary
+      ? <p className="text-[15px] text-muted-foreground">{project.summary}</p>
+      : null;
+  }
+  return (
+    <input
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') { setDraft(project.summary ?? ''); (e.target as HTMLInputElement).blur(); } }}
+      placeholder={t('projects.summaryPh')}
+      className="w-full bg-transparent text-[15px] text-foreground outline-none placeholder:text-faint"
+    />
+  );
+}
+
+function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageMembers }: {
+  id: string; project?: Project; users: UserLite[]; canWrite: boolean; isAdmin: boolean;
+  onPatch: (body: Record<string, unknown>) => void;
+  onManageMembers: () => void;
+}) {
+  const t = useT();
 
   // Debounced description editor. The API stores the description as a string
   // column, so the tiptap doc travels JSON-serialized (legacy plain text is
@@ -879,28 +928,49 @@ function OverviewTab({ id, statuses, project, users, canWrite, onPatch }: {
   };
 
   return (
-    <PageBody width="wide" className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_260px]">
-      {/* Left: pure document */}
-      <div className="order-2 min-w-0 space-y-4 lg:order-1">
-        <InlineHint id="project-overview">{t('projects.overviewHint')}</InlineHint>
+    <PageBody width="wide" className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_280px]">
+      {/* Left: summary, resources, updates, description, milestones, activity */}
+      <div className="order-2 min-w-0 space-y-7 lg:order-1">
         {project ? (
-          <RichEditor key={project.id} value={doc} onChange={onDescChange} editable={canWrite} placeholder={t('projects.aboutPlaceholder')} />
+          <>
+            <div className="space-y-3">
+              <SummaryInput project={project} canWrite={canWrite} onPatch={onPatch} />
+              <ProjectResources
+                links={(project.links ?? []) as ProjectLink[]}
+                canWrite={canWrite}
+                onChange={(next) => onPatch({ links: next })}
+              />
+            </div>
+
+            <ProjectUpdates projectId={id} canWrite={canWrite} isAdmin={isAdmin} />
+
+            <section>
+              <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('projects.description')}</h2>
+              <RichEditor key={project.id} value={doc} onChange={onDescChange} editable={canWrite} placeholder={t('projects.aboutPlaceholder')} />
+            </section>
+
+            <ProjectMilestones projectId={id} canWrite={canWrite} />
+
+            <ProjectActivity projectId={id} users={users} />
+          </>
         ) : (
-          <Skeleton className="h-40" />
+          <div className="space-y-4">
+            <Skeleton className="h-6 w-2/3" />
+            <Skeleton className="h-16" />
+            <Skeleton className="h-40" />
+          </div>
         )}
       </div>
 
-      {/* Right: properties rail */}
+      {/* Right: properties rail (single source for project metadata) */}
       <div className="order-1 lg:order-2">
         {project ? (
           <PropertiesRail
             project={project}
-            statuses={statuses}
-            tasks={tasks}
-            tasksLoading={isLoading}
             users={users}
             canWrite={canWrite}
             onPatch={onPatch}
+            onManageMembers={onManageMembers}
           />
         ) : (
           <div className="space-y-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-8" />)}</div>

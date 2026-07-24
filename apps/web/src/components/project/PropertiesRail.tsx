@@ -1,42 +1,71 @@
-import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Rocket, Target } from 'lucide-react';
+import { Rocket, Tag, Target, Users } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useCan } from '../../lib/auth';
-import {
-  ProgressBar, ProgressRing, Skeleton, StatusIcon, cn,
-} from '../ui';
+import { AvatarGroup, PriorityIcon, cn } from '../ui';
 import { DropdownMenu, MenuItem, MenuLabel } from '../overlays';
-import { projectColor } from './ProjectIcon';
 import {
   RailField, LeadPicker, DateRailPicker, ProjectStatusPicker, VisibilityPicker, CompanyPicker,
   type UserLite, type CompanyLite, type ProjectStatus,
 } from './pickers';
+import { ProjectProgressPanel } from './ProjectProgress';
 import { useT, extendDict } from '../../lib/i18n';
 
 extendDict({
-  en: { 'projects.type': 'Type' },
-  uk: { 'projects.type': 'Тип' },
+  en: {
+    'projects.type': 'Type',
+    'projects.priority': 'Priority',
+    'projects.priorityNone': 'No priority',
+    'projects.priorityLow': 'Low',
+    'projects.priorityMedium': 'Medium',
+    'projects.priorityHigh': 'High',
+    'projects.priorityUrgent': 'Urgent',
+    'projects.labels': 'Labels',
+    'projects.addLabels': 'Add labels',
+    'projects.members': 'Members',
+    'projects.manageMembers': 'Manage members',
+  },
+  uk: {
+    'projects.type': 'Тип',
+    'projects.priority': 'Пріоритет',
+    'projects.priorityNone': 'Без пріоритету',
+    'projects.priorityLow': 'Низький',
+    'projects.priorityMedium': 'Середній',
+    'projects.priorityHigh': 'Високий',
+    'projects.priorityUrgent': 'Терміновий',
+    'projects.labels': 'Мітки',
+    'projects.addLabels': 'Додати мітки',
+    'projects.members': 'Учасники',
+    'projects.manageMembers': 'Керувати учасниками',
+  },
 });
 
 interface ProjectLite {
   id: string; key: string; status: string; leadId?: string | null;
   startDate?: string | null; targetDate?: string | null; visibility?: string;
   companyId?: string | null; companyName?: string | null; projectTypeId?: string | null;
+  priority?: string; labelIds?: string[];
 }
 interface ProjectTypeLite { id: string; name: string; color?: string; requiresClient?: boolean }
-interface StatusLite { id: string; name: string; category?: string; color?: string }
-interface TaskLite { statusId: string }
+interface LabelLite { id: string; name: string; color?: string | null }
+interface MemberLite { userId: string; role: string }
 
-/** Right column of the Overview tab: completion stats + editable properties. */
-export function PropertiesRail({ project, statuses, tasks, tasksLoading, users, canWrite, onPatch }: {
+const PRIORITIES = ['none', 'low', 'medium', 'high', 'urgent'] as const;
+const PRIORITY_KEY: Record<string, string> = {
+  none: 'projects.priorityNone', low: 'projects.priorityLow', medium: 'projects.priorityMedium',
+  high: 'projects.priorityHigh', urgent: 'projects.priorityUrgent',
+};
+
+/**
+ * Right column of the Overview tab: editable properties (single source for
+ * project metadata) plus the Progress panel with the burnup chart.
+ */
+export function PropertiesRail({ project, users, canWrite, onPatch, onManageMembers }: {
   project: ProjectLite;
-  statuses: StatusLite[];
-  tasks: TaskLite[];
-  tasksLoading: boolean;
   users: UserLite[];
   canWrite: boolean;
   onPatch: (body: Record<string, unknown>) => void;
+  onManageMembers?: () => void;
 }) {
   const t = useT();
   const can = useCan();
@@ -54,71 +83,49 @@ export function PropertiesRail({ project, statuses, tasks, tasksLoading, users, 
     staleTime: 5 * 60_000,
   });
   const projectTypes = typesQ.data ?? [];
-
-  const catOf = (sid: string) => statuses.find((s) => s.id === sid)?.category;
-  const total = tasks.length;
-  const done = tasks.filter((x) => catOf(x.statusId) === 'done').length;
-  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-  const accent = projectColor(project.key || project.id);
-  const perStatus = useMemo(
-    () => statuses.map((s) => ({ s, n: tasks.filter((x) => x.statusId === s.id).length })),
-    [statuses, tasks],
-  );
+  const labelsQ = useQuery<LabelLite[]>({
+    queryKey: ['labels'],
+    queryFn: () => api.get<{ data: LabelLite[] }>('/labels').then((r) => r.data),
+    staleTime: 5 * 60_000,
+  });
+  const labels = labelsQ.data ?? [];
+  const membersQ = useQuery<MemberLite[]>({
+    queryKey: ['project-members', project.id],
+    queryFn: () => api.get<{ data: MemberLite[] }>(`/projects/${project.id}/members`).then((r) => r.data),
+  });
+  const memberUsers = (membersQ.data ?? [])
+    .map((m) => users.find((u) => u.id === m.userId))
+    .filter((u): u is UserLite => !!u);
 
   return (
     <div className="space-y-5">
-      {/* Completion stat block */}
-      <div className="rounded-xl border border-border bg-card p-4">
-        <div className="flex items-center gap-3.5">
-          <div className="relative grid shrink-0 place-items-center">
-            <ProgressRing value={pct} size={60} stroke={5} color={pct === 100 ? '#22c55e' : accent} />
-            <span className="absolute text-[13px] font-semibold tabular-nums">{pct}%</span>
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs text-muted-foreground">{t('projects.completion')}</p>
-            {tasksLoading ? (
-              <Skeleton className="mt-1 h-5 w-20" />
-            ) : (
-              <p className="text-sm">
-                <span className="text-base font-semibold tabular-nums">{done}</span>
-                <span className="text-muted-foreground"> / {total} {t('projects.done').toLowerCase()}</span>
-              </p>
-            )}
-          </div>
-        </div>
-
-        {total > 0 && (
-          <div className="mt-3.5 space-y-2 border-t border-border pt-3.5">
-            {perStatus.filter(({ n }) => n > 0).map(({ s, n }) => (
-              <div key={s.id}>
-                <div className="mb-1 flex items-center gap-1.5 text-xs">
-                  <StatusIcon category={s.category} color={s.color} size={12} />
-                  <span className="flex-1 truncate text-muted-foreground">{s.name}</span>
-                  <span className="tabular-nums text-muted-foreground">{n}</span>
-                </div>
-                <ProgressBar value={total > 0 ? (n / total) * 100 : 0} color={s.color} />
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
       {/* Properties */}
-      <div className={cn('space-y-0.5')}>
+      <div className="space-y-0.5">
         <p className="px-1.5 pb-1 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('projects.properties')}</p>
         <RailField label={t('common.status')}>
           <ProjectStatusPicker value={project.status} disabled={!canWrite} onSelect={(s: ProjectStatus) => onPatch({ status: s })} />
         </RailField>
-        <RailField label={t('projects.type')}>
-          <ProjectTypeRailPicker
-            value={project.projectTypeId}
-            types={projectTypes}
-            disabled={!can('projects.write')}
-            onSelect={(tid) => onPatch({ projectTypeId: tid })}
-          />
+        <RailField label={t('projects.priority')}>
+          <PriorityRailPicker value={project.priority ?? 'none'} disabled={!canWrite} onSelect={(p) => onPatch({ priority: p })} />
         </RailField>
         <RailField label={t('projects.lead')}>
           <LeadPicker value={project.leadId} users={users} disabled={!canWrite} onSelect={(uid) => onPatch({ leadId: uid })} />
+        </RailField>
+        <RailField label={t('projects.members')}>
+          <button
+            type="button"
+            onClick={onManageMembers}
+            title={t('projects.manageMembers')}
+            className={cn(
+              'group flex min-h-7 w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-[13px] transition-colors duration-150',
+              onManageMembers ? 'cursor-pointer hover:bg-muted' : 'cursor-default',
+              memberUsers.length === 0 && 'text-faint',
+            )}
+          >
+            {memberUsers.length > 0
+              ? <><AvatarGroup users={memberUsers} size={20} max={5} /><span className="text-xs tabular-nums text-muted-foreground">{memberUsers.length}</span></>
+              : <><Users size={15} className="text-faint" /><span>{t('projects.manageMembers')}</span></>}
+          </button>
         </RailField>
         <RailField label={t('projects.startDate')}>
           <DateRailPicker value={project.startDate} disabled={!canWrite} placeholder={t('projects.setStart')}
@@ -128,6 +135,14 @@ export function PropertiesRail({ project, statuses, tasks, tasksLoading, users, 
           <DateRailPicker value={project.targetDate} disabled={!canWrite} placeholder={t('projects.setTarget')}
             icon={<Target size={14} className="text-faint" />} onChange={(v) => onPatch({ targetDate: v })} />
         </RailField>
+        <RailField label={t('projects.type')}>
+          <ProjectTypeRailPicker
+            value={project.projectTypeId}
+            types={projectTypes}
+            disabled={!can('projects.write')}
+            onSelect={(tid) => onPatch({ projectTypeId: tid })}
+          />
+        </RailField>
         <RailField label={t('projects.company')}>
           <CompanyPicker value={project.companyId} companyName={project.companyName} companies={companies}
             disabled={!canWrite} onSelect={(cid) => onPatch({ companyId: cid })} />
@@ -136,8 +151,96 @@ export function PropertiesRail({ project, statuses, tasks, tasksLoading, users, 
           <VisibilityPicker value={project.visibility} disabled={!can('projects.write')}
             onSelect={(v) => onPatch({ visibility: v })} />
         </RailField>
+        <RailField label={t('projects.labels')}>
+          <LabelsRailPicker
+            value={project.labelIds ?? []}
+            labels={labels}
+            disabled={!canWrite}
+            onChange={(ids) => onPatch({ labelIds: ids })}
+          />
+        </RailField>
       </div>
+
+      {/* Progress (scope / started / completed + burnup) */}
+      <ProjectProgressPanel projectId={project.id} />
     </div>
+  );
+}
+
+/** Priority chip + dropdown, Linear-style glyphs. */
+function PriorityRailPicker({ value, onSelect, disabled }: {
+  value: string; onSelect: (p: string) => void; disabled?: boolean;
+}) {
+  const t = useT();
+  const trigger = (
+    <span className={cn(
+      'group flex min-h-7 w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-[13px] transition-colors duration-150',
+      disabled ? 'cursor-default' : 'cursor-pointer hover:bg-muted',
+      value === 'none' && 'text-muted-foreground',
+    )}>
+      <PriorityIcon priority={value} size={15} />
+      <span className="truncate">{t(PRIORITY_KEY[value] ?? PRIORITY_KEY.none!)}</span>
+    </span>
+  );
+  if (disabled) return trigger;
+  return (
+    <DropdownMenu trigger={trigger} align="start" width={190} className="w-full">
+      <MenuLabel>{t('projects.priority')}</MenuLabel>
+      {PRIORITIES.map((p) => (
+        <MenuItem
+          key={p}
+          checked={value === p}
+          icon={<PriorityIcon priority={p} size={15} />}
+          onSelect={() => { if (p !== value) onSelect(p); }}
+        >
+          {t(PRIORITY_KEY[p]!)}
+        </MenuItem>
+      ))}
+    </DropdownMenu>
+  );
+}
+
+/** Multi-select label chips + dropdown with checkmarks. */
+function LabelsRailPicker({ value, labels, onChange, disabled }: {
+  value: string[]; labels: LabelLite[]; onChange: (ids: string[]) => void; disabled?: boolean;
+}) {
+  const t = useT();
+  const selected = value.map((id) => labels.find((l) => l.id === id)).filter((l): l is LabelLite => !!l);
+  const trigger = (
+    <span className={cn(
+      'group flex min-h-7 w-full flex-wrap items-center gap-1 rounded-md px-1.5 py-1 text-[13px] transition-colors duration-150',
+      disabled ? 'cursor-default' : 'cursor-pointer hover:bg-muted',
+      selected.length === 0 && 'text-faint',
+    )}>
+      {selected.length === 0 ? (
+        <><Tag size={14} className="text-faint" /><span className="truncate">{disabled ? '–' : t('projects.addLabels')}</span></>
+      ) : selected.map((l) => (
+        <span key={l.id} className="inline-flex h-[18px] items-center gap-1 rounded-full border border-border px-1.5 text-[11px] text-muted-foreground">
+          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: l.color ?? '#8a8f98' }} />
+          {l.name}
+        </span>
+      ))}
+    </span>
+  );
+  if (disabled) return trigger;
+  const toggle = (id: string) => {
+    onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
+  };
+  return (
+    <DropdownMenu trigger={trigger} align="start" width={220} className="w-full">
+      <MenuLabel>{t('projects.labels')}</MenuLabel>
+      {labels.map((l) => (
+        <MenuItem
+          key={l.id}
+          checked={value.includes(l.id)}
+          icon={<span className="h-2 w-2 rounded-full" style={{ backgroundColor: l.color ?? '#8a8f98' }} />}
+          onSelect={() => toggle(l.id)}
+        >
+          {l.name}
+        </MenuItem>
+      ))}
+      {labels.length === 0 && <p className="px-2.5 py-2 text-xs text-faint">{t('projects.addLabels')}</p>}
+    </DropdownMenu>
   );
 }
 
@@ -154,7 +257,7 @@ function ProjectTypeRailPicker({ value, types, onSelect, disabled }: {
       !current && 'text-faint',
     )}>
       <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: current?.color ?? '#8a8f98' }} />
-      <span className="truncate">{current?.name ?? '—'}</span>
+      <span className="truncate">{current?.name ?? '–'}</span>
     </span>
   );
   if (disabled) return trigger;

@@ -5,6 +5,7 @@
  */
 import type { ReactNode } from 'react';
 import { cn } from '../ui';
+import { useEntityRefClick } from './entityRefClick';
 import './richtext.css';
 
 /** True when the doc has no visible content (text, mentions, rules…). */
@@ -18,7 +19,7 @@ export function docIsEmpty(doc: unknown): boolean {
       has = true;
       return;
     }
-    if (n.type === 'mention' || n.type === 'horizontalRule' || n.type === 'image') {
+    if (n.type === 'mention' || n.type === 'entityMention' || n.type === 'horizontalRule' || n.type === 'image') {
       has = true;
       return;
     }
@@ -128,6 +129,22 @@ function renderNode(node: any, key: string): ReactNode {
         </span>
       );
     }
+    case 'entityMention': {
+      const label = node.attrs?.label ?? node.attrs?.id ?? '';
+      return (
+        <span
+          key={key}
+          data-type="entity-mention"
+          data-kind={typeof node.attrs?.kind === 'string' ? node.attrs.kind : undefined}
+          data-url={typeof node.attrs?.url === 'string' ? node.attrs.url : undefined}
+          className="ordi-ref"
+          role="link"
+          tabIndex={0}
+        >
+          {String(label)}
+        </span>
+      );
+    }
     default:
       // Unknown block: render its children so content is never silently lost.
       if (Array.isArray(node.content)) return <span key={key}>{renderChildren(node.content, key)}</span>;
@@ -136,6 +153,7 @@ function renderNode(node: any, key: string): ReactNode {
 }
 
 export function RichText({ doc, className }: { doc: unknown; className?: string }) {
+  const onEntityClick = useEntityRefClick();
   if (docIsEmpty(doc)) return null;
   // Legacy/plain-string bodies: render as simple paragraphs.
   if (typeof doc === 'string') {
@@ -148,5 +166,9 @@ export function RichText({ doc, className }: { doc: unknown; className?: string 
     );
   }
   const d = doc as { content?: unknown };
-  return <div className={cn('ordi-prose', className)}>{renderChildren(d.content, 'n')}</div>;
+  return (
+    <div className={cn('ordi-prose', className)} onClick={onEntityClick}>
+      {renderChildren(d.content, 'n')}
+    </div>
+  );
 }

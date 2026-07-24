@@ -21,6 +21,12 @@ export const projectInputSchema = z.object({
   customFields: customFieldsSchema.optional(),
 });
 
+/** Resource link on the project overview. */
+export const projectLinkSchema = z.object({
+  label: z.string().min(1),
+  url: z.string().url(),
+});
+
 export const projectUpdateSchema = z.object({
   name: z.string().min(1).optional(),
   status: z.enum(PROJECT_STATUSES).optional(),
@@ -30,6 +36,10 @@ export const projectUpdateSchema = z.object({
   startDate: z.string().nullable().optional(),
   targetDate: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
+  summary: z.string().max(500).optional(),
+  priority: z.enum(TASK_PRIORITIES).optional(),
+  links: z.array(projectLinkSchema).max(50).optional(),
+  labelIds: z.array(idSchema).optional(),
   estimateUnit: z.enum(ESTIMATE_UNITS).optional(),
   customFields: customFieldsSchema.optional(),
   /** Per-project settings; merged (not replaced) with existing keys like estimateUnit. */
@@ -40,6 +50,35 @@ export const projectUpdateSchema = z.object({
     slackChannelId: z.string().nullable().optional(),
   }).partial().optional(),
   version: z.number().int().optional(),
+});
+
+/** Milestones (project overview checklist). */
+export const milestoneInputSchema = z.object({
+  name: z.string().min(1),
+  targetDate: z.string().nullable().optional(),
+  done: z.boolean().default(false),
+  position: z.number().int().optional(),
+});
+
+export const milestonePatchSchema = z.object({
+  name: z.string().min(1).optional(),
+  targetDate: z.string().nullable().optional(),
+  done: z.boolean().optional(),
+  position: z.number().int().optional(),
+});
+
+/** Project status updates (health reports). */
+export const PROJECT_HEALTH = ['on_track', 'at_risk', 'off_track'] as const;
+export type ProjectHealth = (typeof PROJECT_HEALTH)[number];
+
+export const projectUpdatePostSchema = z.object({
+  body: richTextSchema,
+  health: z.enum(PROJECT_HEALTH).default('on_track'),
+});
+
+export const projectUpdatePatchSchema = z.object({
+  body: richTextSchema.optional(),
+  health: z.enum(PROJECT_HEALTH).optional(),
 });
 
 export const projectMemberInputSchema = z.object({

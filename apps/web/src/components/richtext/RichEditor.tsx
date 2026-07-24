@@ -19,7 +19,9 @@ import TaskItem from '@tiptap/extension-task-item';
 import Mention from '@tiptap/extension-mention';
 import { Bold, Italic, Strikethrough, Code, Link2, Check, ChevronDown, X } from 'lucide-react';
 import { cn } from '../ui';
+import { useEntityRefClick } from './entityRefClick';
 import { mentionSuggestion } from './mention';
+import { EntityMention, entityMentionSuggestion } from './entityMention';
 import { SlashCommand } from './slash';
 import './richtext.css';
 
@@ -31,6 +33,8 @@ export interface RichEditorProps {
   placeholder?: string;
   editable?: boolean;
   compact?: boolean;
+  /** Compact sizing without the bordered card (e.g. dialog composers). */
+  bare?: boolean;
   onSubmit?: () => void;
 }
 
@@ -226,7 +230,8 @@ function BubbleToolbar({
 
 /* ───────────────────────── Editor ───────────────────────── */
 
-export function RichEditor({ value, onChange, placeholder, editable = true, compact = false, onSubmit }: RichEditorProps) {
+export function RichEditor({ value, onChange, placeholder, editable = true, compact = false, bare = false, onSubmit }: RichEditorProps) {
+  const onEntityClick = useEntityRefClick();
   // Refs keep the tiptap callbacks pointing at the latest props without
   // recreating the editor instance.
   const onChangeRef = useRef(onChange);
@@ -256,6 +261,10 @@ export function RichEditor({ value, onChange, placeholder, editable = true, comp
         HTMLAttributes: { class: 'ordi-mention' },
         suggestion: mentionSuggestion,
       }),
+      EntityMention.configure({
+        HTMLAttributes: { class: 'ordi-ref' },
+        suggestion: entityMentionSuggestion,
+      }),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -267,7 +276,10 @@ export function RichEditor({ value, onChange, placeholder, editable = true, comp
     editable,
     editorProps: {
       attributes: {
-        class: cn('ordi-prose outline-none', compact ? 'px-3 py-2 min-h-[2.5rem]' : 'py-1 min-h-[10rem]'),
+        class: cn(
+          'ordi-prose outline-none',
+          bare ? 'px-0 py-1 min-h-[3.25rem]' : compact ? 'px-3 py-2 min-h-[2.5rem]' : 'py-1 min-h-[10rem]',
+        ),
       },
       handleKeyDown: (_view, event) => {
         if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && onSubmitRef.current) {
@@ -299,12 +311,12 @@ export function RichEditor({ value, onChange, placeholder, editable = true, comp
 
   // Compact (comments): bordered card with focus ring. Non-compact (page body):
   // borderless, seamless — the page provides the surface context.
-  const wrapperClass = compact
+  const wrapperClass = compact && !bare
     ? cn('w-full rounded-md border border-input bg-transparent text-sm', editable && 'focus-within:ring-2 focus-within:ring-ring/40')
     : 'w-full bg-transparent text-sm';
 
   return (
-    <div className={wrapperClass}>
+    <div className={wrapperClass} onClick={onEntityClick}>
       {editor && editable && (
         <BubbleMenu
           editor={editor}

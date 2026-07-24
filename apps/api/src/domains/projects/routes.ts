@@ -12,6 +12,7 @@ import { guard } from '../../core/rbac';
 import { err } from '../../lib/errors';
 import { assertProject } from '../../core/access';
 import * as svc from './service';
+import { projectOverviewRoutes } from './overview.routes';
 
 /** Assert settings.manage for workspace-level config changes. */
 function requireSettingsManage(c: any) {
@@ -23,6 +24,9 @@ function requireSettingsManage(c: any) {
 export function projectsRoutes() {
   const app = new Hono<AppEnv>();
   app.use('*', requireAuth);
+
+  // Overview extras: milestones, project updates, progress (Linear-style page).
+  app.route('/', projectOverviewRoutes());
 
   // ── Projects (reads are membership-gated, PRD §4.4) ──
   app.get('/projects', async (c) => {

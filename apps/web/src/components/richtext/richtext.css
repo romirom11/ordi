@@ -178,6 +178,60 @@
   white-space: nowrap;
 }
 
+/* Entity reference chips ("#" mentions: tasks, pages, companies, invoices).
+   Clickable → delegated onClick on the prose container navigates to data-url. */
+.ordi-prose .ordi-ref,
+.ordi-prose span[data-type='entity-mention'] {
+  border-radius: 0.25rem;
+  background: hsl(var(--primary) / 0.1);
+  padding: 0.05em 0.3em;
+  color: hsl(var(--primary));
+  font-weight: 500;
+  font-size: 0.9em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 150ms;
+}
+.ordi-prose .ordi-ref:hover,
+.ordi-prose span[data-type='entity-mention']:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  background: hsl(var(--primary) / 0.16);
+}
+/* Icon-ish prefix per kind (masked lucide glyphs, colored via currentColor). */
+.ordi-prose .ordi-ref::before,
+.ordi-prose span[data-type='entity-mention']::before {
+  content: '';
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  margin-right: 0.3em;
+  vertical-align: -0.08em;
+  background-color: currentColor;
+  -webkit-mask: var(--ordi-ref-ico, url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M4 9h16'/><path d='M4 15h16'/><path d='M10 3 8 21'/><path d='M16 3l-2 18'/></svg>")) center / contain no-repeat;
+  mask: var(--ordi-ref-ico, url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M4 9h16'/><path d='M4 15h16'/><path d='M10 3 8 21'/><path d='M16 3l-2 18'/></svg>")) center / contain no-repeat;
+}
+.ordi-prose .ordi-ref[data-kind='task']::before,
+.ordi-prose span[data-type='entity-mention'][data-kind='task']::before {
+  --ordi-ref-ico: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='m9 11 3 3L22 4'/><path d='M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11'/></svg>");
+}
+.ordi-prose .ordi-ref[data-kind='page']::before,
+.ordi-prose span[data-type='entity-mention'][data-kind='page']::before {
+  --ordi-ref-ico: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20'/><path d='M8 7h6'/><path d='M8 11h8'/></svg>");
+}
+.ordi-prose .ordi-ref[data-kind='company']::before,
+.ordi-prose span[data-type='entity-mention'][data-kind='company']::before {
+  --ordi-ref-ico: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z'/><path d='M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2'/><path d='M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2'/><path d='M10 6h4'/><path d='M10 10h4'/><path d='M10 14h4'/><path d='M10 18h4'/></svg>");
+}
+.ordi-prose .ordi-ref[data-kind='invoice']::before,
+.ordi-prose span[data-type='entity-mention'][data-kind='invoice']::before {
+  --ordi-ref-ico: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z'/><path d='M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8'/><path d='M12 17.5v-11'/></svg>");
+}
+/* Node selection inside the editor */
+.ordi-prose .ordi-ref.ProseMirror-selectednode {
+  outline: 2px solid hsl(var(--ring) / 0.4);
+}
+
 /* Per-node placeholder (tiptap placeholder extension) */
 .ordi-prose .is-empty::before {
   content: attr(data-placeholder);

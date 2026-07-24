@@ -172,7 +172,9 @@ export async function getProject(actor: Actor, id: string) {
   const { db } = getDb();
   const [project] = await db.select().from(projects).where(and(eq(projects.id, id), isNull(projects.deletedAt)));
   if (!project) throw err.notFound('Project not found');
-  return project;
+  const labelRows = await db.select({ labelId: schema.projectLabels.labelId })
+    .from(schema.projectLabels).where(eq(schema.projectLabels.projectId, id));
+  return { ...project, labelIds: labelRows.map((r) => r.labelId) };
 }
 
 export async function updateProject(actor: Actor, id: string, input: any) {
@@ -182,8 +184,14 @@ export async function updateProject(actor: Actor, id: string, input: any) {
   if (!before) throw err.notFound('Project not found');
   assertVersion(before, input.version, before);
   const patch: Record<string, unknown> = {};
-  for (const k of ['name', 'status', 'visibility', 'leadId', 'startDate', 'targetDate', 'description', 'customFields']) {
+  for (const k of ['name', 'status', 'visibility', 'leadId', 'startDate', 'targetDate', 'description', 'summary', 'priority', 'links', 'customFields']) {
     if (input[k] !== undefined) patch[k] = input[k];
+  }
+  // Project labels: replace the join set when labelIds is provided.
+  if (input.labelIds !== undefined) {
+    const next: string[] = input.labelIds;
+    await db.delete(schema.projectLabels).where(eq(schema.projectLabels.projectId, id));
+    if (next.length) await db.insert(schema.projectLabels).values(next.map((labelId) => ({ projectId: id, labelId })));
   }
   // Changing the type re-applies its behaviour: requiresClient needs the existing
   // company link; a type without a client detaches the company.
@@ -207,7 +215,8 @@ export async function updateProject(actor: Actor, id: string, input: any) {
   if (input.status === 'completed' && before.status !== 'completed') {
     await emit({ type: 'project.completed', aggregateType: 'project', aggregateId: id, payload: { key: before.key, companyId: before.companyId }, actorId: actor.userId, actorType: actor.actorType });
   }
-  await writeActivity(db, { entityType: 'project', entityId: id, action: 'updated', before, after: patch, actorId: actor.userId, actorType: actor.actorType });
+  const logged = input.labelIds !== undefined ? { ...patch, labelIds: input.labelIds } : patch;
+  await writeActivity(db, { entityType: 'project', entityId: id, action: 'updated', before, after: logged, actorId: actor.userId, actorType: actor.actorType });
   const [updated] = await db.select().from(projects).where(eq(projects.id, id));
   return updated;
 }

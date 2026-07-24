@@ -68,6 +68,31 @@ export const projectMembers = pgTable('project_members', {
   userIdx: index('project_members_user_idx').on(t.userId),
 }));
 
+/** Project milestones (Linear-style overview checklist). */
+export const milestones = pgTable('milestones', {
+  id: pk(),
+  projectId: text('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  targetDate: text('target_date'),
+  done: boolean('done').notNull().default(false),
+  position: integer('position').notNull().default(0),
+  ...timestamps,
+}, (t) => ({
+  projectIdx: index('milestones_project_idx').on(t.projectId),
+}));
+
+/** Project status updates (health reports posted by members). */
+export const projectUpdates = pgTable('project_updates', {
+  id: pk(),
+  projectId: text('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  body: jsonb('body').notNull().default({}),
+  health: text('health').notNull().default('on_track'), // on_track | at_risk | off_track
+  createdBy: createdBy(),
+  ...timestamps,
+}, (t) => ({
+  projectIdx: index('project_updates_project_idx').on(t.projectId),
+}));
+
 export const taskStatuses = pgTable('task_statuses', {
   id: pk(),
   projectId: text('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
@@ -97,6 +122,14 @@ export const labels = pgTable('labels', {
   color: text('color').notNull().default('#6b7280'),
   ...timestamps,
 });
+
+/** Labels attached to a project (same labels table as tasks). */
+export const projectLabels = pgTable('project_labels', {
+  projectId: text('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  labelId: text('label_id').notNull().references(() => labels.id, { onDelete: 'cascade' }),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.projectId, t.labelId] }),
+}));
 
 export const cycles = pgTable('cycles', {
   id: pk(),

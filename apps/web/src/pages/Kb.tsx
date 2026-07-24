@@ -1,16 +1,21 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '../lib/router';
+import { useTabs } from '../lib/tabs';
 import { useCan } from '../lib/auth';
 import { api, ApiError } from '../lib/api';
 import {
   Button, IconButton, Input, Card, Badge, Breadcrumbs, EmptyState, Skeleton, Spinner, fmtDate, cn,
   type BreadcrumbItem,
 } from '../components/ui';
-import { Dialog, DropdownMenu, MenuItem, toast } from '../components/overlays';
+import {
+  ConfirmDialog, ContextMenu, Dialog, DropdownMenu, MenuItem, MenuSeparator, toast,
+  type ContextMenuEntry,
+} from '../components/overlays';
 import {
   Plus, History, FileText, ChevronRight, RotateCcw, Folder, FolderOpen,
   MoreHorizontal, Pencil, Globe, EyeOff, BookOpen, FileQuestion, Lock,
+  Link2, ExternalLink, Trash2,
 } from 'lucide-react';
 import { RichEditor, EMPTY_DOC } from '../components/richtext/RichEditor';
 import { SpaceAccessDialog, type AccessSpace } from '../components/kb/SpaceAccessDialog';
@@ -35,6 +40,22 @@ extendDict({
     'kb.unsavedChanges': 'Unsaved changes',
     'kb.conflict': 'This page changed elsewhere — refreshed with the latest version',
     'kb.newSpaceHint': 'Spaces group related pages together.',
+    'kb.copyLink': 'Copy link',
+    'kb.linkCopied': 'Link copied',
+    'kb.openNewTab': 'Open in new tab',
+    'kb.deletePage': 'Delete',
+    'kb.deletePageTitle': 'Delete page?',
+    'kb.deletePageBody': 'The page and its subpages will be removed. This cannot be undone.',
+    'kb.pageDeleted': 'Page deleted',
+    'kb.deletePageFailed': 'Could not delete the page',
+    'kb.renameSpace': 'Rename space',
+    'kb.spaceRenamed': 'Space renamed',
+    'kb.renameSpaceFailed': 'Could not rename the space',
+    'kb.deleteSpace': 'Delete',
+    'kb.deleteSpaceTitle': 'Delete space?',
+    'kb.deleteSpaceBody': 'The space and all of its pages will be removed. This cannot be undone.',
+    'kb.spaceDeleted': 'Space deleted',
+    'kb.deleteSpaceFailed': 'Could not delete the space',
   },
   uk: {
     'kb.rename': 'Перейменувати',
@@ -54,6 +75,22 @@ extendDict({
     'kb.unsavedChanges': 'Є незбережені зміни',
     'kb.conflict': 'Сторінку змінили деінде — оновлено до останньої версії',
     'kb.newSpaceHint': 'Простори групують пов’язані сторінки.',
+    'kb.copyLink': 'Копіювати посилання',
+    'kb.linkCopied': 'Посилання скопійовано',
+    'kb.openNewTab': 'Відкрити в новій вкладці',
+    'kb.deletePage': 'Видалити',
+    'kb.deletePageTitle': 'Видалити сторінку?',
+    'kb.deletePageBody': 'Сторінку та її підсторінки буде видалено. Цю дію не можна скасувати.',
+    'kb.pageDeleted': 'Сторінку видалено',
+    'kb.deletePageFailed': 'Не вдалося видалити сторінку',
+    'kb.renameSpace': 'Перейменувати простір',
+    'kb.spaceRenamed': 'Простір перейменовано',
+    'kb.renameSpaceFailed': 'Не вдалося перейменувати простір',
+    'kb.deleteSpace': 'Видалити',
+    'kb.deleteSpaceTitle': 'Видалити простір?',
+    'kb.deleteSpaceBody': 'Простір і всі його сторінки буде видалено. Цю дію не можна скасувати.',
+    'kb.spaceDeleted': 'Простір видалено',
+    'kb.deleteSpaceFailed': 'Не вдалося видалити простір',
   },
 });
 
@@ -105,6 +142,9 @@ interface TreeActions {
   onCreateChild: (spaceId: string, parentId: string) => void;
   onRename: (spaceId: string, page: FlatPage) => void;
   onTogglePublish: (spaceId: string, page: FlatPage) => void;
+  onCopyLink: (spaceId: string, pageId: string) => void;
+  onOpenNewTab: (spaceId: string, pageId: string) => void;
+  onDelete: (spaceId: string, page: FlatPage) => void;
 }
 
 function PageTree({ nodes, spaceId, activeId, depth, canWrite, expandedPages, onTogglePage, actions }: {
@@ -118,8 +158,33 @@ function PageTree({ nodes, spaceId, activeId, depth, canWrite, expandedPages, on
         const hasChildren = n.children.length > 0;
         const isOpen = expandedPages.has(n.id);
         const isActive = n.id === activeId;
+        // Right-click menu mirrors the "…" dropdown (both must work).
+        const ctxItems: ContextMenuEntry[] = [
+          ...(canWrite
+            ? [
+                { key: 'newSub', label: t('kb.newSubpage'), icon: <Plus size={13} />, onSelect: () => actions.onCreateChild(spaceId, n.id) },
+                { key: 'rename', label: t('kb.rename'), icon: <Pencil size={13} />, onSelect: () => actions.onRename(spaceId, n) },
+                {
+                  key: 'publish',
+                  label: n.published ? t('kb.unpublish') : t('kb.publish'),
+                  icon: n.published ? <EyeOff size={13} /> : <Globe size={13} />,
+                  onSelect: () => actions.onTogglePublish(spaceId, n),
+                },
+                { type: 'separator' } as ContextMenuEntry,
+              ]
+            : []),
+          { key: 'copyLink', label: t('kb.copyLink'), icon: <Link2 size={13} />, onSelect: () => actions.onCopyLink(spaceId, n.id) },
+          { key: 'newTab', label: t('kb.openNewTab'), icon: <ExternalLink size={13} />, onSelect: () => actions.onOpenNewTab(spaceId, n.id) },
+          ...(canWrite
+            ? [
+                { type: 'separator' } as ContextMenuEntry,
+                { key: 'delete', label: t('kb.deletePage'), icon: <Trash2 size={13} />, danger: true, onSelect: () => actions.onDelete(spaceId, n) },
+              ]
+            : []),
+        ];
         return (
           <div key={n.id}>
+            <ContextMenu items={ctxItems}>
             <div
               role="button"
               tabIndex={0}
@@ -138,10 +203,11 @@ function PageTree({ nodes, spaceId, activeId, depth, canWrite, expandedPages, on
               <span className="min-w-0 flex-1 truncate">{n.title || t('kb.untitled')}</span>
               {n.published && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-success" title={t('kb.published')} />}
               {canWrite && (
+                <span onClick={(e) => e.stopPropagation()} className="flex shrink-0 items-center">
                 <DropdownMenu
                   align="end"
                   trigger={
-                    <IconButton size="sm" className="opacity-0 transition-opacity duration-150 group-hover:opacity-100" title={t('common.edit')}>
+                    <IconButton size="sm" className="opacity-0 transition-opacity duration-150 group-hover:opacity-100" title={t('common.actions')}>
                       <MoreHorizontal size={13} />
                     </IconButton>
                   }
@@ -151,9 +217,16 @@ function PageTree({ nodes, spaceId, activeId, depth, canWrite, expandedPages, on
                   <MenuItem icon={n.published ? <EyeOff size={13} /> : <Globe size={13} />} onSelect={() => actions.onTogglePublish(spaceId, n)}>
                     {n.published ? t('kb.unpublish') : t('kb.publish')}
                   </MenuItem>
+                  <MenuSeparator />
+                  <MenuItem icon={<Link2 size={13} />} onSelect={() => actions.onCopyLink(spaceId, n.id)}>{t('kb.copyLink')}</MenuItem>
+                  <MenuItem icon={<ExternalLink size={13} />} onSelect={() => actions.onOpenNewTab(spaceId, n.id)}>{t('kb.openNewTab')}</MenuItem>
+                  <MenuSeparator />
+                  <MenuItem danger icon={<Trash2 size={13} />} onSelect={() => actions.onDelete(spaceId, n)}>{t('kb.deletePage')}</MenuItem>
                 </DropdownMenu>
+                </span>
               )}
             </div>
+            </ContextMenu>
             {hasChildren && (
               <AccordionPanel open={isOpen}>
                 <PageTree
@@ -169,9 +242,10 @@ function PageTree({ nodes, spaceId, activeId, depth, canWrite, expandedPages, on
   );
 }
 
-function SpaceSection({ space, active, activePageId, expanded, onToggle, onSelect, canWrite, onNewPage, onAccess, actions }: {
+function SpaceSection({ space, active, activePageId, expanded, onToggle, onSelect, canWrite, onNewPage, onAccess, onRenameSpace, onDeleteSpace, actions }: {
   space: Space; active: boolean; activePageId?: string; expanded: boolean; onToggle: () => void; onSelect: () => void;
-  canWrite: boolean; onNewPage: (spaceId: string) => void; onAccess: (space: Space) => void; actions: TreeActions;
+  canWrite: boolean; onNewPage: (spaceId: string) => void; onAccess: (space: Space) => void;
+  onRenameSpace: (space: Space) => void; onDeleteSpace: (space: Space) => void; actions: TreeActions;
 }) {
   const t = useT();
   const pagesQ = useQuery({
@@ -198,8 +272,19 @@ function SpaceSection({ space, active, activePageId, expanded, onToggle, onSelec
     return next;
   });
 
+  // Right-click menu mirrors the "…" dropdown (both must work). Spaces have
+  // no publish toggle (n/a) — only page rows do.
+  const spaceCtxItems: ContextMenuEntry[] = [
+    { key: 'newPage', label: t('kb.newPage'), icon: <Plus size={13} />, onSelect: () => onNewPage(space.id) },
+    { key: 'access', label: t('kb.access'), icon: <Lock size={13} />, onSelect: () => onAccess(space) },
+    { key: 'rename', label: t('kb.rename'), icon: <Pencil size={13} />, onSelect: () => onRenameSpace(space) },
+    { type: 'separator' },
+    { key: 'delete', label: t('kb.deleteSpace'), icon: <Trash2 size={13} />, danger: true, onSelect: () => onDeleteSpace(space) },
+  ];
+
   return (
     <div className="mb-0.5">
+      <ContextMenu items={spaceCtxItems} disabled={!canWrite}>
       <div
         role="button"
         tabIndex={0}
@@ -229,10 +314,14 @@ function SpaceSection({ space, active, activePageId, expanded, onToggle, onSelec
             >
               <MenuItem icon={<Plus size={13} />} onSelect={() => onNewPage(space.id)}>{t('kb.newPage')}</MenuItem>
               <MenuItem icon={<Lock size={13} />} onSelect={() => onAccess(space)}>{t('kb.access')}</MenuItem>
+              <MenuItem icon={<Pencil size={13} />} onSelect={() => onRenameSpace(space)}>{t('kb.rename')}</MenuItem>
+              <MenuSeparator />
+              <MenuItem danger icon={<Trash2 size={13} />} onSelect={() => onDeleteSpace(space)}>{t('kb.deleteSpace')}</MenuItem>
             </DropdownMenu>
           </span>
         )}
       </div>
+      </ContextMenu>
       <AccordionPanel open={expanded}>
         <div className="py-0.5">
           {pagesQ.isLoading && <Skeleton className="mx-2 my-1 h-6" />}
@@ -247,9 +336,9 @@ function SpaceSection({ space, active, activePageId, expanded, onToggle, onSelec
   );
 }
 
-function NameDialog({ open, onClose, onSubmit, title, label, placeholder, initial, pending }: {
+function NameDialog({ open, onClose, onSubmit, title, label, placeholder, initial, pending, submitLabel }: {
   open: boolean; onClose: () => void; onSubmit: (value: string) => void; title: string; label: string;
-  placeholder?: string; initial?: string; pending?: boolean;
+  placeholder?: string; initial?: string; pending?: boolean; submitLabel?: string;
 }) {
   const t = useT();
   const [value, setValue] = useState(initial ?? '');
@@ -266,7 +355,7 @@ function NameDialog({ open, onClose, onSubmit, title, label, placeholder, initia
         </div>
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="ghost" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button type="submit" size="sm" disabled={pending || !value.trim()}>{pending ? <Spinner /> : t('common.create')}</Button>
+          <Button type="submit" size="sm" disabled={pending || !value.trim()}>{pending ? <Spinner /> : (submitLabel ?? t('common.create'))}</Button>
         </div>
       </form>
     </Dialog>
@@ -277,6 +366,7 @@ export function KbPage({ spaceId, pageId }: { spaceId?: string; pageId?: string 
   const t = useT();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const tabs = useTabs();
   const can = useCan();
   const canWrite = can('kb.write');
   const canManageSpaces = can('kb.manage_spaces');
@@ -336,11 +426,64 @@ export function KbPage({ spaceId, pageId }: { spaceId?: string; pageId?: string 
     onError: () => toast.error(t('kb.publishFailed')),
   });
 
+  /* ── Space rename / delete ── */
+  const [renameSpaceCtx, setRenameSpaceCtx] = useState<Space | null>(null);
+  const renameSpace = useMutation({
+    mutationFn: (vars: { id: string; name: string; version?: number }) =>
+      api.patch(`/spaces/${vars.id}`, { name: vars.name, version: vars.version }),
+    onSuccess: () => {
+      setRenameSpaceCtx(null);
+      qc.invalidateQueries({ queryKey: ['spaces'] });
+      toast(t('kb.spaceRenamed'));
+    },
+    onError: () => toast.error(t('kb.renameSpaceFailed')),
+  });
+
+  const [deleteSpaceCtx, setDeleteSpaceCtx] = useState<Space | null>(null);
+  const deleteSpace = useMutation({
+    mutationFn: (id: string) => api.del(`/spaces/${id}`),
+    onSuccess: (_r, id) => {
+      setDeleteSpaceCtx(null);
+      qc.invalidateQueries({ queryKey: ['spaces'] });
+      toast(t('kb.spaceDeleted'));
+      if (id === spaceId) navigate('/kb');
+    },
+    onError: () => toast.error(t('kb.deleteSpaceFailed')),
+  });
+
+  /* ── Page delete / link helpers ── */
+  const [deletePageCtx, setDeletePageCtx] = useState<{ spaceId: string; page: FlatPage } | null>(null);
+  const deletePage = useMutation({
+    mutationFn: (vars: { spaceId: string; id: string }) => api.del(`/pages/${vars.id}`),
+    onSuccess: (_r, vars) => {
+      setDeletePageCtx(null);
+      qc.invalidateQueries({ queryKey: ['spacePages', vars.spaceId] });
+      toast(t('kb.pageDeleted'));
+      if (vars.id === pageId) navigate(`/kb/${vars.spaceId}`);
+    },
+    onError: () => toast.error(t('kb.deletePageFailed')),
+  });
+
+  const copyPageLink = async (sid: string, pid: string) => {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/kb/${sid}/${pid}`);
+      toast(t('kb.linkCopied'));
+    } catch {
+      toast.error(t('common.error'));
+    }
+  };
+
   const treeActions: TreeActions = {
     onNavigate: (sid, pid) => navigate(`/kb/${sid}/${pid}`),
     onCreateChild: (sid, parentId) => setNewPageCtx({ spaceId: sid, parentId }),
     onRename: (sid, page) => setRenameCtx({ spaceId: sid, page }),
     onTogglePublish: (sid, page) => togglePublish.mutate({ id: page.id, version: page.version, published: !page.published }),
+    onCopyLink: (sid, pid) => { void copyPageLink(sid, pid); },
+    onOpenNewTab: (sid, pid) => {
+      if (tabs) tabs.openInNewTab(`/kb/${sid}/${pid}`);
+      else navigate(`/kb/${sid}/${pid}`);
+    },
+    onDelete: (sid, page) => setDeletePageCtx({ spaceId: sid, page }),
   };
 
   return (
@@ -382,6 +525,8 @@ export function KbPage({ spaceId, pageId }: { spaceId?: string; pageId?: string 
               canWrite={canWrite}
               onNewPage={(sid) => setNewPageCtx({ spaceId: sid, parentId: null })}
               onAccess={setAccessSpace}
+              onRenameSpace={setRenameSpaceCtx}
+              onDeleteSpace={setDeleteSpaceCtx}
               actions={treeActions}
             />
           ))}
@@ -425,6 +570,37 @@ export function KbPage({ spaceId, pageId }: { spaceId?: string; pageId?: string 
         label={t('kb.pageTitle')}
         initial={renameCtx?.page.title}
         pending={renamePage.isPending}
+        submitLabel={t('common.save')}
+      />
+      <NameDialog
+        open={!!renameSpaceCtx}
+        onClose={() => setRenameSpaceCtx(null)}
+        onSubmit={(name) => renameSpaceCtx && renameSpace.mutate({ id: renameSpaceCtx.id, name, version: renameSpaceCtx.version })}
+        title={t('kb.renameSpace')}
+        label={t('kb.spaceName')}
+        initial={renameSpaceCtx?.name}
+        pending={renameSpace.isPending}
+        submitLabel={t('common.save')}
+      />
+      <ConfirmDialog
+        open={!!deleteSpaceCtx}
+        onClose={() => setDeleteSpaceCtx(null)}
+        onConfirm={() => deleteSpaceCtx && deleteSpace.mutate(deleteSpaceCtx.id)}
+        title={t('kb.deleteSpaceTitle')}
+        body={t('kb.deleteSpaceBody')}
+        confirmLabel={t('common.delete')}
+        danger
+        pending={deleteSpace.isPending}
+      />
+      <ConfirmDialog
+        open={!!deletePageCtx}
+        onClose={() => setDeletePageCtx(null)}
+        onConfirm={() => deletePageCtx && deletePage.mutate({ spaceId: deletePageCtx.spaceId, id: deletePageCtx.page.id })}
+        title={t('kb.deletePageTitle')}
+        body={t('kb.deletePageBody')}
+        confirmLabel={t('common.delete')}
+        danger
+        pending={deletePage.isPending}
       />
       {accessSpace && (
         <SpaceAccessDialog

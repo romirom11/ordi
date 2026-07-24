@@ -4,6 +4,7 @@
  */
 import type { ReactNode } from 'react';
 import { cn } from '../ui';
+import { useEntityRefClick } from '../richtext/entityRefClick';
 
 interface Mark { type: string; attrs?: Record<string, unknown> }
 interface Node {
@@ -65,12 +66,31 @@ function renderNode(node: Node, key: number): ReactNode {
     case 'hardBreak': return <br key={key} />;
     case 'mention':
       return <span key={key} className="ordi-mention">@{String(node.attrs?.label ?? node.attrs?.id ?? '')}</span>;
+    case 'entityMention':
+      return (
+        <span
+          key={key}
+          data-type="entity-mention"
+          data-kind={typeof node.attrs?.kind === 'string' ? node.attrs.kind : undefined}
+          data-url={typeof node.attrs?.url === 'string' ? node.attrs.url : undefined}
+          className="ordi-ref"
+          role="link"
+          tabIndex={0}
+        >
+          {String(node.attrs?.label ?? node.attrs?.id ?? '')}
+        </span>
+      );
     default: return <span key={key}>{renderNodes(node.content)}</span>;
   }
 }
 
 export function RichBody({ doc, className }: { doc: unknown; className?: string }) {
+  const onEntityClick = useEntityRefClick();
   const root = doc as Node | null;
   if (!root || root.type !== 'doc') return null;
-  return <div className={cn('ordi-prose', className)}>{renderNodes(root.content)}</div>;
+  return (
+    <div className={cn('ordi-prose', className)} onClick={onEntityClick}>
+      {renderNodes(root.content)}
+    </div>
+  );
 }
