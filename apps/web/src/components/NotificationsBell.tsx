@@ -1,12 +1,30 @@
-import { useState, useEffect, useRef } from 'react';
+/**
+ * NotificationsBell — sidebar-footer "Inbox" item. Renders a nav-style row
+ * (bell icon + label + unread badge); clicking opens the notifications panel
+ * as a popover anchored bottom-left, opening upward.
+ */
+import { useState, useEffect, useRef, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Bell, Inbox } from 'lucide-react';
+import {
+  Bell, Inbox, CheckSquare, AtSign, Receipt, CalendarRange, FileCheck2, BookText,
+} from 'lucide-react';
 import { api } from '../lib/api';
 import { useT } from '../lib/i18n';
 import { setBadge } from '../lib/desktop';
-import { cn, IconButton, fmtRelative } from './ui';
+import { cn, fmtRelative } from './ui';
 
 interface Notif { id: string; type: string; entityRef: string | null; payload: Record<string, unknown>; readAt: string | null; createdAt: string }
+
+/** Icon per notification type family. */
+function notifIcon(type: string): ReactNode {
+  if (type.startsWith('task.')) return <CheckSquare size={14} />;
+  if (type.startsWith('comment.')) return <AtSign size={14} />;
+  if (type.startsWith('page.')) return <BookText size={14} />;
+  if (type.startsWith('invoice.') || type.startsWith('payment.')) return <Receipt size={14} />;
+  if (type.startsWith('quote.')) return <FileCheck2 size={14} />;
+  if (type.startsWith('leave.')) return <CalendarRange size={14} />;
+  return <Bell size={14} />;
+}
 
 export function NotificationsBell() {
   const t = useT();
@@ -38,23 +56,32 @@ export function NotificationsBell() {
 
   return (
     <div className="relative" ref={rootRef}>
-      <IconButton onClick={() => setOpen((o) => !o)} aria-label={t('notifications.title')} className="relative">
-        <Bell size={15} />
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-label={t('notifications.title')}
+        aria-expanded={open}
+        className={cn(
+          'flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] transition-colors duration-150',
+          open ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+        )}
+      >
+        <Bell size={16} className="shrink-0 text-faint" />
+        <span className="flex-1 truncate text-left">{t('notifications.title')}</span>
         {unread > 0 && (
-          <span className="anim-pop-in absolute -right-0.5 -top-0.5 grid h-3.5 min-w-3.5 place-items-center rounded-full bg-primary px-0.5 text-[9px] font-semibold text-primary-foreground">
+          <span className="anim-pop-in grid h-[18px] min-w-[18px] shrink-0 place-items-center rounded-full bg-primary px-1 text-[10px] font-semibold tabular-nums text-primary-foreground">
             {unread > 99 ? '99+' : unread}
           </span>
         )}
-      </IconButton>
+      </button>
       {open && (
         <div
-          className="absolute left-0 top-8 z-50 w-80 overflow-hidden rounded-lg border border-border bg-elevated shadow-pop"
-          style={{ animation: 'dropdown-in 250ms var(--ease-smooth-out) both', transformOrigin: 'top left' }}
+          className="absolute bottom-full left-0 z-50 mb-1.5 w-80 overflow-hidden rounded-lg border border-border bg-elevated shadow-pop"
+          style={{ animation: 'dropdown-in 250ms var(--ease-smooth-out) both', transformOrigin: 'bottom left' }}
         >
           <div className="flex items-center justify-between border-b border-border px-3 py-2">
             <span className="text-[13px] font-semibold">{t('notifications.title')}</span>
             {unread > 0 && (
-              <button className="text-xs text-muted-foreground transition-colors hover:text-foreground" onClick={() => readAll.mutate()}>
+              <button className="text-xs text-muted-foreground transition-colors duration-150 hover:text-foreground" onClick={() => readAll.mutate()}>
                 {t('notifications.markAllRead')}
               </button>
             )}
@@ -69,15 +96,18 @@ export function NotificationsBell() {
             {(data?.data ?? []).map((n, i) => (
               <div
                 key={n.id}
-                className={cn('row-enter flex items-start gap-2 rounded-md px-2 py-2 transition-colors hover:bg-muted', n.readAt && 'opacity-55')}
+                className={cn('row-enter flex items-start gap-2.5 rounded-md px-2 py-2 transition-colors duration-150 hover:bg-muted', n.readAt && 'opacity-55')}
                 style={{ ['--i' as string]: Math.min(i, 8) }}
               >
-                <span className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', n.readAt ? 'bg-transparent' : 'bg-primary')} />
+                <span className="relative mt-px grid h-6 w-6 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
+                  {notifIcon(n.type)}
+                  {!n.readAt && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-primary ring-2 ring-elevated" />}
+                </span>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13px] font-medium">{n.type.replace(/[._]/g, ' ')}</div>
-                  <div className="truncate text-xs text-muted-foreground">{n.entityRef ?? ''}</div>
+                  <div className="truncate text-[13px] font-medium capitalize">{n.type.replace(/[._]/g, ' ')}</div>
+                  {n.entityRef && <div className="truncate font-mono text-[11px] text-muted-foreground">{n.entityRef}</div>}
                 </div>
-                <span className="shrink-0 text-[11px] tabular-nums text-faint">{fmtRelative(n.createdAt)}</span>
+                <span className="shrink-0 pt-px text-[11px] tabular-nums text-faint">{fmtRelative(n.createdAt)}</span>
               </div>
             ))}
           </div>

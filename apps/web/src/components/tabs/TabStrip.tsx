@@ -19,12 +19,12 @@ extendDict({
   en: {
     'tabs.newTab': 'New tab',
     'tabs.closeTab': 'Close tab',
-    'tabs.newTabHint': 'Tip: Ctrl/Cmd+click any link to open it in a new tab. Alt+W closes the current one.',
+    'tabs.newTabHint': 'Ctrl/Cmd+click any link to open it in a new tab. Alt+W closes the current one.',
   },
   uk: {
     'tabs.newTab': 'Нова вкладка',
     'tabs.closeTab': 'Закрити вкладку',
-    'tabs.newTabHint': 'Порада: Ctrl/Cmd+клік на будь-яке посилання відкриє його в новій вкладці. Alt+W закриває поточну.',
+    'tabs.newTabHint': 'Ctrl/Cmd+клік на будь-яке посилання відкриє його в новій вкладці. Alt+W закриває поточну.',
   },
 });
 
@@ -150,7 +150,7 @@ export function TabStrip() {
 
   return (
     <div className="shrink-0">
-      <div className="flex h-8 items-center gap-1 pb-1 pl-0.5 pr-1" role="tablist">
+      <div className="flex items-center gap-1 pb-1 pl-2.5 pr-1 pt-1.5" role="tablist">
         <div
           ref={stripRef}
           className="flex min-w-0 items-center gap-1 overflow-x-auto"
@@ -168,8 +168,9 @@ export function TabStrip() {
           </button>
         </Tooltip>
       </div>
+      {/* Floating tip (bottom-left card) — appears once a second tab is opened. */}
       {tabs.tabs.length > 1 && (
-        <Hint id="tabs-new-tab" className="mb-1.5">
+        <Hint id="tabs-new-tab">
           {t('tabs.newTabHint')}
         </Hint>
       )}

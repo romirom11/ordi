@@ -12,6 +12,7 @@ import { writeActivity } from '../../core/activity';
 import { encrypt, decrypt, generateToken } from '../../lib/crypto';
 import {
   githubOAuthConfigured, signOAuthState, buildGithubAuthorizeUrl, listGithubRepos,
+  slackOAuthConfigured, buildSlackAuthorizeUrl, listSlackChannels,
 } from './oauth';
 
 /**
@@ -54,6 +55,60 @@ export function integrationsRoutes() {
     try {
       const repos = await listGithubRepos(token, conn.instanceUrl);
       return c.json({ data: repos });
+    } catch (e) {
+      return c.json({ error: { code: 'provider_error', message: e instanceof Error ? e.message : 'Provider request failed' } }, 502);
+    }
+  });
+
+  // ── Slack connection (OAuth v2, Linear-style) ──
+  // Status: any authed user (project settings needs to know if Slack is available).
+  app.get('/integrations/slack/status', async (c) => {
+    const { db } = getDb();
+    const [conn] = await db.select({
+      teamName: schema.slackConnections.teamName,
+    }).from(schema.slackConnections).orderBy(desc(schema.slackConnections.createdAt)).limit(1);
+    return c.json({
+      configured: slackOAuthConfigured(),
+      connected: Boolean(conn),
+      teamName: conn?.teamName ?? null,
+    });
+  });
+
+  // Begin the OAuth flow: returns the Slack authorize URL with a signed state.
+  app.get('/integrations/slack/oauth/start', guard('integrations.manage'), async (c) => {
+    if (!slackOAuthConfigured()) throw err.domain('Slack OAuth is not configured');
+    const actor = currentActor(c);
+    const url = buildSlackAuthorizeUrl(signOAuthState(actor.userId));
+    return c.json({ url });
+  });
+
+  // Disconnect Slack (removes the stored bot token; webhooks remain as fallback).
+  app.delete('/integrations/slack', guard('integrations.manage'), async (c) => {
+    const { db } = getDb();
+    await db.delete(schema.slackConnections);
+    const actor = currentActor(c);
+    await writeActivity(db, {
+      entityType: 'slack_connection', entityId: 'workspace', action: 'deleted',
+      actorId: actor.userId, actorType: actor.actorType,
+    });
+    return c.json({ ok: true });
+  });
+
+  // List channels (any authed member — powers the project settings channel picker).
+  app.get('/integrations/slack/channels', async (c) => {
+    const { db } = getDb();
+    const [conn] = await db.select().from(schema.slackConnections)
+      .orderBy(desc(schema.slackConnections.createdAt)).limit(1);
+    if (!conn) throw err.domain('Slack is not connected');
+    let token: string;
+    try {
+      token = decrypt(conn.botToken as string);
+    } catch {
+      throw err.domain('Stored Slack credentials are invalid');
+    }
+    try {
+      const channels = await listSlackChannels(token);
+      return c.json({ data: channels });
     } catch (e) {
       return c.json({ error: { code: 'provider_error', message: e instanceof Error ? e.message : 'Provider request failed' } }, 502);
     }

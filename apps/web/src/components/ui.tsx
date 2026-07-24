@@ -1,6 +1,8 @@
 import { clsx } from 'clsx';
-import { forwardRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes, type CSSProperties } from 'react';
+import { forwardRef, Fragment, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes, type CSSProperties } from 'react';
+import { ChevronRight } from 'lucide-react';
 import { usePageTitle } from '../lib/tabs';
+import { Link } from '../lib/router';
 
 export function cn(...args: Parameters<typeof clsx>): string {
   return clsx(...args);
@@ -154,7 +156,14 @@ export function Checkbox({ checked, onChange, disabled }: { checked: boolean; on
 
 export function Card({ className, children, onClick }: { className?: string; children: ReactNode; onClick?: () => void }) {
   return (
-    <div onClick={onClick} className={cn('rounded-lg border border-border bg-card text-card-foreground', className)}>
+    <div
+      onClick={onClick}
+      className={cn(
+        'rounded-lg border border-border bg-card text-card-foreground',
+        onClick && 'cursor-pointer transition-colors duration-150 hover:border-border-strong',
+        className,
+      )}
+    >
       {children}
     </div>
   );
@@ -179,12 +188,70 @@ export function Kbd({ children }: { children: ReactNode }) {
   );
 }
 
-export function PageHeader({ title, actions, subtitle }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode }) {
+/** Breadcrumb trail — 13px links separated by chevrons; last item is the current page. */
+export interface BreadcrumbItem { label: ReactNode; to?: string; icon?: ReactNode }
+
+export function Breadcrumbs({ items, className }: { items: BreadcrumbItem[]; className?: string }) {
+  if (items.length === 0) return null;
+  return (
+    <nav aria-label="Breadcrumb" className={cn('flex min-w-0 items-center gap-1 text-[13px]', className)}>
+      {items.map((it, i) => {
+        const last = i === items.length - 1;
+        const inner = (
+          <>
+            {it.icon && <span className="shrink-0 text-muted-foreground [&>svg]:block">{it.icon}</span>}
+            <span className="truncate">{it.label}</span>
+          </>
+        );
+        return (
+          <Fragment key={i}>
+            {i > 0 && <ChevronRight size={12} className="shrink-0 text-faint" aria-hidden />}
+            {last ? (
+              <span className="flex min-w-0 items-center gap-1 font-medium text-foreground">{inner}</span>
+            ) : it.to ? (
+              <Link
+                to={it.to}
+                className="flex min-w-0 items-center gap-1 text-muted-foreground transition-colors duration-150 hover:text-foreground"
+              >
+                {inner}
+              </Link>
+            ) : (
+              <span className="flex min-w-0 items-center gap-1 text-muted-foreground">{inner}</span>
+            )}
+          </Fragment>
+        );
+      })}
+    </nav>
+  );
+}
+
+/** The one standard page content container — pages wrap their body in this. */
+export function PageBody({ children, width = 'default', className }: {
+  children: ReactNode; width?: 'default' | 'wide' | 'full'; className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        'w-full px-6 py-6',
+        width === 'default' && 'mx-auto max-w-3xl',
+        width === 'wide' && 'mx-auto max-w-5xl',
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+export function PageHeader({ title, actions, subtitle, breadcrumbs }: {
+  title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; breadcrumbs?: ReactNode;
+}) {
   // Name the active in-app tab after this page (no-op outside TabsProvider).
   usePageTitle(typeof title === 'string' ? title : undefined);
   return (
     <div className="flex min-h-[52px] items-center justify-between gap-3 border-b border-border px-6 py-2.5">
       <div className="min-w-0">
+        {breadcrumbs && <div className="mb-0.5 text-xs">{breadcrumbs}</div>}
         <h1 className="truncate text-[15px] font-semibold leading-tight">{title}</h1>
         {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
       </div>

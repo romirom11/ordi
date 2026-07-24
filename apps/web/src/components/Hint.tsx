@@ -1,9 +1,13 @@
 /**
- * Hint — subtle, dismissible tip card for first-time users.
+ * Hint — floating, dismissible tip cards for first-time users.
+ * Rendered via portal into a shared fixed stack at the bottom-left of the
+ * viewport (clear of the sidebar and of the bottom-right Toaster), so multiple
+ * mounted hints stack vertically instead of overlapping.
  * Dismissal is persisted per hint id in localStorage ('ordi:hint:<id>').
  * Children are already-translated content (callers own their i18n keys).
  */
 import { useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Lightbulb, X } from 'lucide-react';
 import { cn } from './ui';
 import { extendDict, useT } from '../lib/i18n';
@@ -37,6 +41,23 @@ export function resetAllHints(): void {
   } catch { /* private mode */ }
 }
 
+/**
+ * Shared portal target: one fixed flex column at the bottom-left. All mounted
+ * hints portal into it, so stacking is just DOM order — no measuring needed.
+ * Left offset clears the w-56 (14rem) sidebar; the Toaster owns bottom-right.
+ */
+let hintRoot: HTMLElement | null = null;
+function getHintRoot(): HTMLElement {
+  if (!hintRoot || !document.body.contains(hintRoot)) {
+    hintRoot = document.createElement('div');
+    hintRoot.setAttribute('data-ordi-hints', '');
+    hintRoot.className = 'pointer-events-none fixed bottom-4 z-[45] flex w-[340px] flex-col gap-2';
+    hintRoot.style.left = 'calc(14rem + 16px)';
+    document.body.appendChild(hintRoot);
+  }
+  return hintRoot;
+}
+
 export function Hint({ id, icon, title, action, children, className }: {
   id: string;
   icon?: ReactNode;
@@ -54,19 +75,25 @@ export function Hint({ id, icon, title, action, children, className }: {
   const dismiss = () => {
     try { localStorage.setItem(PREFIX + id, '1'); } catch { /* private mode */ }
     setLeaving(true);
-    window.setTimeout(() => setDismissed(true), 150);
+    window.setTimeout(() => setDismissed(true), 200);
   };
 
-  return (
+  return createPortal(
     <div
       className={cn(
-        'anim-pop-in flex items-start gap-2.5 rounded-lg border border-primary/15 bg-primary/5 px-3 py-2 text-[13px]',
-        'transition-[opacity,transform] duration-[150ms] ease-smooth-out',
-        leaving && 'scale-[0.98] opacity-0',
+        'pointer-events-auto flex items-start gap-2.5 rounded-lg border border-border bg-elevated px-3 py-2.5 text-[13px] shadow-pop',
         className,
       )}
+      style={{
+        animation: leaving
+          ? 'hint-out 200ms var(--ease-smooth-out) both'
+          : 'toast-in 350ms var(--ease-smooth-out) both',
+      }}
     >
-      <span className="mt-px shrink-0 text-primary">{icon ?? <Lightbulb size={14} />}</span>
+      <style>{'@keyframes hint-out { from { opacity: 1; transform: translateY(0) } to { opacity: 0; transform: translateY(8px) } }'}</style>
+      <span className="mt-px grid h-5 w-5 shrink-0 place-items-center rounded-md bg-primary/15 text-primary">
+        {icon ?? <Lightbulb size={13} />}
+      </span>
       <div className="min-w-0 flex-1 leading-snug">
         {title && <div className="font-medium text-foreground">{title}</div>}
         <div className={cn(title ? 'text-muted-foreground' : 'text-foreground/90')}>{children}</div>
@@ -75,10 +102,11 @@ export function Hint({ id, icon, title, action, children, className }: {
       <button
         aria-label={t('hint.dismiss')}
         onClick={dismiss}
-        className="-mr-1 grid h-5 w-5 shrink-0 place-items-center rounded text-faint transition-colors duration-150 hover:bg-primary/10 hover:text-foreground"
+        className="-mr-1 -mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded text-faint transition-colors duration-150 hover:bg-muted hover:text-foreground"
       >
         <X size={12} />
       </button>
-    </div>
+    </div>,
+    getHintRoot(),
   );
 }

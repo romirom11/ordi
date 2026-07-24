@@ -9,7 +9,7 @@ import {
   type ReactNode, type CSSProperties,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { X, CheckCircle2, AlertTriangle, Info } from 'lucide-react';
+import { X, CheckCircle2, AlertTriangle, Info, ChevronRight } from 'lucide-react';
 import { cn, IconButton, Button } from './ui';
 
 /* ───────────────────────── Dialog ───────────────────────── */
@@ -194,6 +194,205 @@ export function MenuSeparator() {
 
 export function MenuLabel({ children }: { children: ReactNode }) {
   return <div className="px-2 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-faint">{children}</div>;
+}
+
+/* ───────────────────────── Context menu (right-click) ───────────────────────── */
+
+export type ContextMenuEntry =
+  | {
+      type?: undefined;
+      key: string;
+      label: ReactNode;
+      icon?: ReactNode;
+      shortcut?: string;
+      danger?: boolean;
+      disabled?: boolean;
+      onSelect?: () => void;
+      /** One level of sub-items (opens to the right on hover). */
+      children?: ContextMenuEntry[];
+    }
+  | { type: 'separator' }
+  | { type: 'label'; label: ReactNode };
+
+function isAction(e: ContextMenuEntry): e is Extract<ContextMenuEntry, { key: string }> {
+  return e.type === undefined;
+}
+
+const CTX_MENU_WIDTH = 208;
+
+function ContextMenuList({ items, onDone, autoFocus }: {
+  items: ContextMenuEntry[]; onDone: () => void; autoFocus?: boolean;
+}) {
+  const [hoverKey, setHoverKey] = useState<string | null>(null); // open submenu
+  const [activeIdx, setActiveIdx] = useState(-1); // keyboard cursor
+  const hoverTimer = useRef<number | undefined>(undefined);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const actionable = items.filter((it) => isAction(it) && !it.disabled) as Extract<ContextMenuEntry, { key: string }>[];
+
+  const scheduleSubmenu = (key: string | null) => {
+    window.clearTimeout(hoverTimer.current);
+    hoverTimer.current = window.setTimeout(() => setHoverKey(key), 150);
+  };
+  useEffect(() => () => window.clearTimeout(hoverTimer.current), []);
+
+  // Keyboard navigation (best effort): up/down + enter, on the top level only.
+  useEffect(() => {
+    if (!autoFocus) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        setActiveIdx((cur) => {
+          if (actionable.length === 0) return -1;
+          const delta = e.key === 'ArrowDown' ? 1 : -1;
+          return (cur + delta + actionable.length) % actionable.length;
+        });
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        setActiveIdx((cur) => {
+          const it = actionable[cur];
+          if (it && !it.children) { it.onSelect?.(); onDone(); }
+          if (it?.children) setHoverKey(it.key);
+          return cur;
+        });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFocus, items, onDone]);
+
+  return (
+    <div ref={listRef} className="p-1">
+      {items.map((it, i) => {
+        if (it.type === 'separator') return <MenuSeparator key={`sep-${i}`} />;
+        if (it.type === 'label') return <MenuLabel key={`label-${i}`}>{it.label}</MenuLabel>;
+        const kbActive = actionable[activeIdx]?.key === it.key;
+        return (
+          <div
+            key={it.key}
+            className="relative"
+            onMouseEnter={() => scheduleSubmenu(it.children ? it.key : null)}
+          >
+            <button
+              role="menuitem"
+              disabled={it.disabled}
+              onClick={() => {
+                if (it.children) { setHoverKey(it.key); return; }
+                it.onSelect?.();
+                onDone();
+              }}
+              className={cn(
+                'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors duration-100',
+                it.danger ? 'text-destructive hover:bg-destructive/10' : 'text-foreground hover:bg-muted',
+                kbActive && (it.danger ? 'bg-destructive/10' : 'bg-muted'),
+                it.disabled && 'pointer-events-none opacity-50',
+              )}
+            >
+              {it.icon && <span className={cn('[&>svg]:block', it.danger ? 'text-destructive' : 'text-muted-foreground')}>{it.icon}</span>}
+              <span className="flex-1 truncate">{it.label}</span>
+              {it.shortcut && <span className="text-[11px] text-faint">{it.shortcut}</span>}
+              {it.children && <ChevronRight size={12} className="text-faint" aria-hidden />}
+            </button>
+            {it.children && hoverKey === it.key && (
+              <div
+                className="absolute -top-1 left-full z-10 min-w-[168px] overflow-hidden rounded-lg border border-border bg-elevated shadow-pop"
+                style={{
+                  transformOrigin: 'left top',
+                  animation: 'dropdown-in 250ms var(--ease-smooth-out) both',
+                }}
+                onMouseEnter={() => window.clearTimeout(hoverTimer.current)}
+              >
+                <ContextMenuList items={it.children} onDone={onDone} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * ContextMenu — Linear-style right-click menu. Wraps children; right-click
+ * opens a portal menu at the cursor (clamped to viewport) with the dropdown
+ * visual language. One level of submenu, Esc/outside closes, ↑/↓+Enter navigate.
+ */
+export function ContextMenu({ items, children, disabled, className }: {
+  items: ContextMenuEntry[]; children: ReactNode; disabled?: boolean; className?: string;
+}) {
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const [closing, setClosing] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<CSSProperties>({});
+  const [origin, setOrigin] = useState('left top');
+
+  const close = useCallback(() => {
+    setClosing(true);
+    setTimeout(() => { setAt(null); setClosing(false); }, 150);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!at) return;
+    const mw = menuRef.current?.offsetWidth ?? CTX_MENU_WIDTH;
+    const mh = menuRef.current?.offsetHeight ?? 200;
+    const flipX = at.x + mw > window.innerWidth - 8;
+    const flipY = at.y + mh > window.innerHeight - 8;
+    const left = Math.max(8, flipX ? at.x - mw : at.x);
+    const top = Math.max(8, flipY ? at.y - mh : at.y);
+    setOrigin(`${flipX ? 'right' : 'left'} ${flipY ? 'bottom' : 'top'}`);
+    setPos({ top, left });
+  }, [at]);
+
+  useEffect(() => {
+    if (!at) return;
+    const onDown = (e: MouseEvent) => { if (!menuRef.current?.contains(e.target as Node)) close(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+    document.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('blur', close);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('blur', close);
+    };
+  }, [at, close]);
+
+  return (
+    <>
+      <div
+        className={className ?? 'contents'}
+        onContextMenu={(e) => {
+          if (disabled) return;
+          e.preventDefault();
+          e.stopPropagation();
+          setClosing(false);
+          setAt({ x: e.clientX, y: e.clientY });
+        }}
+      >
+        {children}
+      </div>
+      {at && createPortal(
+        <div
+          ref={menuRef}
+          role="menu"
+          className="fixed z-[60] min-w-[184px] overflow-visible rounded-lg border border-border bg-elevated shadow-pop"
+          style={{
+            ...pos,
+            transformOrigin: origin,
+            animation: closing
+              ? 'ctx-menu-out 150ms var(--ease-smooth-out) both'
+              : 'dropdown-in 250ms var(--ease-smooth-out) both',
+          }}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <style>{`@keyframes ctx-menu-out { from { opacity: 1; transform: scale(1) } to { opacity: 0; transform: scale(var(--scale-tiny)) } }`}</style>
+          <ContextMenuList items={items} onDone={close} autoFocus />
+        </div>,
+        document.body,
+      )}
+    </>
+  );
 }
 
 /* ───────────────────────── Toasts ───────────────────────── */
