@@ -62,8 +62,12 @@ export function createApp() {
     }
   });
 
-  // Public routes (no auth): invoices/quotes/portal/intake/careers/git webhooks
+  // Public routes (no auth): invoices/quotes/portal/intake/careers/git webhooks.
+  // Mounted twice: at the root (direct API access) and under /api/v1, because the
+  // web proxy (nginx/Vite) forwards only /api/* to this service and the SPA's
+  // public pages fetch their data through that prefix.
   app.route('/', publicRoutes());
+  app.route('/api/v1', publicRoutes());
 
   // OpenAPI contract (PRD §15.1) — public, static document
   app.get('/api/docs/openapi.json', (c) => c.json(openApiDoc as Record<string, unknown>));
