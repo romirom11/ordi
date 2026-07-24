@@ -195,7 +195,7 @@ export function SettingsPage({ section }: { section?: string }) {
             ))}
           </nav>
         </aside>
-        <div className="min-w-0 flex-1 overflow-y-auto">
+        <div className="min-w-0 flex-1">
           <div key={active.id} className="anim-fade-in mx-auto max-w-2xl px-8 py-6">
             {active.id === 'workspace' && <WorkspacePanel />}
             {active.id === 'users' && <UsersPanel />}

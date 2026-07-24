@@ -105,23 +105,44 @@ function useCompanies() {
   return useQuery({ queryKey: ['companies', 'finance'], queryFn: () => api.get<{ data: Company[] }>('/companies') });
 }
 
+interface AgingRow { currency: string; bucket_0_30: number; bucket_31_60: number; bucket_61_90: number; bucket_90_plus: number; total: number }
+interface OverdueRow { id: string; number?: string | null; companyId?: string; companyName?: string | null; currency: string; dueDate: string; outstanding: number }
+interface InvoicedPaidRow { currency: string; invoiced: number; paid: number }
+interface FinanceDashboard {
+  asOf?: string;
+  receivables?: { total?: Record<string, number>; aging?: AgingRow[] };
+  invoicedPaid?: InvoicedPaidRow[];
+  overdue?: OverdueRow[];
+  unbilledBillableHours?: number;
+}
+
+/** Sums a per-currency map/array of {currency, amount} rows into one number for display (single-currency workspaces are the common case). */
+function sumValues(rec?: Record<string, number>): number {
+  return Object.values(rec ?? {}).reduce((a, v) => a + Number(v || 0), 0);
+}
+function primaryCurrency(d?: FinanceDashboard): string {
+  return Object.keys(d?.receivables?.total ?? {})[0] ?? d?.invoicedPaid?.[0]?.currency ?? d?.overdue?.[0]?.currency ?? 'USD';
+}
+
 function DashboardView() {
   const t = useT();
   const can = useCan();
-  const dash = useQuery({ queryKey: ['financeDashboard'], queryFn: () => api.get<any>('/finance/dashboard') });
+  const dash = useQuery({ queryKey: ['financeDashboard'], queryFn: () => api.get<FinanceDashboard>('/finance/dashboard') });
   const d = dash.data;
-  const aging = d?.aging ?? {};
-  const agingBuckets: { label: string; keys: string[] }[] = [
-    { label: '0–30', keys: ['b0_30', '0_30', 'current'] },
-    { label: '31–60', keys: ['b31_60', '31_60'] },
-    { label: '61–90', keys: ['b61_90', '61_90'] },
-    { label: '90+', keys: ['b90_plus', '90_plus', 'over90'] },
+  const currency = primaryCurrency(d);
+  const agingRows = d?.receivables?.aging ?? [];
+  const agingBuckets: { label: string; key: keyof AgingRow }[] = [
+    { label: '0–30', key: 'bucket_0_30' },
+    { label: '31–60', key: 'bucket_31_60' },
+    { label: '61–90', key: 'bucket_61_90' },
+    { label: '90+', key: 'bucket_90_plus' },
   ];
-  const agingVal = (keys: string[]): number => {
-    for (const k of keys) if (aging[k] != null) return Number(aging[k]);
-    return 0;
-  };
-  const currency = d?.currency ?? 'USD';
+  const agingVal = (key: keyof AgingRow): number => agingRows.reduce((a, r) => a + Number(r[key] ?? 0), 0);
+
+  const outstandingTotal = sumValues(d?.receivables?.total);
+  const overdueTotal = (d?.overdue ?? []).reduce((a, r) => a + Number(r.outstanding || 0), 0);
+  const paidPeriod = (d?.invoicedPaid ?? []).reduce((a, r) => a + Number(r.paid || 0), 0);
+  const invoicedPeriod = (d?.invoicedPaid ?? []).reduce((a, r) => a + Number(r.invoiced || 0), 0);
 
   if (dash.isLoading) {
     return (
@@ -137,10 +158,10 @@ function DashboardView() {
   return (
     <div className="space-y-6 p-6">
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Tile icon={<Wallet size={16} />} label={t('finance.outstanding')} value={fmtMoney(d?.receivables ?? d?.totalReceivables ?? 0, currency)} />
-        <Tile icon={<AlertTriangle size={16} />} label={t('common.overdue')} value={fmtMoney(d?.overdueTotal ?? 0, currency)} tone="destructive" />
-        <Tile icon={<CheckCircle2 size={16} />} label={t('finance.paidPeriod')} value={fmtMoney(d?.paid ?? 0, currency)} tone="success" />
-        <Tile icon={<Receipt size={16} />} label={t('finance.invoicedPeriod')} value={fmtMoney(d?.invoiced ?? 0, currency)} />
+        <Tile icon={<Wallet size={16} />} label={t('finance.outstanding')} value={fmtMoney(outstandingTotal, currency)} />
+        <Tile icon={<AlertTriangle size={16} />} label={t('common.overdue')} value={fmtMoney(overdueTotal, currency)} tone="destructive" />
+        <Tile icon={<CheckCircle2 size={16} />} label={t('finance.paidPeriod')} value={fmtMoney(paidPeriod, currency)} tone="success" />
+        <Tile icon={<Receipt size={16} />} label={t('finance.invoicedPeriod')} value={fmtMoney(invoicedPeriod, currency)} />
       </div>
 
       <Card className="overflow-hidden">
@@ -153,7 +174,7 @@ function DashboardView() {
           </thead>
           <tbody>
             <tr>
-              {agingBuckets.map((b) => <td key={b.label} className="px-4 py-2 tabular-nums">{fmtMoney(agingVal(b.keys), currency)}</td>)}
+              {agingBuckets.map((b) => <td key={b.label} className="px-4 py-2 tabular-nums">{fmtMoney(agingVal(b.key), currency)}</td>)}
             </tr>
           </tbody>
         </table>
@@ -164,18 +185,18 @@ function DashboardView() {
           <div className="border-b border-border px-4 py-2.5 text-[13px] font-medium">{t('finance.overdueInvoices')}</div>
           <div className="divide-y divide-border">
             {(d?.overdue ?? []).length === 0 && <p className="px-4 py-6 text-[13px] text-muted-foreground">{t('finance.nothingOverdue')}</p>}
-            {(d?.overdue ?? []).map((iv: any) => (
+            {(d?.overdue ?? []).map((iv) => (
               <div key={iv.id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-[13px]">
                 <span className="font-medium">{iv.number ?? iv.id}</span>
                 <span className="min-w-0 flex-1 truncate text-center text-muted-foreground">{iv.companyName ?? ''}</span>
-                <span className="tabular-nums font-medium text-destructive">{fmtMoney(iv.total ?? 0, iv.currency ?? currency)}</span>
+                <span className="tabular-nums font-medium text-destructive">{fmtMoney(iv.outstanding ?? 0, iv.currency ?? currency)}</span>
               </div>
             ))}
           </div>
         </Card>
         <Card className="p-4">
           <div className="text-[13px] font-medium text-muted-foreground">{t('finance.unbilledHours')}</div>
-          <div className="mt-1 text-2xl font-semibold tabular-nums">{Number(d?.unbilledHours ?? d?.unbilled?.hours ?? 0).toFixed(1)}h</div>
+          <div className="mt-1 text-2xl font-semibold tabular-nums">{Number(d?.unbilledBillableHours ?? 0).toFixed(1)}h</div>
           <p className="mt-1 text-xs text-muted-foreground">{t('finance.unbilledHint')}</p>
         </Card>
       </div>
