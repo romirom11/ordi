@@ -167,10 +167,7 @@ export function InvoiceDetailPage({ id }: { id: string }) {
     <div className="mx-auto max-w-4xl p-8">
       <Breadcrumbs
         className="mb-4"
-        items={[
-          { label: t('nav.finance'), to: '/finance' },
-          { label: iv.number ?? t('public.invoice') },
-        ]}
+        items={[{ label: t('nav.finance'), to: '/finance' }]}
       />
 
       {/* Branded document header */}

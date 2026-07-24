@@ -10,7 +10,7 @@ import { api, qs } from '../lib/api';
 import { Link } from '../lib/router';
 import { useCan } from '../lib/auth';
 import {
-  Button, Input, Select, Card, Badge, PageHeader, PageBody, Breadcrumbs, EmptyState, Skeleton, Switch, Avatar, Spinner, cn,
+  Button, Input, Select, Card, Badge, PageBody, Breadcrumbs, EmptyState, Skeleton, Switch, Avatar, Spinner, cn,
 } from '../components/ui';
 import { Dialog, ConfirmDialog, DropdownMenu, MenuItem, toast } from '../components/overlays';
 import { ImportExportPanel } from '../components/ImportExportPanel';
@@ -19,6 +19,7 @@ import { InvoicesPanel } from '../components/settings/InvoicesPanel';
 import { ModulesPanel } from '../components/settings/ModulesPanel';
 import { SectionHead, SettingRow, Field, RowList, AnimatedRow } from '../components/settings/primitives';
 import { downscaleImage } from '../components/settings/image';
+import { usePageTitle } from '../lib/tabs';
 import { useT } from '../lib/i18n';
 import { extendDict } from '../lib/i18n';
 
@@ -226,6 +227,8 @@ export function SettingsPage({ section }: { section?: string }) {
   const flat = groups.flatMap((g) => g.items);
   const requested = section ?? 'workspace';
   const active = flat.find((i) => i.id === requested) ?? flat[0];
+  // PageHeader used to name the tab; the slim trail bar does it explicitly now.
+  usePageTitle(active ? `${t('nav.settings')} · ${t(active.label)}` : t('nav.settings'));
 
   if (!active) {
     return <EmptyState title={t('settings.noneAvailable')} hint={t('settings.noneAvailableHint')} />;
@@ -233,11 +236,10 @@ export function SettingsPage({ section }: { section?: string }) {
 
   return (
     <div className="flex flex-col">
-      <PageHeader
-        title={t('nav.settings')}
-        subtitle={t('settings.subtitle')}
-        breadcrumbs={<Breadcrumbs items={[{ label: t('nav.settings'), to: '/settings' }, { label: t(active.label) }]} />}
-      />
+      {/* Slim trail only — each panel carries its own heading and description. */}
+      <div className="flex h-11 shrink-0 items-center border-b border-border px-4">
+        <Breadcrumbs items={[{ label: t('nav.settings'), to: '/settings' }, { label: t(active.label) }]} />
+      </div>
       <div className="flex min-h-[calc(100vh-53px)]">
         <aside className="w-52 shrink-0 border-r border-border p-3">
           <nav className="space-y-4">

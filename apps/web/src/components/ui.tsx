@@ -192,24 +192,22 @@ export function Kbd({ children }: { children: ReactNode }) {
 export interface BreadcrumbItem { label: ReactNode; to?: string; icon?: ReactNode }
 
 export function Breadcrumbs({ items, className }: { items: BreadcrumbItem[]; className?: string }) {
-  // A lone crumb only repeats the page title — render trails, not echoes.
-  if (items.length < 2) return null;
+  // A lone crumb for the current page only repeats the page title — render
+  // trails, not echoes. A lone parent link is a real trail, so it stays.
+  if (items.length === 0 || (items.length === 1 && !items[0]!.to)) return null;
   return (
     <nav aria-label="Breadcrumb" className={cn('flex min-w-0 items-center gap-1 text-[13px]', className)}>
       {items.map((it, i) => {
-        const last = i === items.length - 1;
         const inner = (
           <>
-            {it.icon && <span className="shrink-0 text-muted-foreground [&>svg]:block">{it.icon}</span>}
+            {it.icon && <span className="shrink-0 [&>svg]:block">{it.icon}</span>}
             <span className="truncate">{it.label}</span>
           </>
         );
         return (
           <Fragment key={i}>
             {i > 0 && <ChevronRight size={12} className="shrink-0 text-faint" aria-hidden />}
-            {last ? (
-              <span className="flex min-w-0 items-center gap-1 font-medium text-foreground">{inner}</span>
-            ) : it.to ? (
+            {it.to ? (
               <Link
                 to={it.to}
                 className="flex min-w-0 items-center gap-1 text-muted-foreground transition-colors duration-150 hover:text-foreground"
@@ -217,7 +215,7 @@ export function Breadcrumbs({ items, className }: { items: BreadcrumbItem[]; cla
                 {inner}
               </Link>
             ) : (
-              <span className="flex min-w-0 items-center gap-1 text-muted-foreground">{inner}</span>
+              <span className="flex min-w-0 items-center gap-1 font-medium text-foreground">{inner}</span>
             )}
           </Fragment>
         );

@@ -71,10 +71,7 @@ export function CompanyDetailPage({ id }: { id: string }) {
       <div className="border-b border-border px-6 pb-4 pt-3">
         <Breadcrumbs
           className="mb-3"
-          items={[
-            { label: t('crm.title'), to: '/crm/clients' },
-            { label: c?.name ?? '…' },
-          ]}
+          items={[{ label: t('crm.title'), to: '/crm/clients' }]}
         />
         <div className="flex items-start gap-4">
           {c ? <Avatar name={c.name} size={48} className="text-base" /> : <Skeleton className="h-12 w-12 rounded-full" />}

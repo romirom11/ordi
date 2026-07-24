@@ -2,15 +2,15 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   List, Columns3, CalendarDays, GanttChart, Table2, Plus,
-  LayoutDashboard, ListChecks, Repeat, CalendarClock, Settings,
+  LayoutDashboard, ListChecks, Repeat, CalendarClock, Settings, ChevronRight,
 } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
-import { useNavigate, useSearchParams } from '../lib/router';
+import { Link, useNavigate, useSearchParams } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import {
   Button, IconButton, Input, Card, Badge, Skeleton, EmptyState, Spinner, AvatarGroup,
-  StatusIcon, PriorityIcon, ProgressBar, SegmentedControl, Breadcrumbs, PageBody,
+  StatusIcon, PriorityIcon, ProgressBar, SegmentedControl, PageBody,
   fmtDate, cn,
 } from '../components/ui';
 import { Dialog, toast } from '../components/overlays';
@@ -246,59 +246,63 @@ function ProjectHeader({ project, loading, canWrite, canDelete, tab, onTab, onDe
       onDeleted={onDeleted}
       className="block border-b border-border"
     >
-      <div className="px-6 pb-2 pt-3">
-        <Breadcrumbs
-          className="mb-1"
-          items={[{ label: t('nav.projects'), to: '/projects' }, { label: project.name }]}
-        />
-        <div className="flex min-w-0 items-center gap-2">
-          <ProjectIcon seed={project.key || project.id} size={26} radius={7} />
-          {editingName ? (
-            <input
-              autoFocus
-              value={nameDraft}
-              onChange={(e) => setNameDraft(e.target.value)}
-              onBlur={commitName}
-              onKeyDown={(e) => { if (e.key === 'Enter') commitName(); if (e.key === 'Escape') setEditingName(false); }}
-              className="min-w-0 flex-1 rounded-md border border-primary/60 bg-transparent px-1.5 py-0.5 text-lg font-semibold outline-none focus:ring-2 focus:ring-ring/25"
-            />
-          ) : (
-            <h1
-              onClick={() => { if (canWrite) { setNameDraft(project.name); setEditingName(true); } }}
-              className={cn('truncate rounded-md px-1.5 py-0.5 text-lg font-semibold leading-tight -ml-1.5',
-                canWrite && 'cursor-text hover:bg-muted')}
-            >
-              {project.name}
-            </h1>
-          )}
+      {/* One slim bar: parent trail + identity on the left, section switcher on
+          the right. The name lives here only — no title echo below. */}
+      <div className="flex h-11 min-w-0 items-center gap-2 px-4">
+        <Link
+          to="/projects"
+          className="hidden shrink-0 text-[13px] text-muted-foreground transition-colors duration-150 hover:text-foreground sm:block"
+        >
+          {t('nav.projects')}
+        </Link>
+        <ChevronRight size={12} className="hidden shrink-0 text-faint sm:block" aria-hidden />
 
-          <span className="shrink-0 font-mono text-[11px] text-faint">{project.key}</span>
-
-          <IconButton
-            size="sm"
-            aria-label={t('nav.settings')}
-            onClick={() => onTab('settings')}
-            className={cn('ml-auto', tab === 'settings' && 'bg-muted text-foreground')}
+        <ProjectIcon seed={project.key || project.id} size={20} radius={6} />
+        {editingName ? (
+          <input
+            autoFocus
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            onBlur={commitName}
+            onKeyDown={(e) => { if (e.key === 'Enter') commitName(); if (e.key === 'Escape') setEditingName(false); }}
+            className="min-w-0 flex-1 rounded-md border border-primary/60 bg-transparent px-1.5 py-0.5 text-[15px] font-semibold outline-none focus:ring-2 focus:ring-ring/25"
+          />
+        ) : (
+          <h1
+            onClick={() => { if (canWrite) { setNameDraft(project.name); setEditingName(true); } }}
+            className={cn('-ml-1 min-w-0 truncate rounded-md px-1 py-0.5 text-[15px] font-semibold leading-tight',
+              canWrite && 'cursor-text hover:bg-muted')}
           >
-            <Settings size={16} />
-          </IconButton>
-        </div>
+            {project.name}
+          </h1>
+        )}
+        <span className="shrink-0 font-mono text-[11px] text-faint">{project.key}</span>
 
-        {/* Quiet section nav — not a second tab bar. */}
-        <nav className="mt-2 flex items-center gap-5">
+        <nav className="ml-auto flex shrink-0 items-center gap-0.5">
           {sections.map((s) => (
             <button
               key={s.key}
               onClick={() => onTab(s.key)}
               className={cn(
-                'flex items-center gap-1.5 text-[13px] transition-colors duration-150',
-                tab === s.key ? 'font-medium text-foreground' : 'text-muted-foreground hover:text-foreground',
+                'flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] transition-colors duration-150',
+                tab === s.key
+                  ? 'bg-muted font-medium text-foreground'
+                  : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
               )}
             >
               <span className={cn('[&>svg]:block', tab === s.key ? 'text-foreground' : 'text-faint')}>{s.icon}</span>
-              {s.label}
+              <span className="hidden md:block">{s.label}</span>
             </button>
           ))}
+          <span className="mx-1 h-4 w-px bg-border" aria-hidden />
+          <IconButton
+            size="sm"
+            aria-label={t('nav.settings')}
+            onClick={() => onTab('settings')}
+            className={cn(tab === 'settings' && 'bg-muted text-foreground')}
+          >
+            <Settings size={16} />
+          </IconButton>
         </nav>
       </div>
     </ProjectContextMenu>

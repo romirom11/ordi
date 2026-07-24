@@ -4,15 +4,16 @@ import { useNavigate } from '../lib/router';
 import { api } from '../lib/api';
 import { useCan } from '../lib/auth';
 import {
-  Button, Badge, Breadcrumbs, PageHeader, PageBody, EmptyState, Skeleton, Avatar,
+  Button, Badge, Breadcrumbs, PageBody, EmptyState, Skeleton, Avatar,
   fmtMoney, fmtDate, cn,
 } from '../components/ui';
 import { DropdownMenu, MenuItem, toast } from '../components/overlays';
 import { CompensationDialog } from '../components/people/CompensationDialog';
 import {
   Users, MoreHorizontal, UserCheck, UserX, Plus, Lock, Mail, Briefcase,
-  Building2, CalendarClock, UserCog, AtSign,
+  CalendarClock, UserCog, AtSign,
 } from 'lucide-react';
+import { usePageTitle } from '../lib/tabs';
 import { useT, extendDict } from '../lib/i18n';
 
 extendDict({
@@ -131,23 +132,23 @@ export function EmployeePage({ id }: { id: string }) {
   }, [emps.data, e?.managerId]);
 
   const comp = compensation.data?.data ?? [];
+  usePageTitle(e ? name : undefined);
 
+  // Slim bar: parent trail + actions. Identity (name, role, department) lives
+  // in the hero below, so nothing is stated twice.
   const header = (
-    <PageHeader
-      breadcrumbs={<Breadcrumbs items={[{ label: t('nav.people'), to: '/people', icon: <Users size={13} /> }, { label: name }]} />}
-      title={name}
-      actions={
-        <>
-          <StatusPill status={e?.status ?? 'active'} />
-          {canWrite && (
-            <DropdownMenu align="end" trigger={<Button size="sm" variant="outline">{t('people.actions')} <MoreHorizontal size={14} /></Button>}>
-              <MenuItem icon={<UserCheck size={13} />} onSelect={() => lifecycle.mutate('onboard')} disabled={lifecycle.isPending}>{t('people.onboard')}</MenuItem>
-              <MenuItem icon={<UserX size={13} />} danger onSelect={() => lifecycle.mutate('exit')} disabled={lifecycle.isPending}>{t('people.exit')}</MenuItem>
-            </DropdownMenu>
-          )}
-        </>
-      }
-    />
+    <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
+      <Breadcrumbs items={[{ label: t('nav.people'), to: '/people', icon: <Users size={13} /> }]} />
+      <div className="ml-auto flex shrink-0 items-center gap-2">
+        <StatusPill status={e?.status ?? 'active'} />
+        {canWrite && (
+          <DropdownMenu align="end" trigger={<Button size="sm" variant="outline">{t('people.actions')} <MoreHorizontal size={14} /></Button>}>
+            <MenuItem icon={<UserCheck size={13} />} onSelect={() => lifecycle.mutate('onboard')} disabled={lifecycle.isPending}>{t('people.onboard')}</MenuItem>
+            <MenuItem icon={<UserX size={13} />} danger onSelect={() => lifecycle.mutate('exit')} disabled={lifecycle.isPending}>{t('people.exit')}</MenuItem>
+          </DropdownMenu>
+        )}
+      </div>
+    </div>
   );
 
   if (employee.isLoading) {
@@ -181,7 +182,8 @@ export function EmployeePage({ id }: { id: string }) {
         <div className="mb-6 flex items-center gap-4">
           <Avatar name={name} src={e.user?.avatar} size={48} />
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-1.5 text-[13px] text-muted-foreground">
+            <h1 className="truncate text-lg font-semibold leading-tight">{name}</h1>
+            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[13px] text-muted-foreground">
               {positionTitle && <span className="inline-flex items-center gap-1.5"><Briefcase size={13} className="text-faint" />{positionTitle}</span>}
               {departmentName && <Badge className="ml-0.5">{departmentName}</Badge>}
             </div>
@@ -202,8 +204,7 @@ export function EmployeePage({ id }: { id: string }) {
         <section className="mb-6">
           <h2 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-faint">{t('people.basicInfo')}</h2>
           <div className="divide-y divide-border rounded-xl border border-border bg-card px-4">
-            <InfoRow icon={<Briefcase size={13} />} label={t('people.position')} value={positionTitle ?? '—'} />
-            <InfoRow icon={<Building2 size={13} />} label={t('people.department')} value={departmentName ?? '—'} />
+            {/* Position and department are already stated in the hero. */}
             <InfoRow icon={<UserCog size={13} />} label={t('people.manager')} value={managerName ?? '—'} />
             <InfoRow icon={<Briefcase size={13} />} label={t('people.employmentType')} value={e.employmentType ? t(EMP_TYPE_KEY[e.employmentType] ?? '') || e.employmentType : '—'} />
             <InfoRow icon={<CalendarClock size={13} />} label={t('people.joinDate')} value={e.joinDate ? fmtDate(e.joinDate) : '—'} />
