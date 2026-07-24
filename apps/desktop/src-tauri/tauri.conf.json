@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ordi",
+  "version": "1.0.0",
+  "identifier": "app.ordi.desktop",
+  "build": {
+    "frontendDist": "../../web/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "pnpm --filter @ordi/web dev",
+    "beforeBuildCommand": "pnpm --filter @ordi/web build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "ordi",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "trayIcon": {
+      "iconPath": "icons/icon.png",
+      "tooltip": "ordi"
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["ordi"]
+      }
+    },
+    "updater": {
+      "endpoints": ["https://releases.ordi.local/{{target}}/{{current_version}}"],
+      "pubkey": ""
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "appimage", "msi", "dmg"],
+    "icon": ["icons/icon.png"]
+  }
+}

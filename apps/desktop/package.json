@@ -1,0 +1,16 @@
+{
+  "name": "@ordi/desktop",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "typecheck": "echo 'desktop: tauri config only'",
+    "lint": "echo 'no lint'"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0"
+  }
+}

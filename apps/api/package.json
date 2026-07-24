@@ -1,0 +1,45 @@
+{
+  "name": "@ordi/api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "seed": "tsx src/seed.ts",
+    "worker": "tsx src/workers/index.ts",
+    "test": "vitest run",
+    "lint": "echo 'no lint'"
+  },
+  "dependencies": {
+    "@ordi/db": "workspace:*",
+    "@ordi/shared": "workspace:*",
+    "@hono/node-server": "^1.13.7",
+    "@hono/zod-validator": "^0.4.2",
+    "hono": "^4.6.14",
+    "zod": "^3.24.1",
+    "pg-boss": "^10.1.6",
+    "postgres": "^3.4.5",
+    "drizzle-orm": "^0.38.3",
+    "ulid": "^2.3.0",
+    "nodemailer": "^6.9.16",
+    "imapflow": "^1.0.171",
+    "zod-to-json-schema": "^3.24.1",
+    "mailparser": "^3.7.2",
+    "pino": "^9.5.0",
+    "otpauth": "^9.3.6",
+    "@aws-sdk/client-s3": "^3.717.0",
+    "@aws-sdk/s3-request-presigner": "^3.717.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/nodemailer": "^6.4.17",
+    "@types/mailparser": "^3.4.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
