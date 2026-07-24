@@ -15,6 +15,7 @@ export * from './schemas/time';
 export * from './schemas/finance';
 export * from './schemas/people';
 export * from './schemas/integrations';
+export * from './schemas/settings';
 
 // Pure business calc (single source of truth, unit-tested)
 export * from './calc/money';

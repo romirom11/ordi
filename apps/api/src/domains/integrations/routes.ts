@@ -9,7 +9,10 @@ import { requireAuth, currentActor } from '../../core/auth';
 import { guard } from '../../core/rbac';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
-import { encrypt, generateToken } from '../../lib/crypto';
+import { encrypt, decrypt, generateToken } from '../../lib/crypto';
+import {
+  githubOAuthConfigured, signOAuthState, buildGithubAuthorizeUrl, listGithubRepos,
+} from './oauth';
 
 /**
  * Integrations domain (PRD §13): git connections/repositories, manual resync,
@@ -20,6 +23,41 @@ import { encrypt, generateToken } from '../../lib/crypto';
 export function integrationsRoutes() {
   const app = new Hono<AppEnv>();
   app.use('*', requireAuth);
+
+  // ── GitHub OAuth (PRD §13.1) ──
+  // Is the GitHub OAuth app configured on this server? (auth only)
+  app.get('/integrations/git/oauth/status', async (c) => {
+    return c.json({ configured: githubOAuthConfigured() });
+  });
+
+  // Begin the OAuth flow: returns the GitHub authorize URL with a signed state.
+  app.get('/integrations/git/oauth/start', guard('integrations.manage'), async (c) => {
+    if (!githubOAuthConfigured()) throw err.domain('GitHub OAuth is not configured');
+    const actor = currentActor(c);
+    const url = buildGithubAuthorizeUrl(signOAuthState(actor.userId));
+    return c.json({ url });
+  });
+
+  // List a connection's repositories from the provider (powers the repo picker).
+  app.get('/integrations/git/connections/:id/repos', guard('integrations.manage'), async (c) => {
+    const { db } = getDb();
+    const [conn] = await db.select().from(schema.gitConnections)
+      .where(eq(schema.gitConnections.id, c.req.param('id')));
+    if (!conn) throw err.notFound('Connection not found');
+    if (conn.provider !== 'github') throw err.domain('Only GitHub repo listing is supported');
+    let token: string;
+    try {
+      token = (JSON.parse(decrypt(conn.credentials as string)) as { token: string }).token;
+    } catch {
+      throw err.domain('Stored credentials are invalid');
+    }
+    try {
+      const repos = await listGithubRepos(token, conn.instanceUrl);
+      return c.json({ data: repos });
+    } catch (e) {
+      return c.json({ error: { code: 'provider_error', message: e instanceof Error ? e.message : 'Provider request failed' } }, 502);
+    }
+  });
 
   // ── Git connections ──
   app.get('/integrations/git/connections', guard('integrations.manage'), async (c) => {

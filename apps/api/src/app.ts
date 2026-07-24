@@ -9,6 +9,7 @@ import { getDb, sql } from '@ordi/db';
 
 // domain routers
 import { authRoutes } from './domains/core/auth.routes';
+import { setupRoutes } from './domains/core/setup.routes';
 import { meRoutes } from './domains/core/me.routes';
 import { usersRoutes } from './domains/core/users.routes';
 import { rolesRoutes } from './domains/core/roles.routes';
@@ -77,6 +78,7 @@ export function createApp() {
   const api = new Hono<AppEnv>();
   api.use('*', authMiddleware);
   api.route('/auth', authRoutes());
+  api.route('/setup', setupRoutes()); // first-run setup (public; locked once an owner exists)
   api.route('/me', meRoutes());
   api.route('/users', usersRoutes());
   api.route('/roles', rolesRoutes());

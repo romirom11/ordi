@@ -1,8 +1,21 @@
 import { Hono } from 'hono';
 import { getDb, schema, eq, sql } from '@ordi/db';
+import { workspaceSettingsUpdateSchema } from '@ordi/shared';
 import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { guard } from '../../core/rbac';
+
+/**
+ * Mask a secret webhook URL for GET responses shown to non-managers: keep the
+ * host and the last 4 chars, hide everything in between. Returns null if unset.
+ */
+function maskWebhookUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  let host = 'hooks.slack.com';
+  try { host = new URL(url).host; } catch { /* keep default */ }
+  const last4 = url.slice(-4);
+  return `https://${host}/…/${last4}`;
+}
 
 /** Workspace settings (PRD §14.7). Trash/restore also here. */
 export function settingsRoutes() {
@@ -12,19 +25,41 @@ export function settingsRoutes() {
   app.get('/workspace', async (c) => {
     const { db } = getDb();
     const [ws] = await db.select().from(schema.workspaceSettings).where(eq(schema.workspaceSettings.id, 'workspace'));
-    return c.json(ws ?? { id: 'workspace', name: 'ordi' });
+    if (!ws) return c.json({ id: 'workspace', name: 'ordi', modules: {}, integrations: { slackWebhookUrl: null } });
+
+    // GET is open to any authed user (Shell reads name/logo). Only settings.manage
+    // holders may fetch the real webhook secret, and only when explicitly asked
+    // via ?full=1; everyone else gets a masked preview.
+    const actor = currentActor(c);
+    const full = c.req.query('full') === '1' && actor.access.permissions.has('settings.manage');
+    const integrations = (ws.integrations as { slackWebhookUrl?: string | null }) ?? {};
+    const safeIntegrations = full
+      ? integrations
+      : { ...integrations, slackWebhookUrl: maskWebhookUrl(integrations.slackWebhookUrl) };
+    return c.json({ ...ws, integrations: safeIntegrations });
   });
 
   app.patch('/workspace', guard('settings.manage'), async (c) => {
-    const patch = await c.req.json();
+    const patch = workspaceSettingsUpdateSchema.parse(await c.req.json());
     const { db } = getDb();
+    const [existing] = await db.select().from(schema.workspaceSettings).where(eq(schema.workspaceSettings.id, 'workspace'));
+
     const allowed: Record<string, unknown> = {};
     for (const k of ['name', 'logo', 'legalDetails', 'workingDays', 'defaultCurrency', 'defaultBillable', 'defaultEstimateUnit', 'sensitiveAuditRetentionMonths']) {
-      if (patch[k] !== undefined) allowed[k] = patch[k];
+      if ((patch as Record<string, unknown>)[k] !== undefined) allowed[k] = (patch as Record<string, unknown>)[k];
     }
-    const [existing] = await db.select().from(schema.workspaceSettings).where(eq(schema.workspaceSettings.id, 'workspace'));
+    // modules + integrations are merged (not replaced) so partial patches keep other keys.
+    if (patch.modules !== undefined) {
+      allowed.modules = { ...((existing?.modules as Record<string, unknown>) ?? {}), ...patch.modules };
+    }
+    if (patch.integrations !== undefined) {
+      allowed.integrations = { ...((existing?.integrations as Record<string, unknown>) ?? {}), ...patch.integrations };
+    }
+
     if (existing) {
-      await db.update(schema.workspaceSettings).set(allowed).where(eq(schema.workspaceSettings.id, 'workspace'));
+      if (Object.keys(allowed).length) {
+        await db.update(schema.workspaceSettings).set(allowed).where(eq(schema.workspaceSettings.id, 'workspace'));
+      }
     } else {
       await db.insert(schema.workspaceSettings).values({ id: 'workspace', ...(allowed as any) });
     }

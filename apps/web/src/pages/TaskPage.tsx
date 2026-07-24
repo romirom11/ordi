@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ChevronRight, Copy, X } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { Link, useNavigate } from '../lib/router';
+import { usePageTitle } from '../lib/tabs';
 import { Button, EmptyState, IconButton, Kbd, Skeleton, Tooltip } from '../components/ui';
 import { toast } from '../components/overlays';
 import { RichEditor, EMPTY_DOC } from '../components/richtext/RichEditor';
@@ -73,7 +74,12 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
 
   const taskQ = useQuery({
     queryKey: ['task', taskId],
-    queryFn: () => api.get<TaskDetail>(`/tasks/${taskId}?include=assignees,labels,relations,links,comments`),
+    queryFn: () => api.get<TaskDetail>(`/tasks/${taskId}?include=assignees,labels,relations,links,comments,git_links`),
+  });
+  const reposQ = useQuery({
+    queryKey: ['project-repos', projectId],
+    queryFn: () => api.get<{ data: unknown[] }>(`/projects/${projectId}/repositories`).then((r) => r.data),
+    staleTime: 60_000,
   });
   const projectQ = useQuery({
     queryKey: ['project', projectId],
@@ -96,6 +102,9 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
   const project = projectQ.data;
   const statuses = statusesQ.data ?? [];
   const refLabel = task?.ref ?? (project && task ? `${project.key}-${task.number}` : '');
+  const hasRepos = (reposQ.data ?? []).length > 0;
+
+  usePageTitle(task ? `${refLabel} ${task.title}` : null);
 
   /* ── Patch mutation (version-aware) ── */
   const patchM = useMutation({
@@ -278,6 +287,7 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
             users={usersQ.data ?? []}
             labels={labelsQ.data ?? []}
             onPatch={patch}
+            hasRepos={hasRepos}
           />
         </aside>
       </div>

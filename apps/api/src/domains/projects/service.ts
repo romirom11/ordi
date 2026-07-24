@@ -164,8 +164,14 @@ export async function updateProject(actor: Actor, id: string, input: any) {
   for (const k of ['name', 'status', 'visibility', 'projectTypeId', 'leadId', 'startDate', 'targetDate', 'description', 'customFields']) {
     if (input[k] !== undefined) patch[k] = input[k];
   }
-  if (input.estimateUnit !== undefined) {
-    patch.settings = { ...(before.settings as Record<string, unknown>), estimateUnit: input.estimateUnit };
+  // Merge settings keys (never blindly replace — preserve estimateUnit etc.).
+  if (input.estimateUnit !== undefined || input.settings !== undefined) {
+    const merged: Record<string, unknown> = { ...(before.settings as Record<string, unknown>) };
+    if (input.settings && typeof input.settings === 'object') {
+      for (const [k, v] of Object.entries(input.settings as Record<string, unknown>)) merged[k] = v;
+    }
+    if (input.estimateUnit !== undefined) merged.estimateUnit = input.estimateUnit;
+    patch.settings = merged;
   }
   if (Object.keys(patch).length) {
     await db.update(projects).set(patch).where(and(eq(projects.id, id), eq(projects.version, before.version)));

@@ -1,0 +1,2 @@
+ALTER TABLE "workspace_settings" ADD COLUMN "modules" jsonb DEFAULT '{}'::jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "workspace_settings" ADD COLUMN "integrations" jsonb DEFAULT '{}'::jsonb NOT NULL;

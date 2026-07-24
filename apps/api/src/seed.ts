@@ -1,41 +1,28 @@
 /**
- * Seed: roles + permissions catalog, an Owner user, workspace defaults and a set
- * of demo data so the app is immediately usable (PRD §20 "сід демо-даних").
+ * Seed (DEV): baseline config (shared with first-run /setup) PLUS a set of demo
+ * data — companies, deals, projects, tasks and extra users — so the app is
+ * immediately usable for local development (PRD §20 "сід демо-даних"). The
+ * baseline-only part lives in seed-baseline.ts and is what production first-run
+ * setup uses; everything below the baseline call here is the DEV-only demo path.
  * Idempotent: re-running skips existing rows by natural keys.
  */
 import { getDb, schema, eq, runMigrations } from '@ordi/db';
 import { ulid } from 'ulid';
-import { ALL_ROLE_SEEDS, resolveRolePermissions } from '@ordi/shared';
 import { hashPassword } from './lib/crypto';
-
-async function seedRoles(): Promise<Map<string, string>> {
-  const { db } = getDb();
-  const roleIds = new Map<string, string>();
-  for (const seed of ALL_ROLE_SEEDS) {
-    let [role] = await db.select().from(schema.roles).where(eq(schema.roles.key, seed.key));
-    if (!role) {
-      const id = ulid();
-      await db.insert(schema.roles).values({ id, key: seed.key, name: seed.name, description: seed.description, isSystem: seed.isSystem });
-      const perms = resolveRolePermissions(seed);
-      if (perms.length) await db.insert(schema.rolePermissions).values(perms.map((p) => ({ roleId: id, permission: p })));
-      roleIds.set(seed.key, id);
-    } else {
-      roleIds.set(seed.key, role.id);
-    }
-  }
-  return roleIds;
-}
+import { seedBaseline } from './seed-baseline';
 
 async function main() {
   const { db, close } = getDb();
   const ownerEmail = (process.env.SEED_OWNER_EMAIL ?? 'owner@ordi.local').toLowerCase();
   const ownerPassword = process.env.SEED_OWNER_PASSWORD ?? 'password123';
 
-  const roleIds = await seedRoles();
+  // ── Baseline config (roles, workspace settings, stages, leave types, tax, task types) ──
+  const { roleIds } = await seedBaseline(db, 'Acme Agency');
 
-  // Workspace settings
-  const [ws] = await db.select().from(schema.workspaceSettings).where(eq(schema.workspaceSettings.id, 'workspace'));
-  if (!ws) await db.insert(schema.workspaceSettings).values({ id: 'workspace', name: 'Acme Agency', defaultCurrency: 'USD' });
+  // ─────────────────────────────────────────────────────────────────────────
+  // DEV-ONLY DEMO DATA below: owner + extra users, companies, deals, projects,
+  // tasks, KB, departments. Not created by production first-run setup.
+  // ─────────────────────────────────────────────────────────────────────────
 
   // Owner + agent service user
   let [owner] = await db.select().from(schema.users).where(eq(schema.users.email, ownerEmail));
@@ -65,49 +52,6 @@ async function main() {
     const id = ulid();
     await db.insert(schema.users).values({ id, email: memberEmail, name: 'Dev Member', passwordHash: hashPassword('password123'), roleId: roleIds.get('member')! });
     [member] = await db.select().from(schema.users).where(eq(schema.users.id, id));
-  }
-
-  // Deal stages
-  const existingStages = await db.select().from(schema.dealStages);
-  if (!existingStages.length) {
-    const stages = [
-      { name: 'Lead', position: 0, probability: 10, isWon: false, isLost: false },
-      { name: 'Qualified', position: 1, probability: 30, isWon: false, isLost: false },
-      { name: 'Proposal', position: 2, probability: 60, isWon: false, isLost: false },
-      { name: 'Won', position: 3, probability: 100, isWon: true, isLost: false },
-      { name: 'Lost', position: 4, probability: 0, isWon: false, isLost: true },
-    ];
-    await db.insert(schema.dealStages).values(stages.map((s) => ({ id: ulid(), ...s })));
-  }
-
-  // Applicant stages
-  const existingApp = await db.select().from(schema.applicantStages);
-  if (!existingApp.length) {
-    const stages = [
-      { name: 'Applied', position: 0, isHired: false, isRejected: false },
-      { name: 'Screening', position: 1, isHired: false, isRejected: false },
-      { name: 'Interview', position: 2, isHired: false, isRejected: false },
-      { name: 'Offer', position: 3, isHired: false, isRejected: false },
-      { name: 'Hired', position: 4, isHired: true, isRejected: false },
-      { name: 'Rejected', position: 5, isHired: false, isRejected: true },
-    ];
-    await db.insert(schema.applicantStages).values(stages.map((s) => ({ id: ulid(), ...s })));
-  }
-
-  // Leave types
-  const existingLeave = await db.select().from(schema.leaveTypes);
-  if (!existingLeave.length) {
-    await db.insert(schema.leaveTypes).values([
-      { id: ulid(), name: 'Annual leave', isPaid: true, needsApproval: true, affectsBalance: true, allowHalfDay: true, annualQuota: '20' },
-      { id: ulid(), name: 'Sick leave', isPaid: true, needsApproval: false, affectsBalance: false, allowHalfDay: false, annualQuota: '0' },
-      { id: ulid(), name: 'Unpaid', isPaid: false, needsApproval: true, affectsBalance: false, allowHalfDay: false, annualQuota: '0' },
-    ]);
-  }
-
-  // Tax rate
-  const existingTax = await db.select().from(schema.taxRates);
-  if (!existingTax.length) {
-    await db.insert(schema.taxRates).values({ id: ulid(), name: 'VAT 20%', ratePercent: '20' });
   }
 
   // Demo company + contact + deal

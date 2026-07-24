@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { KeyRound } from 'lucide-react';
 import { api, ApiError, setSessionToken } from '../lib/api';
 import { isTauri } from '../lib/desktop';
@@ -7,6 +8,17 @@ import { useT } from '../lib/i18n';
 
 export function LoginPage() {
   const t = useT();
+  // Fresh install (no owner yet) → send to the first-run setup wizard.
+  const setupStatus = useQuery<{ needsSetup: boolean }>({
+    queryKey: ['setup', 'status'],
+    queryFn: () => api.get<{ needsSetup: boolean }>('/setup/status'),
+    staleTime: Infinity,
+    retry: false,
+  });
+  if (setupStatus.data?.needsSetup) {
+    window.history.replaceState({}, '', '/setup');
+    window.location.reload();
+  }
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [totp, setTotp] = useState('');

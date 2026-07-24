@@ -1,5 +1,6 @@
 import { clsx } from 'clsx';
 import { forwardRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes, type CSSProperties } from 'react';
+import { usePageTitle } from '../lib/tabs';
 
 export function cn(...args: Parameters<typeof clsx>): string {
   return clsx(...args);
@@ -179,6 +180,8 @@ export function Kbd({ children }: { children: ReactNode }) {
 }
 
 export function PageHeader({ title, actions, subtitle }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode }) {
+  // Name the active in-app tab after this page (no-op outside TabsProvider).
+  usePageTitle(typeof title === 'string' ? title : undefined);
   return (
     <div className="flex min-h-[52px] items-center justify-between gap-3 border-b border-border px-6 py-2.5">
       <div className="min-w-0">

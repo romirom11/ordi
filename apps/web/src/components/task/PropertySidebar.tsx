@@ -10,6 +10,7 @@ import {
   Avatar, AvatarGroup, Badge, PriorityIcon, StatusIcon, cn, fmtDate,
 } from '../ui';
 import { DropdownMenu, MenuItem, MenuLabel, MenuSeparator } from '../overlays';
+import { GitBlock } from './GitBlock';
 import { useT, extendDict } from '../../lib/i18n';
 import type { TaskDetail, TaskLabel, TaskPatch, TaskStatus, UserLite } from './types';
 
@@ -157,12 +158,13 @@ function DateMenu({ label, emptyLabel, icon, value, overdue, onSet, t }: {
   );
 }
 
-export function PropertySidebar({ task, statuses, users, labels, onPatch }: {
+export function PropertySidebar({ task, statuses, users, labels, onPatch, hasRepos }: {
   task: TaskDetail;
   statuses: TaskStatus[];
   users: UserLite[];
   labels: TaskLabel[];
   onPatch: (patch: TaskPatch) => void;
+  hasRepos?: boolean;
 }) {
   const t = useT();
   const [estimateDraft, setEstimateDraft] = useState('');
@@ -383,6 +385,13 @@ export function PropertySidebar({ task, statuses, users, labels, onPatch }: {
           )}
         </DropdownMenu>
       </Row>
+
+      <div className="mx-3 my-2 h-px bg-border" />
+
+      {/* Git */}
+      <div className="px-1.5 pb-1">
+        <GitBlock taskId={task.id} links={task.gitLinks ?? []} showLinks={hasRepos} />
+      </div>
 
       <div className="mx-3 my-2 h-px bg-border" />
 
