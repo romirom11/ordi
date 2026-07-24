@@ -42,15 +42,30 @@ export function useSearchParams(): URLSearchParams {
   return new URLSearchParams(path.split('?')[1] ?? '');
 }
 
+/**
+ * Provided by TabsProvider (lib/tabs.tsx). When present, Ctrl/Cmd-click and
+ * middle-click on internal <Link>s open an in-app tab instead of a browser tab.
+ */
+export const NewTabContext = createContext<((to: string) => void) | null>(null);
+
 export function Link({ to, children, className, onClick }: { to: string; children: ReactNode; className?: string; onClick?: () => void }) {
   const navigate = useNavigate();
+  const openInNewTab = useContext(NewTabContext);
   const handle = (e: MouseEvent) => {
-    if (e.metaKey || e.ctrlKey) return;
+    if (e.metaKey || e.ctrlKey) {
+      // In-app new tab; without a TabsProvider fall back to the browser default.
+      if (openInNewTab) { e.preventDefault(); openInNewTab(to); }
+      return;
+    }
+    if (e.button !== 0) return;
     e.preventDefault();
     onClick?.();
     navigate(to);
   };
-  return <a href={to} className={className} onClick={handle}>{children}</a>;
+  const handleAux = (e: MouseEvent) => {
+    if (e.button === 1 && openInNewTab) { e.preventDefault(); openInNewTab(to); }
+  };
+  return <a href={to} className={className} onClick={handle} onAuxClick={handleAux}>{children}</a>;
 }
 
 /** Match a pattern like /projects/:id/tasks/:taskId against a path. */

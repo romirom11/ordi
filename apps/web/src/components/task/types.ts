@@ -41,6 +41,16 @@ export interface TaskDetail {
   assignees: TaskAssignee[];
   labels: TaskLabel[];
   comments: TaskComment[];
+  gitLinks?: TaskGitLink[];
+}
+
+export interface TaskGitLink {
+  id: string;
+  type: string; // branch | commit | pr | mr
+  externalRef: string;
+  title?: string | null;
+  url?: string | null;
+  state?: string | null; // open | merged | closed
 }
 
 export interface TaskStatus {

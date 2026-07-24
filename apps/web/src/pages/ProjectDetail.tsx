@@ -1,26 +1,30 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  List, Columns3, CalendarDays, GanttChart, Table2, Plus, Lock, ChevronDown,
-  LayoutDashboard, ListChecks, Repeat, Settings2, Target, Rocket, CalendarClock,
+  List, Columns3, CalendarDays, GanttChart, Table2, Plus, ChevronDown,
+  LayoutDashboard, ListChecks, Repeat, Settings2, CalendarClock,
 } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
 import { useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
+import { usePageTitle } from '../lib/tabs';
 import {
-  Button, Input, Card, Badge, Skeleton, EmptyState, Spinner, Avatar, AvatarGroup,
-  StatusIcon, PriorityIcon, ProgressBar, ProgressRing, Tabs, SegmentedControl,
+  Button, Input, Card, Badge, Skeleton, EmptyState, Spinner, AvatarGroup,
+  StatusIcon, PriorityIcon, ProgressBar, Tabs, SegmentedControl,
   fmtDate, cn,
 } from '../components/ui';
-import { DropdownMenu, MenuItem, MenuLabel, MenuSeparator, Dialog, toast } from '../components/overlays';
+import { DropdownMenu, MenuItem, MenuLabel, Dialog, toast } from '../components/overlays';
 import { CalendarView } from '../components/views/CalendarView';
 import { TimelineView } from '../components/views/TimelineView';
 import { SpreadsheetView } from '../components/views/SpreadsheetView';
 import { SavedViewsBar, type SavedView } from '../components/views/SavedViewsBar';
 import { RichEditor, EMPTY_DOC } from '../components/richtext/RichEditor';
 import { ProjectAccessPanel } from '../components/ProjectAccessPanel';
-import { ProjectIcon, projectColor } from '../components/project/ProjectIcon';
-import { LeadPicker, DatePickerMenu, type UserLite } from '../components/project/pickers';
+import { ProjectIcon } from '../components/project/ProjectIcon';
+import { PropertiesRail } from '../components/project/PropertiesRail';
+import { InlineHint } from '../components/project/InlineHint';
+import { ProjectIntegrations } from '../components/project/ProjectIntegrations';
+import { PROJECT_STATUSES, STATUS_META, type UserLite } from '../components/project/pickers';
 import { useT, extendDict } from '../lib/i18n';
 
 extendDict({
@@ -49,10 +53,12 @@ extendDict({
     'projects.statusArchived': 'Archived',
     'projects.newTaskInline': 'Add task…',
     'projects.noTasks': 'No tasks in this project yet',
-    'projects.noTasksHint': 'Create a task to start planning the work.',
-    'projects.aboutPlaceholder': 'Write about this project — goals, scope, context…',
+    'projects.noTasksHint': 'Create your first task — click + in a status group or press C.',
+    'projects.aboutPlaceholder': 'Describe this project — goals, scope, context…',
     'projects.overviewEmpty': 'No tasks yet',
     'projects.loadFailed': 'Could not load this project.',
+    'projects.properties': 'Properties',
+    'projects.overviewHint': 'This is the project page — describe the goals here, and add tasks in the Tasks tab.',
   },
   uk: {
     'projects.noLead': 'Без керівника',
@@ -79,10 +85,12 @@ extendDict({
     'projects.statusArchived': 'Архів',
     'projects.newTaskInline': 'Додати задачу…',
     'projects.noTasks': 'У цьому проєкті ще немає задач',
-    'projects.noTasksHint': 'Створіть задачу, щоб почати планувати роботу.',
+    'projects.noTasksHint': 'Створіть першу задачу — натисніть + у групі статусу або C на клавіатурі.',
     'projects.aboutPlaceholder': 'Опишіть проєкт — цілі, обсяг, контекст…',
     'projects.overviewEmpty': 'Задач поки немає',
     'projects.loadFailed': 'Не вдалося завантажити проєкт.',
+    'projects.properties': 'Властивості',
+    'projects.overviewHint': 'Це сторінка проєкту: опишіть тут цілі, а задачі додавайте у вкладці Tasks.',
   },
 });
 
@@ -90,7 +98,7 @@ interface Project {
   id: string; name: string; key: string; status: string; kind?: string;
   companyId?: string | null; companyName?: string | null; description?: unknown;
   leadId?: string | null; startDate?: string | null; targetDate?: string | null;
-  visibility?: string; version?: number;
+  visibility?: string; version?: number; settings?: Record<string, unknown>;
 }
 interface TaskStatus {
   id: string; name: string; category?: string; color?: string; position?: number; isDefault?: boolean;
@@ -104,14 +112,6 @@ interface Cycle {
   id: string; name: string; startDate?: string; endDate?: string; status?: string; goal?: string;
   progress?: number; completedCount?: number; totalCount?: number; openCount?: number;
 }
-
-const PROJECT_STATUS = ['active', 'paused', 'completed', 'archived'] as const;
-const STATUS_META: Record<string, { color: string; key: string }> = {
-  active: { color: '#22c55e', key: 'projects.statusActive' },
-  paused: { color: '#eab308', key: 'projects.statusPaused' },
-  completed: { color: '#5e6ad2', key: 'projects.statusCompleted' },
-  archived: { color: '#8a8f98', key: 'projects.statusArchived' },
-};
 
 function isOverdue(due: string | null | undefined, cat?: string): boolean {
   if (!due) return false;
@@ -150,6 +150,8 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
   const project = projectQ.data;
   const users = usersQ.data ?? [];
 
+  usePageTitle(project ? `${project.key} · ${project.name}` : null);
+
   const openTask = (tid: string) => navigate(`/projects/${id}/tasks/${tid}`);
 
   const patchProject = useMutation({
@@ -177,7 +179,6 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
       <ProjectHeader
         project={project}
         loading={projectQ.isLoading}
-        users={users}
         canWrite={canWrite}
         onPatch={(b) => patchProject.mutate(b)}
       />
@@ -186,7 +187,7 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
       </div>
 
       <div className="flex-1 overflow-auto">
-        {tab === 'overview' && <OverviewTab id={id} statuses={statuses} project={project} canWrite={canWrite} onPatch={(b) => patchProject.mutate(b)} />}
+        {tab === 'overview' && <OverviewTab id={id} statuses={statuses} project={project} users={users} canWrite={canWrite} onPatch={(b) => patchProject.mutate(b)} />}
         {tab === 'tasks' && <TasksTab id={id} statuses={statuses} statusesLoading={statusesQ.isLoading} projectKey={project?.key} users={users} onOpen={openTask} />}
         {tab === 'cycles' && <CyclesTab id={id} />}
         {tab === 'settings' && <SettingsTab project={project} isAdmin={isAdmin} onPatch={(b) => patchProject.mutate(b)} pending={patchProject.isPending} />}
@@ -197,8 +198,8 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
 
 /* ───────────────────────── Header ───────────────────────── */
 
-function ProjectHeader({ project, loading, users, canWrite, onPatch }: {
-  project?: Project; loading: boolean; users: UserLite[]; canWrite: boolean;
+function ProjectHeader({ project, loading, canWrite, onPatch }: {
+  project?: Project; loading: boolean; canWrite: boolean;
   onPatch: (body: Record<string, unknown>) => void;
 }) {
   const t = useT();
@@ -207,12 +208,9 @@ function ProjectHeader({ project, loading, users, canWrite, onPatch }: {
 
   if (loading || !project) {
     return (
-      <div className="px-6 pt-4">
-        <div className="flex items-center gap-3">
-          <Skeleton className="h-8 w-8 rounded-lg" />
-          <Skeleton className="h-6 w-56" />
-        </div>
-        <Skeleton className="mt-3 h-5 w-72" />
+      <div className="flex items-center gap-2.5 px-6 pt-4">
+        <Skeleton className="h-[26px] w-[26px] rounded-md" />
+        <Skeleton className="h-6 w-56" />
       </div>
     );
   }
@@ -225,75 +223,55 @@ function ProjectHeader({ project, loading, users, canWrite, onPatch }: {
   };
 
   return (
-    <div className="px-6 pt-4">
-      <div className="flex items-start gap-3">
-        <ProjectIcon seed={project.key || project.id} size={34} radius={9} />
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            {editingName ? (
-              <input
-                autoFocus
-                value={nameDraft}
-                onChange={(e) => setNameDraft(e.target.value)}
-                onBlur={commitName}
-                onKeyDown={(e) => { if (e.key === 'Enter') commitName(); if (e.key === 'Escape') setEditingName(false); }}
-                className="min-w-0 flex-1 rounded-md border border-primary/60 bg-transparent px-1.5 py-0.5 text-lg font-semibold outline-none focus:ring-2 focus:ring-ring/25"
-              />
-            ) : (
-              <h1
-                onClick={() => { if (canWrite) { setNameDraft(project.name); setEditingName(true); } }}
-                className={cn('truncate rounded-md px-1.5 py-0.5 text-lg font-semibold leading-tight -ml-1.5',
-                  canWrite && 'cursor-text hover:bg-muted')}
-              >
-                {project.name}
-              </h1>
-            )}
+    <div className="flex min-w-0 items-center gap-2 px-6 pt-4">
+      <ProjectIcon seed={project.key || project.id} size={26} radius={7} />
+      {editingName ? (
+        <input
+          autoFocus
+          value={nameDraft}
+          onChange={(e) => setNameDraft(e.target.value)}
+          onBlur={commitName}
+          onKeyDown={(e) => { if (e.key === 'Enter') commitName(); if (e.key === 'Escape') setEditingName(false); }}
+          className="min-w-0 flex-1 rounded-md border border-primary/60 bg-transparent px-1.5 py-0.5 text-lg font-semibold outline-none focus:ring-2 focus:ring-ring/25"
+        />
+      ) : (
+        <h1
+          onClick={() => { if (canWrite) { setNameDraft(project.name); setEditingName(true); } }}
+          className={cn('truncate rounded-md px-1.5 py-0.5 text-lg font-semibold leading-tight -ml-1.5',
+            canWrite && 'cursor-text hover:bg-muted')}
+        >
+          {project.name}
+        </h1>
+      )}
 
-            {/* Status menu */}
-            {canWrite ? (
-              <DropdownMenu
-                trigger={
-                  <span className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-border bg-card px-2 py-0.5 text-xs font-medium transition-colors hover:bg-muted">
-                    <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: meta.color }} />
-                    <span className="text-muted-foreground">{meta.key ? t(meta.key) : project.status}</span>
-                    <ChevronDown size={12} className="text-faint" />
-                  </span>
-                }
-                align="start" width={170}
-              >
-                <MenuLabel>{t('common.status')}</MenuLabel>
-                {PROJECT_STATUS.map((s) => (
-                  <MenuItem key={s} checked={project.status === s} onSelect={() => { if (s !== project.status) onPatch({ status: s }); }}
-                    icon={<span className="h-2 w-2 rounded-full" style={{ backgroundColor: STATUS_META[s]!.color }} />}>
-                    {t(STATUS_META[s]!.key)}
-                  </MenuItem>
-                ))}
-              </DropdownMenu>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2 py-0.5 text-xs font-medium">
-                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: meta.color }} />
-                <span className="text-muted-foreground">{meta.key ? t(meta.key) : project.status}</span>
-              </span>
-            )}
+      <span className="shrink-0 font-mono text-[11px] text-faint">{project.key}</span>
 
-            <Badge className="bg-muted font-mono text-[11px] text-muted-foreground">{project.key}</Badge>
-            {project.companyName && <span className="truncate text-[13px] text-muted-foreground">· {project.companyName}</span>}
-          </div>
-
-          {/* Properties row */}
-          <div className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-1 text-[13px] text-muted-foreground">
-            <LeadPicker value={project.leadId} users={users} onSelect={(uid) => onPatch({ leadId: uid })} disabled={!canWrite} />
-            <span className="text-faint">·</span>
-            <DatePickerMenu value={project.startDate} onChange={(v) => onPatch({ startDate: v })} placeholder={t('projects.setStart')} icon={<Rocket size={14} className="text-faint" />} disabled={!canWrite} />
-            <DatePickerMenu value={project.targetDate} onChange={(v) => onPatch({ targetDate: v })} placeholder={t('projects.setTarget')} icon={<Target size={14} className="text-faint" />} disabled={!canWrite} />
-            {project.visibility === 'private' && (
-              <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground">
-                <Lock size={13} className="text-faint" /> {t('projects.private')}
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
+      {/* Status pill */}
+      {canWrite ? (
+        <DropdownMenu
+          trigger={
+            <span className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-border bg-card px-2 py-0.5 text-xs font-medium transition-colors hover:bg-muted">
+              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: meta.color }} />
+              <span className="text-muted-foreground">{meta.key ? t(meta.key) : project.status}</span>
+              <ChevronDown size={12} className="text-faint" />
+            </span>
+          }
+          align="start" width={170}
+        >
+          <MenuLabel>{t('common.status')}</MenuLabel>
+          {PROJECT_STATUSES.map((s) => (
+            <MenuItem key={s} checked={project.status === s} onSelect={() => { if (s !== project.status) onPatch({ status: s }); }}
+              icon={<span className="h-2 w-2 rounded-full" style={{ backgroundColor: STATUS_META[s]!.color }} />}>
+              {t(STATUS_META[s]!.key)}
+            </MenuItem>
+          ))}
+        </DropdownMenu>
+      ) : (
+        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-2 py-0.5 text-xs font-medium">
+          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: meta.color }} />
+          <span className="text-muted-foreground">{meta.key ? t(meta.key) : project.status}</span>
+        </span>
+      )}
     </div>
   );
 }
@@ -578,8 +556,8 @@ function BoardView({ statuses, byStatus, onOpen, canWrite, projectKey, resolveUs
 
 /* ───────────────────────── Overview tab ───────────────────────── */
 
-function OverviewTab({ id, statuses, project, canWrite, onPatch }: {
-  id: string; statuses: TaskStatus[]; project?: Project; canWrite: boolean;
+function OverviewTab({ id, statuses, project, users, canWrite, onPatch }: {
+  id: string; statuses: TaskStatus[]; project?: Project; users: UserLite[]; canWrite: boolean;
   onPatch: (body: Record<string, unknown>) => void;
 }) {
   const t = useT();
@@ -602,69 +580,33 @@ function OverviewTab({ id, statuses, project, canWrite, onPatch }: {
     timer.current = setTimeout(() => { onPatch({ description: next }); }, 900);
   };
 
-  const catOf = (sid: string) => statuses.find((s) => s.id === sid)?.category;
-  const total = tasks.length;
-  const done = tasks.filter((x) => catOf(x.statusId) === 'done').length;
-  const inProgress = tasks.filter((x) => catOf(x.statusId) === 'in_progress').length;
-  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-  const accent = project ? projectColor(project.key || project.id) : undefined;
-
-  const perStatus = statuses.map((s) => ({ s, n: tasks.filter((x) => x.statusId === s.id).length }));
-
   return (
-    <div className="grid gap-6 p-6 lg:grid-cols-[1fr_320px]">
-      {/* Left: description */}
-      <div className="min-w-0 order-2 lg:order-1">
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('projects.about')}</h3>
-        <div className="rounded-lg border border-border bg-card p-3">
-          {project ? (
-            <RichEditor key={project.id} value={doc} onChange={onDescChange} editable={canWrite} placeholder={t('projects.aboutPlaceholder')} />
-          ) : (
-            <Skeleton className="h-24" />
-          )}
-        </div>
+    <div className="mx-auto grid max-w-[1200px] gap-8 p-6 lg:grid-cols-[minmax(0,1fr)_260px]">
+      {/* Left: pure document */}
+      <div className="order-2 min-w-0 space-y-4 lg:order-1">
+        <InlineHint id="project-overview">{t('projects.overviewHint')}</InlineHint>
+        {project ? (
+          <RichEditor key={project.id} value={doc} onChange={onDescChange} editable={canWrite} placeholder={t('projects.aboutPlaceholder')} />
+        ) : (
+          <Skeleton className="h-40" />
+        )}
       </div>
 
-      {/* Right: stats */}
-      <div className="order-1 space-y-4 lg:order-2">
-        <Card className="p-4">
-          <div className="flex items-center gap-4">
-            <div className="relative grid place-items-center">
-              <ProgressRing value={pct} size={72} stroke={6} color={pct === 100 ? '#22c55e' : accent} />
-              <span className="absolute text-lg font-semibold tabular-nums">{pct}%</span>
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs text-muted-foreground">{t('projects.completion')}</p>
-              {isLoading ? <Skeleton className="mt-1 h-6 w-24" /> : (
-                <p className="text-sm"><span className="text-lg font-semibold tabular-nums">{done}</span>
-                  <span className="text-muted-foreground"> / {total} {t('projects.done').toLowerCase()}</span></p>
-              )}
-              <div className="mt-2 flex gap-3 text-xs text-muted-foreground">
-                <span><span className="font-medium text-foreground tabular-nums">{inProgress}</span> {t('projects.inProgress').toLowerCase()}</span>
-              </div>
-            </div>
-          </div>
-        </Card>
-
-        <Card className="p-4">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('projects.byStatus')}</h3>
-          {total === 0 ? (
-            <p className="text-[13px] text-muted-foreground">{t('projects.overviewEmpty')}</p>
-          ) : (
-            <div className="space-y-2.5">
-              {perStatus.map(({ s, n }) => (
-                <div key={s.id}>
-                  <div className="mb-1 flex items-center gap-2 text-[13px]">
-                    <StatusIcon category={s.category} color={s.color} size={13} />
-                    <span className="flex-1 truncate">{s.name}</span>
-                    <span className="tabular-nums text-muted-foreground">{n}</span>
-                  </div>
-                  <ProgressBar value={total > 0 ? (n / total) * 100 : 0} color={s.color} />
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
+      {/* Right: properties rail */}
+      <div className="order-1 lg:order-2">
+        {project ? (
+          <PropertiesRail
+            project={project}
+            statuses={statuses}
+            tasks={tasks}
+            tasksLoading={isLoading}
+            users={users}
+            canWrite={canWrite}
+            onPatch={onPatch}
+          />
+        ) : (
+          <div className="space-y-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-8" />)}</div>
+        )}
       </div>
     </div>
   );
@@ -783,6 +725,8 @@ function SettingsTab({ project, isAdmin, onPatch, pending }: {
   project?: Project; isAdmin: boolean; onPatch: (body: Record<string, unknown>) => void; pending: boolean;
 }) {
   const t = useT();
+  const can = useCan();
+  const canManageIntegrations = can('integrations.manage');
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -816,7 +760,7 @@ function SettingsTab({ project, isAdmin, onPatch, pending }: {
           </SettingRow>
           <SettingRow label={t('common.status')}>
             <div className="flex flex-wrap gap-1.5">
-              {PROJECT_STATUS.map((s) => (
+              {PROJECT_STATUSES.map((s) => (
                 <button key={s} disabled={!isAdmin} onClick={() => { if (s !== project.status) onPatch({ status: s }); }}
                   className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors',
                     project.status === s ? 'border-primary/40 bg-primary/10 text-foreground' : 'border-border bg-card text-muted-foreground hover:bg-muted',
@@ -838,6 +782,14 @@ function SettingsTab({ project, isAdmin, onPatch, pending }: {
         <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('projects.access')}</h2>
         <ProjectAccessPanel projectId={project.id} canManage={isAdmin} />
       </section>
+
+      {/* Integrations */}
+      <ProjectIntegrations
+        projectId={project.id}
+        settings={project.settings}
+        version={project.version}
+        canManage={canManageIntegrations}
+      />
     </div>
   );
 }
