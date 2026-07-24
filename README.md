@@ -108,8 +108,13 @@ Create a token in the app under **Settings → API tokens** (scope ⊆ your role
   custom dashboards, uk/en UI, OpenAPI at `/api/docs`, CSV import/export,
   dead-letter admin with replay, TOTP 2FA, MCP agent (31 tools).
 
-See [`docs/operations.md`](docs/operations.md) for backup/PITR (RPO ≤ 5 min,
-RTO ≤ 1 h), monitoring and deployment runbooks.
+Docs: [`docs/deployment.md`](docs/deployment.md) — production deployment
+(Dokploy / docker-compose); [`docs/operations.md`](docs/operations.md) —
+backup/PITR (RPO ≤ 5 min, RTO ≤ 1 h), monitoring, restore runbook;
+[`docs/desktop.md`](docs/desktop.md) — how the desktop app works (instance URL,
+bearer auth, native features, releases);
+[`docs/architecture-decisions.md`](docs/architecture-decisions.md) —
+engineering decisions log.
 
 ## Security & operations
 
