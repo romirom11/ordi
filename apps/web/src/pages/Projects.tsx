@@ -109,9 +109,9 @@ export function ProjectsPage() {
   const [creating, setCreating] = useState(false);
   const [filter, setFilter] = useState<Filter>('all');
 
-  const { data, isLoading } = useQuery<{ data: Project[] }>({
+  const { data, isLoading } = useQuery<Project[]>({
     queryKey: ['projects'],
-    queryFn: () => api.get<{ data: Project[] }>('/projects'),
+    queryFn: () => api.get<{ data: Project[] }>('/projects').then((r) => r.data),
   });
   const usersQ = useQuery<UserLite[]>({
     queryKey: ['users', 'lookup'],
@@ -124,7 +124,7 @@ export function ProjectsPage() {
     return m;
   }, [usersQ.data]);
 
-  const projects = data?.data ?? [];
+  const projects = data ?? [];
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: projects.length };
     for (const p of projects) c[p.status] = (c[p.status] ?? 0) + 1;
