@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, FolderKanban, Lock, Target } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
-import { useNavigate } from '../lib/router';
+import { Link, useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import {
   Button, Input, Select, Badge, PageHeader, Breadcrumbs, Skeleton, EmptyState, Spinner,
@@ -16,6 +16,8 @@ import { useT, extendDict } from '../lib/i18n';
 
 extendDict({
   en: {
+    'projects.noClientsYet': 'No clients yet.',
+    'projects.addClientFirst': 'Add one in CRM',
     'projects.filterAll': 'All',
     'projects.statusActive': 'Active',
     'projects.statusPaused': 'Paused',
@@ -28,6 +30,8 @@ extendDict({
     'projects.count': 'projects',
   },
   uk: {
+    'projects.noClientsYet': 'Клієнтів ще немає.',
+    'projects.addClientFirst': 'Додати в CRM',
     'projects.filterAll': 'Всі',
     'projects.statusActive': 'Активний',
     'projects.statusPaused': 'Призупинено',
@@ -275,9 +279,16 @@ function NewProjectModal({ open, onClose, onCreated }: { open: boolean; onClose:
   const companiesQ = useQuery<CompanyLite[]>({
     queryKey: ['companies', 'lite'],
     queryFn: () => api.get<{ data: CompanyLite[] }>('/companies').then((r) => r.data),
-    enabled: open && canCrm && kind === 'client',
+    enabled: open && canCrm,
   });
   const companies = companiesQ.data ?? [];
+  const noClientsYet = canCrm && companiesQ.isSuccess && companies.length === 0;
+
+  // A brand-new workspace has no clients — defaulting to "client" would dead-end
+  // the very first project behind a picker with nothing in it.
+  useEffect(() => {
+    if (open && noClientsYet) setKind('internal');
+  }, [open, noClientsYet]);
 
   const mut = useMutation({
     mutationFn: () => api.post<Project>('/projects', {
@@ -337,7 +348,12 @@ function NewProjectModal({ open, onClose, onCreated }: { open: boolean; onClose:
         {kind === 'client' && (
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">{t('crm.client')}</label>
-            {canCrm ? (
+            {canCrm && noClientsYet ? (
+              <p className="text-xs text-muted-foreground">
+                {t('projects.noClientsYet')}{' '}
+                <Link to="/crm" className="text-primary hover:underline">{t('projects.addClientFirst')}</Link>
+              </p>
+            ) : canCrm ? (
               <Select value={companyId} onChange={(e) => setCompanyId(e.target.value)} className="w-full">
                 <option value="">{companiesQ.isLoading ? t('common.loading') : t('projects.selectClient')}</option>
                 {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
