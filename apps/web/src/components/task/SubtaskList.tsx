@@ -143,7 +143,7 @@ export function SubtaskList({ taskId, projectId, projectKey, statuses }: {
               if (e.key === 'Enter' && draft.trim() && !createSub.isPending) createSub.mutate(draft.trim());
             }}
             placeholder={t('task.addSubtask')}
-            className="h-full min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-faint"
+            className="h-full min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-faint focus-visible:outline-none"
           />
           {draft.trim() && (
             <span className="anim-fade-in flex items-center gap-1 text-[11px] text-faint">

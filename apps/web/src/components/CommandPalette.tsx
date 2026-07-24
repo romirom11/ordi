@@ -110,7 +110,7 @@ export function CommandPalette({ open, onClose, onNavigate }: {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder={t('search.placeholder')}
-            className="h-12 w-full bg-transparent text-sm outline-none placeholder:text-faint"
+            className="h-12 w-full bg-transparent text-sm outline-none placeholder:text-faint focus-visible:outline-none"
           />
           {isFetching && <Spinner className="h-3.5 w-3.5 shrink-0" />}
         </div>

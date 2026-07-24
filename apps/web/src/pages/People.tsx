@@ -591,13 +591,18 @@ function PeopleDashboardView() {
       </div>
     );
   }
+  // API shape: { headcount: {active,onLeave,newHires,exits}, openJobOpenings, pipeline: [{count}], upcomingAbsences: [] }
+  // (with fallbacks for older/flat shapes so this keeps working either way).
+  const pipelineCount = Array.isArray(d?.pipeline)
+    ? d.pipeline.reduce((a: number, p: any) => a + Number(p?.count ?? 0), 0)
+    : d?.pipelineCount ?? d?.applicants ?? 0;
   const tiles: { label: string; value: string; icon: ReactNode }[] = [
-    { label: t('people.headcount'), value: String(d?.headcount ?? d?.activeCount ?? 0), icon: <Users size={15} /> },
-    { label: t('people.onLeave'), value: String(d?.onLeave ?? 0), icon: <CalendarClock size={15} /> },
-    { label: t('people.newHires'), value: String(d?.newHires ?? 0), icon: <Sparkles size={15} /> },
-    { label: t('people.openPositions'), value: String(d?.openPositions ?? d?.openOpenings ?? 0), icon: <Briefcase size={15} /> },
-    { label: t('people.inPipeline'), value: String(d?.pipelineCount ?? d?.applicants ?? 0), icon: <UserPlus size={15} /> },
-    { label: t('people.upcomingLeave'), value: String(d?.upcomingLeave ?? 0), icon: <CalendarClock size={15} /> },
+    { label: t('people.headcount'), value: String(d?.headcount?.active ?? d?.headcount ?? d?.activeCount ?? 0), icon: <Users size={15} /> },
+    { label: t('people.onLeave'), value: String(d?.headcount?.onLeave ?? d?.onLeave ?? 0), icon: <CalendarClock size={15} /> },
+    { label: t('people.newHires'), value: String(d?.headcount?.newHires ?? d?.newHires ?? 0), icon: <Sparkles size={15} /> },
+    { label: t('people.openPositions'), value: String(d?.openJobOpenings ?? d?.openPositions ?? d?.openOpenings ?? 0), icon: <Briefcase size={15} /> },
+    { label: t('people.inPipeline'), value: String(pipelineCount), icon: <UserPlus size={15} /> },
+    { label: t('people.upcomingLeave'), value: String(d?.upcomingAbsences?.length ?? d?.upcomingLeave ?? 0), icon: <CalendarClock size={15} /> },
   ];
   return (
     <div className="grid grid-cols-2 gap-3 p-6 md:grid-cols-3">

@@ -102,7 +102,7 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && canCreate) create.mutate(); }}
-          className="h-9 border-none px-1 text-[15px] font-medium focus:ring-0"
+          className="h-9 border-none px-1 text-[15px] font-medium focus:ring-0 focus-visible:outline-none"
         />
 
         <div className="mt-2.5 flex items-center gap-1.5">

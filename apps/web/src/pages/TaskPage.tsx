@@ -247,7 +247,7 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
               onKeyDown={(e) => {
                 if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLTextAreaElement).blur(); }
               }}
-              className="w-full resize-none overflow-hidden bg-transparent text-xl font-semibold leading-snug outline-none placeholder:text-faint"
+              className="w-full resize-none overflow-hidden bg-transparent text-xl font-semibold leading-snug outline-none placeholder:text-faint focus-visible:outline-none"
             />
 
             {/* Description */}

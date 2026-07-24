@@ -66,7 +66,15 @@ export function ActivityFeed({ taskId, comments, users }: {
       ...comments.map((c): TimelineItem => ({ kind: 'comment', at: c.createdAt, comment: c })),
       ...(auditQ.data ?? []).map((e): TimelineItem => ({ kind: 'audit', at: e.createdAt, entry: e })),
     ];
-    return items.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+    items.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+    // Collapse runs of identical audit events (same actor + action) into the latest one.
+    return items.filter((item, i) => {
+      if (item.kind !== 'audit') return true;
+      const next = items[i + 1];
+      return !(next && next.kind === 'audit'
+        && next.entry.actorId === item.entry.actorId
+        && next.entry.action === item.entry.action);
+    });
   }, [comments, auditQ.data]);
 
   const canSend = docHasText(draft);
