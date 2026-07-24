@@ -289,6 +289,14 @@ export async function createPosition(input: any): Promise<string> {
   return id;
 }
 
+export async function updatePosition(id: string, input: any) {
+  const { db } = getDb();
+  const patch: Record<string, unknown> = {};
+  if (input.title !== undefined) patch.title = input.title;
+  if (Object.keys(patch).length === 0) return;
+  await db.update(schema.positions).set(patch).where(eq(schema.positions.id, id));
+}
+
 export async function deletePosition(id: string) {
   const { db } = getDb();
   const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.employees).where(eq(schema.employees.positionId, id)) as any[];

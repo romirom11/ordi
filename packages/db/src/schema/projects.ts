@@ -39,6 +39,12 @@ export const projects = pgTable('projects', {
   startDate: text('start_date'),
   targetDate: text('target_date'),
   description: text('description'),
+  /** One-line summary shown on the project overview (Linear-style). */
+  summary: text('summary').notNull().default(''),
+  /** Same enum as tasks: none | low | medium | high | urgent. */
+  priority: text('priority').notNull().default('none'),
+  /** Resource links: [{label, url}]. */
+  links: jsonb('links').notNull().default([]),
   settings: jsonb('settings').notNull().default({ estimateUnit: 'hours' }),
   customFields: customFields(),
   createdBy: createdBy(),

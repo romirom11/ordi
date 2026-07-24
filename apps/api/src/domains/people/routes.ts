@@ -104,6 +104,11 @@ export function peopleRoutes() {
     const body = positionInputSchema.parse(await c.req.json());
     return c.json({ id: await svc.createPosition(body) }, 201);
   });
+  app.patch('/positions/:id', guard('people.write'), async (c) => {
+    const body = positionInputSchema.partial().parse(await c.req.json());
+    await svc.updatePosition(c.req.param('id'), body);
+    return c.json({ ok: true });
+  });
   app.delete('/positions/:id', guard('people.write'), async (c) => {
     await svc.deletePosition(c.req.param('id'));
     return c.json({ ok: true });

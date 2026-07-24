@@ -1,8 +1,9 @@
 /**
- * Finance → Subscriptions: recurring outgoing payments (SaaS, hosting, rent…).
- * A stat strip (monthly-normalized total per currency + count, next-30-days
- * timeline) sits above a list of subscriptions. Rows toggle active inline and
- * expose edit/delete via a row menu. Create/edit happens in a Dialog.
+ * Finance → Expenses → "Повторювані витрати": recurring outgoing payments
+ * (SaaS, hosting, rent…) rendered as a section at the top of the Expenses tab.
+ * A compact header (title + count + monthly-total chip + add button) sits above
+ * a next-30-days strip and the list. Rows toggle active inline and expose
+ * edit/delete via a row menu. Create/edit happens in a Dialog.
  *
  * Contracts (verified):
  *   GET  /recurring-payments?active=
@@ -20,7 +21,7 @@ import { api, ApiError } from '../../lib/api';
 import { useCan } from '../../lib/auth';
 import { useT, extendDict } from '../../lib/i18n';
 import {
-  Badge, Button, Card, EmptyState, Input, Select, Skeleton, Switch, Spinner,
+  Badge, Button, EmptyState, Input, Select, Skeleton, Switch, Spinner,
   cn, fmtMoney, fmtDate,
 } from '../ui';
 import { DropdownMenu, MenuItem, MenuSeparator, Dialog, ConfirmDialog, toast } from '../overlays';
@@ -29,6 +30,8 @@ import { Hint } from '../Hint';
 extendDict({
   en: {
     'subs.title': 'Subscriptions',
+    'subs.recurringTitle': 'Recurring expenses',
+    'subs.addRecurring': 'Add recurring',
     'subs.new': 'New subscription',
     'subs.edit': 'Edit subscription',
     'subs.monthlyTotal': 'Monthly total',
@@ -36,7 +39,7 @@ extendDict({
     'subs.upcoming': 'Next 30 days',
     'subs.noUpcoming': 'Nothing due in the next 30 days',
     'subs.empty': 'No subscriptions tracked yet',
-    'subs.emptyHint': 'Track recurring costs — hosting, SaaS tools, office rent, retainers — to see your true monthly burn.',
+    'subs.emptyHint': 'Track recurring costs – hosting, SaaS tools, office rent, retainers – to see your true monthly burn.',
     'subs.hintTitle': 'What to track here',
     'subs.hintBody': 'Add recurring payments like hosting, SaaS subscriptions, rent or retainers. Amounts are normalized to a monthly figure so you always see the real burn.',
     'subs.name': 'Name',
@@ -67,14 +70,16 @@ extendDict({
   },
   uk: {
     'subs.title': 'Підписки',
+    'subs.recurringTitle': 'Повторювані витрати',
+    'subs.addRecurring': 'Додати повторювану',
     'subs.new': 'Нова підписка',
     'subs.edit': 'Редагувати підписку',
     'subs.monthlyTotal': 'Щомісяця всього',
     'subs.activeCount': 'активних: {n}',
     'subs.upcoming': 'Наступні 30 днів',
-    'subs.noUpcoming': 'Найближчі 30 днів — без списань',
+    'subs.noUpcoming': 'Найближчі 30 днів – без списань',
     'subs.empty': 'Підписки ще не додано',
-    'subs.emptyHint': 'Додавайте регулярні витрати — хостинг, SaaS, оренду офісу, ретейнери — щоб бачити реальні щомісячні витрати.',
+    'subs.emptyHint': 'Додавайте регулярні витрати – хостинг, SaaS, оренду офісу, ретейнери – щоб бачити реальні щомісячні витрати.',
     'subs.hintTitle': 'Що тут відстежувати',
     'subs.hintBody': 'Додавайте регулярні платежі: хостинг, SaaS-підписки, оренду чи ретейнери. Суми нормалізуються до місячних, тож ви завжди бачите реальні витрати.',
     'subs.name': 'Назва',
@@ -145,7 +150,7 @@ function daysUntil(iso: string): number {
   return Math.round((d.getTime() - now.getTime()) / 86_400_000);
 }
 
-export function SubscriptionsTab() {
+export function RecurringExpensesSection() {
   const t = useT();
   const can = useCan();
   const canWrite = can('finance.write');
@@ -196,32 +201,30 @@ export function SubscriptionsTab() {
   const activeCount = rows.filter((r) => r.isActive).length;
 
   return (
-    <div className="space-y-6 p-6">
-      {/* Stat strip */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
-        <MonthlyTotalCard
-          monthlyTotal={summary?.monthlyTotal}
-          activeCount={activeCount}
-          loading={summaryQ.isLoading}
-        />
-        <UpcomingCard upcoming={summary?.upcoming ?? []} loading={summaryQ.isLoading} />
-      </div>
-
-      {/* Header row */}
-      <div className="flex items-center justify-between">
+    <section className="space-y-3">
+      {/* Header row: title + count + monthly-total chip + add button */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <h2 className="flex items-center gap-2 text-[13px] font-semibold">
           <Repeat size={15} className="text-muted-foreground" />
-          {t('subs.title')}
+          {t('subs.recurringTitle')}
           {rows.length > 0 && (
             <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">{rows.length}</span>
           )}
         </h2>
+        <MonthlyTotalChip
+          monthlyTotal={summary?.monthlyTotal}
+          activeCount={activeCount}
+          loading={summaryQ.isLoading}
+        />
         {canWrite && (
-          <Button size="sm" onClick={() => setDialog({ mode: 'create' })}>
-            <Plus size={14} /> {t('subs.new')}
+          <Button size="sm" variant="outline" className="ml-auto" onClick={() => setDialog({ mode: 'create' })}>
+            <Plus size={14} /> {t('subs.addRecurring')}
           </Button>
         )}
       </div>
+
+      {/* Next-30-days strip */}
+      <UpcomingStrip upcoming={summary?.upcoming ?? []} loading={summaryQ.isLoading} />
 
       {/* List */}
       {listQ.isLoading ? (
@@ -233,7 +236,7 @@ export function SubscriptionsTab() {
           icon={<Repeat size={20} />}
           title={t('subs.empty')}
           hint={t('subs.emptyHint')}
-          action={canWrite ? <Button size="sm" onClick={() => setDialog({ mode: 'create' })}><Plus size={14} /> {t('subs.new')}</Button> : undefined}
+          action={canWrite ? <Button size="sm" onClick={() => setDialog({ mode: 'create' })}><Plus size={14} /> {t('subs.addRecurring')}</Button> : undefined}
         />
       ) : (
         <div className="overflow-hidden rounded-xl border border-border bg-card">
@@ -276,7 +279,7 @@ export function SubscriptionsTab() {
         danger
         pending={del.isPending}
       />
-    </div>
+    </section>
   );
 }
 
