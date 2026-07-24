@@ -76,9 +76,14 @@ interface DocRow {
   dueDate?: string | null;
   validUntil?: string | null;
   isOverdue?: boolean;
+  is_overdue?: boolean;
 }
 interface Expense { id: string; description?: string | null; category?: string | null; amount?: number | string; currency?: string; date?: string | null; projectName?: string | null }
-interface ProfitRow { name?: string; label?: string; revenue?: number | string; cost?: number | string; margin?: number | string; marginPct?: number | string; currency?: string }
+interface ProfitRow {
+  projectId?: string; name?: string; label?: string; revenue?: number | string; cost?: number | string;
+  laborCost?: number | string; expenseCost?: number | string;
+  margin?: number | string; marginPct?: number | string; marginPercent?: number | string; currency?: string;
+}
 type Tab = 'dashboard' | 'invoices' | 'quotes' | 'expenses';
 
 export function FinancePage() {
@@ -225,8 +230,8 @@ function Tile({ label, value, icon, tone }: { label: string; value: string; icon
 
 function ProfitabilityView() {
   const t = useT();
-  const prof = useQuery({ queryKey: ['profitability', 'project'], queryFn: () => api.get<{ data: ProfitRow[] }>('/finance/profitability' + qs({ scope: 'project' })) });
-  const rows = prof.data?.data ?? [];
+  const prof = useQuery({ queryKey: ['profitability', 'project'], queryFn: () => api.get<{ rows: ProfitRow[] }>('/finance/profitability' + qs({ scope: 'project' })) });
+  const rows = prof.data?.rows ?? [];
   return (
     <Card className="overflow-hidden">
       <div className="border-b border-border px-4 py-2.5 text-[13px] font-medium">{t('finance.profitabilityByProject')}</div>
@@ -245,14 +250,16 @@ function ProfitabilityView() {
           {!prof.isLoading && rows.length === 0 && <tr><td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">{t('finance.noProfitability')}</td></tr>}
           {rows.map((r, i) => {
             const cur = r.currency ?? 'USD';
-            const margin = Number(r.margin ?? 0);
+            const cost = Number(r.cost ?? (Number(r.laborCost ?? 0) + Number(r.expenseCost ?? 0)));
+            const margin = Number(r.margin ?? Number(r.revenue ?? 0) - cost);
+            const marginPct = r.marginPct ?? r.marginPercent;
             return (
-              <tr key={r.name ?? r.label ?? String(i)} className="border-t border-border">
+              <tr key={r.projectId ?? r.name ?? r.label ?? String(i)} className="border-t border-border">
                 <td className="px-4 py-2">{r.label ?? r.name ?? '—'}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{fmtMoney(r.revenue ?? 0, cur)}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{fmtMoney(r.cost ?? 0, cur)}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{fmtMoney(cost, cur)}</td>
                 <td className={cn('px-4 py-2 text-right tabular-nums', margin < 0 && 'text-destructive')}>{fmtMoney(margin, cur)}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{r.marginPct != null ? `${Number(r.marginPct).toFixed(0)}%` : '—'}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{marginPct != null ? `${Number(marginPct).toFixed(0)}%` : '—'}</td>
               </tr>
             );
           })}
