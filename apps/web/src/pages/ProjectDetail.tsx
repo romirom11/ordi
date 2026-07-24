@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  List, Columns3, CalendarDays, GanttChart, Table2, Plus,
+  CalendarDays, Plus,
   LayoutDashboard, ListChecks, Repeat, CalendarClock, Settings, ChevronRight,
 } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
@@ -9,15 +9,14 @@ import { Link, useNavigate, useSearchParams } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import {
-  Button, IconButton, Input, Card, Badge, Skeleton, EmptyState, Spinner, AvatarGroup,
-  StatusIcon, PriorityIcon, ProgressBar, SegmentedControl, PageBody,
+  Button, IconButton, Input, Card, Badge, Skeleton, EmptyState, Spinner, Avatar, AvatarGroup,
+  StatusIcon, PriorityIcon, ProgressBar, ProgressRing, PageBody,
   fmtDate, cn,
 } from '../components/ui';
 import { Dialog, toast } from '../components/overlays';
 import { CalendarView } from '../components/views/CalendarView';
 import { TimelineView } from '../components/views/TimelineView';
 import { SpreadsheetView } from '../components/views/SpreadsheetView';
-import { SavedViewsBar, type SavedView } from '../components/views/SavedViewsBar';
 import { RichEditor, EMPTY_DOC } from '../components/richtext/RichEditor';
 import { ProjectAccessPanel } from '../components/ProjectAccessPanel';
 import { ProjectIcon } from '../components/project/ProjectIcon';
@@ -26,6 +25,12 @@ import { InlineHint } from '../components/project/InlineHint';
 import { ProjectIntegrations } from '../components/project/ProjectIntegrations';
 import { ProjectContextMenu, TaskContextMenu } from '../components/project/contextMenus';
 import { PROJECT_STATUSES, STATUS_META, type UserLite } from '../components/project/pickers';
+import { TasksToolbar } from '../components/project/TasksToolbar';
+import type { LabelLite } from '../components/project/FilterPopover';
+import {
+  EMPTY_FILTERS, PRIORITIES, PRIORITY_LABEL_KEY, applyFilters, loadPrefs, orderTasks, savePrefs,
+  type Grouping, type TaskFilters, type TaskViewPrefs,
+} from '../components/project/taskViewPrefs';
 import { useT, extendDict } from '../lib/i18n';
 
 extendDict({
@@ -111,7 +116,7 @@ interface TaskStatus {
 interface Task {
   id: string; number?: number; ref?: string; title: string; statusId: string; priority?: string;
   dueDate?: string | null; startDate?: string | null; estimate?: number | string | null; version?: number;
-  parentId?: string | null; assigneeIds?: string[];
+  parentId?: string | null; assigneeIds?: string[]; labelIds?: string[]; createdAt?: string;
 }
 interface Cycle {
   id: string; name: string; startDate?: string; endDate?: string; status?: string; goal?: string;
@@ -311,23 +316,76 @@ function ProjectHeader({ project, loading, canWrite, canDelete, tab, onTab, onDe
 
 /* ───────────────────────── Tasks tab ───────────────────────── */
 
-const TASK_VIEWS = [
-  { key: 'list', labelKey: 'tasks.list', icon: List },
-  { key: 'board', labelKey: 'tasks.board', icon: Columns3 },
-  { key: 'calendar', labelKey: 'tasks.calendar', icon: CalendarDays },
-  { key: 'timeline', labelKey: 'tasks.timeline', icon: GanttChart },
-  { key: 'spreadsheet', labelKey: 'tasks.spreadsheet', icon: Table2 },
-] as const;
-type TaskView = typeof TASK_VIEWS[number]['key'];
-
-function isTaskView(v: unknown): v is TaskView {
-  return typeof v === 'string' && TASK_VIEWS.some((tv) => tv.key === v);
-}
-
 function refLabel(t: Task, projectKey?: string): string {
   if (t.ref) return t.ref;
   if (t.number == null) return '';
   return projectKey ? `${projectKey}-${t.number}` : `#${t.number}`;
+}
+
+interface ChildStats { total: number; done: number }
+
+/** A rendered list/board group: header identity + its (ordered) tasks + quick-add payload. */
+interface TaskGroup {
+  key: string;
+  label: string;
+  icon: ReactNode;
+  items: Task[];
+  /** Extra POST /tasks fields so quick-add lands in this group. */
+  seed: Record<string, unknown>;
+}
+
+function buildGroups(
+  grouping: Grouping, tasks: Task[], statuses: TaskStatus[], users: UserLite[], labels: LabelLite[],
+  t: (k: string) => string,
+): TaskGroup[] {
+  switch (grouping) {
+    case 'status':
+      return statuses.map((s) => ({
+        key: `status:${s.id}`, label: s.name,
+        icon: <StatusIcon category={s.category} color={s.color} size={14} />,
+        items: tasks.filter((x) => x.statusId === s.id),
+        seed: { statusId: s.id },
+      }));
+    case 'priority':
+      return PRIORITIES.map((p) => ({
+        key: `priority:${p}`, label: t(PRIORITY_LABEL_KEY[p]!),
+        icon: <PriorityIcon priority={p} size={14} />,
+        items: tasks.filter((x) => (x.priority ?? 'none') === p),
+        seed: { priority: p },
+      }));
+    case 'assignee': {
+      const groups: TaskGroup[] = users.map((u) => ({
+        key: `assignee:${u.id}`, label: u.name,
+        icon: <Avatar name={u.name} src={u.avatar} size={16} />,
+        items: tasks.filter((x) => (x.assigneeIds ?? []).includes(u.id)),
+        seed: { assigneeIds: [u.id] },
+      }));
+      groups.push({
+        key: 'assignee:none', label: t('tasksview.noAssignee'),
+        icon: <StatusIcon category="backlog" size={14} />,
+        items: tasks.filter((x) => !(x.assigneeIds ?? []).length),
+        seed: {},
+      });
+      return groups;
+    }
+    case 'label': {
+      const groups: TaskGroup[] = labels.map((l) => ({
+        key: `label:${l.id}`, label: l.name,
+        icon: <span className="block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: l.color ?? '#8a8f98' }} />,
+        items: tasks.filter((x) => (x.labelIds ?? []).includes(l.id)),
+        seed: { labelIds: [l.id] },
+      }));
+      groups.push({
+        key: 'label:none', label: t('tasksview.noLabel'),
+        icon: <StatusIcon category="backlog" size={14} />,
+        items: tasks.filter((x) => !(x.labelIds ?? []).length),
+        seed: {},
+      });
+      return groups;
+    }
+    default:
+      return [{ key: 'all', label: t('common.tasks'), icon: null, items: tasks, seed: {} }];
+  }
 }
 
 function TasksTab({ id, statuses, statusesLoading, projectKey, users, onOpen }: {
@@ -337,29 +395,51 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, onOpen }: 
   const qc = useQueryClient();
   const can = useCan();
   const canWrite = can('projects.write') || can('projects.create');
-  const [view, setViewState] = useState<TaskView>(() => {
-    try {
-      const stored = localStorage.getItem(`ordi:view:${id}`);
-      return isTaskView(stored) ? stored : 'list';
-    } catch { return 'list'; }
-  });
-  const setView = (v: TaskView) => {
-    setViewState(v);
-    try { localStorage.setItem(`ordi:view:${id}`, v); } catch { /* private mode */ }
-  };
+
+  const [prefs, setPrefsState] = useState<TaskViewPrefs>(() => loadPrefs(id));
+  const [filters, setFilters] = useState<TaskFilters>(EMPTY_FILTERS);
+  useEffect(() => { setPrefsState(loadPrefs(id)); setFilters(EMPTY_FILTERS); }, [id]);
+  const updatePrefs = (patch: Partial<TaskViewPrefs>) =>
+    setPrefsState((p) => { const next = { ...p, ...patch }; savePrefs(id, next); return next; });
 
   const tasksQ = useQuery<Task[]>({ queryKey: ['tasks', id], queryFn: () => api.get<{ data: Task[] }>(`/tasks${qs({ projectId: id })}`).then((r) => r.data) });
-  const tasks = tasksQ.data ?? [];
+  const allTasks = useMemo(() => tasksQ.data ?? [], [tasksQ.data]);
+  // Same key + shape as the task page, so the cache is shared.
+  const labelsQ = useQuery<LabelLite[]>({
+    queryKey: ['labels'],
+    queryFn: () => api.get<{ data: LabelLite[] }>('/labels').then((r) => r.data),
+    staleTime: 5 * 60_000,
+  });
+  const labels = useMemo(() => labelsQ.data ?? [], [labelsQ.data]);
 
-  const userById = useMemo(() => {
-    const m = new Map<string, UserLite>();
-    for (const u of users) m.set(u.id, u);
-    return m;
-  }, [users]);
+  const statusById = useMemo(() => new Map(statuses.map((s) => [s.id, s])), [statuses]);
+  const labelById = useMemo(() => new Map(labels.map((l) => [l.id, l])), [labels]);
+  const taskById = useMemo(() => new Map(allTasks.map((x) => [x.id, x])), [allTasks]);
+  const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
   const resolveUsers = (ids?: string[]) => (ids ?? []).map((uid) => userById.get(uid) ?? { id: uid, name: '?' });
 
+  /** Sub-task counters per parent, from the unfiltered list. */
+  const childStats = useMemo(() => {
+    const m = new Map<string, ChildStats>();
+    for (const x of allTasks) {
+      if (!x.parentId) continue;
+      const st = m.get(x.parentId) ?? { total: 0, done: 0 };
+      st.total += 1;
+      if (statusById.get(x.statusId)?.category === 'done') st.done += 1;
+      m.set(x.parentId, st);
+    }
+    return m;
+  }, [allTasks, statusById]);
+
+  const visibleTasks = useMemo(() => {
+    let list = applyFilters(allTasks, filters, (sid) => statusById.get(sid)?.category);
+    if (!prefs.showSubtasks) list = list.filter((x) => !x.parentId);
+    return list;
+  }, [allTasks, filters, prefs.showSubtasks, statusById]);
+
   const addTask = useMutation({
-    mutationFn: (vars: { title: string; statusId?: string }) => api.post('/tasks', { projectId: id, title: vars.title, statusId: vars.statusId }),
+    mutationFn: (vars: { title: string; seed?: Record<string, unknown> }) =>
+      api.post('/tasks', { projectId: id, title: vars.title, ...(vars.seed ?? {}) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks', id] }),
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('tasks.createFailed')),
   });
@@ -380,26 +460,44 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, onOpen }: 
     onSettled: () => qc.invalidateQueries({ queryKey: ['tasks', id] }),
   });
 
-  const byStatus = (sid: string) => tasks.filter((x) => x.statusId === sid);
+  const groups = useMemo(() => {
+    const grouping = prefs.view === 'board' ? 'status' : prefs.grouping;
+    return buildGroups(grouping, visibleTasks, statuses, users, labels, t)
+      .map((g) => ({ ...g, items: orderTasks(g.items, prefs.ordering) }))
+      .filter((g) => g.items.length > 0 || (prefs.showEmptyGroups && canWrite) || g.key === 'all');
+  }, [prefs.view, prefs.grouping, prefs.ordering, prefs.showEmptyGroups, visibleTasks, statuses, users, labels, canWrite, t]);
+
   const loading = statusesLoading || tasksQ.isLoading;
+  const { view } = prefs;
+  const filtered = allTasks.length > 0 && visibleTasks.length === 0;
 
   return (
-    <PageBody width="full">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <SegmentedControl
-          options={TASK_VIEWS.map((tv) => ({ key: tv.key, label: t(tv.labelKey), icon: <tv.icon size={14} />, title: t(tv.labelKey) }))}
-          value={view}
-          onChange={(v) => setView(v as TaskView)}
-        />
-        <SavedViewsBar projectId={id} currentView={view}
-          onApply={(v: SavedView) => { if (isTaskView(v.layout)) setView(v.layout); }} />
-      </div>
+    <div className="flex min-h-full flex-col">
+      <TasksToolbar
+        projectId={id}
+        prefs={prefs}
+        onPrefs={updatePrefs}
+        filters={filters}
+        onFilters={setFilters}
+        statuses={statuses}
+        labels={labels}
+        users={users}
+      />
 
       {loading ? (
-        <div className="space-y-2">{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-9" />)}</div>
+        <div className="space-y-px pt-2">
+          {[0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="mx-4 h-8" />)}
+        </div>
       ) : statuses.length === 0 ? (
         <EmptyState icon={<ListChecks size={20} />} title={t('projects.noWorkflow')} hint={t('projects.noWorkflowHint')} />
-      ) : tasks.length === 0 && (!canWrite || view === 'calendar' || view === 'timeline') ? (
+      ) : filtered ? (
+        <EmptyState
+          icon={<ListChecks size={20} />}
+          title={t('tasksview.noMatches')}
+          hint={t('tasksview.noMatchesHint')}
+          action={<Button size="sm" variant="outline" onClick={() => setFilters(EMPTY_FILTERS)}>{t('tasksview.clearFilters')}</Button>}
+        />
+      ) : allTasks.length === 0 && (!canWrite || view === 'calendar' || view === 'timeline') ? (
         // Writers see the list/board with inline "+ add" rows instead of a dead end.
         <EmptyState
           icon={<ListChecks size={20} />}
@@ -407,36 +505,59 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, onOpen }: 
           hint={canWrite ? t('projects.noTasksHint') : undefined}
         />
       ) : view === 'list' ? (
-        <ListView projectId={id} statuses={statuses} byStatus={byStatus} onOpen={onOpen} canWrite={canWrite} projectKey={projectKey}
-          resolveUsers={resolveUsers} onAdd={(title, statusId) => addTask.mutate({ title, statusId })} />
+        <ListView
+          projectId={id} projectKey={projectKey} statuses={statuses} groups={groups} prefs={prefs}
+          canWrite={canWrite} resolveUsers={resolveUsers} labelById={labelById} childStats={childStats} taskById={taskById}
+          onOpen={onOpen}
+          onToggleCollapse={(key) => updatePrefs({
+            collapsed: prefs.collapsed.includes(key) ? prefs.collapsed.filter((k) => k !== key) : [...prefs.collapsed, key],
+          })}
+          onAdd={(title, seed) => addTask.mutate({ title, seed })}
+        />
       ) : view === 'board' ? (
-        <BoardView projectId={id} statuses={statuses} byStatus={byStatus} onOpen={onOpen} canWrite={canWrite} projectKey={projectKey}
-          resolveUsers={resolveUsers} onAdd={(title, statusId) => addTask.mutate({ title, statusId })}
-          onMove={(taskId, statusId, version) => move.mutate({ taskId, statusId, version })} />
-      ) : view === 'calendar' ? (
-        <CalendarView tasks={tasks} projectKey={projectKey} onOpenTask={onOpen} />
-      ) : view === 'timeline' ? (
-        <TimelineView tasks={tasks} statuses={statuses} onOpenTask={onOpen} />
+        <div className="min-w-0 flex-1 px-4 py-3">
+          <BoardView
+            projectId={id} projectKey={projectKey} statuses={statuses} groups={groups} prefs={prefs}
+            canWrite={canWrite} resolveUsers={resolveUsers} labelById={labelById} childStats={childStats}
+            onOpen={onOpen}
+            onAdd={(title, seed) => addTask.mutate({ title, seed })}
+            onMove={(taskId, statusId, version) => move.mutate({ taskId, statusId, version })}
+          />
+        </div>
       ) : (
-        <SpreadsheetView tasks={tasks} statuses={statuses} projectId={id} onOpenTask={onOpen} />
+        <PageBody width="full">
+          {view === 'calendar' ? (
+            <CalendarView tasks={visibleTasks} projectKey={projectKey} onOpenTask={onOpen} />
+          ) : view === 'timeline' ? (
+            <TimelineView tasks={visibleTasks} statuses={statuses} onOpenTask={onOpen} />
+          ) : (
+            <SpreadsheetView tasks={visibleTasks} statuses={statuses} projectId={id} onOpenTask={onOpen} />
+          )}
+        </PageBody>
       )}
-    </PageBody>
+    </div>
   );
 }
 
-function QuickAdd({ statusId, onAdd, placeholder, variant = 'row' }: {
-  statusId?: string; onAdd: (title: string, statusId?: string) => void; placeholder: string; variant?: 'row' | 'card';
+function QuickAdd({ seed, onAdd, placeholder, variant = 'row', inputRef, onDismiss }: {
+  seed?: Record<string, unknown>; onAdd: (title: string, seed?: Record<string, unknown>) => void;
+  placeholder: string; variant?: 'row' | 'card'; inputRef?: (el: HTMLInputElement | null) => void;
+  /** Called on Escape or on blur with an empty draft — lets the list hide the row again. */
+  onDismiss?: () => void;
 }) {
   const [title, setTitle] = useState('');
   return (
     <form
-      onSubmit={(e: FormEvent) => { e.preventDefault(); const v = title.trim(); if (!v) return; onAdd(v, statusId); setTitle(''); }}
-      className={cn('flex items-center gap-2', variant === 'row' ? 'px-3 py-1.5' : 'px-2 py-1.5')}
+      onSubmit={(e: FormEvent) => { e.preventDefault(); const v = title.trim(); if (!v) return; onAdd(v, seed); setTitle(''); }}
+      className={cn('flex items-center gap-2.5', variant === 'row' ? 'h-9 px-4' : 'px-2 py-1.5')}
     >
       <Plus size={13} className="shrink-0 text-faint" />
       <input
+        ref={inputRef}
         value={title}
         onChange={(e) => setTitle(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Escape' && onDismiss) { e.stopPropagation(); setTitle(''); onDismiss(); } }}
+        onBlur={() => { if (!title.trim()) onDismiss?.(); }}
         placeholder={placeholder}
         className="h-6 flex-1 bg-transparent text-[13px] outline-none placeholder:text-faint"
       />
@@ -444,64 +565,161 @@ function QuickAdd({ statusId, onAdd, placeholder, variant = 'row' }: {
   );
 }
 
-/* ---- List view (grouped by status) ---- */
+/* ---- Shared row fragments (List + Board) ---- */
 
-function ListView({ projectId, statuses, byStatus, onOpen, canWrite, projectKey, resolveUsers, onAdd }: {
-  projectId: string; statuses: TaskStatus[]; byStatus: (sid: string) => Task[]; onOpen: (tid: string) => void;
-  canWrite: boolean; projectKey?: string; resolveUsers: (ids?: string[]) => UserLite[];
-  onAdd: (title: string, statusId?: string) => void;
+function labelChips(task: Task, labelById: Map<string, LabelLite>, max = 2): ReactNode {
+  const ls = (task.labelIds ?? []).map((lid) => labelById.get(lid)).filter((l): l is LabelLite => !!l);
+  if (ls.length === 0) return null;
+  const shown = ls.slice(0, max);
+  return (
+    <span className="hidden items-center gap-1 md:flex">
+      {shown.map((l) => (
+        <span key={l.id} className="inline-flex h-[18px] items-center gap-1 rounded-full border border-border px-1.5 text-[11px] text-muted-foreground">
+          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: l.color ?? '#8a8f98' }} />
+          {l.name}
+        </span>
+      ))}
+      {ls.length > max && <span className="text-[11px] tabular-nums text-faint">+{ls.length - max}</span>}
+    </span>
+  );
+}
+
+function ProgressPill({ stats }: { stats: ChildStats }) {
+  return (
+    <span className="inline-flex h-[18px] shrink-0 items-center gap-1 rounded-full border border-border px-1.5 text-[11px] tabular-nums text-muted-foreground">
+      <ProgressRing value={stats.total ? (stats.done / stats.total) * 100 : 0} size={11} stroke={2} />
+      {stats.done}/{stats.total}
+    </span>
+  );
+}
+
+/* ---- List view (grouped, Linear-density rows) ---- */
+
+function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, resolveUsers, labelById, childStats, taskById, onOpen, onToggleCollapse, onAdd }: {
+  projectId: string; projectKey?: string; statuses: TaskStatus[]; groups: TaskGroup[]; prefs: TaskViewPrefs;
+  canWrite: boolean; resolveUsers: (ids?: string[]) => UserLite[];
+  labelById: Map<string, LabelLite>; childStats: Map<string, ChildStats>; taskById: Map<string, Task>;
+  onOpen: (tid: string) => void; onToggleCollapse: (key: string) => void;
+  onAdd: (title: string, seed?: Record<string, unknown>) => void;
 }) {
   const t = useT();
+  const inputs = useRef(new Map<string, HTMLInputElement | null>());
+  // Linear keeps rows quiet: non-empty groups show the add-row only after "+".
+  const [adding, setAdding] = useState<string[]>([]);
+  const { props } = prefs;
+
+  const openQuickAdd = (key: string) => {
+    setAdding((a) => (a.includes(key) ? a : [...a, key]));
+    setTimeout(() => inputs.current.get(key)?.focus(), 30);
+  };
+
   return (
-    <div className="space-y-6">
-      {statuses.map((s) => {
-        const items = byStatus(s.id);
-        if (items.length === 0 && !canWrite) return null;
+    <div className="flex-1 pb-10">
+      {groups.map((g) => {
+        const collapsed = prefs.collapsed.includes(g.key);
+        const flat = g.key === 'all';
+        const quickAddVisible = canWrite && (g.items.length === 0 || flat || adding.includes(g.key));
         return (
-          <section key={s.id}>
-            <h3 className="mb-1.5 flex items-center gap-2 px-1 text-[13px] font-semibold">
-              <StatusIcon category={s.category} color={s.color} size={14} />
-              <span>{s.name}</span>
-              <span className="rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground">{items.length}</span>
-            </h3>
-            <div className="overflow-hidden rounded-lg border border-border bg-card">
-              {items.map((task, i) => {
-                const assignees = resolveUsers(task.assigneeIds);
-                const overdue = isOverdue(task.dueDate, s.category);
-                return (
-                  <TaskContextMenu
-                    key={task.id}
-                    task={task}
-                    projectId={projectId}
-                    projectKey={projectKey}
-                    statuses={statuses}
-                    canWrite={canWrite}
+          <section key={g.key}>
+            {!flat && (
+              <div className="group/hd flex h-8 items-center gap-2 bg-muted/40 pl-4 pr-2.5">
+                <button
+                  type="button"
+                  onClick={() => onToggleCollapse(g.key)}
+                  aria-expanded={!collapsed}
+                  aria-label={t('tasksview.collapse')}
+                  className="flex h-full min-w-0 flex-1 items-center gap-2 text-left"
+                >
+                  <span className="shrink-0 [&>svg]:block">{g.icon}</span>
+                  <span className="truncate text-[13px] font-medium">{g.label}</span>
+                  <span className="text-xs tabular-nums text-muted-foreground">{g.items.length}</span>
+                  <ChevronRight
+                    size={12}
+                    className={cn(
+                      'shrink-0 text-faint transition-all duration-150',
+                      collapsed ? 'opacity-100' : 'rotate-90 opacity-0 group-hover/hd:opacity-100',
+                    )}
+                  />
+                </button>
+                {canWrite && (
+                  <IconButton
+                    size="sm"
+                    aria-label={t('tasksview.addTask')}
+                    className="opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-hover/hd:opacity-100"
+                    onClick={() => {
+                      if (collapsed) onToggleCollapse(g.key);
+                      openQuickAdd(g.key);
+                    }}
                   >
-                    <button
-                      onClick={() => onOpen(task.id)}
-                      className={cn('row-enter flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors duration-150 hover:bg-muted/60',
-                        i > 0 && 'border-t border-border')}
-                      style={{ ['--i' as string]: Math.min(i, 10) }}
+                    <Plus size={14} />
+                  </IconButton>
+                )}
+              </div>
+            )}
+            {(!collapsed || flat) && (
+              <div>
+                {g.items.map((task, i) => {
+                  const st = statuses.find((s) => s.id === task.statusId);
+                  const assignees = resolveUsers(task.assigneeIds);
+                  const overdue = isOverdue(task.dueDate, st?.category);
+                  const parent = task.parentId ? taskById.get(task.parentId) : undefined;
+                  const stats = childStats.get(task.id);
+                  const ref = refLabel(task, projectKey);
+                  return (
+                    <TaskContextMenu
+                      key={task.id}
+                      task={task}
+                      projectId={projectId}
+                      projectKey={projectKey}
+                      statuses={statuses}
+                      canWrite={canWrite}
                     >
-                      <PriorityIcon priority={task.priority} size={15} />
-                      {refLabel(task, projectKey) && (
-                        <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{refLabel(task, projectKey)}</span>
-                      )}
-                      <span className="flex-1 truncate text-[13px]">{task.title}</span>
-                      {task.dueDate && (
-                        <span className={cn('shrink-0 text-xs tabular-nums', overdue ? 'text-destructive' : 'text-muted-foreground')}>{fmtDate(task.dueDate)}</span>
-                      )}
-                      {assignees.length > 0 && <AvatarGroup users={assignees} size={20} max={3} />}
-                    </button>
-                  </TaskContextMenu>
-                );
-              })}
-              {canWrite && (
-                <div className={cn(items.length > 0 && 'border-t border-border')}>
-                  <QuickAdd statusId={s.id} onAdd={onAdd} placeholder={t('projects.newTaskInline')} />
-                </div>
-              )}
-            </div>
+                      <button
+                        onClick={() => onOpen(task.id)}
+                        className={cn(
+                          'row-enter flex h-9 w-full items-center gap-2.5 px-4 text-left transition-colors duration-150 hover:bg-muted/50',
+                          (i > 0 || flat) && 'border-t border-border/60',
+                        )}
+                        style={{ ['--i' as string]: Math.min(i, 10) }}
+                      >
+                        {props.priority && <PriorityIcon priority={task.priority} size={15} />}
+                        {props.id && ref && (
+                          <span className="hidden w-16 shrink-0 truncate font-mono text-[11px] text-faint sm:block">{ref}</span>
+                        )}
+                        {props.status && <StatusIcon category={st?.category} color={st?.color} size={14} />}
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span className="truncate text-[13px] font-medium">{task.title}</span>
+                          {parent && (
+                            <span className="hidden min-w-0 max-w-44 truncate text-xs text-faint lg:block">› {parent.title}</span>
+                          )}
+                          {props.progress && stats && <ProgressPill stats={stats} />}
+                        </span>
+                        <span className="ml-auto flex shrink-0 items-center gap-2.5 pl-2">
+                          {props.labels && labelChips(task, labelById)}
+                          {props.dueDate && task.dueDate && (
+                            <span className={cn('text-xs tabular-nums', overdue ? 'text-destructive' : 'text-muted-foreground')}>
+                              {fmtDate(task.dueDate)}
+                            </span>
+                          )}
+                          {props.assignee && assignees.length > 0 && <AvatarGroup users={assignees} size={20} max={3} />}
+                        </span>
+                      </button>
+                    </TaskContextMenu>
+                  );
+                })}
+                {quickAddVisible && (
+                  <div className={cn((g.items.length > 0 || flat) && 'border-t border-border/60')}>
+                    <QuickAdd
+                      seed={g.seed}
+                      onAdd={onAdd}
+                      placeholder={t('projects.newTaskInline')}
+                      inputRef={(el) => inputs.current.set(g.key, el)}
+                      onDismiss={g.items.length > 0 && !flat ? () => setAdding((a) => a.filter((k) => k !== g.key)) : undefined}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
           </section>
         );
       })}
@@ -509,22 +727,28 @@ function ListView({ projectId, statuses, byStatus, onOpen, canWrite, projectKey,
   );
 }
 
-/* ---- Board view (drag & drop) ---- */
+/* ---- Board view (drag & drop, status columns) ---- */
 
-function BoardView({ projectId, statuses, byStatus, onOpen, canWrite, projectKey, resolveUsers, onAdd, onMove }: {
-  projectId: string; statuses: TaskStatus[]; byStatus: (sid: string) => Task[]; onOpen: (tid: string) => void;
-  canWrite: boolean; projectKey?: string; resolveUsers: (ids?: string[]) => UserLite[];
-  onAdd: (title: string, statusId?: string) => void;
+function BoardView({ projectId, projectKey, statuses, groups, prefs, canWrite, resolveUsers, labelById, childStats, onOpen, onAdd, onMove }: {
+  projectId: string; projectKey?: string; statuses: TaskStatus[]; groups: TaskGroup[]; prefs: TaskViewPrefs;
+  canWrite: boolean; resolveUsers: (ids?: string[]) => UserLite[];
+  labelById: Map<string, LabelLite>; childStats: Map<string, ChildStats>;
+  onOpen: (tid: string) => void;
+  onAdd: (title: string, seed?: Record<string, unknown>) => void;
   onMove: (taskId: string, statusId: string, version?: number) => void;
 }) {
   const t = useT();
   const [dragId, setDragId] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
+  const { props } = prefs;
+  const allItems = useMemo(() => groups.flatMap((g) => g.items), [groups]);
 
   return (
     <div className="flex gap-3 overflow-x-auto pb-2">
-      {statuses.map((s) => {
-        const items = byStatus(s.id);
+      {groups.map((g) => {
+        const s = statuses.find((x) => `status:${x.id}` === g.key);
+        if (!s) return null;
+        const items = g.items;
         const isOver = overCol === s.id;
         return (
           <div
@@ -536,7 +760,7 @@ function BoardView({ projectId, statuses, byStatus, onOpen, canWrite, projectKey
               const taskId = e.dataTransfer.getData('text/task-id') || dragId;
               setOverCol(null); setDragId(null);
               if (!taskId) return;
-              const src = statuses.flatMap((st) => byStatus(st.id)).find((x) => x.id === taskId);
+              const src = allItems.find((x) => x.id === taskId);
               if (src && src.statusId !== s.id) onMove(taskId, s.id, src.version);
             }}
             className={cn(
@@ -555,6 +779,8 @@ function BoardView({ projectId, statuses, byStatus, onOpen, canWrite, projectKey
               {items.map((task) => {
                 const assignees = resolveUsers(task.assigneeIds);
                 const overdue = isOverdue(task.dueDate, s.category);
+                const stats = childStats.get(task.id);
+                const ref = refLabel(task, projectKey);
                 return (
                   <TaskContextMenu
                     key={task.id}
@@ -577,17 +803,21 @@ function BoardView({ projectId, statuses, byStatus, onOpen, canWrite, projectKey
                       )}
                     >
                       <div className="flex items-start gap-1.5">
-                        <span className="mt-0.5"><PriorityIcon priority={task.priority} size={14} /></span>
-                        <span className="flex-1 text-[13px] leading-snug">{task.title}</span>
+                        {props.priority && <span className="mt-0.5"><PriorityIcon priority={task.priority} size={14} /></span>}
+                        <span className="flex-1 text-[13px] font-medium leading-snug">{task.title}</span>
+                        {props.progress && stats && <ProgressPill stats={stats} />}
                       </div>
+                      {props.labels && (task.labelIds ?? []).length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1">{labelChips(task, labelById, 3)}</div>
+                      )}
                       <div className="mt-2 flex items-center gap-2">
-                        {refLabel(task, projectKey) && (
-                          <span className="font-mono text-[11px] text-muted-foreground">{refLabel(task, projectKey)}</span>
+                        {props.id && ref && (
+                          <span className="font-mono text-[11px] text-muted-foreground">{ref}</span>
                         )}
-                        {task.dueDate && (
+                        {props.dueDate && task.dueDate && (
                           <span className={cn('text-[11px] tabular-nums', overdue ? 'text-destructive' : 'text-muted-foreground')}>{fmtDate(task.dueDate)}</span>
                         )}
-                        {assignees.length > 0 && <span className="ml-auto"><AvatarGroup users={assignees} size={18} max={3} /></span>}
+                        {props.assignee && assignees.length > 0 && <span className="ml-auto"><AvatarGroup users={assignees} size={18} max={3} /></span>}
                       </div>
                     </div>
                   </TaskContextMenu>
@@ -595,7 +825,7 @@ function BoardView({ projectId, statuses, byStatus, onOpen, canWrite, projectKey
               })}
               {canWrite && (
                 <div className="rounded-lg border border-dashed border-border">
-                  <QuickAdd statusId={s.id} onAdd={onAdd} placeholder={t('projects.newTaskInline')} variant="card" />
+                  <QuickAdd seed={g.seed} onAdd={onAdd} placeholder={t('projects.newTaskInline')} variant="card" />
                 </div>
               )}
             </div>
