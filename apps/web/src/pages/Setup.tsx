@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowRight, Building2, Eye, EyeOff, UserCog } from 'lucide-r
 import { api, ApiError, setSessionToken } from '../lib/api';
 import { isTauri } from '../lib/desktop';
 import { Button, Card, Input, Spinner, cn } from '../components/ui';
+import { BrandMark } from '../components/BrandMark';
 import { extendDict, useT } from '../lib/i18n';
 
 extendDict({
@@ -225,7 +226,7 @@ export function SetupPage() {
 
       <Card className="anim-pop-in relative w-full max-w-sm p-7 shadow-pop">
         <div className="mb-6 flex flex-col items-center gap-3 text-center">
-          <div className="grid h-10 w-10 place-items-center rounded-lg bg-primary text-base font-semibold text-primary-foreground shadow-sm">o</div>
+          <BrandMark size={40} />
           <ProgressDots step={step} total={3} />
         </div>
 

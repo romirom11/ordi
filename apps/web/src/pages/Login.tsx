@@ -4,6 +4,7 @@ import { KeyRound } from 'lucide-react';
 import { api, ApiError, setSessionToken } from '../lib/api';
 import { isTauri } from '../lib/desktop';
 import { Button, Input, Card, Spinner } from '../components/ui';
+import { BrandMark } from '../components/BrandMark';
 import { useT } from '../lib/i18n';
 
 export function LoginPage() {
@@ -70,7 +71,7 @@ export function LoginPage() {
 
       <Card className="anim-pop-in relative w-full max-w-sm p-7 shadow-pop">
         <div className="mb-7 flex flex-col items-center gap-3 text-center">
-          <div className="grid h-10 w-10 place-items-center rounded-lg bg-primary text-base font-semibold text-primary-foreground shadow-sm">o</div>
+          <BrandMark size={40} />
           <div>
             <h1 className="text-base font-semibold">{t('auth.signIn')}</h1>
             <p className="text-sm text-muted-foreground">{t('auth.useWorkEmail')}</p>

@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api, ApiError } from '../lib/api';
 import { useSearchParams } from '../lib/router';
 import { Button, Input, Card, Spinner } from '../components/ui';
+import { BrandMark } from '../components/BrandMark';
 import { useT } from '../lib/i18n';
 
 interface InvitePreview {
@@ -61,7 +62,7 @@ export function AcceptInvitePage() {
 
       <Card className="anim-pop-in relative w-full max-w-sm p-7 shadow-pop">
         <div className="mb-7 flex flex-col items-center gap-3 text-center">
-          <div className="grid h-10 w-10 place-items-center rounded-lg bg-primary text-base font-semibold text-primary-foreground shadow-sm">o</div>
+          <BrandMark size={40} />
           {!token || invite.isError ? null : (
             <div>
               <h1 className="text-base font-semibold">{t('auth.acceptInvite')}</h1>

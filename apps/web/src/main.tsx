@@ -18,6 +18,7 @@ import { PortalPage } from './pages/public/Portal';
 import { IntakeFormPage } from './pages/public/Intake';
 import { CareersPage } from './pages/public/Careers';
 import { Spinner, Button, Input, Card } from './components/ui';
+import { BrandMark } from './components/BrandMark';
 import { installErrorReporting } from './lib/sentry';
 import { isTauri } from './lib/desktop';
 import { getInstanceUrl, setInstanceUrl } from './lib/api';
@@ -57,7 +58,7 @@ function InstanceGate() {
     <div className="grid min-h-screen place-items-center bg-muted/30 px-4">
       <Card className="w-full max-w-sm p-6">
         <div className="mb-1 flex items-center gap-2 font-semibold">
-          <div className="grid h-6 w-6 place-items-center rounded bg-primary text-primary-foreground text-xs">o</div>
+          <BrandMark size={24} />
           ordi
         </div>
         <p className="mb-4 text-sm text-muted-foreground">{t('desktop.connectTitle')}</p>
