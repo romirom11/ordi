@@ -1,11 +1,11 @@
 import { Routes, type RouteDef } from './lib/router';
 import { DashboardPage } from './pages/Dashboard';
 import { MyTasksPage } from './pages/MyTasks';
-import { CompaniesPage } from './pages/Companies';
 import { CompanyDetailPage } from './pages/CompanyDetail';
-import { DealsPage } from './pages/Deals';
+import { CrmPage } from './pages/Crm';
 import { ProjectsPage } from './pages/Projects';
 import { ProjectDetailPage } from './pages/ProjectDetail';
+import { TaskPage } from './pages/TaskPage';
 import { KbPage } from './pages/Kb';
 import { TimePage } from './pages/Time';
 import { FinancePage } from './pages/Finance';
@@ -19,12 +19,14 @@ import { ProfilePage } from './pages/Profile';
 const routes: RouteDef[] = [
   { pattern: '/', render: () => <DashboardPage /> },
   { pattern: '/my-tasks', render: () => <MyTasksPage /> },
-  { pattern: '/companies', render: () => <CompaniesPage /> },
+  { pattern: '/crm', render: () => <CrmPage /> },
+  { pattern: '/crm/:tab', render: (p) => <CrmPage tab={p.tab} /> },
+  { pattern: '/companies', render: () => <CrmPage tab="clients" /> },
   { pattern: '/companies/:id', render: (p) => <CompanyDetailPage id={p.id!} /> },
-  { pattern: '/deals', render: () => <DealsPage /> },
+  { pattern: '/deals', render: () => <CrmPage tab="deals" /> },
   { pattern: '/projects', render: () => <ProjectsPage /> },
   { pattern: '/projects/:id', render: (p) => <ProjectDetailPage id={p.id!} /> },
-  { pattern: '/projects/:id/tasks/:taskId', render: (p) => <ProjectDetailPage id={p.id!} taskId={p.taskId} /> },
+  { pattern: '/projects/:id/tasks/:taskId', render: (p) => <TaskPage projectId={p.id!} taskId={p.taskId!} /> },
   { pattern: '/kb', render: () => <KbPage /> },
   { pattern: '/kb/:spaceId', render: (p) => <KbPage spaceId={p.spaceId} /> },
   { pattern: '/kb/:spaceId/:pageId', render: (p) => <KbPage spaceId={p.spaceId} pageId={p.pageId} /> },

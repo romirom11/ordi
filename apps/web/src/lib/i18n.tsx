@@ -25,6 +25,12 @@ const en: Dict = {
   'nav.settings': 'Settings',
   'nav.search': 'Search',
   'nav.signOut': 'Sign out',
+  'nav.crm': 'CRM',
+  'nav.profile': 'Profile',
+  'theme.title': 'Theme',
+  'theme.dark': 'Dark',
+  'theme.light': 'Light',
+  'theme.system': 'System',
   // common
   'common.create': 'Create',
   'common.cancel': 'Cancel',
@@ -563,6 +569,12 @@ const uk: Dict = {
   'nav.settings': 'Налаштування',
   'nav.search': 'Пошук',
   'nav.signOut': 'Вийти',
+  'nav.crm': 'CRM',
+  'nav.profile': 'Профіль',
+  'theme.title': 'Тема',
+  'theme.dark': 'Темна',
+  'theme.light': 'Світла',
+  'theme.system': 'Системна',
   'common.create': 'Створити',
   'common.cancel': 'Скасувати',
   'common.save': 'Зберегти',
@@ -1080,6 +1092,17 @@ const uk: Dict = {
 };
 
 const DICTS: Record<Locale, Dict> = { en, uk };
+
+/**
+ * Feature modules register their own strings at import time via extendDict —
+ * this keeps page-specific keys next to the page instead of in this file, and
+ * lets independent features add strings without touching a shared file.
+ * Must be called at module top level (before components render).
+ */
+export function extendDict(dicts: { en: Dict; uk: Dict }): void {
+  Object.assign(DICTS.en, dicts.en);
+  Object.assign(DICTS.uk, dicts.uk);
+}
 
 interface I18n {
   locale: Locale;

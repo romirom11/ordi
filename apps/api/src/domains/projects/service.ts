@@ -809,7 +809,7 @@ export async function myTasks(actor: Actor) {
   const weekEnd = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
 
   const assigned = await db.execute(sql`
-    select t.id, t.title, t.due_date, t.priority, t.number, p.key, ts.category
+    select t.id, t.title, t.due_date, t.priority, t.number, t.project_id, p.key, ts.category, ts.name as status_name, ts.color as status_color
     from tasks t
     join task_assignees ta on ta.task_id = t.id and ta.user_id = ${actor.userId}
     join projects p on p.id = t.project_id
@@ -818,7 +818,7 @@ export async function myTasks(actor: Actor) {
     order by t.due_date nulls last`) as any[];
 
   const createdUnassigned = await db.execute(sql`
-    select t.id, t.title, t.due_date, t.priority, t.number, p.key, ts.category
+    select t.id, t.title, t.due_date, t.priority, t.number, t.project_id, p.key, ts.category, ts.name as status_name, ts.color as status_color
     from tasks t
     join projects p on p.id = t.project_id
     join task_statuses ts on ts.id = t.status_id
