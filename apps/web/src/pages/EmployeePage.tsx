@@ -9,9 +9,10 @@ import {
 } from '../components/ui';
 import { DropdownMenu, MenuItem, toast } from '../components/overlays';
 import { CompensationDialog } from '../components/people/CompensationDialog';
+import { EditEmployeeDialog } from '../components/people/EditEmployeeDialog';
 import {
   Users, MoreHorizontal, UserCheck, UserX, Plus, Lock, Mail, Briefcase,
-  CalendarClock, UserCog, AtSign,
+  CalendarClock, UserCog, AtSign, Pencil,
 } from 'lucide-react';
 import { usePageTitle } from '../lib/tabs';
 import { useT, extendDict } from '../lib/i18n';
@@ -98,6 +99,7 @@ export function EmployeePage({ id }: { id: string }) {
   const canWrite = can('people.write');
   const canComp = can('people.read_compensation');
   const [compOpen, setCompOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
 
   const employee = useQuery({ queryKey: ['employee', id], queryFn: () => api.get<EmployeeDetail>(`/employees/${id}`) });
   const positions = useQuery({ queryKey: ['positions'], queryFn: () => api.get<{ data: Position[] }>('/positions') });
@@ -141,6 +143,11 @@ export function EmployeePage({ id }: { id: string }) {
       <Breadcrumbs items={[{ label: t('nav.people'), to: '/people', icon: <Users size={13} /> }]} />
       <div className="ml-auto flex shrink-0 items-center gap-2">
         <StatusPill status={e?.status ?? 'active'} />
+        {canWrite && e && (
+          <Button size="sm" variant="outline" onClick={() => setEditOpen(true)}>
+            <Pencil size={13} /> {t('common.edit')}
+          </Button>
+        )}
         {canWrite && (
           <DropdownMenu align="end" trigger={<Button size="sm" variant="outline">{t('people.actions')} <MoreHorizontal size={14} /></Button>}>
             <MenuItem icon={<UserCheck size={13} />} onSelect={() => lifecycle.mutate('onboard')} disabled={lifecycle.isPending}>{t('people.onboard')}</MenuItem>
@@ -205,9 +212,9 @@ export function EmployeePage({ id }: { id: string }) {
           <h2 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-faint">{t('people.basicInfo')}</h2>
           <div className="divide-y divide-border rounded-xl border border-border bg-card px-4">
             {/* Position and department are already stated in the hero. */}
-            <InfoRow icon={<UserCog size={13} />} label={t('people.manager')} value={managerName ?? '—'} />
-            <InfoRow icon={<Briefcase size={13} />} label={t('people.employmentType')} value={e.employmentType ? t(EMP_TYPE_KEY[e.employmentType] ?? '') || e.employmentType : '—'} />
-            <InfoRow icon={<CalendarClock size={13} />} label={t('people.joinDate')} value={e.joinDate ? fmtDate(e.joinDate) : '—'} />
+            <InfoRow icon={<UserCog size={13} />} label={t('people.manager')} value={managerName ?? '–'} />
+            <InfoRow icon={<Briefcase size={13} />} label={t('people.employmentType')} value={e.employmentType ? t(EMP_TYPE_KEY[e.employmentType] ?? '') || e.employmentType : '–'} />
+            <InfoRow icon={<CalendarClock size={13} />} label={t('people.joinDate')} value={e.joinDate ? fmtDate(e.joinDate) : '–'} />
             {e.probationEnd && <InfoRow icon={<CalendarClock size={13} />} label={t('people.probationEnd')} value={fmtDate(e.probationEnd)} />}
             {e.exitDate && <InfoRow icon={<CalendarClock size={13} />} label={t('people.exitDate')} value={fmtDate(e.exitDate)} />}
           </div>
@@ -261,6 +268,7 @@ export function EmployeePage({ id }: { id: string }) {
       </PageBody>
 
       <CompensationDialog employeeId={id} open={compOpen} onClose={() => setCompOpen(false)} />
+      {canWrite && <EditEmployeeDialog employee={e} open={editOpen} onClose={() => setEditOpen(false)} />}
     </div>
   );
 }

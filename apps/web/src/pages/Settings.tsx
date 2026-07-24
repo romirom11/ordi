@@ -4,7 +4,7 @@ import { PERMISSIONS, PERMISSION_META, type Permission } from '@ordi/shared';
 import {
   Building2, ArrowLeftRight, Users as UsersIcon, Shield, SlidersHorizontal, Wallet, Plug,
   ScrollText, Inbox, Plus, Copy, Upload, Trash2, Lock, Globe, ImageIcon, ChevronRight,
-  ChevronLeft, MoreHorizontal, Check, RotateCcw, Boxes, Receipt, FolderKanban,
+  ChevronLeft, MoreHorizontal, Check, RotateCcw, Boxes, Receipt, FolderKanban, Bot,
 } from 'lucide-react';
 import { api, qs } from '../lib/api';
 import { Link } from '../lib/router';
@@ -15,6 +15,7 @@ import {
 import { Dialog, ConfirmDialog, DropdownMenu, MenuItem, toast } from '../components/overlays';
 import { ImportExportPanel } from '../components/ImportExportPanel';
 import { IntegrationsPanel } from '../components/settings/IntegrationsPanel';
+import { McpPanel } from '../components/settings/McpPanel';
 import { InvoicesPanel } from '../components/settings/InvoicesPanel';
 import { ModulesPanel } from '../components/settings/ModulesPanel';
 import { ChartOfAccountsBlock, ExpenseCategoriesBlock } from '../components/finance/accounts';
@@ -38,7 +39,7 @@ extendDict({
     'settings.upload': 'Upload',
     'settings.remove': 'Remove',
     'settings.dropImage': 'Drop image here',
-    'settings.logoTooLarge': 'Image too large after processing — try a simpler image.',
+    'settings.logoTooLarge': 'Image too large after processing – try a simpler image.',
     'settings.logoInvalid': "Couldn't read that image.",
     'settings.logoUpdated': 'Logo updated',
     'settings.workingDays': 'Working days',
@@ -64,7 +65,7 @@ extendDict({
     'settings.inviteCopyHint': 'Share this link so they can set up their account.',
     'settings.noUsers': 'No members yet',
     'settings.permissions': 'Permissions',
-    'settings.systemRoleLocked': 'System role — permissions are fixed.',
+    'settings.systemRoleLocked': 'System role – permissions are fixed.',
     'settings.deleteRole': 'Delete role',
     'settings.deleteRoleConfirm': 'Delete this role? Members will need a new role assigned.',
     'settings.backToRoles': 'All roles',
@@ -72,7 +73,7 @@ extendDict({
     'settings.members': 'members',
     'settings.invoices': 'Invoices',
     'settings.saveFailed': 'Could not save changes',
-    'settings.conflict': 'Someone else made changes — reloaded latest.',
+    'settings.conflict': 'Someone else made changes – reloaded latest.',
     'settings.unit.hours': 'hours',
     'settings.unit.points': 'points',
     'settings.unit.days': 'days',
@@ -89,7 +90,7 @@ extendDict({
     'settings.upload': 'Завантажити',
     'settings.remove': 'Видалити',
     'settings.dropImage': 'Перетягніть зображення сюди',
-    'settings.logoTooLarge': 'Зображення завелике після обробки — оберіть простіше.',
+    'settings.logoTooLarge': 'Зображення завелике після обробки – оберіть простіше.',
     'settings.logoInvalid': 'Не вдалося прочитати зображення.',
     'settings.logoUpdated': 'Логотип оновлено',
     'settings.workingDays': 'Робочі дні',
@@ -115,7 +116,7 @@ extendDict({
     'settings.inviteCopyHint': 'Надішліть це посилання, щоб вони налаштували обліковий запис.',
     'settings.noUsers': 'Ще немає учасників',
     'settings.permissions': 'Дозволи',
-    'settings.systemRoleLocked': 'Системна роль — дозволи незмінні.',
+    'settings.systemRoleLocked': 'Системна роль – дозволи незмінні.',
     'settings.deleteRole': 'Видалити роль',
     'settings.deleteRoleConfirm': 'Видалити цю роль? Учасникам знадобиться нова роль.',
     'settings.backToRoles': 'Усі ролі',
@@ -123,7 +124,7 @@ extendDict({
     'settings.members': 'учасників',
     'settings.invoices': 'Інвойси',
     'settings.saveFailed': 'Не вдалося зберегти зміни',
-    'settings.conflict': 'Хтось інший вніс зміни — завантажено найновіше.',
+    'settings.conflict': 'Хтось інший вніс зміни – завантажено найновіше.',
     // Permission catalog (labels come from the shared package in English).
     'perm.crm.read': 'Перегляд компаній і контактів',
     'perm.crm.write': 'Створення/редагування компаній і контактів',
@@ -185,7 +186,7 @@ extendDict({
   },
 });
 
-interface NavItem { id: string; label: string; perm: string; icon: React.ComponentType<{ size?: number }> }
+interface NavItem { id: string; label: string; perm?: string; icon: React.ComponentType<{ size?: number }> }
 interface NavGroup { label: string; items: NavItem[] }
 
 const GROUPS: NavGroup[] = [
@@ -212,6 +213,8 @@ const GROUPS: NavGroup[] = [
       { id: 'finance', label: 'nav.finance', perm: 'finance.settings', icon: Wallet },
       { id: 'invoices', label: 'settings.invoices', perm: 'finance.settings', icon: Receipt },
       { id: 'integrations', label: 'settings.integrations', perm: 'integrations.manage', icon: Plug },
+      // Personal MCP/API tokens — available to every authenticated user, no perm gate.
+      { id: 'mcp', label: 'settings.mcp', icon: Bot },
     ],
   },
   {
@@ -226,7 +229,7 @@ const GROUPS: NavGroup[] = [
 export function SettingsPage({ section }: { section?: string }) {
   const t = useT();
   const can = useCan();
-  const groups = GROUPS.map((g) => ({ ...g, items: g.items.filter((n) => can(n.perm)) })).filter((g) => g.items.length > 0);
+  const groups = GROUPS.map((g) => ({ ...g, items: g.items.filter((n) => !n.perm || can(n.perm)) })).filter((g) => g.items.length > 0);
   const flat = groups.flatMap((g) => g.items);
   const requested = section ?? 'workspace';
   const active = flat.find((i) => i.id === requested) ?? flat[0];
@@ -283,6 +286,7 @@ export function SettingsPage({ section }: { section?: string }) {
             {active.id === 'finance' && <FinancePanel />}
             {active.id === 'invoices' && <InvoicesPanel />}
             {active.id === 'integrations' && <IntegrationsPanel />}
+            {active.id === 'mcp' && <McpPanel />}
             {active.id === 'audit' && <AuditPanel />}
             {active.id === 'events' && <DlqPanel />}
             {active.id === 'import-export' && <ImportExportPanel />}
@@ -479,7 +483,7 @@ function UsersPanel() {
   });
 
   const roleList = roles.data?.data ?? [];
-  const roleName = (id?: string | null) => roleList.find((r) => r.id === id)?.name ?? '—';
+  const roleName = (id?: string | null) => roleList.find((r) => r.id === id)?.name ?? '–';
   const rows = users.data?.data ?? [];
 
   return (
@@ -498,7 +502,7 @@ function UsersPanel() {
               <Avatar name={u.name} src={u.avatar} size={28} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="truncate text-[13px] font-medium">{u.name ?? '—'}</span>
+                  <span className="truncate text-[13px] font-medium">{u.name ?? '–'}</span>
                   {u.isActive === false && <Badge className="bg-destructive/10 text-destructive">{t('settings.deactivated')}</Badge>}
                 </div>
                 <div className="truncate text-xs text-faint">{u.email}</div>
@@ -509,7 +513,7 @@ function UsersPanel() {
                 className="h-7 w-36 text-xs"
                 title={roleName(u.roleId)}
               >
-                {!u.roleId && <option value="">—</option>}
+                {!u.roleId && <option value="">–</option>}
                 {roleList.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
               </Select>
               <DropdownMenu align="end" trigger={<Button variant="ghost" size="sm" className="h-7 w-7 px-0"><MoreHorizontal size={15} /></Button>}>
@@ -800,8 +804,8 @@ function CustomFieldsPanel() {
           {rows.map((f) => (
             <div key={f.id} className="flex items-center gap-3 border-b border-border px-3 py-2.5 text-[13px] last:border-0">
               <span className="font-mono text-[11px] text-muted-foreground">{f.key}</span>
-              <span className="flex-1">{f.label ?? '—'}</span>
-              <Badge>{f.type ?? '—'}</Badge>
+              <span className="flex-1">{f.label ?? '–'}</span>
+              <Badge>{f.type ?? '–'}</Badge>
               {f.required && <Badge className="bg-warning/15 text-warning">{t('settings.required')}</Badge>}
             </div>
           ))}
@@ -830,7 +834,7 @@ function FinancePanel() {
         <RowList>
           {rows.map((tr) => (
             <div key={tr.id} className="flex items-center justify-between border-b border-border px-3 py-2.5 text-[13px] last:border-0">
-              <span>{tr.name ?? '—'}</span>
+              <span>{tr.name ?? '–'}</span>
               <span className="tabular-nums text-muted-foreground">{Number(tr.ratePercent ?? 0)}%</span>
             </div>
           ))}

@@ -11,9 +11,10 @@ import {
 import { Dialog, DropdownMenu, MenuItem, ContextMenu, toast, type ContextMenuEntry } from '../components/overlays';
 import {
   Plus, Check, X, UserPlus, Users, CalendarClock, Briefcase,
-  ChevronRight, LayoutGrid, Sparkles, ExternalLink, Copy, FilePlus, IdCard,
+  ChevronRight, LayoutGrid, Sparkles, ExternalLink, Copy, FilePlus, IdCard, Network,
 } from 'lucide-react';
 import { CreateProfileDialog, type CreateProfileTarget } from '../components/people/CreateProfileDialog';
+import { OrgStructureView } from '../components/people/OrgStructureView';
 import { useT, extendDict } from '../lib/i18n';
 
 extendDict({
@@ -48,7 +49,8 @@ extendDict({
     'people.copyEmail': 'Copy email',
     'people.emailCopied': 'Email copied',
     'people.noEmail': 'No email',
-    'people.directoryHint': 'Everyone in the workspace shows here — including users without an employee profile yet.',
+    'people.directoryHint': 'Everyone in the workspace shows here – including users without an employee profile yet.',
+    'people.org': 'Organization',
   },
   uk: {
     'people.statusActive': 'Активний',
@@ -81,7 +83,8 @@ extendDict({
     'people.copyEmail': 'Копіювати ел. пошту',
     'people.emailCopied': 'Ел. пошту скопійовано',
     'people.noEmail': 'Немає ел. пошти',
-    'people.directoryHint': 'Тут показані всі люди робочого простору — зокрема користувачі, які ще не мають профілю співробітника.',
+    'people.directoryHint': 'Тут показані всі люди робочого простору – зокрема користувачі, які ще не мають профілю співробітника.',
+    'people.org': 'Організація',
   },
 });
 
@@ -127,7 +130,7 @@ function StatusPill({ status, meta }: { status: string; meta: Record<string, { c
   );
 }
 
-type Tab = 'employees' | 'leave' | 'recruiting' | 'dashboard';
+type Tab = 'employees' | 'leave' | 'recruiting' | 'org' | 'dashboard';
 
 export function PeoplePage() {
   const t = useT();
@@ -142,6 +145,7 @@ export function PeoplePage() {
     { key: 'employees', label: t('people.employees'), icon: <Users size={13} />, show: true },
     { key: 'leave', label: t('people.leave'), icon: <CalendarClock size={13} />, show: true },
     { key: 'recruiting', label: t('people.recruiting'), icon: <Briefcase size={13} />, show: can('people.recruit') },
+    { key: 'org', label: t('people.org'), icon: <Network size={13} />, show: can('people.write') },
     { key: 'dashboard', label: t('nav.dashboard'), icon: <LayoutGrid size={13} />, show: true },
   ];
 
@@ -154,6 +158,7 @@ export function PeoplePage() {
       {tab === 'employees' && <DirectoryView />}
       {tab === 'leave' && <LeaveView />}
       {tab === 'recruiting' && can('people.recruit') && <RecruitingView />}
+      {tab === 'org' && can('people.write') && <OrgStructureView />}
       {tab === 'dashboard' && <PeopleDashboardView />}
     </div>
   );
@@ -305,7 +310,7 @@ function DirectoryView() {
                         <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{t('people.noProfile')}</span>
                       )}
                     </div>
-                    <div className="truncate text-xs text-faint">{r.position ?? '—'}</div>
+                    <div className="truncate text-xs text-faint">{r.position ?? '–'}</div>
                   </div>
                   {dept && <Badge color={deptColor(dept)} className="hidden shrink-0 sm:inline-flex">{dept}</Badge>}
                   <StatusPill status={r.status} meta={DIR_STATUS_META} />
@@ -388,8 +393,8 @@ function LeaveView() {
               >
                 <Avatar name={r.employeeName} size={26} />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium text-foreground">{r.employeeName ?? '—'}</div>
-                  <div className="truncate text-xs text-faint">{r.leaveTypeName ?? '—'}</div>
+                  <div className="truncate font-medium text-foreground">{r.employeeName ?? '–'}</div>
+                  <div className="truncate text-xs text-faint">{r.leaveTypeName ?? '–'}</div>
                 </div>
                 <div className="hidden shrink-0 items-center gap-1 text-xs text-muted-foreground sm:flex">
                   <span className="tabular-nums">{fmtDate(r.fromDate)}</span>

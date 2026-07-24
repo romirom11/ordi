@@ -54,7 +54,7 @@ extendDict({
     'subs.company': 'Linked client',
     'subs.notes': 'Notes',
     'subs.autoExpense': 'Auto-create expense',
-    'subs.autoExpenseHint': 'Автоматично створювати витрату при кожному списанні',
+    'subs.autoExpenseHint': 'Create an expense automatically on each charge',
     'subs.autoExpenseHintEn': 'Create an expense automatically on each charge',
     'subs.perMonth': '/mo',
     'subs.every.weekly': 'Weekly',
@@ -283,70 +283,63 @@ export function RecurringExpensesSection() {
   );
 }
 
-function MonthlyTotalCard({ monthlyTotal, activeCount, loading }: {
+/** Compact chip with the monthly-normalized total per currency + active count. */
+function MonthlyTotalChip({ monthlyTotal, activeCount, loading }: {
   monthlyTotal?: Record<string, number>; activeCount: number; loading: boolean;
 }) {
   const t = useT();
   const entries = Object.entries(monthlyTotal ?? {}).filter(([, v]) => v > 0);
+  if (loading) return <Skeleton className="h-6 w-36 rounded-full" />;
   return (
-    <Card className="p-4">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <Wallet size={14} /> {t('subs.monthlyTotal')}
-      </div>
-      {loading ? (
-        <Skeleton className="mt-2 h-8 w-32" />
-      ) : entries.length === 0 ? (
-        <div className="mt-1 text-2xl font-semibold tabular-nums text-muted-foreground">—</div>
+    <span className="anim-fade-in inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/60 px-2.5 py-1 text-xs text-muted-foreground">
+      <Wallet size={13} className="shrink-0" />
+      {entries.length === 0 ? (
+        <span className="font-medium">–</span>
       ) : (
-        <div className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-          {entries.map(([cur, val]) => (
-            <span key={cur} className="text-2xl font-semibold tabular-nums">{fmtMoney(val, cur)}</span>
-          ))}
-        </div>
+        <span className="font-semibold tabular-nums text-foreground">
+          {entries.map(([cur, val]) => `${fmtMoney(val, cur)}${t('subs.perMonth')}`).join(' · ')}
+        </span>
       )}
-      <div className="mt-1.5 text-xs text-faint">{t('subs.activeCount').replace('{n}', String(activeCount))}</div>
-    </Card>
+      <span className="tabular-nums">· {t('subs.activeCount').replace('{n}', String(activeCount))}</span>
+    </span>
   );
 }
 
-function UpcomingCard({ upcoming, loading }: {
+/** Horizontal next-30-days strip; hidden when there is nothing upcoming. */
+function UpcomingStrip({ upcoming, loading }: {
   upcoming: Summary['upcoming']; loading: boolean;
 }) {
   const t = useT();
+  if (loading) {
+    return <div className="flex gap-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-12 w-44 rounded-lg" />)}</div>;
+  }
+  if (upcoming.length === 0) return null;
   return (
-    <Card className="p-4">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+    <div className="flex items-center gap-2 overflow-x-auto pb-1">
+      <span className="flex shrink-0 items-center gap-1.5 pr-1 text-xs text-muted-foreground">
         <CalendarClock size={14} /> {t('subs.upcoming')}
-      </div>
-      {loading ? (
-        <div className="mt-3 flex gap-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-12 w-40 rounded-lg" />)}</div>
-      ) : upcoming.length === 0 ? (
-        <p className="mt-3 text-[13px] text-muted-foreground">{t('subs.noUpcoming')}</p>
-      ) : (
-        <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-          {upcoming.map((u) => {
-            const soon = daysUntil(u.date) <= 7;
-            return (
-              <div
-                key={u.id}
-                className="flex min-w-[150px] shrink-0 items-center gap-2.5 rounded-lg border border-border bg-muted/30 px-3 py-2"
-              >
-                <span className={cn(
-                  'grid h-8 w-8 shrink-0 place-items-center rounded-md text-[11px] font-semibold leading-none tabular-nums',
-                  soon ? 'bg-warning/15 text-warning' : 'bg-muted text-muted-foreground',
-                )}>
-                  {fmtDate(u.date)}
-                </span>
-                <div className="min-w-0">
-                  <div className="truncate text-[13px] font-medium">{u.name}</div>
-                  <div className="text-xs tabular-nums text-muted-foreground">{fmtMoney(u.amount, u.currency)}</div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </Card>
+      </span>
+      {upcoming.map((u) => {
+        const soon = daysUntil(u.date) <= 7;
+        return (
+          <div
+            key={u.id}
+            className="anim-fade-in flex min-w-[150px] shrink-0 items-center gap-2.5 rounded-lg border border-border bg-muted/30 px-3 py-1.5"
+          >
+            <span className={cn(
+              'grid h-8 w-8 shrink-0 place-items-center rounded-md text-[11px] font-semibold leading-none tabular-nums',
+              soon ? 'bg-warning/15 text-warning' : 'bg-muted text-muted-foreground',
+            )}>
+              {fmtDate(u.date)}
+            </span>
+            <div className="min-w-0">
+              <div className="truncate text-[13px] font-medium">{u.name}</div>
+              <div className="text-xs tabular-nums text-muted-foreground">{fmtMoney(u.amount, u.currency)}</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -372,12 +365,12 @@ function SubscriptionRow({ sub, companyName, index, canWrite, onToggle, onEdit, 
           {sub.name}
         </div>
         <div className="truncate text-xs text-faint">
-          {[sub.vendor, companyName].filter(Boolean).join(' · ') || '—'}
+          {[sub.vendor, companyName].filter(Boolean).join(' · ') || '–'}
         </div>
       </div>
 
       <div className="hidden w-28 shrink-0 sm:block">
-        {sub.category ? <Badge>{sub.category}</Badge> : <span className="text-xs text-faint">—</span>}
+        {sub.category ? <Badge>{sub.category}</Badge> : <span className="text-xs text-faint">–</span>}
       </div>
 
       <div className="w-24 shrink-0">

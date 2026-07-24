@@ -8,12 +8,13 @@ import { Button, Input, Select, Card, PageHeader, EmptyState, Skeleton, Segmente
 import { Dialog, ContextMenu, toast, type ContextMenuEntry } from '../components/overlays';
 import { Plus, Trash2, Wallet, AlertTriangle, CheckCircle2, Receipt, FileStack, Copy, ExternalLink, Link2 } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
-import { SubscriptionsTab } from '../components/finance/subscriptions';
+import { RecurringExpensesSection } from '../components/finance/subscriptions';
 import { TransactionsTab, AddIncomeDialog } from '../components/finance/ledger';
 
 extendDict({
   en: {
     'finance.newExpense': 'New expense',
+    'finance.oneOffTitle': 'One-off expenses',
     'finance.status.draft': 'Draft',
     'finance.status.sent': 'Sent',
     'finance.status.viewed': 'Viewed',
@@ -32,6 +33,7 @@ extendDict({
   },
   uk: {
     'finance.newExpense': 'Нова витрата',
+    'finance.oneOffTitle': 'Разові витрати',
     'finance.status.draft': 'Чернетка',
     'finance.status.sent': 'Надіслано',
     'finance.status.viewed': 'Переглянуто',
@@ -107,7 +109,7 @@ interface ProfitRow {
   laborCost?: number | string; expenseCost?: number | string;
   margin?: number | string; marginPct?: number | string; marginPercent?: number | string; currency?: string;
 }
-type Tab = 'dashboard' | 'invoices' | 'quotes' | 'expenses' | 'subscriptions' | 'transactions';
+type Tab = 'dashboard' | 'invoices' | 'quotes' | 'expenses' | 'transactions';
 
 export function FinancePage() {
   const t = useT();
@@ -119,7 +121,6 @@ export function FinancePage() {
     { key: 'invoices', label: t('finance.invoices') },
     { key: 'quotes', label: t('finance.quotes') },
     { key: 'expenses', label: t('finance.expenses') },
-    { key: 'subscriptions', label: t('subs.title') },
     { key: 'transactions', label: t('ledger.transactions') },
   ];
   return (
@@ -141,7 +142,6 @@ export function FinancePage() {
       {tab === 'invoices' && <InvoicesView />}
       {tab === 'quotes' && <QuotesView />}
       {tab === 'expenses' && <ExpensesView />}
-      {tab === 'subscriptions' && <SubscriptionsTab />}
       {tab === 'transactions' && <TransactionsTab />}
       {incomeOpen && <AddIncomeDialog onClose={() => setIncomeOpen(false)} />}
     </div>
@@ -297,11 +297,11 @@ function ProfitabilityView() {
             const marginPct = r.marginPct ?? r.marginPercent;
             return (
               <tr key={r.projectId ?? r.name ?? r.label ?? String(i)} className="border-t border-border">
-                <td className="px-4 py-2">{r.label ?? r.name ?? '—'}</td>
+                <td className="px-4 py-2">{r.label ?? r.name ?? '–'}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{fmtMoney(r.revenue ?? 0, cur)}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{fmtMoney(cost, cur)}</td>
                 <td className={cn('px-4 py-2 text-right tabular-nums', margin < 0 && 'text-destructive')}>{fmtMoney(margin, cur)}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{marginPct != null ? `${Number(marginPct).toFixed(0)}%` : '—'}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{marginPct != null ? `${Number(marginPct).toFixed(0)}%` : '–'}</td>
               </tr>
             );
           })}
@@ -507,7 +507,7 @@ function DocTable({ rows, loading, kind, onRow, companies }: {
             style={{ ['--i' as string]: Math.min(i, 10) }}
           >
             <span className="w-28 shrink-0 truncate font-mono text-xs text-muted-foreground">{r.number ?? r.id.slice(0, 8)}</span>
-            <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{companyName(r) ?? '—'}</span>
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{companyName(r) ?? '–'}</span>
             <StatusPill status={r.status} overdue={overdue} />
             <span className="w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
               {fmtDate(kind === 'invoice' ? r.dueDate : r.validUntil)}
@@ -549,9 +549,21 @@ function ExpensesView() {
   const rows = expenses.data?.data ?? [];
 
   return (
-    <div className="p-6">
-      <div className="mb-4 flex items-center justify-end">
-        {can('finance.write') && <Button size="sm" onClick={() => setShowForm(true)}><Plus size={14} /> {t('finance.newExpense')}</Button>}
+    <div className="space-y-8 p-6">
+      {/* Recurring expenses (subscriptions merged in: підписки самі по собі і є витратами) */}
+      <RecurringExpensesSection />
+
+      {/* One-off expenses */}
+      <section className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="flex items-center gap-2 text-[13px] font-semibold">
+          <Receipt size={15} className="text-muted-foreground" />
+          {t('finance.oneOffTitle')}
+          {rows.length > 0 && (
+            <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">{rows.length}</span>
+          )}
+        </h2>
+        {can('finance.write') && <Button size="sm" variant="outline" onClick={() => setShowForm(true)}><Plus size={14} /> {t('finance.newExpense')}</Button>}
       </div>
       {expenses.isLoading ? (
         <div className="overflow-hidden rounded-xl border border-border">
@@ -569,7 +581,7 @@ function ExpensesView() {
             <div key={e.id} className={cn('row-enter flex items-center gap-3 px-4 py-2.5 transition-colors duration-150 hover:bg-muted/40', i > 0 && 'border-t border-border')} style={{ ['--i' as string]: Math.min(i, 10) }}>
               <span className="w-16 shrink-0 text-xs text-muted-foreground tabular-nums">{fmtDate(e.date)}</span>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[13px] font-medium">{e.description ?? '—'}</div>
+                <div className="truncate text-[13px] font-medium">{e.description ?? '–'}</div>
                 {(e.category || e.projectName) && (
                   <div className="truncate text-xs text-muted-foreground">{[e.category, e.projectName].filter(Boolean).join(' · ')}</div>
                 )}
@@ -579,6 +591,7 @@ function ExpensesView() {
           ))}
         </div>
       )}
+      </section>
 
       {can('finance.write') && (
         <Dialog open={showForm} onClose={() => setShowForm(false)} title={t('finance.newExpense')} width={440}>
