@@ -10,6 +10,7 @@ import { I18nProvider, guessLocale, rememberLocale } from './lib/i18n';
 import { Shell } from './components/Shell';
 import { AppRoutes } from './routes';
 import { LoginPage } from './pages/Login';
+import { SetupPage } from './pages/Setup';
 import { AcceptInvitePage } from './pages/AcceptInvite';
 import { PublicInvoicePage } from './pages/public/Invoice';
 import { PublicQuotePage } from './pages/public/Quote';
@@ -85,6 +86,7 @@ function Root() {
   }
 
   // Public routes (no auth)
+  if (path.startsWith('/setup')) return <I18nProvider locale={guessLocale()}><SetupPage /></I18nProvider>;
   if (path.startsWith('/login')) return <I18nProvider locale={guessLocale()}><LoginPage /></I18nProvider>;
   if (path.startsWith('/accept-invite')) return <I18nProvider locale={guessLocale()}><AcceptInvitePage /></I18nProvider>;
   if (path.startsWith('/i/')) return <I18nProvider locale={guessLocale()}><PublicInvoicePage token={path.split('/i/')[1]!} /></I18nProvider>;

@@ -4,7 +4,7 @@ import { PERMISSIONS, PERMISSION_META, type Permission } from '@ordi/shared';
 import {
   Building2, ArrowLeftRight, Users as UsersIcon, Shield, SlidersHorizontal, Wallet, Plug,
   ScrollText, Inbox, Plus, Copy, Upload, Trash2, Lock, Globe, ImageIcon, ChevronRight,
-  ChevronLeft, MoreHorizontal, Check, RotateCcw,
+  ChevronLeft, MoreHorizontal, Check, RotateCcw, Boxes,
 } from 'lucide-react';
 import { api, qs } from '../lib/api';
 import { Link } from '../lib/router';
@@ -14,6 +14,8 @@ import {
 } from '../components/ui';
 import { Dialog, ConfirmDialog, DropdownMenu, MenuItem, toast } from '../components/overlays';
 import { ImportExportPanel } from '../components/ImportExportPanel';
+import { IntegrationsPanel } from '../components/settings/IntegrationsPanel';
+import { ModulesPanel } from '../components/settings/ModulesPanel';
 import { SectionHead, SettingRow, Field, RowList, AnimatedRow } from '../components/settings/primitives';
 import { downscaleImage } from '../components/settings/image';
 import { useT } from '../lib/i18n';
@@ -43,7 +45,7 @@ extendDict({
     'settings.rolesDesc': 'Define what each role can do.',
     'settings.customFieldsDesc': 'Add custom fields to any entity type.',
     'settings.financeDesc': 'Tax rates and finance defaults.',
-    'settings.integrationsDesc': 'Git connections and outgoing webhooks.',
+    'settings.integrationsDesc': 'Connect GitHub and Slack, and send outgoing webhooks.',
     'settings.auditDesc': 'Immutable record of changes across the workspace.',
     'settings.eventsDesc': 'Failed background events awaiting replay.',
     'settings.importExportDesc': 'Bulk import and export via CSV.',
@@ -90,7 +92,7 @@ extendDict({
     'settings.rolesDesc': 'Визначте, що може робити кожна роль.',
     'settings.customFieldsDesc': 'Додавайте власні поля до будь-якого типу сутностей.',
     'settings.financeDesc': 'Податкові ставки та фінансові налаштування.',
-    'settings.integrationsDesc': 'Git-підключення та вихідні вебхуки.',
+    'settings.integrationsDesc': 'Підключіть GitHub і Slack та надсилайте вихідні вебхуки.',
     'settings.auditDesc': 'Незмінний запис змін у робочому просторі.',
     'settings.eventsDesc': 'Невдалі фонові події, що очікують повтору.',
     'settings.importExportDesc': 'Масовий імпорт та експорт через CSV.',
@@ -137,6 +139,7 @@ const GROUPS: NavGroup[] = [
   {
     label: 'settings.groupConfig',
     items: [
+      { id: 'modules', label: 'settings.modules', perm: 'settings.manage', icon: Boxes },
       { id: 'custom-fields', label: 'settings.customFields', perm: 'settings.manage', icon: SlidersHorizontal },
       { id: 'finance', label: 'nav.finance', perm: 'finance.settings', icon: Wallet },
       { id: 'integrations', label: 'settings.integrations', perm: 'integrations.manage', icon: Plug },
@@ -200,6 +203,7 @@ export function SettingsPage({ section }: { section?: string }) {
             {active.id === 'workspace' && <WorkspacePanel />}
             {active.id === 'users' && <UsersPanel />}
             {active.id === 'roles' && <RolesPanel />}
+            {active.id === 'modules' && <ModulesPanel />}
             {active.id === 'custom-fields' && <CustomFieldsPanel />}
             {active.id === 'finance' && <FinancePanel />}
             {active.id === 'integrations' && <IntegrationsPanel />}
@@ -610,8 +614,11 @@ function RoleEditor({ role, grouped, onBack }: { role: Role; grouped: { domain: 
 
   return (
     <div>
-      <button onClick={onBack} className="mb-4 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground">
-        <ChevronLeft size={14} /> {t('settings.backToRoles')}
+      <button
+        onClick={onBack}
+        className="-ml-1.5 mb-3 inline-flex items-center gap-0.5 rounded-md py-0.5 pl-1 pr-2 text-[13px] text-muted-foreground transition-colors duration-150 hover:bg-muted/60 hover:text-foreground"
+      >
+        <ChevronLeft size={15} /> {t('settings.backToRoles')}
       </button>
 
       <SectionHead
@@ -751,87 +758,6 @@ function FinancePanel() {
           ))}
         </RowList>
       )}
-    </div>
-  );
-}
-
-/* ────────────────────────────── Integrations ────────────────────────────── */
-
-interface GitConnection { id: string; provider?: string | null; fullName?: string | null; status?: string | null; instanceUrl?: string | null }
-interface Webhook { id: string; url?: string | null; active?: boolean; eventTypes?: string[] }
-function IntegrationsPanel() {
-  const t = useT();
-  const qc = useQueryClient();
-  const connections = useQuery({ queryKey: ['gitConnections'], queryFn: () => api.get<{ data: GitConnection[] }>('/integrations/git/connections') });
-  const webhooks = useQuery({ queryKey: ['webhooks'], queryFn: () => api.get<{ data: Webhook[] }>('/webhooks') });
-  const [conn, setConn] = useState({ provider: 'github', instanceUrl: '', token: '' });
-  const addConn = useMutation({
-    mutationFn: () => api.post('/integrations/git/connections', { provider: conn.provider, instanceUrl: conn.instanceUrl || undefined, token: conn.token || undefined }),
-    onSuccess: () => { setConn({ provider: 'github', instanceUrl: '', token: '' }); qc.invalidateQueries({ queryKey: ['gitConnections'] }); toast(t('common.saved')); },
-    onError: () => toast.error(t('settings.saveFailed')),
-  });
-  const [hook, setHook] = useState({ url: '', eventTypes: '' });
-  const addHook = useMutation({
-    mutationFn: () => api.post('/webhooks', { url: hook.url, eventTypes: hook.eventTypes.split(',').map((s) => s.trim()).filter(Boolean) }),
-    onSuccess: () => { setHook({ url: '', eventTypes: '' }); qc.invalidateQueries({ queryKey: ['webhooks'] }); toast(t('common.saved')); },
-    onError: () => toast.error(t('settings.saveFailed')),
-  });
-  const conns = connections.data?.data ?? [];
-  const hooks = webhooks.data?.data ?? [];
-
-  return (
-    <div className="space-y-8">
-      <div>
-        <SectionHead title={t('settings.integrations')} desc={t('settings.integrationsDesc')} />
-        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('settings.gitConnections')}</div>
-        {connections.isLoading ? <Skeleton className="h-14 w-full" /> : conns.length === 0 ? (
-          <p className="mb-3 text-[13px] text-muted-foreground">{t('settings.noGitConnections')}</p>
-        ) : (
-          <RowList className="mb-3">
-            {conns.map((c) => (
-              <div key={c.id} className="flex items-center justify-between border-b border-border px-3 py-2.5 text-[13px] last:border-0">
-                <span className="flex items-center gap-2"><Plug size={14} className="text-muted-foreground" /> {c.provider ?? 'git'} · {c.fullName ?? c.instanceUrl ?? c.id}</span>
-                <Badge color={c.status === 'connected' ? '#22c55e' : '#6b7280'}>{c.status ?? 'connected'}</Badge>
-              </div>
-            ))}
-          </RowList>
-        )}
-        <Card className="p-3">
-          <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); addConn.mutate(); }}>
-            <Field label={t('settings.provider')} className="w-32">
-              <Select value={conn.provider} onChange={(e) => setConn((c) => ({ ...c, provider: e.target.value }))} className="w-full">
-                {['github', 'gitlab', 'gitea'].map((p) => <option key={p} value={p}>{p}</option>)}
-              </Select>
-            </Field>
-            <Field label={t('settings.instanceUrl')} className="w-40"><Input value={conn.instanceUrl} onChange={(e) => setConn((c) => ({ ...c, instanceUrl: e.target.value }))} placeholder={t('settings.optional')} /></Field>
-            <Field label={t('settings.token')} className="w-36"><Input value={conn.token} onChange={(e) => setConn((c) => ({ ...c, token: e.target.value }))} type="password" /></Field>
-            <Button type="submit" size="sm" disabled={addConn.isPending}><Plus size={14} /> {t('common.add')}</Button>
-          </form>
-        </Card>
-      </div>
-
-      <div>
-        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('settings.webhooks')}</div>
-        {webhooks.isLoading ? <Skeleton className="h-14 w-full" /> : hooks.length === 0 ? (
-          <p className="mb-3 text-[13px] text-muted-foreground">{t('settings.noWebhooks')}</p>
-        ) : (
-          <RowList className="mb-3">
-            {hooks.map((h) => (
-              <div key={h.id} className="flex items-center justify-between border-b border-border px-3 py-2.5 text-[13px] last:border-0">
-                <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{h.url}</span>
-                <Badge color={h.active === false ? '#6b7280' : '#22c55e'}>{h.active === false ? t('settings.off') : t('settings.active')}</Badge>
-              </div>
-            ))}
-          </RowList>
-        )}
-        <Card className="p-3">
-          <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); if (hook.url) addHook.mutate(); }}>
-            <Field label="URL" className="w-56"><Input value={hook.url} onChange={(e) => setHook((h) => ({ ...h, url: e.target.value }))} placeholder="https://…" /></Field>
-            <Field label={t('settings.events')} className="w-56"><Input value={hook.eventTypes} onChange={(e) => setHook((h) => ({ ...h, eventTypes: e.target.value }))} placeholder="invoice.sent, payment.recorded" /></Field>
-            <Button type="submit" size="sm" disabled={addHook.isPending}><Plus size={14} /> {t('common.add')}</Button>
-          </form>
-        </Card>
-      </div>
     </div>
   );
 }

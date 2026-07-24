@@ -75,17 +75,19 @@ function ProviderIcon({ provider, className }: { provider?: string; className?: 
   return <GitBranch size={14} className={className} />;
 }
 
-/** Fetch repositories for a connection, tolerating either endpoint contract. */
+/**
+ * Fetch repositories for a connection, tolerating either endpoint contract.
+ * The brief's provider-backed endpoint may not exist yet; if it is missing or
+ * errors, fall back to the registered-repositories list for the connection.
+ */
 async function fetchConnectionRepos(connId: string): Promise<Repo[]> {
   try {
     const r = await api.get<{ data: Repo[] }>(`/integrations/git/connections/${connId}/repos`);
     return r.data ?? [];
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) {
-      const r = await api.get<{ data: Repo[] }>(`/integrations/git/repositories${qs({ connectionId: connId })}`);
-      return r.data ?? [];
-    }
-    throw e;
+  } catch {
+    // Endpoint not available (404/5xx) — use the registered repositories.
+    const r = await api.get<{ data: Repo[] }>(`/integrations/git/repositories${qs({ connectionId: connId })}`);
+    return r.data ?? [];
   }
 }
 

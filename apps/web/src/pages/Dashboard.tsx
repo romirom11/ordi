@@ -1,14 +1,14 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle, Activity, CheckCircle2, ListTodo, Receipt, Handshake,
   FolderKanban, CheckSquare, MessageSquare, Users, Building2, BookText, Clock,
-  CalendarRange, User as UserIcon,
+  CalendarRange, User as UserIcon, Rocket, ChevronRight, X,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useNavigate } from '../lib/router';
-import { useMe } from '../lib/auth';
-import { Card, PageHeader, Skeleton, EmptyState, PriorityIcon, ProgressBar, fmtMoney, fmtDate, fmtRelative, cn } from '../components/ui';
+import { useMe, useCan } from '../lib/auth';
+import { Card, Kbd, PageHeader, Skeleton, EmptyState, PriorityIcon, ProgressBar, fmtMoney, fmtDate, fmtRelative, cn } from '../components/ui';
 import { extendDict, useT } from '../lib/i18n';
 
 extendDict({
@@ -19,6 +19,14 @@ extendDict({
     'dashboard.you': 'You',
     'dashboard.noDeals': 'No open deals',
     'dashboard.noDealsHint': 'Deals in progress will show up here.',
+    'onboarding.title': 'Getting started',
+    'onboarding.subtitle': 'A few steps to make ordi yours.',
+    'onboarding.project': 'Create your first project',
+    'onboarding.task': 'Create a task',
+    'onboarding.taskHint': 'Press',
+    'onboarding.team': 'Invite your team',
+    'onboarding.client': 'Add your first client',
+    'onboarding.progress': '{done} of {total} done',
   },
   uk: {
     'dashboard.myOpenTasks': 'Мої відкриті задачі',
@@ -27,8 +35,179 @@ extendDict({
     'dashboard.you': 'Ви',
     'dashboard.noDeals': 'Немає відкритих угод',
     'dashboard.noDealsHint': 'Угоди в роботі зʼявляться тут.',
+    'onboarding.title': 'Початок роботи',
+    'onboarding.subtitle': 'Кілька кроків, щоб зробити ordi своїм.',
+    'onboarding.project': 'Створіть перший проєкт',
+    'onboarding.task': 'Створіть задачу',
+    'onboarding.taskHint': 'Натисніть',
+    'onboarding.team': 'Запросіть команду',
+    'onboarding.client': 'Додайте першого клієнта',
+    'onboarding.progress': 'Виконано {done} з {total}',
   },
 });
+
+const ONBOARDING_HINT_KEY = 'ordi:hint:onboarding-checklist';
+
+interface OnboardingItem {
+  key: string;
+  label: string;
+  done: boolean;
+  onClick?: () => void;
+  hint?: ReactNode;
+}
+
+/** Non-interactive Checkbox-style circle: draws a check when done, faint ring otherwise. */
+function CheckCircle({ done }: { done: boolean }) {
+  return (
+    <span
+      className={cn(
+        'grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full border transition-colors duration-150',
+        done ? 'border-success bg-success/15' : 'border-border-strong bg-transparent',
+      )}
+    >
+      <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden>
+        <path
+          d="M2.5 6.5L5 9L9.5 3.5"
+          stroke="hsl(var(--success))" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
+          style={{
+            strokeDasharray: 12,
+            strokeDashoffset: done ? 0 : 12,
+            transition: 'stroke-dashoffset 350ms cubic-bezier(0.22, 1, 0.36, 1)',
+          }}
+        />
+      </svg>
+    </span>
+  );
+}
+
+function OnboardingChecklist({ hasTasks }: { hasTasks: boolean }) {
+  const t = useT();
+  const navigate = useNavigate();
+  const canCrm = useCan()('crm.read');
+  const [dismissed, setDismissed] = useState(() => {
+    try { return localStorage.getItem(ONBOARDING_HINT_KEY) === '1'; } catch { return false; }
+  });
+  const [leaving, setLeaving] = useState(false);
+
+  const projectsQ = useQuery({
+    queryKey: ['onboarding', 'projects'],
+    queryFn: () => api.get<{ data: unknown[] }>('/projects').then((r) => r.data),
+    enabled: !dismissed,
+    staleTime: 60_000,
+  });
+  const usersQ = useQuery({
+    queryKey: ['onboarding', 'users'],
+    queryFn: () => api.get<{ data: unknown[] }>('/users/lookup').then((r) => r.data),
+    enabled: !dismissed,
+    staleTime: 60_000,
+  });
+  const companiesQ = useQuery({
+    queryKey: ['onboarding', 'companies'],
+    queryFn: () => api.get<{ data: unknown[] }>('/companies').then((r) => r.data),
+    enabled: !dismissed && canCrm,
+    staleTime: 60_000,
+  });
+
+  const settled = projectsQ.isSuccess && usersQ.isSuccess && (!canCrm || companiesQ.isSuccess);
+  if (dismissed || !settled) return null;
+
+  const items: OnboardingItem[] = [
+    {
+      key: 'project',
+      label: t('onboarding.project'),
+      done: (projectsQ.data?.length ?? 0) > 0,
+      onClick: () => navigate('/projects'),
+    },
+    {
+      key: 'task',
+      label: t('onboarding.task'),
+      done: hasTasks,
+      hint: <span className="flex items-center gap-1 text-xs text-faint">{t('onboarding.taskHint')} <Kbd>C</Kbd></span>,
+    },
+    {
+      key: 'team',
+      label: t('onboarding.team'),
+      done: (usersQ.data?.length ?? 0) > 1,
+      onClick: () => navigate('/settings/users'),
+    },
+  ];
+  if (canCrm) {
+    items.push({
+      key: 'client',
+      label: t('onboarding.client'),
+      done: (companiesQ.data?.length ?? 0) > 0,
+      onClick: () => navigate('/crm'),
+    });
+  }
+
+  const total = items.length;
+  const doneCount = items.filter((i) => i.done).length;
+  if (doneCount >= 4) return null;
+
+  const dismiss = () => {
+    try { localStorage.setItem(ONBOARDING_HINT_KEY, '1'); } catch { /* private mode */ }
+    setLeaving(true);
+    window.setTimeout(() => setDismissed(true), 150);
+  };
+
+  return (
+    <div
+      className={cn(
+        'anim-pop-in overflow-hidden rounded-lg border border-primary/15 bg-primary/5',
+        'transition-[opacity,transform] duration-[150ms] ease-smooth-out',
+        leaving && 'scale-[0.98] opacity-0',
+      )}
+    >
+      <div className="flex items-start justify-between gap-3 px-4 pt-3.5">
+        <div className="flex items-start gap-2.5">
+          <span className="mt-px shrink-0 text-primary"><Rocket size={16} /></span>
+          <div>
+            <div className="text-sm font-semibold">{t('onboarding.title')}</div>
+            <div className="text-xs text-muted-foreground">{t('onboarding.subtitle')}</div>
+          </div>
+        </div>
+        <button
+          aria-label={t('hint.dismiss')}
+          onClick={dismiss}
+          className="-mr-1 grid h-5 w-5 shrink-0 place-items-center rounded text-faint transition-colors duration-150 hover:bg-primary/10 hover:text-foreground"
+        >
+          <X size={12} />
+        </button>
+      </div>
+
+      <div className="mt-3 flex items-center gap-2 px-4">
+        <div className="flex-1"><ProgressBar value={(doneCount / total) * 100} color="hsl(var(--success))" /></div>
+        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+          {t('onboarding.progress').replace('{done}', String(doneCount)).replace('{total}', String(total))}
+        </span>
+      </div>
+
+      <div className="mt-2 pb-2">
+        {items.map((item, i) => {
+          const clickable = !item.done && !!item.onClick;
+          return (
+            <button
+              key={item.key}
+              type="button"
+              onClick={clickable ? item.onClick : undefined}
+              disabled={!clickable}
+              style={{ ['--i' as string]: Math.min(i, 10) }}
+              className={cn(
+                'row-enter flex w-full items-center gap-2.5 px-4 py-2 text-left text-[13px]',
+                clickable ? 'transition-colors duration-150 hover:bg-primary/5' : 'cursor-default',
+              )}
+            >
+              <CheckCircle done={item.done} />
+              <span className={cn('flex-1 truncate', item.done && 'text-muted-foreground line-through')}>{item.label}</span>
+              {!item.done && item.hint}
+              {clickable && <ChevronRight size={14} className="shrink-0 text-faint" />}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 /* ───────────────────────── Types (snake_case: raw SQL rows) ───────────────────────── */
 
@@ -190,6 +369,8 @@ export function DashboardPage() {
       <PageHeader title={`${t('dashboard.greeting')}, ${firstName}`} subtitle={t('dashboard.subtitle')} />
 
       <div className="space-y-4 p-6">
+        <OnboardingChecklist hasTasks={totalOpen > 0} />
+
         {/* Stat tiles */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {stats.map((s, i) => (
