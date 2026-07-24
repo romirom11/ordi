@@ -11,6 +11,7 @@
 import { getDb, schema, eq } from '@ordi/db';
 import { ulid } from 'ulid';
 import { ALL_ROLE_SEEDS, resolveRolePermissions } from '@ordi/shared';
+import { SYSTEM_ACCOUNTS } from './domains/finance/ledger.service';
 
 type Db = ReturnType<typeof getDb>['db'];
 
@@ -99,6 +100,9 @@ export async function seedBaseline(db: Db, workspaceName = 'ordi'): Promise<{ ro
     ]);
   }
 
+  // Chart of accounts (double-entry ledger) — idempotent by account code.
+  await seedChartOfAccounts(db);
+
   // Default (workspace-wide) task types
   const existingTypes = await db.select().from(schema.taskTypes);
   if (!existingTypes.length) {
@@ -110,4 +114,15 @@ export async function seedBaseline(db: Db, workspaceName = 'ordi'): Promise<{ ro
   }
 
   return { roleIds };
+}
+
+/** Seed the baseline chart of accounts (system rows, idempotent by code). */
+export async function seedChartOfAccounts(db: Db): Promise<void> {
+  for (const acc of SYSTEM_ACCOUNTS) {
+    const [existing] = await db.select().from(schema.accounts).where(eq(schema.accounts.code, acc.code));
+    if (existing) continue;
+    await db.insert(schema.accounts)
+      .values({ id: acc.id, code: acc.code, name: acc.name, type: acc.type, isSystem: true, position: acc.position })
+      .onConflictDoNothing();
+  }
 }

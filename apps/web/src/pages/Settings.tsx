@@ -17,6 +17,7 @@ import { ImportExportPanel } from '../components/ImportExportPanel';
 import { IntegrationsPanel } from '../components/settings/IntegrationsPanel';
 import { InvoicesPanel } from '../components/settings/InvoicesPanel';
 import { ModulesPanel } from '../components/settings/ModulesPanel';
+import { ChartOfAccountsBlock, ExpenseCategoriesBlock } from '../components/finance/accounts';
 import { ProjectTypesPanel } from '../components/settings/ProjectTypesPanel';
 import { SectionHead, SettingRow, Field, RowList, AnimatedRow } from '../components/settings/primitives';
 import { downscaleImage } from '../components/settings/image';
@@ -835,6 +836,13 @@ function FinancePanel() {
           ))}
         </RowList>
       )}
+
+      <div className="mt-8">
+        <ChartOfAccountsBlock />
+      </div>
+      <div className="mt-8">
+        <ExpenseCategoriesBlock />
+      </div>
     </div>
   );
 }

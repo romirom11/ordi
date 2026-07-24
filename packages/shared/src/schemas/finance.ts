@@ -97,7 +97,11 @@ export const expenseInputSchema = z.object({
   markup: z.number().min(0).default(0),
 });
 
-export const expenseCategoryInputSchema = z.object({ name: z.string().min(1) });
+export const expenseCategoryInputSchema = z.object({
+  name: z.string().min(1),
+  accountId: idSchema.nullable().optional(),
+});
+export const expenseCategoryUpdateSchema = expenseCategoryInputSchema.partial();
 
 /** Recurring payment / subscription the workspace pays regularly. */
 export const RECURRING_PAYMENT_INTERVALS = ['weekly', 'monthly', 'quarterly', 'yearly'] as const;
@@ -152,4 +156,64 @@ export const profitabilityQuerySchema = z.object({
   to: z.string().optional(),
   projectId: idSchema.optional(),
   companyId: idSchema.optional(),
+});
+
+// ─── Ledger (double-entry core) ────────────────────────────────────────────────
+export const ACCOUNT_TYPES = ['asset', 'liability', 'equity', 'revenue', 'expense'] as const;
+export type AccountType = (typeof ACCOUNT_TYPES)[number];
+export const LEDGER_SOURCE_TYPES = ['invoice', 'payment', 'expense', 'income', 'manual', 'reversal'] as const;
+
+const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
+
+export const accountInputSchema = z.object({
+  name: z.string().min(1),
+  type: z.enum(ACCOUNT_TYPES),
+  code: z.string().nullable().optional(),
+  currency: z.string().length(3).nullable().optional(),
+  parentId: idSchema.nullable().optional(),
+  position: z.number().int().optional(),
+});
+export const accountUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  code: z.string().nullable().optional(),
+  currency: z.string().length(3).nullable().optional(),
+  parentId: idSchema.nullable().optional(),
+  archived: z.boolean().optional(),
+  position: z.number().int().optional(),
+});
+
+export const ledgerPostingInputSchema = z.object({
+  accountId: idSchema,
+  direction: z.enum(['debit', 'credit']),
+  amount: z.number().positive(),
+  currency: z.string().length(3).optional(),
+});
+
+/** Manual journal entry — the service enforces balance (Σdebit == Σcredit). */
+export const ledgerTransactionInputSchema = z.object({
+  date: dateOnly,
+  description: z.string().default(''),
+  projectId: idSchema.nullable().optional(),
+  companyId: idSchema.nullable().optional(),
+  postings: z.array(ledgerPostingInputSchema).min(2),
+});
+
+/** Manual income document — a convenience wrapper over a ledger transaction. */
+export const incomeInputSchema = z.object({
+  date: dateOnly,
+  amount: z.number().positive(),
+  currency: z.string().length(3).default('USD'),
+  accountId: idSchema.optional(), // revenue account; defaults to "Product revenue"
+  projectId: idSchema.nullable().optional(),
+  companyId: idSchema.nullable().optional(),
+  description: z.string().default(''),
+});
+
+export const ledgerTransactionsQuerySchema = z.object({
+  accountId: idSchema.optional(),
+  projectId: idSchema.optional(),
+  sourceType: z.enum(LEDGER_SOURCE_TYPES).optional(),
+  from: dateOnly.optional(),
+  to: dateOnly.optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
 });

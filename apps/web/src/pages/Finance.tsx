@@ -9,6 +9,7 @@ import { Dialog, ContextMenu, toast, type ContextMenuEntry } from '../components
 import { Plus, Trash2, Wallet, AlertTriangle, CheckCircle2, Receipt, FileStack, Copy, ExternalLink, Link2 } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
 import { SubscriptionsTab } from '../components/finance/subscriptions';
+import { TransactionsTab, AddIncomeDialog } from '../components/finance/ledger';
 
 extendDict({
   en: {
@@ -106,29 +107,43 @@ interface ProfitRow {
   laborCost?: number | string; expenseCost?: number | string;
   margin?: number | string; marginPct?: number | string; marginPercent?: number | string; currency?: string;
 }
-type Tab = 'dashboard' | 'invoices' | 'quotes' | 'expenses' | 'subscriptions';
+type Tab = 'dashboard' | 'invoices' | 'quotes' | 'expenses' | 'subscriptions' | 'transactions';
 
 export function FinancePage() {
   const t = useT();
+  const can = useCan();
   const [tab, setTab] = useState<Tab>('dashboard');
+  const [incomeOpen, setIncomeOpen] = useState(false);
   const tabs: { key: Tab; label: string }[] = [
     { key: 'dashboard', label: t('nav.dashboard') },
     { key: 'invoices', label: t('finance.invoices') },
     { key: 'quotes', label: t('finance.quotes') },
     { key: 'expenses', label: t('finance.expenses') },
     { key: 'subscriptions', label: t('subs.title') },
+    { key: 'transactions', label: t('ledger.transactions') },
   ];
   return (
     <div>
       <PageHeader
         title={t('nav.finance')}
-        actions={<SegmentedControl options={tabs} value={tab} onChange={setTab} />}
+        actions={
+          <div className="flex items-center gap-2">
+            {can('finance.write') && (
+              <Button size="sm" variant="outline" className="text-success" onClick={() => setIncomeOpen(true)}>
+                <Plus size={14} /> {t('ledger.addIncome')}
+              </Button>
+            )}
+            <SegmentedControl options={tabs} value={tab} onChange={setTab} />
+          </div>
+        }
       />
       {tab === 'dashboard' && <DashboardView />}
       {tab === 'invoices' && <InvoicesView />}
       {tab === 'quotes' && <QuotesView />}
       {tab === 'expenses' && <ExpensesView />}
       {tab === 'subscriptions' && <SubscriptionsTab />}
+      {tab === 'transactions' && <TransactionsTab />}
+      {incomeOpen && <AddIncomeDialog onClose={() => setIncomeOpen(false)} />}
     </div>
   );
 }

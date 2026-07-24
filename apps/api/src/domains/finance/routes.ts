@@ -3,7 +3,7 @@ import {
   invoiceInputSchema, invoiceUpdateSchema, sendDocumentSchema, paymentInputSchema, creditNoteInputSchema,
   invoiceFromTimeSchema, quoteInputSchema, quoteUpdateSchema, recurringInvoiceInputSchema,
   recurringPaymentInputSchema, recurringPaymentUpdateSchema,
-  expenseInputSchema, expenseCategoryInputSchema, taxRateInputSchema, reminderRuleInputSchema,
+  expenseInputSchema, expenseCategoryInputSchema, expenseCategoryUpdateSchema, taxRateInputSchema, reminderRuleInputSchema,
   emailTemplateInputSchema, numberSequenceInputSchema, profitabilityQuerySchema,
 } from '@ordi/shared';
 import type { AppEnv } from '../../context';
@@ -11,6 +11,7 @@ import { requireAuth, currentActor } from '../../core/auth';
 import { guard } from '../../core/rbac';
 import { page } from '../../lib/http';
 import * as svc from './service';
+import { ledgerRoutes } from './ledger.routes';
 
 /** Node Buffer → ArrayBuffer (a BodyInit Hono accepts) for PDF responses. */
 function toArrayBuffer(b: Buffer): ArrayBuffer {
@@ -20,6 +21,9 @@ function toArrayBuffer(b: Buffer): ArrayBuffer {
 export function financeRoutes() {
   const app = new Hono<AppEnv>();
   app.use('*', requireAuth);
+
+  // Double-entry ledger: /ledger/accounts, /ledger/transactions, /income
+  app.route('/', ledgerRoutes());
 
   // ── Invoices ──
   app.get('/invoices', guard('finance.read'), async (c) => {
@@ -215,6 +219,11 @@ export function financeRoutes() {
     const body = expenseCategoryInputSchema.parse(await c.req.json());
     const id = await svc.createExpenseCategory(body);
     return c.json({ id }, 201);
+  });
+
+  app.patch('/expense-categories/:id', guard('finance.settings'), async (c) => {
+    const body = expenseCategoryUpdateSchema.parse(await c.req.json());
+    return c.json(await svc.updateExpenseCategory(c.req.param('id'), body));
   });
 
   app.delete('/expense-categories/:id', guard('finance.settings'), async (c) => {

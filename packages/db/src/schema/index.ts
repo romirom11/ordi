@@ -4,5 +4,6 @@ export * from './projects';
 export * from './kb';
 export * from './time';
 export * from './finance';
+export * from './ledger';
 export * from './people';
 export * from './integrations';

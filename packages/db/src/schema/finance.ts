@@ -3,6 +3,7 @@ import { pk, timestamps, createdBy, version, deletedAt, customFields, money, pos
 import { users } from './core';
 import { companies } from './crm';
 import { projects } from './projects';
+import { accounts } from './ledger';
 
 export const numberSequences = pgTable('number_sequences', {
   id: pk(),
@@ -152,6 +153,9 @@ export const recurringInvoices = pgTable('recurring_invoices', {
 export const expenseCategories = pgTable('expense_categories', {
   id: pk(),
   name: text('name').notNull(),
+  // Ledger mapping: expenses in this category post to this expense account
+  // (falls back to the system "Other expenses" account when unset).
+  accountId: text('account_id').references(() => accounts.id),
   ...timestamps,
 });
 

@@ -6,6 +6,7 @@ import { getDb, schema, eq, and, lte, isNull, sql, inArray } from '@ordi/db';
 import { ulid } from 'ulid';
 import { computeDocumentTotals } from '@ordi/shared';
 import { emit } from '../core/events';
+import { postExpense } from '../domains/finance/ledger.service';
 import { queueEmail } from '../lib/email';
 import { appLink, asLocale, loadBranding, renderEmail, tr } from '../lib/email-templates';
 import { logger } from '../lib/logger';
@@ -109,18 +110,25 @@ export async function runRecurringPayments(): Promise<void> {
   ));
   for (const rp of due) {
     if (rp.autoCreateExpense) {
+      const expenseId = ulid();
+      const description = rp.vendor ? `${rp.name} — ${rp.vendor}` : rp.name;
       await db.insert(schema.expenses).values({
-        id: ulid(),
+        id: expenseId,
         companyId: rp.companyId ?? null,
         projectId: null,
         categoryId: null,
         amount: rp.amount,
         currency: rp.currency,
         date: rp.nextDate,
-        description: rp.vendor ? `${rp.name} — ${rp.vendor}` : rp.name,
+        description,
         billable: false,
         markup: '0',
         createdBy: rp.createdBy,
+      });
+      // Ledger mirror: same hook as user-created expenses (debit expense account / credit Bank).
+      await postExpense(null, {
+        id: expenseId, amount: rp.amount, currency: rp.currency, date: rp.nextDate,
+        description, categoryId: null, projectId: null, companyId: rp.companyId ?? null,
       });
     }
     // Advance next_date until it is strictly in the future (catch up missed cycles).

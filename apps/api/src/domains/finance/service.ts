@@ -23,6 +23,7 @@ import { asLocale, loadBranding, renderEmail, tr, type EmailLocale } from '../..
 import { nextNumber } from '../../workers/scheduled';
 import { env } from '../../env';
 import { renderInvoicePdf, renderQuotePdf } from './pdf';
+import * as ledger from './ledger.service';
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 function today(): string {
@@ -271,6 +272,8 @@ export async function sendInvoice(actor: Actor, id: string, opts: { to?: string;
   if (isFirstSend) {
     await db.update(schema.invoices).set({ status: 'sent', sentAt: new Date() })
       .where(and(eq(schema.invoices.id, id), eq(schema.invoices.version, inv.version)));
+    // Ledger mirror (accrual-light): first send books AR against Client billing.
+    await ledger.postInvoiceSent(actor, inv);
   }
   await writeActivity(db, { entityType: 'invoice', entityId: id, action: 'sent', before: { status: inv.status }, after: { status: 'sent', to }, actorId: actor.userId, actorType: actor.actorType });
   await emit({ type: 'invoice.sent', aggregateType: 'invoice', aggregateId: id, payload: { number: inv.number, companyId: inv.companyId, to }, actorId: actor.userId, actorType: actor.actorType });
@@ -289,6 +292,8 @@ export async function cancelInvoice(actor: Actor, id: string) {
   if (itemIds.length) {
     await db.update(schema.timeEntries).set({ invoiceItemId: null }).where(inArray(schema.timeEntries.invoiceItemId, itemIds));
   }
+  // Ledger mirror: canceling a sent invoice reverses its AR/revenue posting (no-op for drafts).
+  await ledger.reverseInvoice(actor, inv);
   await writeActivity(db, { entityType: 'invoice', entityId: id, action: 'canceled', before: { status: inv.status }, after: { status: 'canceled' }, actorId: actor.userId, actorType: actor.actorType });
   return getInvoice(id);
 }
@@ -445,6 +450,8 @@ export async function recordPayment(actor: Actor, invoiceId: string, input: any)
     method: input.method, reference: input.reference ?? '', notes: input.notes ?? '', createdBy: actor.userId,
   });
   const rec = await reconcileInvoice(invoiceId);
+  // Ledger mirror: cash in → debit Bank / credit Accounts receivable.
+  await ledger.postPayment(actor, { id, amount: input.amount, currency: input.currency, date: input.date }, inv);
   await writeActivity(db, { entityType: 'invoice', entityId: invoiceId, action: 'payment_recorded', after: { paymentId: id, amount: input.amount, status: rec.status }, actorId: actor.userId, actorType: actor.actorType });
   await emit({ type: 'payment.recorded', aggregateType: 'payment', aggregateId: id, payload: { invoiceId, amount: input.amount, number: inv.number }, actorId: actor.userId, actorType: actor.actorType });
   if (rec.isFullyPaid) {
@@ -459,6 +466,9 @@ export async function deletePayment(actor: Actor, paymentId: string) {
   if (!pay) throw err.notFound('Payment not found');
   await db.delete(schema.payments).where(eq(schema.payments.id, paymentId));
   const rec = await reconcileInvoice(pay.invoiceId);
+  // Ledger mirror: deleting a payment reverses its Bank/AR posting.
+  const inv = await getInvoiceRow(pay.invoiceId);
+  await ledger.reversePayment(actor, paymentId, inv.number);
   await writeActivity(db, { entityType: 'invoice', entityId: pay.invoiceId, action: 'payment_deleted', before: { paymentId, amount: pay.amount }, after: { status: rec.status }, actorId: actor.userId, actorType: actor.actorType });
 }
 
@@ -820,6 +830,12 @@ export async function createExpense(actor: Actor, input: any) {
     amount: String(input.amount), currency: input.currency, date: input.date, description: input.description ?? '',
     attachmentId: input.attachmentId ?? null, billable: input.billable ?? false, markup: String(input.markup ?? 0), createdBy: actor.userId,
   });
+  // Ledger mirror: debit the category's expense account / credit Bank.
+  await ledger.postExpense(actor, {
+    id, amount: String(input.amount), currency: input.currency, date: input.date,
+    description: input.description ?? '', categoryId: input.categoryId ?? null,
+    projectId: input.projectId ?? null, companyId: input.companyId ?? null,
+  });
   await writeActivity(db, { entityType: 'expense', entityId: id, action: 'created', after: input, actorId: actor.userId, actorType: actor.actorType });
   return id;
 }
@@ -835,6 +851,16 @@ export async function updateExpense(actor: Actor, id: string, input: any) {
   if (input.amount !== undefined) patch.amount = String(input.amount);
   if (input.markup !== undefined) patch.markup = String(input.markup);
   await db.update(schema.expenses).set(patch).where(eq(schema.expenses.id, id));
+  // Ledger mirror: money-relevant edits reverse the old posting and re-post.
+  const after = { ...before, ...patch } as typeof before;
+  const moneyChanged = (['amount', 'currency', 'date', 'categoryId', 'projectId', 'companyId'] as const)
+    .some((k) => patch[k] !== undefined && patch[k] !== before[k]);
+  if (moneyChanged) {
+    await ledger.repostExpense(actor, {
+      id, amount: String(after.amount), currency: after.currency, date: after.date,
+      description: after.description ?? '', categoryId: after.categoryId, projectId: after.projectId, companyId: after.companyId,
+    });
+  }
   await writeActivity(db, { entityType: 'expense', entityId: id, action: 'updated', before, after: patch, actorId: actor.userId, actorType: actor.actorType });
   return { ...before, ...patch };
 }
@@ -842,6 +868,8 @@ export async function updateExpense(actor: Actor, id: string, input: any) {
 export async function deleteExpense(actor: Actor, id: string) {
   const { db } = getDb();
   await db.update(schema.expenses).set({ deletedAt: new Date() }).where(eq(schema.expenses.id, id));
+  // Ledger mirror: soft delete reverses the expense posting.
+  await ledger.reverseExpense(actor, id);
   await writeActivity(db, { entityType: 'expense', entityId: id, action: 'deleted', actorId: actor.userId, actorType: actor.actorType });
 }
 
@@ -852,8 +880,19 @@ export async function listExpenseCategories() {
 export async function createExpenseCategory(input: any) {
   const { db } = getDb();
   const id = ulid();
-  await db.insert(schema.expenseCategories).values({ id, name: input.name });
+  await db.insert(schema.expenseCategories).values({ id, name: input.name, accountId: input.accountId ?? null });
   return id;
+}
+export async function updateExpenseCategory(id: string, input: any) {
+  const { db } = getDb();
+  const [before] = await db.select().from(schema.expenseCategories).where(eq(schema.expenseCategories.id, id));
+  if (!before) throw err.notFound('Expense category not found');
+  const patch: Record<string, unknown> = {};
+  if (input.name !== undefined) patch.name = input.name;
+  if (input.accountId !== undefined) patch.accountId = input.accountId;
+  if (Object.keys(patch).length) await db.update(schema.expenseCategories).set(patch).where(eq(schema.expenseCategories.id, id));
+  const [after] = await db.select().from(schema.expenseCategories).where(eq(schema.expenseCategories.id, id));
+  return after;
 }
 export async function deleteExpenseCategory(id: string) {
   const { db } = getDb();
@@ -1121,9 +1160,12 @@ async function projectProfit(
   // Revenue depends on the project type's revenueSource (PRD §5.4):
   //   none           → pure cost, zero revenue
   //   client_billing → invoiced (or billable value while nothing is invoiced yet)
-  //   direct         → same fallback for now; real direct revenue will come from
-  //                    the upcoming manual income ledger.
-  const revenue = p.revenueSource === 'none' ? 0 : (invoiced > 0 ? invoiced : billableValue);
+  //   direct         → net credits on revenue accounts in the ledger (manual
+  //                    income and other direct postings attributed to the project)
+  let revenue: number;
+  if (p.revenueSource === 'none') revenue = 0;
+  else if (p.revenueSource === 'direct') revenue = await ledger.projectDirectRevenue(projectId, from, to);
+  else revenue = invoiced > 0 ? invoiced : billableValue;
   const profit = computeProfitability({ revenue, laborCost, expenseCost });
   return {
     projectId, name: p.name, typeId: p.typeId, typeName: p.typeName,
