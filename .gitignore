@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.turbo/
+*.log
+.env
+.env.local
+.env.*.local
+coverage/
+.DS_Store
+apps/desktop/src-tauri/target/
+*.tsbuildinfo
+.vite/
+tmp/
