@@ -11,7 +11,7 @@ import { err } from '../../lib/errors';
 import { emit } from '../../core/events';
 import { hmacSha256, encrypt, generateToken } from '../../lib/crypto';
 import { writeActivity } from '../../core/activity';
-import { verifyOAuthState, exchangeGithubCode } from '../integrations/oauth';
+import { verifyOAuthState, exchangeGithubCode, exchangeSlackCode } from '../integrations/oauth';
 
 /**
  * Public (unauthenticated) surface (PRD §11.2/11.3/11.8, §8.6, §12.3, §13.1).
@@ -304,6 +304,36 @@ export function publicRoutes() {
       return c.redirect(`${appUrl}/settings/integrations?git=connected`);
     } catch {
       return c.redirect(`${appUrl}/settings/integrations?git=error`);
+    }
+  });
+
+  // ── Slack OAuth callback — public; Slack redirects the browser here. ──
+  app.get('/integrations/slack/oauth/callback', async (c) => {
+    const appUrl = env.appUrl.replace(/\/$/, '');
+    try {
+      const code = c.req.query('code');
+      const state = verifyOAuthState(c.req.query('state'));
+      if (!code || !state) return c.redirect(`${appUrl}/settings/integrations?slack=error`);
+      const conn = await exchangeSlackCode(code);
+      const { db } = getDb();
+      // Single-row semantics: replace any existing connection on reconnect.
+      await db.delete(schema.slackConnections);
+      const id = ulid();
+      await db.insert(schema.slackConnections).values({
+        id,
+        teamId: conn.teamId,
+        teamName: conn.teamName,
+        botToken: encrypt(conn.botToken),
+        scope: conn.scope,
+        createdBy: state.userId,
+      });
+      await writeActivity(db, {
+        entityType: 'slack_connection', entityId: id, action: 'created',
+        after: { teamId: conn.teamId, teamName: conn.teamName }, actorId: state.userId, actorType: 'user',
+      });
+      return c.redirect(`${appUrl}/settings/integrations?slack=connected`);
+    } catch {
+      return c.redirect(`${appUrl}/settings/integrations?slack=error`);
     }
   });
 
