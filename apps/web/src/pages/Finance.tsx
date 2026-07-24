@@ -549,7 +549,9 @@ function ExpensesView() {
               <span className="w-16 shrink-0 text-xs text-muted-foreground tabular-nums">{fmtDate(e.date)}</span>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[13px] font-medium">{e.description ?? '—'}</div>
-                <div className="truncate text-xs text-muted-foreground">{[e.category, e.projectName].filter(Boolean).join(' · ') || '—'}</div>
+                {(e.category || e.projectName) && (
+                  <div className="truncate text-xs text-muted-foreground">{[e.category, e.projectName].filter(Boolean).join(' · ')}</div>
+                )}
               </div>
               <span className="shrink-0 text-[13px] font-semibold tabular-nums">{fmtMoney(e.amount ?? 0, e.currency ?? 'USD')}</span>
             </div>

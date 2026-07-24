@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Building2, FileText, Receipt, Search, SquareCheck } from 'lucide-react';
+import { ArrowRight, Building2, FileText, Receipt, Search, SquareCheck } from 'lucide-react';
 import { api, qs } from '../lib/api';
 import { Kbd, Spinner, cn } from './ui';
 import { useT, extendDict } from '../lib/i18n';
@@ -20,6 +20,7 @@ extendDict({
     'search.kind.company': 'Client',
     'search.kind.invoice': 'Invoice',
     'search.kind.page': 'Page',
+    'search.goto': 'Go to',
   },
   uk: {
     'search.hintNavigate': 'навігація',
@@ -30,10 +31,27 @@ extendDict({
     'search.kind.company': 'Клієнт',
     'search.kind.invoice': 'Рахунок',
     'search.kind.page': 'Сторінка',
+    'search.goto': 'Перейти',
   },
 });
 
 interface SearchResult { id: string; title: string; kind: string; url: string }
+
+/** Static navigation commands so "⌘K → finance → ↵" jumps straight to a section. */
+const NAV_COMMANDS: { labelKey: string; to: string }[] = [
+  { labelKey: 'nav.dashboard', to: '/' },
+  { labelKey: 'nav.myTasks', to: '/my-tasks' },
+  { labelKey: 'nav.projects', to: '/projects' },
+  { labelKey: 'nav.crm', to: '/crm' },
+  { labelKey: 'nav.knowledge', to: '/kb' },
+  { labelKey: 'nav.time', to: '/time' },
+  { labelKey: 'nav.finance', to: '/finance' },
+  { labelKey: 'nav.people', to: '/people' },
+  { labelKey: 'nav.resourcing', to: '/resourcing' },
+  { labelKey: 'nav.dashboards', to: '/dashboards' },
+  { labelKey: 'nav.settings', to: '/settings' },
+  { labelKey: 'nav.profile', to: '/profile' },
+];
 
 const KIND_ICON: Record<string, ReactNode> = {
   task: <SquareCheck size={15} className="text-primary" />,
@@ -57,29 +75,44 @@ export function CommandPalette({ open, onClose, onNavigate }: {
   });
   const results = q.length > 1 ? data?.data ?? [] : [];
 
+  // Navigation commands matched client-side against the localized labels.
+  const navMatches = q.trim().length > 0
+    ? NAV_COMMANDS.filter((c) => t(c.labelKey).toLowerCase().includes(q.trim().toLowerCase()))
+    : [];
+  const totalCount = navMatches.length + results.length;
+
   useEffect(() => {
     if (!open) { setQ(''); setActive(0); }
   }, [open]);
   useEffect(() => { setActive(0); }, [q]);
 
-  const pick = (r: SearchResult) => { onNavigate(r.url); onClose(); };
+  const pick = (idx: number) => {
+    if (idx < navMatches.length) {
+      const cmd = navMatches[idx]!;
+      onNavigate(cmd.to);
+    } else {
+      const r = results[idx - navMatches.length];
+      if (!r) return;
+      onNavigate(r.url);
+    }
+    onClose();
+  };
 
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { e.stopPropagation(); onClose(); return; }
-      if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.min(a + 1, results.length - 1)); }
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.min(a + 1, totalCount - 1)); }
       if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
-      if (e.key === 'Enter' && results[0]) {
+      if (e.key === 'Enter' && totalCount > 0) {
         e.preventDefault();
-        const r = results[Math.min(active, results.length - 1)];
-        if (r) pick(r);
+        pick(Math.min(active, totalCount - 1));
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, results, active, onClose]);
+  }, [open, navMatches.length, results, active, onClose]);
 
   // Keep the active row in view while arrowing through results.
   useEffect(() => {
@@ -123,26 +156,46 @@ export function CommandPalette({ open, onClose, onNavigate }: {
               <p className="text-[13px] text-muted-foreground">{t('search.startTyping')}</p>
             </div>
           )}
-          {q.length > 1 && results.length === 0 && !isFetching && (
+          {q.length > 1 && totalCount === 0 && !isFetching && (
             <div className="py-8 text-center text-[13px] text-muted-foreground">{t('search.noResults')}</div>
           )}
-          {results.map((r, i) => (
+          {navMatches.map((c, i) => (
             <button
-              key={r.kind + r.id}
+              key={c.to}
               data-idx={i}
-              onClick={() => pick(r)}
+              onClick={() => pick(i)}
               onMouseMove={() => setActive(i)}
               className={cn(
-                'flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] transition-colors duration-100',
+                'flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] transition-colors duration-150',
                 i === active ? 'bg-muted text-foreground' : 'text-foreground/90',
               )}
             >
-              <span className="shrink-0">{KIND_ICON[r.kind] ?? <FileText size={15} className="text-muted-foreground" />}</span>
-              <span className="min-w-0 flex-1 truncate">{r.title}</span>
-              <span className="shrink-0 text-[11px] text-faint">{t(`search.kind.${r.kind}`, r.kind)}</span>
+              <span className="shrink-0"><ArrowRight size={15} className="text-muted-foreground" /></span>
+              <span className="min-w-0 flex-1 truncate">{t(c.labelKey)}</span>
+              <span className="shrink-0 text-[11px] text-faint">{t('search.goto')}</span>
               {i === active && <Kbd>↵</Kbd>}
             </button>
           ))}
+          {results.map((r, i) => {
+            const idx = navMatches.length + i;
+            return (
+              <button
+                key={r.kind + r.id}
+                data-idx={idx}
+                onClick={() => pick(idx)}
+                onMouseMove={() => setActive(idx)}
+                className={cn(
+                  'flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] transition-colors duration-150',
+                  idx === active ? 'bg-muted text-foreground' : 'text-foreground/90',
+                )}
+              >
+                <span className="shrink-0">{KIND_ICON[r.kind] ?? <FileText size={15} className="text-muted-foreground" />}</span>
+                <span className="min-w-0 flex-1 truncate">{r.title}</span>
+                <span className="shrink-0 text-[11px] text-faint">{t(`search.kind.${r.kind}`, r.kind)}</span>
+                {idx === active && <Kbd>↵</Kbd>}
+              </button>
+            );
+          })}
         </div>
 
         {/* Footer hints */}

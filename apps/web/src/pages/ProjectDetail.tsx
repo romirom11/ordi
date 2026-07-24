@@ -55,6 +55,8 @@ extendDict({
     'projects.newTaskInline': 'Add task…',
     'projects.noTasks': 'No tasks in this project yet',
     'projects.noTasksHint': 'Create your first task — click + in a status group or press C.',
+    'projects.cycleDatesRequired': 'Pick start and end dates for the cycle.',
+    'projects.cycleDatesOrder': 'The end date must be after the start date.',
     'projects.aboutPlaceholder': 'Describe this project — goals, scope, context…',
     'projects.overviewEmpty': 'No tasks yet',
     'projects.loadFailed': 'Could not load this project.',
@@ -87,6 +89,8 @@ extendDict({
     'projects.newTaskInline': 'Додати задачу…',
     'projects.noTasks': 'У цьому проєкті ще немає задач',
     'projects.noTasksHint': 'Створіть першу задачу — натисніть + у групі статусу або C на клавіатурі.',
+    'projects.cycleDatesRequired': 'Оберіть дати початку та завершення циклу.',
+    'projects.cycleDatesOrder': 'Дата завершення має бути після дати початку.',
     'projects.aboutPlaceholder': 'Опишіть проєкт — цілі, обсяг, контекст…',
     'projects.overviewEmpty': 'Задач поки немає',
     'projects.loadFailed': 'Не вдалося завантажити проєкт.',
@@ -391,7 +395,8 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, onOpen }: 
         <div className="space-y-2">{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-9" />)}</div>
       ) : statuses.length === 0 ? (
         <EmptyState icon={<ListChecks size={20} />} title={t('projects.noWorkflow')} hint={t('projects.noWorkflowHint')} />
-      ) : tasks.length === 0 && view !== 'board' && view !== 'spreadsheet' ? (
+      ) : tasks.length === 0 && (!canWrite || view === 'calendar' || view === 'timeline') ? (
+        // Writers see the list/board with inline "+ add" rows instead of a dead end.
         <EmptyState
           icon={<ListChecks size={20} />}
           title={t('projects.noTasks')}
@@ -470,8 +475,9 @@ function ListView({ projectId, statuses, byStatus, onOpen, canWrite, projectKey,
                   >
                     <button
                       onClick={() => onOpen(task.id)}
-                      className={cn('flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors duration-150 hover:bg-muted/60',
+                      className={cn('row-enter flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors duration-150 hover:bg-muted/60',
                         i > 0 && 'border-t border-border')}
+                      style={{ ['--i' as string]: Math.min(i, 10) }}
                     >
                       <PriorityIcon priority={task.priority} size={15} />
                       {refLabel(task, projectKey) && (
@@ -598,6 +604,20 @@ function BoardView({ projectId, statuses, byStatus, onOpen, canWrite, projectKey
 
 /* ───────────────────────── Overview tab ───────────────────────── */
 
+/** description column is text: parse stored tiptap JSON, wrap legacy plain text. */
+function parseProjectDoc(raw: unknown): unknown {
+  if (!raw) return EMPTY_DOC;
+  if (typeof raw === 'object') return raw;
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') return parsed;
+    } catch { /* legacy plain text */ }
+    return { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: raw }] }] };
+  }
+  return EMPTY_DOC;
+}
+
 function OverviewTab({ id, statuses, project, users, canWrite, onPatch }: {
   id: string; statuses: TaskStatus[]; project?: Project; users: UserLite[]; canWrite: boolean;
   onPatch: (body: Record<string, unknown>) => void;
@@ -606,11 +626,13 @@ function OverviewTab({ id, statuses, project, users, canWrite, onPatch }: {
   const { data, isLoading } = useQuery<Task[]>({ queryKey: ['tasks', id], queryFn: () => api.get<{ data: Task[] }>(`/tasks${qs({ projectId: id })}`).then((r) => r.data) });
   const tasks = data ?? [];
 
-  // Debounced description editor.
+  // Debounced description editor. The API stores the description as a string
+  // column, so the tiptap doc travels JSON-serialized (legacy plain text is
+  // wrapped into a paragraph).
   const [doc, setDoc] = useState<unknown>(EMPTY_DOC);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    setDoc(project?.description ?? EMPTY_DOC);
+    setDoc(parseProjectDoc(project?.description));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project?.id]);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
@@ -619,7 +641,7 @@ function OverviewTab({ id, statuses, project, users, canWrite, onPatch }: {
     setDoc(next);
     if (!canWrite) return;
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => { onPatch({ description: next }); }, 900);
+    timer.current = setTimeout(() => { onPatch({ description: JSON.stringify(next) }); }, 900);
   };
 
   return (
@@ -678,10 +700,17 @@ function CyclesTab({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
 
   const reset = () => { setName(''); setStart(''); setEnd(''); setGoal(''); setError(null); };
+  // Prefill a sensible two-week window when the dialog opens.
+  useEffect(() => {
+    if (!adding) return;
+    const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    setStart((s) => s || iso(new Date()));
+    setEnd((s) => s || iso(new Date(Date.now() + 13 * 86_400_000)));
+  }, [adding]);
   const mut = useMutation({
     mutationFn: () => api.post('/cycles', { projectId: id, name, startDate: start || undefined, endDate: end || undefined, goal: goal || undefined }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['cycles', id] }); setAdding(false); reset(); },
-    onError: (e) => { const m = e instanceof ApiError ? e.message : t('projects.createCycleFailed'); setError(m); toast.error(m); },
+    onError: (e) => { setError(e instanceof ApiError ? e.message : t('projects.createCycleFailed')); },
   });
 
   const cycles = data ?? [];
@@ -733,7 +762,17 @@ function CyclesTab({ id }: { id: string }) {
       )}
 
       <Dialog open={adding} onClose={() => { setAdding(false); reset(); }} title={t('projects.newCycle')} width={440}>
-        <form onSubmit={(e: FormEvent) => { e.preventDefault(); setError(null); if (!name.trim()) { setError(t('common.nameRequired')); return; } mut.mutate(); }} className="space-y-3 px-4 pb-4 pt-1">
+        <form
+          onSubmit={(e: FormEvent) => {
+            e.preventDefault();
+            setError(null);
+            if (!name.trim()) { setError(t('common.nameRequired')); return; }
+            if (!start || !end) { setError(t('projects.cycleDatesRequired')); return; }
+            if (end < start) { setError(t('projects.cycleDatesOrder')); return; }
+            mut.mutate();
+          }}
+          className="space-y-3 px-4 pb-4 pt-1"
+        >
           <Input autoFocus placeholder={t('projects.cycleNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} />
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1"><label className="text-xs text-muted-foreground">{t('projects.start')}</label><Input type="date" value={start} onChange={(e) => setStart(e.target.value)} /></div>

@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, FolderKanban, Lock, Target } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
@@ -247,14 +247,30 @@ export function ProjectsPage() {
   );
 }
 
+/** Suggest a project key from the name: initials for multi-word, first 3 letters otherwise. */
+function deriveProjectKey(name: string): string {
+  const words = name.toUpperCase().replace(/[^A-Z0-9\s]/gi, ' ').trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return '';
+  const k = (words.length === 1 ? words[0]!.slice(0, 3) : words.map((w) => w[0]!).join('').slice(0, 5))
+    .replace(/[^A-Z]/g, '');
+  return k.length >= 2 ? k : '';
+}
+
 function NewProjectModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (id: string) => void }) {
   const t = useT();
   const canCrm = useCan()('crm.read');
   const [name, setName] = useState('');
   const [key, setKey] = useState('');
+  const [keyTouched, setKeyTouched] = useState(false);
   const [kind, setKind] = useState<'client' | 'internal'>('client');
   const [companyId, setCompanyId] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  // Fresh form every time the dialog opens.
+  useEffect(() => {
+    if (!open) return;
+    setName(''); setKey(''); setKeyTouched(false); setKind('client'); setCompanyId(''); setError(null);
+  }, [open]);
 
   const companiesQ = useQuery<CompanyLite[]>({
     queryKey: ['companies', 'lite'],
@@ -285,14 +301,27 @@ function NewProjectModal({ open, onClose, onCreated }: { open: boolean; onClose:
       <form onSubmit={submit} className="space-y-3 px-4 pb-4 pt-1">
         <div className="space-y-1">
           <label className="text-xs font-medium text-muted-foreground">{t('common.name')}</label>
-          <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Marketing site" />
+          <Input
+            autoFocus
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+              if (!keyTouched) setKey(deriveProjectKey(e.target.value));
+            }}
+            placeholder="Marketing site"
+          />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">{t('projects.key')}</label>
             <Input
               value={key}
-              onChange={(e) => setKey(e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5))}
+              onChange={(e) => {
+                const v = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5);
+                setKey(v);
+                // Manual edits stop auto-derivation; clearing the field resumes it.
+                setKeyTouched(v !== '');
+              }}
               placeholder="MKT"
               className="font-mono uppercase"
             />

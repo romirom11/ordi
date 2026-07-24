@@ -9,7 +9,7 @@ import { CalendarDays, CalendarPlus, Gauge, Tag, UserPlus2, X } from 'lucide-rea
 import {
   Avatar, AvatarGroup, Badge, PriorityIcon, StatusIcon, cn, fmtDate,
 } from '../ui';
-import { DropdownMenu, MenuItem, MenuLabel, MenuSeparator } from '../overlays';
+import { DropdownMenu, MenuItem, MenuLabel, MenuSeparator, useMenuClose } from '../overlays';
 import { GitBlock } from './GitBlock';
 import { useT, extendDict } from '../../lib/i18n';
 import type { TaskDetail, TaskLabel, TaskPatch, TaskStatus, UserLite } from './types';
@@ -101,17 +101,54 @@ function ToggleItem({ children, icon, checked, onToggle }: {
       role="menuitemcheckbox"
       aria-checked={checked}
       onClick={onToggle}
-      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-foreground transition-colors duration-100 hover:bg-muted"
+      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-foreground transition-colors duration-150 hover:bg-muted"
     >
       {icon && <span className="[&>svg]:block">{icon}</span>}
       <span className="flex-1 truncate">{children}</span>
-      <span className={cn('text-primary transition-opacity duration-100', checked ? 'opacity-100' : 'opacity-0')}>✓</span>
+      <span className={cn('text-primary transition-opacity duration-150', checked ? 'opacity-100' : 'opacity-0')}>✓</span>
     </button>
   );
 }
 
 function isoDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Native date input inside a menu — picking a date applies it and closes the menu. */
+function DatePickInput({ value, onSet, ariaLabel }: {
+  value: string | null; onSet: (v: string) => void; ariaLabel: string;
+}) {
+  const close = useMenuClose();
+  return (
+    <input
+      type="date"
+      aria-label={ariaLabel}
+      defaultValue={value ? value.slice(0, 10) : ''}
+      onChange={(e) => { if (e.target.value) { onSet(e.target.value); close(); } }}
+      className="h-7 w-full rounded-md border border-input bg-transparent px-2 text-[13px] outline-none transition-colors duration-150 hover:border-border-strong focus:border-primary/60"
+    />
+  );
+}
+
+/** Numeric estimate input inside the menu — Enter applies and closes. */
+function EstimateInput({ onSubmit }: { onSubmit: (n: number) => void }) {
+  const close = useMenuClose();
+  const [draft, setDraft] = useState('');
+  const submit = () => {
+    const n = Number(draft);
+    if (draft.trim() !== '' && Number.isFinite(n) && n >= 0) { onSubmit(n); close(); }
+  };
+  return (
+    <input
+      type="number"
+      min={0}
+      placeholder="8"
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+      className="h-7 w-full rounded-md border border-input bg-transparent px-2 text-[13px] tabular-nums outline-none transition-colors duration-150 hover:border-border-strong focus:border-primary/60"
+    />
+  );
 }
 
 function DateMenu({ label, emptyLabel, icon, value, overdue, onSet, t }: {
@@ -135,13 +172,7 @@ function DateMenu({ label, emptyLabel, icon, value, overdue, onSet, t }: {
       >
         <MenuLabel>{label}</MenuLabel>
         <div className="px-2 pb-1.5">
-          <input
-            type="date"
-            aria-label={t('task.pickDate')}
-            defaultValue={value ? value.slice(0, 10) : ''}
-            onChange={(e) => { if (e.target.value) onSet(e.target.value); }}
-            className="h-7 w-full rounded-md border border-input bg-transparent px-2 text-[13px] outline-none transition-colors duration-150 hover:border-border-strong focus:border-primary/60"
-          />
+          <DatePickInput value={value} onSet={onSet} ariaLabel={t('task.pickDate')} />
         </div>
         <MenuSeparator />
         <MenuItem icon={<CalendarDays size={14} />} onSelect={() => onSet(isoDate(now))}>{t('task.today')}</MenuItem>
@@ -167,7 +198,6 @@ export function PropertySidebar({ task, statuses, users, labels, onPatch, hasRep
   hasRepos?: boolean;
 }) {
   const t = useT();
-  const [estimateDraft, setEstimateDraft] = useState('');
 
   const status = statuses.find((s) => s.id === task.statusId);
   const assigneeIds = task.assignees.map((a) => a.userId);
@@ -181,10 +211,6 @@ export function PropertySidebar({ task, statuses, users, labels, onPatch, hasRep
   };
   const toggleLabel = (id: string) => {
     onPatch({ labelIds: labelIds.includes(id) ? labelIds.filter((l) => l !== id) : [...labelIds, id] });
-  };
-  const submitEstimate = () => {
-    const n = Number(estimateDraft);
-    if (estimateDraft.trim() !== '' && Number.isFinite(n) && n >= 0) onPatch({ estimate: n });
   };
 
   return (
@@ -359,15 +385,7 @@ export function PropertySidebar({ task, statuses, users, labels, onPatch, hasRep
         >
           <MenuLabel>{t('task.estimate')}</MenuLabel>
           <div className="px-2 pb-1.5">
-            <input
-              type="number"
-              min={0}
-              placeholder="8"
-              value={estimateDraft}
-              onChange={(e) => setEstimateDraft(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') submitEstimate(); }}
-              className="h-7 w-full rounded-md border border-input bg-transparent px-2 text-[13px] tabular-nums outline-none transition-colors duration-150 hover:border-border-strong focus:border-primary/60"
-            />
+            <EstimateInput onSubmit={(n) => onPatch({ estimate: n })} />
           </div>
           <MenuSeparator />
           <div className="grid grid-cols-6 gap-0.5 px-1 pb-1">

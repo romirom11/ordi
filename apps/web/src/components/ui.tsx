@@ -109,14 +109,14 @@ export function Switch({ checked, onChange, disabled, label }: {
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        'relative inline-flex h-[18px] w-[30px] shrink-0 items-center rounded-full transition-colors duration-200',
+        'relative inline-flex h-[18px] w-[30px] shrink-0 items-center rounded-full transition-colors duration-150',
         checked ? 'bg-primary' : 'bg-border-strong',
         disabled && 'pointer-events-none opacity-50',
       )}
     >
       <span
         className="absolute left-[2px] h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform"
-        style={{ transform: checked ? 'translateX(12px)' : 'translateX(0)', transitionDuration: '350ms', transitionTimingFunction: 'cubic-bezier(0.34, 1.35, 0.64, 1)' }}
+        style={{ transform: checked ? 'translateX(12px)' : 'translateX(0)', transitionDuration: 'var(--duration-medium)', transitionTimingFunction: 'var(--ease-bounce)' }}
       />
     </button>
   );
@@ -144,7 +144,7 @@ export function Checkbox({ checked, onChange, disabled }: { checked: boolean; on
           style={{
             strokeDasharray: 12,
             strokeDashoffset: checked ? 0 : 12,
-            transition: 'stroke-dashoffset 350ms cubic-bezier(0.22, 1, 0.36, 1)',
+            transition: 'stroke-dashoffset var(--duration-medium) var(--ease-smooth-out)',
           }}
         />
       </svg>
@@ -192,7 +192,8 @@ export function Kbd({ children }: { children: ReactNode }) {
 export interface BreadcrumbItem { label: ReactNode; to?: string; icon?: ReactNode }
 
 export function Breadcrumbs({ items, className }: { items: BreadcrumbItem[]; className?: string }) {
-  if (items.length === 0) return null;
+  // A lone crumb only repeats the page title — render trails, not echoes.
+  if (items.length < 2) return null;
   return (
     <nav aria-label="Breadcrumb" className={cn('flex min-w-0 items-center gap-1 text-[13px]', className)}>
       {items.map((it, i) => {
@@ -318,7 +319,7 @@ export function AvatarGroup({ users, size = 20, max = 4 }: {
       {shown.map((u, i) => (
         <span
           key={u.id}
-          className="rounded-full ring-2 ring-card transition-transform duration-300 ease-smooth-out hover:-translate-y-0.5 hover:scale-105"
+          className="rounded-full ring-2 ring-card transition-transform duration-[350ms] [transition-timing-function:var(--ease-bounce-strong)] hover:-translate-y-0.5 hover:scale-105 hover:duration-150 hover:[transition-timing-function:var(--ease-smooth-out)]"
           style={{ marginLeft: i === 0 ? 0 : -Math.round(size / 3), zIndex: i + 1 }}
         >
           <Avatar name={u.name} src={u.avatar} size={size} />
@@ -452,7 +453,7 @@ export function ProgressRing({ value, size = 16, stroke = 2.5, color, className 
         cx={size / 2} cy={size / 2} r={r} fill="none"
         stroke={color ?? 'hsl(var(--primary))'} strokeWidth={stroke} strokeLinecap="round"
         strokeDasharray={circ} strokeDashoffset={circ * (1 - pct / 100)}
-        style={{ transition: 'stroke-dashoffset 500ms cubic-bezier(0.22, 1, 0.36, 1)' }}
+        style={{ transition: 'stroke-dashoffset var(--duration-very-slow) var(--ease-smooth-out)' }}
       />
     </svg>
   );
@@ -468,7 +469,7 @@ export function Tooltip({ label, children, side = 'top' }: { label: ReactNode; c
         role="tooltip"
         className={cn(
           'pointer-events-none absolute z-50 whitespace-nowrap rounded-md bg-elevated px-2 py-1 text-xs text-foreground shadow-pop',
-          'opacity-0 transition-opacity duration-150 ease-out group-hover/tt:opacity-100 group-hover/tt:delay-500',
+          'opacity-0 transition-opacity duration-150 ease-out group-hover/tt:opacity-100 group-hover/tt:delay-[80ms]',
           side === 'top' && 'bottom-full left-1/2 mb-1.5 -translate-x-1/2',
           side === 'bottom' && 'top-full left-1/2 mt-1.5 -translate-x-1/2',
           side === 'right' && 'left-full top-1/2 ml-1.5 -translate-y-1/2',

@@ -117,7 +117,13 @@ function AuthedApp() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+// Reuse the existing root across Vite HMR re-evaluations of this module —
+// calling createRoot twice on the same container is a React error.
+const hotData = (import.meta as { hot?: { data: { root?: ReactDOM.Root } } }).hot?.data;
+const root = hotData?.root ?? ReactDOM.createRoot(document.getElementById('root')!);
+if (hotData) hotData.root = root;
+
+root.render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>

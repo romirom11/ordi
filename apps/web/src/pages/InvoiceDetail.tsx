@@ -198,7 +198,18 @@ export function InvoiceDetailPage({ id }: { id: string }) {
         <div className="flex flex-wrap items-center justify-end gap-2">
           {can('finance.send') && <Button size="sm" variant="outline" onClick={() => send.mutate()} disabled={send.isPending}><Send size={14} /> {t('common.send')}</Button>}
           <Button size="sm" variant="outline" onClick={() => window.open(`/api/v1/invoices/${id}/pdf`, '_blank')}><Download size={14} /> PDF</Button>
-          {can('finance.payments') && outstanding > 0 && <Button size="sm" onClick={() => setShowPayment(true)}><Plus size={14} /> {t('finance.recordPayment')}</Button>}
+          {can('finance.payments') && outstanding > 0 && (
+            <Button
+              size="sm"
+              onClick={() => {
+                // Prefill with the outstanding amount and today's date.
+                setPay((p) => ({ ...p, amount: String(outstanding), date: todayIso() }));
+                setShowPayment(true);
+              }}
+            >
+              <Plus size={14} /> {t('finance.recordPayment')}
+            </Button>
+          )}
           {can('finance.write') && cancelable && <Button size="sm" variant="destructive" onClick={() => setShowCancel(true)} disabled={cancel.isPending}><Ban size={14} /> {t('common.cancel')}</Button>}
         </div>
       </div>

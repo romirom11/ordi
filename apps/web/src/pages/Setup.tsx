@@ -57,7 +57,7 @@ extendDict({
   },
 });
 
-const SLIDE = 'cubic-bezier(0.22, 1, 0.36, 1)';
+const SLIDE = 'var(--ease-smooth-out)';
 
 interface SetupStatus { needsSetup: boolean }
 interface SetupResult { ok: boolean; sessionToken?: string }
@@ -112,7 +112,7 @@ function SuccessCheck() {
           style={{
             strokeDasharray: 44,
             strokeDashoffset: 44,
-            animation: `check-draw 500ms ${SLIDE} 160ms both`,
+            animation: `check-draw var(--duration-very-slow) ${SLIDE} var(--duration-micro) both`,
           }}
         />
       </svg>

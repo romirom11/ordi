@@ -225,7 +225,7 @@
   border-radius: 0.4rem;
   text-align: left;
   cursor: pointer;
-  transition: background-color 120ms;
+  transition: background-color var(--duration-quick, 150ms);
 }
 .ordi-rt-menu-item[data-active='true'] {
   background: hsl(var(--muted));
@@ -297,7 +297,7 @@
   font-size: 0.8125rem;
   color: hsl(var(--foreground));
   cursor: pointer;
-  transition: background-color 120ms;
+  transition: background-color var(--duration-quick, 150ms);
 }
 .ordi-rt-blockmenu-item:hover {
   background: hsl(var(--muted));
@@ -331,7 +331,7 @@
   padding: 0.3rem 0.4rem;
   text-align: left;
   cursor: pointer;
-  transition: background-color 120ms;
+  transition: background-color var(--duration-quick, 150ms);
 }
 .ordi-mention-item.is-selected,
 .ordi-mention-item:hover {

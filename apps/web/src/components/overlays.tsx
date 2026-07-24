@@ -45,7 +45,7 @@ export function Dialog({ open, onClose, children, width = 480, title, hideClose 
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
       style={{
         background: 'hsl(var(--overlay) / 0.55)',
-        animation: `${closing ? 'overlay-out' : 'overlay-in'} ${closing ? 150 : 250}ms var(--ease-smooth-out) both`,
+        animation: `${closing ? 'overlay-out' : 'overlay-in'} ${closing ? 'var(--duration-quick)' : 'var(--duration-fast)'} var(--ease-smooth-out) both`,
       }}
     >
       <style>{`@keyframes overlay-out { from { opacity: 1 } to { opacity: 0 } } @keyframes modal-out { from { opacity: 1; transform: scale(1) } to { opacity: 0; transform: scale(var(--scale-large)) } }`}</style>
@@ -55,7 +55,7 @@ export function Dialog({ open, onClose, children, width = 480, title, hideClose 
         className="w-full rounded-xl border border-border bg-elevated shadow-modal"
         style={{
           maxWidth: width,
-          animation: `${closing ? 'modal-out' : 'modal-in'} ${closing ? 150 : 250}ms var(--ease-smooth-out) both`,
+          animation: `${closing ? 'modal-out' : 'modal-in'} ${closing ? 'var(--duration-quick)' : 'var(--duration-fast)'} var(--ease-smooth-out) both`,
         }}
         onMouseDown={(e) => e.stopPropagation()}
       >
@@ -96,6 +96,11 @@ export function ConfirmDialog({ open, onClose, onConfirm, title, body, confirmLa
 interface MenuCtxType { close: () => void }
 const MenuCtx = createContext<MenuCtxType>({ close: () => {} });
 
+/** Close the nearest DropdownMenu — for custom controls (inputs, etc.) inside a menu. */
+export function useMenuClose(): () => void {
+  return useContext(MenuCtx).close;
+}
+
 export function DropdownMenu({ trigger, children, align = 'start', side = 'bottom', width, disabled, className }: {
   trigger: ReactNode; children: ReactNode; align?: 'start' | 'end'; side?: 'bottom' | 'top' | 'right';
   width?: number; disabled?: boolean; className?: string;
@@ -108,7 +113,7 @@ export function DropdownMenu({ trigger, children, align = 'start', side = 'botto
 
   const close = useCallback(() => {
     setClosing(true);
-    setTimeout(() => { setOpen(false); setClosing(false); }, 120);
+    setTimeout(() => { setOpen(false); setClosing(false); }, 150);
   }, []);
 
   useLayoutEffect(() => {
@@ -150,8 +155,8 @@ export function DropdownMenu({ trigger, children, align = 'start', side = 'botto
             ...pos,
             transformOrigin: `${align === 'end' ? 'right' : 'left'} ${side === 'top' ? 'bottom' : 'top'}`,
             animation: closing
-              ? 'dropdown-out 120ms var(--ease-smooth-out) both'
-              : 'dropdown-in 250ms var(--ease-smooth-out) both',
+              ? 'dropdown-out var(--duration-quick) var(--ease-smooth-out) both'
+              : 'dropdown-in var(--duration-fast) var(--ease-smooth-out) both',
           }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -175,7 +180,7 @@ export function MenuItem({ children, onSelect, icon, danger, disabled, shortcut,
       disabled={disabled}
       onClick={() => { onSelect?.(); close(); }}
       className={cn(
-        'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors duration-100',
+        'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors duration-150',
         danger ? 'text-destructive hover:bg-destructive/10' : 'text-foreground hover:bg-muted',
         disabled && 'pointer-events-none opacity-50',
       )}
@@ -283,7 +288,7 @@ function ContextMenuList({ items, onDone, autoFocus }: {
                 onDone();
               }}
               className={cn(
-                'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors duration-100',
+                'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors duration-150',
                 it.danger ? 'text-destructive hover:bg-destructive/10' : 'text-foreground hover:bg-muted',
                 kbActive && (it.danger ? 'bg-destructive/10' : 'bg-muted'),
                 it.disabled && 'pointer-events-none opacity-50',
@@ -299,7 +304,7 @@ function ContextMenuList({ items, onDone, autoFocus }: {
                 className="absolute -top-1 left-full z-10 min-w-[168px] overflow-hidden rounded-lg border border-border bg-elevated shadow-pop"
                 style={{
                   transformOrigin: 'left top',
-                  animation: 'dropdown-in 250ms var(--ease-smooth-out) both',
+                  animation: 'dropdown-in var(--duration-fast) var(--ease-smooth-out) both',
                 }}
                 onMouseEnter={() => window.clearTimeout(hoverTimer.current)}
               >
@@ -381,8 +386,8 @@ export function ContextMenu({ items, children, disabled, className }: {
             ...pos,
             transformOrigin: origin,
             animation: closing
-              ? 'ctx-menu-out 150ms var(--ease-smooth-out) both'
-              : 'dropdown-in 250ms var(--ease-smooth-out) both',
+              ? 'ctx-menu-out var(--duration-quick) var(--ease-smooth-out) both'
+              : 'dropdown-in var(--duration-fast) var(--ease-smooth-out) both',
           }}
           onContextMenu={(e) => e.preventDefault()}
         >
@@ -409,7 +414,7 @@ function emit() { listeners.forEach((l) => l()); }
 function dismiss(id: number) {
   toasts = toasts.map((t) => (t.id === id ? { ...t, leaving: true } : t));
   emit();
-  setTimeout(() => { toasts = toasts.filter((t) => t.id !== id); emit(); }, 250);
+  setTimeout(() => { toasts = toasts.filter((t) => t.id !== id); emit(); }, 350);
 }
 
 export function toast(message: string, kind: ToastKind = 'success') {
@@ -440,7 +445,7 @@ export function Toaster() {
         <div
           key={t.id}
           className="pointer-events-auto flex items-start gap-2.5 rounded-lg border border-border bg-elevated px-3 py-2.5 text-[13px] shadow-pop"
-          style={{ animation: t.leaving ? 'toast-out 250ms var(--ease-smooth-out) both' : 'toast-in 350ms var(--ease-smooth-out) both' }}
+          style={{ animation: t.leaving ? 'toast-out var(--duration-medium) var(--ease-smooth-out) both' : 'toast-in var(--duration-medium) var(--ease-smooth-out) both' }}
         >
           <span className="mt-px shrink-0">{ICONS[t.kind]}</span>
           <span className="flex-1 leading-snug">{t.message}</span>

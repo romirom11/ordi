@@ -322,9 +322,18 @@ export async function getSpace(actor: Actor, id: string): Promise<SpaceRow> {
   return loadSpace(id);
 }
 
+/**
+ * Space editor, or a workspace admin holding kb.manage_spaces — the same fallback
+ * deleteSpace uses, so admins can manage orphaned spaces they are not members of.
+ */
+async function assertSpaceEditorOrManager(actor: Actor, spaceId: string): Promise<void> {
+  if (hasPermission(actor.access, 'kb.manage_spaces')) return;
+  await assertSpace(actor, spaceId, 'editor');
+}
+
 export async function updateSpace(actor: Actor, id: string, input: any): Promise<SpaceRow> {
   const { db } = getDb();
-  await assertSpace(actor, id, 'editor');
+  await assertSpaceEditorOrManager(actor, id);
   const before = await loadSpace(id);
   assertVersion(before, input.version, before);
   const patch: Record<string, unknown> = {};
@@ -371,7 +380,7 @@ export async function deleteSpace(actor: Actor, id: string): Promise<void> {
 
 export async function listMembers(actor: Actor, spaceId: string) {
   const { db } = getDb();
-  await assertSpace(actor, spaceId, 'editor');
+  await assertSpaceEditorOrManager(actor, spaceId);
   return db
     .select({
       userId: schema.spaceMembers.userId,
@@ -387,7 +396,7 @@ export async function listMembers(actor: Actor, spaceId: string) {
 
 export async function addMember(actor: Actor, spaceId: string, input: any): Promise<void> {
   const { db } = getDb();
-  await assertSpace(actor, spaceId, 'editor');
+  await assertSpaceEditorOrManager(actor, spaceId);
   await db
     .insert(schema.spaceMembers)
     .values({ spaceId, userId: input.userId, role: input.role ?? 'editor' })
@@ -407,7 +416,7 @@ export async function addMember(actor: Actor, spaceId: string, input: any): Prom
 
 export async function removeMember(actor: Actor, spaceId: string, userId: string): Promise<void> {
   const { db } = getDb();
-  await assertSpace(actor, spaceId, 'editor');
+  await assertSpaceEditorOrManager(actor, spaceId);
   await db
     .delete(schema.spaceMembers)
     .where(and(eq(schema.spaceMembers.spaceId, spaceId), eq(schema.spaceMembers.userId, userId)));

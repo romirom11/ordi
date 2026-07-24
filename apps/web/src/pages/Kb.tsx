@@ -84,7 +84,7 @@ function Caret({ open, visible = true }: { open: boolean; visible?: boolean }) {
         <ChevronRight
           size={12}
           className="text-faint"
-          style={{ transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 200ms var(--ease-smooth-out)' }}
+          style={{ transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform var(--duration-fast) var(--ease-smooth-out)' }}
         />
       )}
     </span>

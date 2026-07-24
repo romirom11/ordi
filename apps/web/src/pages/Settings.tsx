@@ -70,6 +70,9 @@ extendDict({
     'settings.invoices': 'Invoices',
     'settings.saveFailed': 'Could not save changes',
     'settings.conflict': 'Someone else made changes — reloaded latest.',
+    'settings.unit.hours': 'hours',
+    'settings.unit.points': 'points',
+    'settings.unit.days': 'days',
   },
   uk: {
     'settings.subtitle': 'Керуйте робочим простором, учасниками та налаштуваннями',
@@ -118,6 +121,64 @@ extendDict({
     'settings.invoices': 'Інвойси',
     'settings.saveFailed': 'Не вдалося зберегти зміни',
     'settings.conflict': 'Хтось інший вніс зміни — завантажено найновіше.',
+    // Permission catalog (labels come from the shared package in English).
+    'perm.crm.read': 'Перегляд компаній і контактів',
+    'perm.crm.write': 'Створення/редагування компаній і контактів',
+    'perm.crm.delete': 'Видалення записів CRM',
+    'perm.crm.export': 'Експорт даних CRM',
+    'perm.deals.read': 'Перегляд угод',
+    'perm.deals.write': 'Створення/редагування угод',
+    'perm.deals.delete': 'Видалення угод',
+    'perm.projects.read': 'Перегляд проєктів воркспейсу',
+    'perm.projects.create': 'Створення проєктів',
+    'perm.projects.write': 'Керування налаштуваннями проєкту (як адмін проєкту)',
+    'perm.projects.delete': 'Видалення проєктів',
+    'perm.projects.export': 'Експорт даних проєкту',
+    'perm.kb.read': 'Перегляд бази знань',
+    'perm.kb.write': 'Створення/редагування сторінок',
+    'perm.kb.manage_spaces': 'Створення/видалення просторів воркспейсу',
+    'perm.time.track': 'Трекінг власного часу',
+    'perm.time.read_all': 'Перегляд часу всіх',
+    'perm.time.manage': 'Редагування чужого часу та ставок',
+    'perm.finance.read': 'Перегляд рахунків, кошторисів, дебіторки',
+    'perm.finance.write': 'Створення/редагування фінансових документів',
+    'perm.finance.send': 'Надсилання документів',
+    'perm.finance.payments': 'Фіксація платежів',
+    'perm.finance.delete': 'Видалення фінансових документів',
+    'perm.finance.settings': 'Нумерація, податки, нагадування',
+    'perm.finance.export': 'Експорт фінансових даних',
+    'perm.finance.read_costs': 'Перегляд витрат і прибутковості',
+    'perm.people.read': 'Перегляд співробітників та структури',
+    'perm.people.read_sensitive': 'Перегляд чутливих полів',
+    'perm.people.read_compensation': 'Перегляд компенсацій (найвужчий)',
+    'perm.people.write': 'Редагування співробітників та життєвого циклу',
+    'perm.people.manage_leave': 'Керування типами відпусток/квотами/календарями',
+    'perm.people.approve_leave': 'Погодження відпусток поза лінією менеджера',
+    'perm.people.recruit': 'Вакансії, кандидати, співбесіди',
+    'perm.integrations.manage': 'Керування git та вебхуками',
+    'perm.settings.manage': 'Налаштування воркспейсу, шаблони, кастомні поля',
+    'perm.users.manage': 'Запрошення/керування користувачами',
+    'perm.roles.manage': 'Керування ролями',
+    'perm.audit.read': 'Перегляд журналу аудиту',
+    'permdomain.crm': 'CRM',
+    'permdomain.deals': 'Угоди',
+    'permdomain.projects': 'Проєкти',
+    'permdomain.kb': 'База знань',
+    'permdomain.time': 'Час',
+    'permdomain.finance': 'Фінанси',
+    'permdomain.people': 'Люди',
+    'permdomain.integrations': 'Інтеграції',
+    'permdomain.settings': 'Налаштування',
+    'settings.unit.hours': 'години',
+    'settings.unit.points': 'бали',
+    'settings.unit.days': 'дні',
+    'settings.day.1': 'Пн',
+    'settings.day.2': 'Вт',
+    'settings.day.3': 'Ср',
+    'settings.day.4': 'Чт',
+    'settings.day.5': 'Пт',
+    'settings.day.6': 'Сб',
+    'settings.day.7': 'Нд',
   },
 });
 
@@ -350,7 +411,7 @@ function WorkspacePanel() {
       {/* Estimate unit */}
       <SettingRow label={t('settings.estimateUnit')}>
         <Select value={unit} onChange={(e) => setUnit(e.target.value)} className="w-32">
-          {ESTIMATE_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+          {ESTIMATE_UNITS.map((u) => <option key={u} value={u}>{t(`settings.unit.${u}`, u)}</option>)}
         </Select>
       </SettingRow>
 
@@ -374,7 +435,7 @@ function WorkspacePanel() {
                   on ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-muted-foreground hover:border-border-strong hover:text-foreground',
                 )}
               >
-                {DAY_LABELS[d]}
+                {t(`settings.day.${d}`, DAY_LABELS[d])}
               </button>
             );
           })}
@@ -513,6 +574,7 @@ function InviteDialog({ open, onClose, roles }: { open: boolean; onClose: () => 
 interface CatalogPerm { key: string; domain: string; label: string }
 
 function useCatalog(): { domain: string; perms: { key: string; label: string }[] }[] {
+  const t = useT();
   const catalog = useQuery({ queryKey: ['rolesCatalog'], queryFn: () => api.get<{ permissions?: CatalogPerm[] }>('/roles/catalog') });
   return useMemo(() => {
     let flat: CatalogPerm[] = catalog.data?.permissions ?? [];
@@ -520,11 +582,12 @@ function useCatalog(): { domain: string; perms: { key: string; label: string }[]
     const byDomain = new Map<string, { key: string; label: string }[]>();
     for (const f of flat) {
       const bucket = byDomain.get(f.domain) ?? [];
-      bucket.push({ key: f.key, label: f.label });
+      // Localize the shared English catalog labels when a translation exists.
+      bucket.push({ key: f.key, label: t(`perm.${f.key}`, f.label) });
       byDomain.set(f.domain, bucket);
     }
     return Array.from(byDomain.entries()).map(([domain, perms]) => ({ domain, perms }));
-  }, [catalog.data]);
+  }, [catalog.data, t]);
 }
 
 function RolesPanel() {
@@ -651,7 +714,7 @@ function RoleEditor({ role, grouped, onBack }: { role: Role; grouped: { domain: 
       <div className="space-y-5">
         {grouped.map((g) => (
           <div key={g.domain}>
-            <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-faint">{g.domain}</div>
+            <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-faint">{t(`permdomain.${g.domain}`, g.domain)}</div>
             <RowList>
               {g.perms.map((p) => (
                 <div key={p.key} className="flex items-center justify-between gap-3 border-b border-border px-3 py-2.5 last:border-0">

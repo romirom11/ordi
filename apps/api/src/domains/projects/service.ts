@@ -94,6 +94,12 @@ export async function listProjects(actor: Actor, filters: { kind?: string; statu
 
 export async function createProject(actor: Actor, input: any): Promise<{ id: string; key: string }> {
   const { db } = getDb();
+  // Friendly duplicate-key guard — otherwise the unique index surfaces as a 500.
+  const [dupe] = await db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(and(eq(projects.key, input.key), isNull(projects.deletedAt)));
+  if (dupe) throw err.domain(`Project key "${input.key}" is already in use — pick another key.`);
   const id = ulid();
   await db.insert(projects).values({
     id,
