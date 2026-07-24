@@ -3,10 +3,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, qs, ApiError } from '../lib/api';
 import { useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
-import { Button, Input, Select, Card, PageHeader, EmptyState, Skeleton, SegmentedControl, fmtMoney, fmtDate, cn } from '../components/ui';
-import { Dialog, toast } from '../components/overlays';
-import { Plus, Trash2, Wallet, AlertTriangle, CheckCircle2, Receipt, FileStack } from 'lucide-react';
+import { useTabs } from '../lib/tabs';
+import { Button, Input, Select, Card, PageHeader, Breadcrumbs, EmptyState, Skeleton, SegmentedControl, fmtMoney, fmtDate, cn } from '../components/ui';
+import { Dialog, ContextMenu, toast, type ContextMenuEntry } from '../components/overlays';
+import { Plus, Trash2, Wallet, AlertTriangle, CheckCircle2, Receipt, FileStack, Copy, ExternalLink, Link2 } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
+import { SubscriptionsTab } from '../components/finance/subscriptions';
 
 extendDict({
   en: {
@@ -22,6 +24,10 @@ extendDict({
     'finance.status.declined': 'Declined',
     'finance.status.expired': 'Expired',
     'finance.status.open': 'Open',
+    'finance.openInNewTab': 'Open in new tab',
+    'finance.copyLink': 'Copy link',
+    'finance.copyPublicLink': 'Copy public link',
+    'finance.linkCopied': 'Link copied',
   },
   uk: {
     'finance.newExpense': 'Нова витрата',
@@ -36,8 +42,16 @@ extendDict({
     'finance.status.declined': 'Відхилено',
     'finance.status.expired': 'Прострочено (пропозиція)',
     'finance.status.open': 'Відкрито',
+    'finance.openInNewTab': 'Відкрити в новій вкладці',
+    'finance.copyLink': 'Скопіювати посилання',
+    'finance.copyPublicLink': 'Скопіювати публічне посилання',
+    'finance.linkCopied': 'Посилання скопійовано',
   },
 });
+
+function copyToClipboard(text: string, msg: string) {
+  navigator.clipboard?.writeText(text).then(() => toast(msg)).catch(() => toast.error(msg));
+}
 
 type Tone = 'faint' | 'primary' | 'success' | 'warning' | 'destructive';
 const STATUS_TONE: Record<string, Tone> = {
@@ -83,6 +97,7 @@ interface DocRow {
   validUntil?: string | null;
   isOverdue?: boolean;
   is_overdue?: boolean;
+  publicToken?: string | null;
 }
 interface Expense { id: string; description?: string | null; category?: string | null; amount?: number | string; currency?: string; date?: string | null; projectName?: string | null }
 interface ProfitRow {
@@ -90,7 +105,7 @@ interface ProfitRow {
   laborCost?: number | string; expenseCost?: number | string;
   margin?: number | string; marginPct?: number | string; marginPercent?: number | string; currency?: string;
 }
-type Tab = 'dashboard' | 'invoices' | 'quotes' | 'expenses';
+type Tab = 'dashboard' | 'invoices' | 'quotes' | 'expenses' | 'subscriptions';
 
 export function FinancePage() {
   const t = useT();
@@ -100,14 +115,20 @@ export function FinancePage() {
     { key: 'invoices', label: t('finance.invoices') },
     { key: 'quotes', label: t('finance.quotes') },
     { key: 'expenses', label: t('finance.expenses') },
+    { key: 'subscriptions', label: t('subs.title') },
   ];
   return (
     <div>
-      <PageHeader title={t('nav.finance')} actions={<SegmentedControl options={tabs} value={tab} onChange={setTab} />} />
+      <PageHeader
+        title={t('nav.finance')}
+        breadcrumbs={<Breadcrumbs items={[{ label: t('nav.finance') }]} />}
+        actions={<SegmentedControl options={tabs} value={tab} onChange={setTab} />}
+      />
       {tab === 'dashboard' && <DashboardView />}
       {tab === 'invoices' && <InvoicesView />}
       {tab === 'quotes' && <QuotesView />}
       {tab === 'expenses' && <ExpensesView />}
+      {tab === 'subscriptions' && <SubscriptionsTab />}
     </div>
   );
 }
@@ -427,6 +448,7 @@ function QuotesView() {
 
 function DocTable({ rows, loading, kind, onRow }: { rows: DocRow[]; loading: boolean; kind: 'invoice' | 'quote'; onRow?: (id: string) => void }) {
   const t = useT();
+  const tabs = useTabs();
   if (loading) {
     return (
       <div className="overflow-hidden rounded-xl border border-border">
@@ -450,9 +472,9 @@ function DocTable({ rows, loading, kind, onRow }: { rows: DocRow[]; loading: boo
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       {rows.map((r, i) => {
         const overdue = kind === 'invoice' && (r.isOverdue || r.is_overdue || r.status === 'overdue');
-        return (
+        const detailUrl = `/finance/invoices/${r.id}`;
+        const row = (
           <div
-            key={r.id}
             role={onRow ? 'button' : undefined}
             tabIndex={onRow ? 0 : undefined}
             onClick={onRow ? () => onRow(r.id) : undefined}
@@ -473,6 +495,15 @@ function DocTable({ rows, loading, kind, onRow }: { rows: DocRow[]; loading: boo
             <span className="w-24 shrink-0 text-right text-[13px] font-semibold tabular-nums">{fmtMoney(r.total ?? 0, r.currency ?? 'USD')}</span>
           </div>
         );
+        if (kind !== 'invoice' || !onRow) return <div key={r.id}>{row}</div>;
+        const menu: ContextMenuEntry[] = [
+          { key: 'open', label: t('finance.openInNewTab'), icon: <ExternalLink size={14} />, onSelect: () => tabs?.openInNewTab(detailUrl) },
+          { key: 'copy', label: t('finance.copyLink'), icon: <Copy size={14} />, onSelect: () => copyToClipboard(`${window.location.origin}${detailUrl}`, t('finance.linkCopied')) },
+          ...(r.publicToken
+            ? [{ key: 'copyPublic', label: t('finance.copyPublicLink'), icon: <Link2 size={14} />, onSelect: () => copyToClipboard(`${window.location.origin}/i/${r.publicToken}`, t('finance.linkCopied')) } as ContextMenuEntry]
+            : []),
+        ];
+        return <ContextMenu key={r.id} items={menu}>{row}</ContextMenu>;
       })}
     </div>
   );

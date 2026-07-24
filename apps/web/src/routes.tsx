@@ -11,6 +11,7 @@ import { TimePage } from './pages/Time';
 import { FinancePage } from './pages/Finance';
 import { InvoiceDetailPage } from './pages/InvoiceDetail';
 import { PeoplePage } from './pages/People';
+import { EmployeePage } from './pages/EmployeePage';
 import { SettingsPage } from './pages/Settings';
 import { DashboardsPage } from './pages/Dashboards';
 import { ResourcingPage } from './pages/Resourcing';
@@ -34,6 +35,7 @@ const routes: RouteDef[] = [
   { pattern: '/finance', render: () => <FinancePage /> },
   { pattern: '/finance/invoices/:id', render: (p) => <InvoiceDetailPage id={p.id!} /> },
   { pattern: '/people', render: () => <PeoplePage /> },
+  { pattern: '/people/:id', render: (p) => <EmployeePage id={p.id!} /> },
   { pattern: '/settings', render: () => <SettingsPage /> },
   { pattern: '/settings/:section', render: (p) => <SettingsPage section={p.section} /> },
   { pattern: '/dashboards', render: () => <DashboardsPage /> },

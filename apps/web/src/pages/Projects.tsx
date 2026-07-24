@@ -5,12 +5,13 @@ import { api, qs, ApiError } from '../lib/api';
 import { useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import {
-  Button, Input, Select, Badge, PageHeader, Skeleton, EmptyState, Spinner,
+  Button, Input, Select, Badge, PageHeader, Breadcrumbs, Skeleton, EmptyState, Spinner,
   Avatar, ProgressRing, Tooltip, fmtDate, cn,
 } from '../components/ui';
 import { Dialog } from '../components/overlays';
 import { toast } from '../components/overlays';
 import { ProjectIcon } from '../components/project/ProjectIcon';
+import { ProjectContextMenu } from '../components/project/contextMenus';
 import { useT, extendDict } from '../lib/i18n';
 
 extendDict({
@@ -44,7 +45,7 @@ interface Project {
   id: string; name: string; key: string; kind: 'client' | 'internal';
   status: string; companyId?: string | null; companyName?: string | null;
   leadId?: string | null; startDate?: string | null; targetDate?: string | null;
-  visibility?: string;
+  visibility?: string; version?: number;
 }
 interface CompanyLite { id: string; name: string }
 interface UserLite { id: string; name: string; avatar?: string | null }
@@ -106,6 +107,8 @@ export function ProjectsPage() {
   const qc = useQueryClient();
   const can = useCan();
   const canCreate = can('projects.create');
+  const canWrite = can('projects.write') || can('projects.create');
+  const canDelete = can('projects.delete');
   const [creating, setCreating] = useState(false);
   const [filter, setFilter] = useState<Filter>('all');
 
@@ -137,6 +140,7 @@ export function ProjectsPage() {
       <PageHeader
         title={t('nav.projects')}
         subtitle={t('projects.subtitle')}
+        breadcrumbs={<Breadcrumbs items={[{ label: t('nav.projects') }]} />}
         actions={canCreate && (
           <Button size="sm" onClick={() => setCreating(true)}><Plus size={14} /> {t('projects.newProject')}</Button>
         )}
@@ -194,8 +198,13 @@ export function ProjectsPage() {
             {shown.map((p, i) => {
               const lead = p.leadId ? userById.get(p.leadId) : undefined;
               return (
-                <button
+                <ProjectContextMenu
                   key={p.id}
+                  project={{ id: p.id, name: p.name, key: p.key, status: p.status, version: p.version }}
+                  canWrite={canWrite}
+                  canDelete={canDelete}
+                >
+                <button
                   onClick={() => navigate(`/projects/${p.id}`)}
                   style={{ ['--i' as string]: Math.min(i, 10) }}
                   className={cn(
@@ -222,6 +231,7 @@ export function ProjectsPage() {
                       : <span className="h-[22px] w-[22px] rounded-full border border-dashed border-border" title={t('projects.noLead')} />}
                   </div>
                 </button>
+                </ProjectContextMenu>
               );
             })}
           </div>

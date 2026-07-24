@@ -1,16 +1,19 @@
 import { useMemo, useState, type ReactNode, type CSSProperties } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, qs, ApiError } from '../lib/api';
+import { useNavigate } from '../lib/router';
+import { useTabs } from '../lib/tabs';
 import { useCan } from '../lib/auth';
 import {
   Button, Input, Select, Textarea, Card, Badge, PageHeader, EmptyState, Skeleton, Spinner,
   Avatar, SegmentedControl, fmtMoney, fmtDate, cn,
 } from '../components/ui';
-import { Dialog, DropdownMenu, MenuItem, toast } from '../components/overlays';
+import { Dialog, DropdownMenu, MenuItem, ContextMenu, toast, type ContextMenuEntry } from '../components/overlays';
 import {
-  Plus, Check, X, UserPlus, Users, CalendarClock, Briefcase, MoreHorizontal,
-  ChevronRight, LayoutGrid, UserCheck, UserX, Sparkles,
+  Plus, Check, X, UserPlus, Users, CalendarClock, Briefcase,
+  ChevronRight, LayoutGrid, Sparkles, ExternalLink, Copy, FilePlus, IdCard,
 } from 'lucide-react';
+import { CreateProfileDialog, type CreateProfileTarget } from '../components/people/CreateProfileDialog';
 import { useT, extendDict } from '../lib/i18n';
 
 extendDict({
@@ -38,6 +41,14 @@ extendDict({
     'people.moved': 'Applicant moved',
     'people.moveTo': 'Move to…',
     'people.searchPlaceholder': 'Filter by name or role…',
+    'people.noProfile': 'No profile',
+    'people.statusDeactivated': 'Deactivated',
+    'people.openProfile': 'Open profile',
+    'people.openNewTab': 'Open in new tab',
+    'people.copyEmail': 'Copy email',
+    'people.emailCopied': 'Email copied',
+    'people.noEmail': 'No email',
+    'people.directoryHint': 'Everyone in the workspace shows here — including users without an employee profile yet.',
   },
   uk: {
     'people.statusActive': 'Активний',
@@ -63,6 +74,14 @@ extendDict({
     'people.moved': 'Кандидата переміщено',
     'people.moveTo': 'Перемістити до…',
     'people.searchPlaceholder': 'Фільтр за іменем або посадою…',
+    'people.noProfile': 'Немає профілю',
+    'people.statusDeactivated': 'Деактивований',
+    'people.openProfile': 'Відкрити профіль',
+    'people.openNewTab': 'Відкрити в новій вкладці',
+    'people.copyEmail': 'Копіювати ел. пошту',
+    'people.emailCopied': 'Ел. пошту скопійовано',
+    'people.noEmail': 'Немає ел. пошти',
+    'people.directoryHint': 'Тут показані всі люди робочого простору — зокрема користувачі, які ще не мають профілю співробітника.',
   },
 });
 
@@ -132,7 +151,7 @@ export function PeoplePage() {
         title={t('nav.people')}
         actions={<SegmentedControl options={tabs.filter((tb) => tb.show)} value={tab} onChange={(v) => setTab(v as Tab)} />}
       />
-      {tab === 'employees' && <EmployeesView />}
+      {tab === 'employees' && <DirectoryView />}
       {tab === 'leave' && <LeaveView />}
       {tab === 'recruiting' && can('people.recruit') && <RecruitingView />}
       {tab === 'dashboard' && <PeopleDashboardView />}
@@ -140,97 +159,114 @@ export function PeoplePage() {
   );
 }
 
-function EmployeesView() {
+const DIR_STATUS_META: Record<string, { color: string; key: string }> = {
+  active: { color: '#22c55e', key: 'people.statusActive' },
+  deactivated: { color: '#6b7280', key: 'people.statusDeactivated' },
+};
+
+interface DirectoryRow {
+  userId: string | null; employeeId: string | null; name: string; email: string | null;
+  avatar: string | null; position: string | null; departmentName: string | null;
+  status: 'active' | 'deactivated'; hasEmployeeProfile: boolean;
+}
+
+type DirFilter = 'all' | 'active' | 'deactivated' | 'no_profile';
+
+function DirectoryView() {
   const t = useT();
-  const qc = useQueryClient();
   const can = useCan();
+  const navigate = useNavigate();
+  const tabs = useTabs();
   const canWrite = can('people.write');
-  const [selected, setSelected] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
-  const [filter, setFilter] = useState<string>('all');
-  const [form, setForm] = useState({ firstName: '', lastName: '', position: '', department: '' });
-  const employees = useQuery({ queryKey: ['employees'], queryFn: () => api.get<{ data: Employee[] }>('/employees') });
-  const create = useMutation({
-    mutationFn: () => api.post('/employees', { firstName: form.firstName, lastName: form.lastName, position: form.position, department: form.department }),
-    onSuccess: () => {
-      setForm({ firstName: '', lastName: '', position: '', department: '' });
-      setShowForm(false);
-      qc.invalidateQueries({ queryKey: ['employees'] });
-    },
-    onError: () => toast.error(t('people.createFailed')),
-  });
-  const rows = employees.data?.data ?? [];
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<DirFilter>('all');
+  const [createTarget, setCreateTarget] = useState<CreateProfileTarget | null>(null);
+
+  const directory = useQuery({ queryKey: ['peopleDirectory'], queryFn: () => api.get<{ data: DirectoryRow[] }>('/people/directory') });
+  const rows = directory.data?.data ?? [];
 
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: rows.length };
-    for (const e of rows) { const s = e.status ?? 'active'; c[s] = (c[s] ?? 0) + 1; }
+    const c: Record<DirFilter, number> = { all: rows.length, active: 0, deactivated: 0, no_profile: 0 };
+    for (const r of rows) {
+      c[r.status] += 1;
+      if (!r.hasEmployeeProfile) c.no_profile += 1;
+    }
     return c;
   }, [rows]);
-  const shown = filter === 'all' ? rows : rows.filter((e) => (e.status ?? 'active') === filter);
+
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return rows.filter((r) => {
+      if (filter === 'active' && r.status !== 'active') return false;
+      if (filter === 'deactivated' && r.status !== 'deactivated') return false;
+      if (filter === 'no_profile' && r.hasEmployeeProfile) return false;
+      if (!q) return true;
+      return r.name.toLowerCase().includes(q)
+        || (r.email ?? '').toLowerCase().includes(q)
+        || (r.position ?? '').toLowerCase().includes(q);
+    });
+  }, [rows, query, filter]);
+
+  const openRow = (r: DirectoryRow) => {
+    if (r.hasEmployeeProfile && r.employeeId) navigate(`/people/${r.employeeId}`);
+    else if (canWrite) setCreateTarget({ userId: r.userId, name: r.name, email: r.email });
+  };
+
+  const copyEmail = (email: string | null) => {
+    if (!email) { toast.error(t('people.noEmail')); return; }
+    navigator.clipboard?.writeText(email).then(() => toast(t('people.emailCopied'))).catch(() => toast.error(email));
+  };
+
+  const menuFor = (r: DirectoryRow): ContextMenuEntry[] => {
+    const items: ContextMenuEntry[] = [];
+    if (r.hasEmployeeProfile && r.employeeId) {
+      items.push({ key: 'open', label: t('people.openProfile'), icon: <IdCard size={15} />, onSelect: () => navigate(`/people/${r.employeeId}`) });
+      if (tabs) items.push({ key: 'newtab', label: t('people.openNewTab'), icon: <ExternalLink size={15} />, onSelect: () => tabs.openInNewTab(`/people/${r.employeeId}`) });
+    } else if (canWrite) {
+      items.push({ key: 'create', label: t('people.createProfile'), icon: <FilePlus size={15} />, onSelect: () => setCreateTarget({ userId: r.userId, name: r.name, email: r.email }) });
+    }
+    items.push({ type: 'separator' });
+    items.push({ key: 'copy', label: t('people.copyEmail'), icon: <Copy size={15} />, disabled: !r.email, onSelect: () => copyEmail(r.email) });
+    return items;
+  };
+
+  const filters: { key: DirFilter; label: string; color?: string }[] = [
+    { key: 'all', label: t('common.all') },
+    { key: 'active', label: t('people.statusActive'), color: DIR_STATUS_META.active!.color },
+    { key: 'deactivated', label: t('people.statusDeactivated'), color: DIR_STATUS_META.deactivated!.color },
+    { key: 'no_profile', label: t('people.noProfile') },
+  ];
 
   return (
     <div className="p-6">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        {rows.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-1.5">
-            {(['all', ...Object.keys(EMP_STATUS_META)] as const).map((f) => {
-              const n = counts[f] ?? 0;
-              if (f !== 'all' && n === 0) return null;
-              const active = filter === f;
-              const meta = EMP_STATUS_META[f];
-              return (
-                <button
-                  key={f}
-                  onClick={() => setFilter(f)}
-                  className={cn(
-                    'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors duration-150',
-                    active ? 'border-primary/40 bg-primary/10 text-foreground' : 'border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground',
-                  )}
-                >
-                  {meta && <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: meta.color }} />}
-                  {f === 'all' ? t('common.all') : t(meta!.key)}
-                  <span className="tabular-nums text-faint">{n}</span>
-                </button>
-              );
-            })}
-          </div>
-        ) : <div />}
-        {canWrite && <Button size="sm" onClick={() => setShowForm((v) => !v)}><Plus size={14} /> {t('people.newEmployee')}</Button>}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {filters.map((f) => {
+            const n = counts[f.key];
+            if (f.key !== 'all' && n === 0) return null;
+            const active = filter === f.key;
+            return (
+              <button
+                key={f.key}
+                onClick={() => setFilter(f.key)}
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors duration-150',
+                  active ? 'border-primary/40 bg-primary/10 text-foreground' : 'border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground',
+                )}
+              >
+                {f.color && <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: f.color }} />}
+                {f.label}
+                <span className="tabular-nums text-faint">{n}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="w-full max-w-xs sm:w-64">
+          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('people.searchPlaceholder')} />
+        </div>
       </div>
 
-      <Dialog open={showForm && canWrite} onClose={() => setShowForm(false)} title={t('people.newEmployee')} width={440}>
-        <form
-          className="space-y-3 px-4 pb-4 pt-1"
-          onSubmit={(e) => { e.preventDefault(); if (form.firstName) create.mutate(); }}
-        >
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">{t('crm.firstName')}</label>
-              <Input autoFocus value={form.firstName} onChange={(e) => setForm((f) => ({ ...f, firstName: e.target.value }))} />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">{t('crm.lastName')}</label>
-              <Input value={form.lastName} onChange={(e) => setForm((f) => ({ ...f, lastName: e.target.value }))} />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">{t('people.position')}</label>
-              <Input value={form.position} onChange={(e) => setForm((f) => ({ ...f, position: e.target.value }))} />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">{t('people.department')}</label>
-              <Input value={form.department} onChange={(e) => setForm((f) => ({ ...f, department: e.target.value }))} />
-            </div>
-          </div>
-          <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="ghost" size="sm" onClick={() => setShowForm(false)}>{t('common.cancel')}</Button>
-            <Button type="submit" size="sm" disabled={create.isPending || !form.firstName}>{create.isPending ? <Spinner /> : t('common.create')}</Button>
-          </div>
-        </form>
-      </Dialog>
-
-      {employees.isLoading ? (
+      {directory.isLoading ? (
         <div className="overflow-hidden rounded-xl border border-border bg-card">
           {[0, 1, 2, 3].map((i) => (
             <div key={i} className={cn('flex items-center gap-3 px-4 py-2.5', i > 0 && 'border-t border-border')}>
@@ -241,119 +277,63 @@ function EmployeesView() {
           ))}
         </div>
       ) : rows.length === 0 ? (
-        <EmptyState icon={<Users size={20} />} title={t('people.noEmployees')} hint={t('people.noEmployeesHint')} />
+        <EmptyState icon={<Users size={20} />} title={t('people.noEmployees')} hint={t('people.directoryHint')} />
       ) : shown.length === 0 ? (
         <EmptyState icon={<Users size={20} />} title={t('crm.noMatch')} hint={t('crm.noMatchHint')} />
       ) : (
         <div className="overflow-hidden rounded-xl border border-border bg-card">
-          {shown.map((e, i) => {
-            const name = empName(e) || t('people.unnamed');
-            const dept = e.departmentName ?? e.department;
+          {shown.map((r, i) => {
+            const dept = r.departmentName;
             return (
-              <button
-                key={e.id}
-                onClick={() => setSelected(e.id)}
-                style={{ ['--i' as string]: Math.min(i, 10) }}
-                className={cn(
-                  'row-enter flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors duration-150 hover:bg-muted/60',
-                  i > 0 && 'border-t border-border',
-                )}
-              >
-                <Avatar name={name} size={28} />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13px] font-medium text-foreground">{name}</div>
-                  <div className="truncate text-xs text-faint">{e.positionTitle ?? e.position ?? '—'}</div>
+              <ContextMenu key={r.userId ?? r.employeeId ?? String(i)} items={menuFor(r)}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openRow(r)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') openRow(r); }}
+                  style={{ ['--i' as string]: Math.min(i, 10) }}
+                  className={cn(
+                    'row-enter group flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left transition-colors duration-150 hover:bg-muted/60',
+                    i > 0 && 'border-t border-border',
+                  )}
+                >
+                  <Avatar name={r.name} src={r.avatar} size={28} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate text-[13px] font-medium text-foreground">{r.name}</span>
+                      {!r.hasEmployeeProfile && (
+                        <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{t('people.noProfile')}</span>
+                      )}
+                    </div>
+                    <div className="truncate text-xs text-faint">{r.position ?? '—'}</div>
+                  </div>
+                  {dept && <Badge color={deptColor(dept)} className="hidden shrink-0 sm:inline-flex">{dept}</Badge>}
+                  <StatusPill status={r.status} meta={DIR_STATUS_META} />
+                  {!r.hasEmployeeProfile && canWrite && (
+                    <button
+                      title={t('people.createProfile')}
+                      onClick={(e) => { e.stopPropagation(); setCreateTarget({ userId: r.userId, name: r.name, email: r.email }); }}
+                      className="shrink-0 rounded-md p-1.5 text-muted-foreground opacity-0 transition-all duration-150 hover:bg-primary/10 hover:text-primary group-hover:opacity-100"
+                    >
+                      <FilePlus size={15} />
+                    </button>
+                  )}
                 </div>
-                {dept && <Badge color={deptColor(dept)} className="hidden shrink-0 sm:inline-flex">{dept}</Badge>}
-                <StatusPill status={e.status ?? 'active'} meta={EMP_STATUS_META} />
-              </button>
+              </ContextMenu>
             );
           })}
         </div>
       )}
 
-      {selected && <EmployeeDialog id={selected} onClose={() => setSelected(null)} />}
+      {createTarget && (
+        <CreateProfileDialog
+          open
+          target={createTarget}
+          onClose={() => setCreateTarget(null)}
+          onCreated={(employeeId) => navigate(`/people/${employeeId}`)}
+        />
+      )}
     </div>
-  );
-}
-
-function EmployeeDialog({ id, onClose }: { id: string; onClose: () => void }) {
-  const t = useT();
-  const qc = useQueryClient();
-  const can = useCan();
-  const employee = useQuery({ queryKey: ['employee', id], queryFn: () => api.get<Employee>(`/employees/${id}`) });
-  const compensation = useQuery({
-    queryKey: ['compensation', id],
-    queryFn: () => api.get<{ data: Compensation[] } | Compensation[]>(`/employees/${id}/compensation`),
-    enabled: can('people.read_compensation'),
-  });
-  const lifecycle = useMutation({
-    mutationFn: (action: 'onboard' | 'exit') => api.post(`/employees/${id}/lifecycle`, { action }),
-    onSuccess: (_r, action) => {
-      qc.invalidateQueries({ queryKey: ['employee', id] });
-      qc.invalidateQueries({ queryKey: ['employees'] });
-      toast(action === 'onboard' ? t('people.onboarded') : t('people.exited'));
-    },
-    onError: () => toast.error(t('people.lifecycleFailed')),
-  });
-
-  const comp = compensation.data ? (Array.isArray(compensation.data) ? compensation.data : compensation.data.data) : [];
-  const name = employee.data ? (empName(employee.data) || t('people.unnamed')) : t('people.employee');
-
-  return (
-    <Dialog open onClose={onClose} width={440} title={
-      <span className="flex items-center gap-2">
-        <Avatar name={name} size={22} />
-        <span className="truncate">{name}</span>
-      </span>
-    }>
-      <div className="px-4 pb-4 pt-1 text-[13px]">
-        {employee.isLoading ? (
-          <Skeleton className="h-24 w-full" />
-        ) : employee.data ? (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0 text-muted-foreground">
-                <div className="truncate">{employee.data.positionTitle ?? employee.data.position ?? '—'}</div>
-                <div className="truncate text-xs text-faint">{employee.data.departmentName ?? employee.data.department ?? '—'}</div>
-              </div>
-              <StatusPill status={employee.data.status ?? 'active'} meta={EMP_STATUS_META} />
-            </div>
-
-            {can('people.write') && (
-              <DropdownMenu
-                trigger={<Button size="sm" variant="outline">{t('people.actions')} <MoreHorizontal size={14} /></Button>}
-              >
-                <MenuItem icon={<UserCheck size={13} />} onSelect={() => lifecycle.mutate('onboard')} disabled={lifecycle.isPending}>{t('people.onboard')}</MenuItem>
-                <MenuItem icon={<UserX size={13} />} danger onSelect={() => lifecycle.mutate('exit')} disabled={lifecycle.isPending}>{t('people.exit')}</MenuItem>
-              </DropdownMenu>
-            )}
-
-            {can('people.read_compensation') && (
-              <div>
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">{t('people.compensation')}</div>
-                {compensation.isLoading ? (
-                  <Skeleton className="h-12 w-full" />
-                ) : comp.length === 0 ? (
-                  <p className="text-muted-foreground">{t('people.noCompensation')}</p>
-                ) : (
-                  <div className="space-y-1">
-                    {comp.map((c, i) => (
-                      <div key={c.id ?? String(i)} className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-1.5">
-                        <span className="text-muted-foreground">{c.compType ?? 'salary'} · {t('resourcing.from').toLowerCase()} {fmtDate(c.effectiveFrom)}</span>
-                        <span className="font-medium tabular-nums">{fmtMoney(c.amount ?? 0, c.currency ?? 'USD')}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        ) : (
-          <p className="text-muted-foreground">{t('people.employeeNotFound')}</p>
-        )}
-      </div>
-    </Dialog>
   );
 }
 

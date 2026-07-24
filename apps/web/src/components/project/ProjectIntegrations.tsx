@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  GitBranch, Github, Gitlab, Link2, Plus, Search, Slack, X,
+  ChevronDown, GitBranch, Github, Gitlab, Hash, Link2, Plus, Search, Slack, X,
 } from 'lucide-react';
 import { api, qs, ApiError } from '../../lib/api';
 import { Link } from '../../lib/router';
@@ -35,6 +35,18 @@ extendDict({
     'projects.slackDesc': 'Project events (tasks, status changes) are posted to this channel. Create an Incoming Webhook in Slack and paste the URL here.',
     'projects.slackSaved': 'Slack webhook saved',
     'projects.openSettings': 'Open Integrations',
+    'projects.slackChannel': 'Channel',
+    'projects.slackChannelDesc': 'Project events (tasks, status changes) are posted to this Slack channel.',
+    'projects.slackPickChannel': 'Select a channel…',
+    'projects.slackChannelSaved': 'Slack channel updated',
+    'projects.slackChannelCleared': 'Slack channel cleared',
+    'projects.slackClear': 'No channel',
+    'projects.slackSearchChannels': 'Search channels…',
+    'projects.slackLoadFailed': 'Could not load channels.',
+    'projects.slackNotConnected': 'Connect Slack in',
+    'projects.settingsIntegrations': 'Settings → Integrations',
+    'projects.advanced': 'Advanced',
+    'projects.slackWebhookAdvanced': 'Post to an Incoming Webhook URL instead of a workspace channel.',
   },
   uk: {
     'projects.integrations': 'Інтеграції',
@@ -59,6 +71,18 @@ extendDict({
     'projects.slackDesc': 'Події проєкту (задачі, статуси) поститимуться в цей канал. Створіть Incoming Webhook у Slack і вставте URL сюди.',
     'projects.slackSaved': 'Вебхук Slack збережено',
     'projects.openSettings': 'Відкрити Інтеграції',
+    'projects.slackChannel': 'Канал',
+    'projects.slackChannelDesc': 'Події проєкту (задачі, статуси) поститимуться в цей канал Slack.',
+    'projects.slackPickChannel': 'Обрати канал…',
+    'projects.slackChannelSaved': 'Канал Slack оновлено',
+    'projects.slackChannelCleared': 'Канал Slack очищено',
+    'projects.slackClear': 'Без каналу',
+    'projects.slackSearchChannels': 'Пошук каналів…',
+    'projects.slackLoadFailed': 'Не вдалося завантажити канали.',
+    'projects.slackNotConnected': 'Підключіть Slack у',
+    'projects.settingsIntegrations': 'Settings → Integrations',
+    'projects.advanced': 'Додатково',
+    'projects.slackWebhookAdvanced': 'Постити на URL Incoming Webhook замість каналу робочого простору.',
   },
 });
 
@@ -322,12 +346,72 @@ function ConnectRepoDialog({ projectId, open, onClose, boundIds }: {
 
 /* ───────────────────────────── Slack ───────────────────────────── */
 
-function SlackSection({ projectId, settings, version, canManage }: {
-  projectId: string; settings: Record<string, unknown>; version?: number; canManage: boolean;
+interface SlackStatus { configured?: boolean; connected?: boolean; teamName?: string | null }
+interface SlackChannel { id: string; name: string; isPrivate?: boolean }
+
+function ChannelPicker({ channels, currentId, onSelect, onClear }: {
+  channels: SlackChannel[]; currentId: string;
+  onSelect: (id: string) => void; onClear: () => void;
+}) {
+  const t = useT();
+  const [search, setSearch] = useState('');
+  const showSearch = channels.length > 15;
+  const current = channels.find((c) => c.id === currentId);
+  const filtered = search.trim()
+    ? channels.filter((c) => c.name.toLowerCase().includes(search.trim().toLowerCase()))
+    : channels;
+
+  return (
+    <DropdownMenu
+      align="start"
+      width={300}
+      className="w-full"
+      trigger={
+        <span className="flex h-8 w-full cursor-pointer items-center gap-1.5 rounded-md border border-input px-2.5 text-[13px] transition-colors hover:border-border-strong">
+          {current ? (
+            <>
+              <Hash size={14} className="shrink-0 text-muted-foreground" />
+              <span className="flex-1 truncate">{current.name}</span>
+            </>
+          ) : (
+            <span className="flex-1 truncate text-faint">{t('projects.slackPickChannel')}</span>
+          )}
+          <ChevronDown size={14} className="shrink-0 text-faint" />
+        </span>
+      }
+    >
+      {showSearch && (
+        <div className="p-1">
+          <div className="relative">
+            <Search size={13} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-faint" />
+            <Input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t('projects.slackSearchChannels')} className="h-7 pl-7 text-[13px]" />
+          </div>
+        </div>
+      )}
+      <div className="max-h-64 overflow-y-auto">
+        {filtered.map((c) => (
+          <MenuItem key={c.id} icon={<Hash size={14} />} checked={c.id === currentId} onSelect={() => onSelect(c.id)}>
+            {c.name}
+          </MenuItem>
+        ))}
+      </div>
+      {current && (
+        <>
+          <div className="mx-1 my-1 h-px bg-border" />
+          <MenuItem icon={<X size={14} />} danger onSelect={onClear}>{t('projects.slackClear')}</MenuItem>
+        </>
+      )}
+    </DropdownMenu>
+  );
+}
+
+function AdvancedWebhook({ projectId, settings, version }: {
+  projectId: string; settings: Record<string, unknown>; version?: number;
 }) {
   const t = useT();
   const qc = useQueryClient();
   const initial = typeof settings.slackWebhookUrl === 'string' ? settings.slackWebhookUrl : '';
+  const [open, setOpen] = useState(!!initial);
   const [url, setUrl] = useState(initial);
 
   const save = useMutation({
@@ -338,15 +422,77 @@ function SlackSection({ projectId, settings, version, canManage }: {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['project', projectId] }); toast(t('projects.slackSaved')); },
     onError: (e) => {
       if (e instanceof ApiError && (e.status === 409 || e.code === 'conflict')) {
-        qc.invalidateQueries({ queryKey: ['project', projectId] });
-        toast.error(t('projects.conflict'));
-      } else {
-        toast.error(e instanceof ApiError ? e.message : t('common.saveFailed'));
-      }
+        qc.invalidateQueries({ queryKey: ['project', projectId] }); toast.error(t('projects.conflict'));
+      } else toast.error(e instanceof ApiError ? e.message : t('common.saveFailed'));
     },
   });
-
   const dirty = url.trim() !== initial;
+
+  return (
+    <div className="mt-2 border-t border-border pt-2">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <ChevronDown size={13} className={cn('transition-transform duration-150', open ? 'rotate-0' : '-rotate-90')} />
+        {t('projects.advanced')}
+      </button>
+      {open && (
+        <div className="mt-2">
+          <label className="mb-1 block text-xs text-muted-foreground">{t('projects.slackUrl')}</label>
+          <div className="flex gap-2">
+            <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://hooks.slack.com/services/…" className="font-mono text-[12px]" />
+            <Button size="sm" variant="outline" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>
+              {save.isPending ? <Spinner /> : t('common.save')}
+            </Button>
+          </div>
+          <p className="mt-2 text-xs text-faint">{t('projects.slackWebhookAdvanced')}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SlackSection({ projectId, settings, version, canManage }: {
+  projectId: string; settings: Record<string, unknown>; version?: number; canManage: boolean;
+}) {
+  const t = useT();
+  const qc = useQueryClient();
+  const currentId = typeof settings.slackChannelId === 'string' ? settings.slackChannelId : '';
+
+  const statusQ = useQuery<SlackStatus>({
+    queryKey: ['slack-status'],
+    queryFn: () => api.get<SlackStatus>('/integrations/slack/status'),
+    enabled: canManage,
+    staleTime: 60_000,
+    retry: false,
+  });
+  const connected = statusQ.data?.connected ?? false;
+
+  const channelsQ = useQuery<SlackChannel[]>({
+    queryKey: ['slack-channels'],
+    queryFn: () => api.get<{ data: SlackChannel[] }>('/integrations/slack/channels').then((r) => r.data),
+    enabled: canManage && connected,
+    staleTime: 60_000,
+    retry: false,
+  });
+  const channels = channelsQ.data ?? [];
+
+  const save = useMutation({
+    mutationFn: (channelId: string | undefined) => api.patch(`/projects/${projectId}`, {
+      settings: { ...settings, slackChannelId: channelId },
+      version,
+    }),
+    onSuccess: (_d, channelId) => {
+      qc.invalidateQueries({ queryKey: ['project', projectId] });
+      toast(channelId ? t('projects.slackChannelSaved') : t('projects.slackChannelCleared'));
+    },
+    onError: (e) => {
+      if (e instanceof ApiError && (e.status === 409 || e.code === 'conflict')) {
+        qc.invalidateQueries({ queryKey: ['project', projectId] }); toast.error(t('projects.conflict'));
+      } else toast.error(e instanceof ApiError ? e.message : t('common.saveFailed'));
+    },
+  });
 
   return (
     <div>
@@ -355,22 +501,36 @@ function SlackSection({ projectId, settings, version, canManage }: {
         <h3 className="text-[13px] font-semibold">{t('projects.slack')}</h3>
       </div>
       <div className="rounded-lg border border-border bg-card p-3">
-        <label className="mb-1 block text-xs text-muted-foreground">{t('projects.slackUrl')}</label>
-        <div className="flex gap-2">
-          <Input
-            value={url}
-            disabled={!canManage}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://hooks.slack.com/services/…"
-            className="font-mono text-[12px]"
-          />
-          {canManage && (
-            <Button size="sm" variant="outline" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>
-              {save.isPending ? <Spinner /> : t('common.save')}
-            </Button>
-          )}
-        </div>
-        <p className="mt-2 text-xs text-faint">{t('projects.slackDesc')}</p>
+        {statusQ.isLoading ? (
+          <div className="h-8 animate-pulse rounded-md bg-muted/40" />
+        ) : connected ? (
+          <>
+            <label className="mb-1 block text-xs text-muted-foreground">{t('projects.slackChannel')}</label>
+            {channelsQ.isLoading ? (
+              <div className="h-8 animate-pulse rounded-md bg-muted/40" />
+            ) : channelsQ.isError ? (
+              <p className="text-[13px] text-muted-foreground">{t('projects.slackLoadFailed')}</p>
+            ) : (
+              <ChannelPicker
+                channels={channels}
+                currentId={currentId}
+                onSelect={(id) => save.mutate(id)}
+                onClear={() => save.mutate(undefined)}
+              />
+            )}
+            <p className="mt-2 text-xs text-faint">
+              {t('projects.slackChannelDesc')}
+              {statusQ.data?.teamName ? ` · ${statusQ.data.teamName}` : ''}
+            </p>
+          </>
+        ) : (
+          <p className="text-xs text-faint">
+            {t('projects.slackNotConnected')}{' '}
+            <Link to="/settings/integrations" className="text-primary hover:underline">{t('projects.settingsIntegrations')}</Link>
+          </p>
+        )}
+
+        <AdvancedWebhook projectId={projectId} settings={settings} version={version} />
       </div>
     </div>
   );

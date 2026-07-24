@@ -3,13 +3,18 @@
  * search + status chips, staggered row entrance. Row click → company detail.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { Search, Building2 } from 'lucide-react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Search, Building2, ExternalLink, Copy, CircleDot, Trash2 } from 'lucide-react';
 import { useNavigate } from '../../lib/router';
+import { useTabs } from '../../lib/tabs';
+import { useCan } from '../../lib/auth';
+import { api, ApiError } from '../../lib/api';
 import { useT } from '../../lib/i18n';
 import { Avatar, Button, Input, EmptyState, Skeleton, Tooltip, cn, fmtMoney } from '../ui';
+import { ContextMenu, ConfirmDialog, toast, type ContextMenuEntry } from '../overlays';
 import {
   COMPANY_STATUSES, StatusPill, useAllDeals, useCompanies, useDealStages, useUsersLookup,
-  type Deal, type Stage,
+  type Company, type Deal, type Stage,
 } from './shared';
 
 function useDebounced<T>(value: T, delay = 250): T {
@@ -39,8 +44,12 @@ function rollupDeals(deals: Deal[], stages: Stage[]): Map<string, Rollup> {
 export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
   const t = useT();
   const navigate = useNavigate();
+  const tabs = useTabs();
+  const can = useCan();
+  const qc = useQueryClient();
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
+  const [toDelete, setToDelete] = useState<Company | null>(null);
   const debouncedQ = useDebounced(q);
 
   const companiesQ = useCompanies(debouncedQ, status);
@@ -49,6 +58,45 @@ export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
   const usersQ = useUsersLookup();
 
   const companies = companiesQ.data ?? [];
+
+  const setCompanyStatus = useMutation({
+    mutationFn: (v: { c: Company; status: string }) =>
+      api.patch(`/companies/${v.c.id}`, { status: v.status, version: v.c.version }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['companies'] }); toast(t('crm.statusUpdated')); },
+    onError: (e) => {
+      qc.invalidateQueries({ queryKey: ['companies'] });
+      toast.error(e instanceof ApiError && (e.code === 'version_conflict' || e.status === 409) ? t('crm.conflict') : (e instanceof ApiError ? e.message : t('common.saveFailed')));
+    },
+  });
+  const del = useMutation({
+    mutationFn: (id: string) => api.del(`/companies/${id}`),
+    onSuccess: () => { setToDelete(null); qc.invalidateQueries({ queryKey: ['companies'] }); toast(t('crm.clientDeleted')); },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
+  });
+
+  const canDelete = can('crm.delete');
+  const canWrite = can('crm.write');
+
+  const buildMenu = (c: Company): ContextMenuEntry[] => {
+    const url = `/companies/${c.id}`;
+    const items: ContextMenuEntry[] = [
+      { key: 'open', label: t('crm.openInNewTab'), icon: <ExternalLink size={14} />, onSelect: () => tabs?.openInNewTab(url) },
+      { key: 'copy', label: t('crm.copyLink'), icon: <Copy size={14} />, onSelect: () => { navigator.clipboard?.writeText(`${window.location.origin}${url}`).then(() => toast(t('crm.linkCopied'))); } },
+    ];
+    if (canWrite) {
+      items.push({
+        key: 'status', label: t('crm.changeStatus'), icon: <CircleDot size={14} />,
+        children: COMPANY_STATUSES.map((s) => ({
+          key: s, label: <StatusPill status={s} />, onSelect: () => c.status !== s && setCompanyStatus.mutate({ c, status: s }),
+        })),
+      });
+    }
+    if (canDelete) {
+      items.push({ type: 'separator' });
+      items.push({ key: 'delete', label: t('common.delete'), icon: <Trash2 size={14} />, danger: true, onSelect: () => setToDelete(c) });
+    }
+    return items;
+  };
   const rollup = useMemo(
     () => rollupDeals(dealsQ.data ?? [], stagesQ.data ?? []),
     [dealsQ.data, stagesQ.data],
@@ -62,9 +110,9 @@ export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* Filter bar */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-border px-6 py-2.5">
-        <div className="relative w-full max-w-xs">
+      {/* Compact toolbar: search · status chips · count */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-6 py-3">
+        <div className="relative w-56">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('crm.searchClients')} className="pl-8" />
         </div>
@@ -82,6 +130,11 @@ export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
             </button>
           ))}
         </div>
+        {!companiesQ.isLoading && companies.length > 0 && (
+          <span className="ml-auto text-xs tabular-nums text-faint">
+            {t('crm.clientCount').replace('{n}', String(companies.length))}
+          </span>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
@@ -110,8 +163,8 @@ export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
                 const r = rollup.get(c.id);
                 const owner = c.ownerId ? userMap.get(c.ownerId) : undefined;
                 return (
+                  <ContextMenu key={c.id} items={buildMenu(c)}>
                   <div
-                    key={c.id}
                     onClick={() => navigate(`/companies/${c.id}`)}
                     style={{ ['--i' as string]: Math.min(i, 10) }}
                     className="row-enter group grid cursor-pointer grid-cols-[minmax(0,1fr)_130px_170px_40px] items-center gap-3 rounded-md px-3 py-2 transition-colors duration-150 hover:bg-muted"
@@ -146,12 +199,24 @@ export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
                       )}
                     </div>
                   </div>
+                  </ContextMenu>
                 );
               })}
             </div>
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!toDelete}
+        onClose={() => setToDelete(null)}
+        onConfirm={() => toDelete && del.mutate(toDelete.id)}
+        title={t('crm.deleteClientTitle')}
+        body={toDelete ? t('crm.deleteClientBody').replace('{name}', toDelete.name) : ''}
+        confirmLabel={t('common.delete')}
+        danger
+        pending={del.isPending}
+      />
     </div>
   );
 }
