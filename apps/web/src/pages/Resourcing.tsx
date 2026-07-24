@@ -2,9 +2,31 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, qs, ApiError } from '../lib/api';
 import { useCan } from '../lib/auth';
-import { Button, Input, Select, Card, Badge, PageHeader, EmptyState, Skeleton, cn } from '../components/ui';
-import { ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react';
-import { useT } from '../lib/i18n';
+import { Button, IconButton, Input, Select, Card, Avatar, PageHeader, EmptyState, Skeleton, cn } from '../components/ui';
+import { Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator, toast } from '../components/overlays';
+import { ChevronLeft, ChevronRight, Plus, Trash2, Users } from 'lucide-react';
+import { useT, extendDict } from '../lib/i18n';
+
+extendDict({
+  en: {
+    'resourcing.emptyRange': 'Nobody is allocated in this range',
+    'resourcing.emptyRangeHint': 'Add allocations to plan the team’s load over the coming weeks.',
+    'resourcing.legendUnder': 'Under-utilized',
+    'resourcing.legendOk': 'On track',
+    'resourcing.legendOver': 'Over-allocated',
+    'resourcing.thisWeekShort': 'Now',
+    'resourcing.addForUser': 'Add allocation',
+  },
+  uk: {
+    'resourcing.emptyRange': 'У цьому діапазоні нікого не розподілено',
+    'resourcing.emptyRangeHint': 'Додайте розподіли, щоб спланувати завантаження команди на наступні тижні.',
+    'resourcing.legendUnder': 'Недовантажений',
+    'resourcing.legendOk': 'В нормі',
+    'resourcing.legendOver': 'Перевантажений',
+    'resourcing.thisWeekShort': 'Зараз',
+    'resourcing.addForUser': 'Додати розподіл',
+  },
+});
 
 interface Allocation {
   id: string;
@@ -14,7 +36,7 @@ interface Allocation {
   fromDate?: string | null;
   toDate?: string | null;
 }
-interface UserRow { id: string; name?: string | null; email?: string | null }
+interface UserRow { id: string; name?: string | null; email?: string | null; avatar?: string | null }
 interface ProjectRow { id: string; name?: string | null }
 interface LeaveRow {
   id: string;
@@ -25,6 +47,9 @@ interface LeaveRow {
   startDate?: string | null;
   endDate?: string | null;
 }
+
+const WEEKS_SHOWN = 6;
+const CAPACITY_HOURS = 40;
 
 function mondayOf(d: Date): Date {
   const date = new Date(d);
@@ -49,6 +74,30 @@ function overlapsWeek(from: string | null | undefined, to: string | null | undef
   if (t && t < weekStart) return false;
   return true;
 }
+function shortDate(iso: string): string {
+  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+function weekRangeLabel(ws: string): string {
+  const start = new Date(ws + 'T00:00:00');
+  const end = new Date(addDays(ws, 6) + 'T00:00:00');
+  const sameMonth = start.getMonth() === end.getMonth();
+  const startStr = start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const endStr = end.toLocaleDateString(undefined, sameMonth ? { day: 'numeric' } : { month: 'short', day: 'numeric' });
+  return `${startStr}–${endStr}`;
+}
+
+type Tone = 'empty' | 'under' | 'ok' | 'over';
+function utilizationTone(hours: number): Tone {
+  if (hours <= 0) return 'empty';
+  if (hours <= CAPACITY_HOURS * 0.8) return 'under';
+  if (hours <= CAPACITY_HOURS) return 'ok';
+  return 'over';
+}
+const TONE_CLASS: Record<Exclude<Tone, 'empty'>, string> = {
+  under: 'bg-muted text-muted-foreground',
+  ok: 'bg-success/15 text-success',
+  over: 'bg-destructive/15 text-destructive',
+};
 
 export function ResourcingPage() {
   const t = useT();
@@ -69,8 +118,10 @@ function ResourcingView() {
   const can = useCan();
   const qc = useQueryClient();
   const canWrite = can('people.write');
-  const [weekStart, setWeekStart] = useState(() => isoDate(mondayOf(new Date())));
-  const weekEnd = addDays(weekStart, 6);
+  const [rangeStart, setRangeStart] = useState(() => isoDate(mondayOf(new Date())));
+  const weekCols = Array.from({ length: WEEKS_SHOWN }, (_, i) => addDays(rangeStart, i * 7));
+  const rangeEnd = addDays(weekCols[weekCols.length - 1]!, 6);
+  const thisWeek = isoDate(mondayOf(new Date()));
 
   const allocations = useQuery({
     queryKey: ['allocations'],
@@ -131,12 +182,15 @@ function ResourcingView() {
     onSuccess: () => {
       setForm({ userId: '', projectId: '', hoursPerWeek: '', fromDate: '', toDate: '' });
       setShowForm(false);
+      toast(t('common.saved'));
       qc.invalidateQueries({ queryKey: ['allocations'] });
     },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('resourcing.addFailed')),
   });
   const deleteAllocation = useMutation({
     mutationFn: (id: string) => api.del(`/allocations/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['allocations'] }),
+    onError: () => toast.error(t('resourcing.deleteFailed')),
   });
 
   const userName = (userId: string): string => {
@@ -147,21 +201,21 @@ function ResourcingView() {
     const p = (projects.data?.data ?? []).find((x) => x.id === projectId);
     return p?.name ?? projectId.slice(0, 8);
   };
-  const isAbsent = (userId: string): boolean =>
+  const isAbsent = (userId: string, weekStart: string, weekEnd: string): boolean =>
     (leaves.data?.data ?? []).some((l) => {
       const lu = l.userId ?? l.employeeUserId;
       return lu === userId && overlapsWeek(l.fromDate ?? l.startDate, l.toDate ?? l.endDate, weekStart, weekEnd);
     });
 
   const allocForbidden = (allocations.data as { forbidden?: boolean } | undefined)?.forbidden === true;
-  const weekAllocations = (allocations.data?.data ?? []).filter((a) => overlapsWeek(a.fromDate, a.toDate, weekStart, weekEnd));
-  const byUser = new Map<string, Allocation[]>();
-  for (const a of weekAllocations) {
-    const bucket = byUser.get(a.userId);
-    if (bucket) bucket.push(a);
-    else byUser.set(a.userId, [a]);
-  }
-  const rows = [...byUser.entries()].sort((a, b) => userName(a[0]).localeCompare(userName(b[0])));
+  const allAllocations = allocations.data?.data ?? [];
+  const rangeAllocations = allAllocations.filter((a) => overlapsWeek(a.fromDate, a.toDate, rangeStart, rangeEnd));
+  const userIds = [...new Set(rangeAllocations.map((a) => a.userId))].sort((a, b) => userName(a).localeCompare(userName(b)));
+
+  const openAddFor = (userId?: string, weekStart?: string) => {
+    setForm({ userId: userId ?? '', projectId: '', hoursPerWeek: '', fromDate: weekStart ?? rangeStart, toDate: '' });
+    setShowForm(true);
+  };
 
   const isLoading = allocations.isLoading || users.isLoading || projects.isLoading || leaves.isLoading;
 
@@ -170,120 +224,193 @@ function ResourcingView() {
       <PageHeader
         title={t('nav.resourcing')}
         subtitle={t('resourcing.subtitle')}
-        actions={canWrite && <Button size="sm" onClick={() => setShowForm((s) => !s)}><Plus size={14} /> {t('resourcing.addAllocation')}</Button>}
+        actions={canWrite && <Button size="sm" onClick={() => openAddFor()}><Plus size={14} /> {t('resourcing.addAllocation')}</Button>}
       />
       <div className="p-6">
-        <div className="mb-4 flex items-center gap-3">
-          <button className="rounded border border-border p-1.5 hover:bg-muted" onClick={() => setWeekStart(addDays(weekStart, -7))}><ChevronLeft size={15} /></button>
-          <span className="text-sm font-medium">{t('time.weekOf')} {weekStart}</span>
-          <button className="rounded border border-border p-1.5 hover:bg-muted" onClick={() => setWeekStart(addDays(weekStart, 7))}><ChevronRight size={15} /></button>
-          <button className="text-xs text-muted-foreground hover:underline" onClick={() => setWeekStart(isoDate(mondayOf(new Date())))}>{t('tasks.thisWeek')}</button>
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <IconButton size="sm" onClick={() => setRangeStart(addDays(rangeStart, -7))} aria-label="Previous"><ChevronLeft size={15} /></IconButton>
+            <span className="min-w-[9rem] text-center text-[13px] font-medium tabular-nums">{shortDate(rangeStart)} – {shortDate(rangeEnd)}</span>
+            <IconButton size="sm" onClick={() => setRangeStart(addDays(rangeStart, 7))} aria-label="Next"><ChevronRight size={15} /></IconButton>
+          </div>
+          <button className="text-xs text-muted-foreground transition-colors hover:text-foreground" onClick={() => setRangeStart(thisWeek)}>{t('tasks.thisWeek')}</button>
+
+          <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-muted-foreground/40" /> {t('resourcing.legendUnder')}</span>
+            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-success" /> {t('resourcing.legendOk')}</span>
+            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-destructive" /> {t('resourcing.legendOver')}</span>
+          </div>
         </div>
 
-        {canWrite && showForm && (
-          <Card className="mb-4 max-w-3xl p-4">
-            <div className="mb-3 text-sm font-medium">{t('resourcing.addAllocation')}</div>
-            <form
-              className="flex flex-wrap items-end gap-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (form.userId && form.projectId && Number(form.hoursPerWeek) > 0 && form.fromDate) addAllocation.mutate();
-              }}
-            >
-              <label className="text-xs text-muted-foreground">
-                {t('time.groupUser')}
-                <Select value={form.userId} onChange={(e) => setForm((f) => ({ ...f, userId: e.target.value }))} className="mt-1 block min-w-36">
-                  <option value="">{t('common.select')}</option>
-                  {(users.data?.data ?? []).map((u) => <option key={u.id} value={u.id}>{u.name ?? u.email ?? u.id.slice(0, 8)}</option>)}
-                </Select>
-              </label>
-              <label className="text-xs text-muted-foreground">
-                {t('time.groupProject')}
-                <Select value={form.projectId} onChange={(e) => setForm((f) => ({ ...f, projectId: e.target.value }))} className="mt-1 block min-w-36">
-                  <option value="">{t('common.select')}</option>
-                  {(projects.data?.data ?? []).map((p) => <option key={p.id} value={p.id}>{p.name ?? p.id.slice(0, 8)}</option>)}
-                </Select>
-              </label>
-              <label className="text-xs text-muted-foreground">
-                {t('resourcing.hoursPerWeek')}
-                <Input type="number" min={1} max={80} value={form.hoursPerWeek} onChange={(e) => setForm((f) => ({ ...f, hoursPerWeek: e.target.value }))} className="mt-1 w-20" />
-              </label>
-              <label className="text-xs text-muted-foreground">
-                {t('resourcing.from')}
-                <Input type="date" value={form.fromDate} onChange={(e) => setForm((f) => ({ ...f, fromDate: e.target.value }))} className="mt-1" />
-              </label>
-              <label className="text-xs text-muted-foreground">
-                {t('resourcing.to')}
-                <Input type="date" value={form.toDate} onChange={(e) => setForm((f) => ({ ...f, toDate: e.target.value }))} className="mt-1" />
-              </label>
-              <Button type="submit" disabled={addAllocation.isPending}>{t('common.add')}</Button>
-            </form>
-            {addAllocation.isError && <p className="mt-2 text-xs text-destructive">{t('resourcing.addFailed')}</p>}
-          </Card>
-        )}
-
         {isLoading ? (
-          <Skeleton className="h-48 w-full" />
+          <Skeleton className="h-64 w-full rounded-xl" />
         ) : allocForbidden ? (
           <EmptyState title={t('resourcing.allocForbidden')} hint={t('resourcing.allocForbiddenHint')} />
         ) : allocations.isError ? (
           <p className="text-sm text-destructive">{t('resourcing.loadFailed')}</p>
-        ) : rows.length === 0 ? (
+        ) : userIds.length === 0 ? (
           <EmptyState
-            title={t('resourcing.emptyWeek')}
-            hint={t('resourcing.emptyWeekHint')}
-            action={canWrite ? <Button size="sm" onClick={() => setShowForm(true)}><Plus size={14} /> {t('resourcing.addAllocation')}</Button> : undefined}
+            icon={<Users size={20} />}
+            title={t('resourcing.emptyRange')}
+            hint={t('resourcing.emptyRangeHint')}
+            action={canWrite ? <Button size="sm" onClick={() => openAddFor()}><Plus size={14} /> {t('resourcing.addAllocation')}</Button> : undefined}
           />
         ) : (
-          <Card>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                  <th className="px-4 py-2 font-medium">{t('resourcing.person')}</th>
-                  <th className="px-4 py-2 font-medium">{t('resourcing.allocations')}</th>
-                  <th className="px-4 py-2 text-right font-medium">{t('resourcing.totalPerWeek')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map(([userId, allocs]) => {
-                  const total = allocs.reduce((a, x) => a + Number(x.hoursPerWeek), 0);
-                  return (
-                    <tr key={userId} className="border-b border-border last:border-0">
-                      <td className="px-4 py-2 align-top">
-                        <span className="font-medium">{userName(userId)}</span>
-                        {isAbsent(userId) && <Badge className="ml-2 bg-muted text-muted-foreground">{t('resourcing.absent')}</Badge>}
-                      </td>
-                      <td className="px-4 py-2">
-                        <div className="flex flex-wrap gap-1.5">
-                          {allocs.map((a) => (
-                            <span key={a.id} className="inline-flex items-center gap-1 rounded border border-border bg-muted/50 px-1.5 py-0.5 text-xs">
-                              <span className="max-w-40 truncate">{projectName(a.projectId)}</span>
-                              <span className="tabular-nums text-muted-foreground">{Number(a.hoursPerWeek)}h/wk</span>
-                              {canWrite && (
-                                <button
-                                  className="ml-0.5 text-muted-foreground hover:text-destructive"
-                                  title={t('resourcing.deleteAllocation')}
-                                  onClick={() => deleteAllocation.mutate(a.id)}
-                                >
-                                  <Trash2 size={11} />
-                                </button>
-                              )}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className={cn('px-4 py-2 text-right align-top font-medium tabular-nums', total > 40 && 'text-destructive')}>
-                        {total}h
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <Card className="overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-[13px]">
+                <thead>
+                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                    <th className="sticky left-0 z-10 min-w-[180px] bg-card px-4 py-2 font-medium">{t('resourcing.person')}</th>
+                    {weekCols.map((ws) => (
+                      <th key={ws} className={cn('min-w-[92px] px-2 py-2 text-center font-medium', ws === thisWeek && 'text-foreground')}>
+                        {weekRangeLabel(ws)}
+                        {ws === thisWeek && <span className="ml-1 rounded bg-primary/15 px-1 py-px text-[10px] font-medium text-primary">{t('resourcing.thisWeekShort')}</span>}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {userIds.map((userId, ri) => {
+                    const user = (users.data?.data ?? []).find((u) => u.id === userId);
+                    return (
+                      <tr key={userId} className="group row-enter border-b border-border last:border-0" style={{ ['--i' as string]: Math.min(ri, 10) }}>
+                        <td className="sticky left-0 z-10 bg-card px-4 py-2 align-middle transition-colors duration-150 group-hover:bg-muted/40">
+                          <div className="flex items-center gap-2">
+                            <Avatar name={user?.name ?? userId} src={user?.avatar} size={22} />
+                            <span className="truncate font-medium">{userName(userId)}</span>
+                          </div>
+                        </td>
+                        {weekCols.map((ws) => {
+                          const we = addDays(ws, 6);
+                          const allocs = rangeAllocations.filter((a) => a.userId === userId && overlapsWeek(a.fromDate, a.toDate, ws, we));
+                          const total = allocs.reduce((a, x) => a + Number(x.hoursPerWeek), 0);
+                          const absent = isAbsent(userId, ws, we);
+                          const tone = utilizationTone(total);
+                          return (
+                            <td key={ws} className="px-2 py-2 text-center align-middle transition-colors duration-150 group-hover:bg-muted/40">
+                              <LoadCell
+                                total={total}
+                                tone={tone}
+                                absent={absent}
+                                allocs={allocs}
+                                canWrite={canWrite}
+                                projectName={projectName}
+                                onAdd={() => openAddFor(userId, ws)}
+                                onDelete={(id) => deleteAllocation.mutate(id)}
+                                weekLabel={weekRangeLabel(ws)}
+                              />
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </Card>
         )}
-        {deleteAllocation.isError && <p className="mt-2 text-xs text-destructive">{t('resourcing.deleteFailed')}</p>}
       </div>
+
+      <Dialog open={showForm} onClose={() => setShowForm(false)} title={t('resourcing.addAllocation')} width={440}>
+        <form
+          className="space-y-3 px-4 pb-4 pt-1"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (form.userId && form.projectId && Number(form.hoursPerWeek) > 0 && form.fromDate) addAllocation.mutate();
+          }}
+        >
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">{t('time.groupUser')}</label>
+              <Select value={form.userId} onChange={(e) => setForm((f) => ({ ...f, userId: e.target.value }))} className="block w-full">
+                <option value="">{t('common.select')}</option>
+                {(users.data?.data ?? []).map((u) => <option key={u.id} value={u.id}>{u.name ?? u.email ?? u.id.slice(0, 8)}</option>)}
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">{t('time.groupProject')}</label>
+              <Select value={form.projectId} onChange={(e) => setForm((f) => ({ ...f, projectId: e.target.value }))} className="block w-full">
+                <option value="">{t('common.select')}</option>
+                {(projects.data?.data ?? []).map((p) => <option key={p.id} value={p.id}>{p.name ?? p.id.slice(0, 8)}</option>)}
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">{t('resourcing.hoursPerWeek')}</label>
+              <Input type="number" min={1} max={80} value={form.hoursPerWeek} onChange={(e) => setForm((f) => ({ ...f, hoursPerWeek: e.target.value }))} />
+            </div>
+            <div />
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">{t('resourcing.from')}</label>
+              <Input type="date" value={form.fromDate} onChange={(e) => setForm((f) => ({ ...f, fromDate: e.target.value }))} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">{t('resourcing.to')}</label>
+              <Input type="date" value={form.toDate} onChange={(e) => setForm((f) => ({ ...f, toDate: e.target.value }))} />
+            </div>
+          </div>
+          {addAllocation.isError && <p className="text-xs text-destructive">{t('resourcing.addFailed')}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setShowForm(false)}>{t('common.cancel')}</Button>
+            <Button type="submit" size="sm" disabled={addAllocation.isPending}>{t('common.add')}</Button>
+          </div>
+        </form>
+      </Dialog>
     </div>
+  );
+}
+
+function LoadCell({ total, tone, absent, allocs, canWrite, projectName, onAdd, onDelete, weekLabel }: {
+  total: number; tone: Tone; absent: boolean; allocs: Allocation[]; canWrite: boolean;
+  projectName: (id: string) => string; onAdd: () => void; onDelete: (id: string) => void; weekLabel: string;
+}) {
+  const t = useT();
+
+  if (tone === 'empty') {
+    return canWrite ? (
+      <button
+        onClick={onAdd}
+        title={t('resourcing.addForUser')}
+        className="mx-auto grid h-6 w-10 place-items-center rounded-full border border-dashed border-border text-faint transition-colors duration-150 hover:border-primary/50 hover:text-primary"
+      >
+        <Plus size={11} />
+      </button>
+    ) : (
+      <span className="text-faint">—</span>
+    );
+  }
+
+  const chip = (
+    <button className={cn('inline-flex h-6 min-w-[2.75rem] items-center justify-center gap-1 rounded-full px-2 text-xs font-medium tabular-nums transition-transform duration-150 hover:scale-105', TONE_CLASS[tone])}>
+      {total}h
+      {absent && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-60" title={t('resourcing.absent')} />}
+    </button>
+  );
+
+  return (
+    <DropdownMenu trigger={chip} align="start" width={200}>
+      <MenuLabel>{weekLabel}{absent ? ` · ${t('resourcing.absent')}` : ''}</MenuLabel>
+      {allocs.map((a) => (
+        <MenuItem
+          key={a.id}
+          icon={canWrite ? <Trash2 size={13} /> : undefined}
+          danger={canWrite}
+          disabled={!canWrite}
+          onSelect={canWrite ? () => onDelete(a.id) : undefined}
+        >
+          <span className="flex w-full items-center justify-between gap-2">
+            <span className="truncate">{projectName(a.projectId)}</span>
+            <span className="shrink-0 tabular-nums text-muted-foreground">{Number(a.hoursPerWeek)}h</span>
+          </span>
+        </MenuItem>
+      ))}
+      {canWrite && (
+        <>
+          <MenuSeparator />
+          <MenuItem icon={<Plus size={13} />} onSelect={onAdd}>{t('resourcing.addForUser')}</MenuItem>
+        </>
+      )}
+    </DropdownMenu>
   );
 }

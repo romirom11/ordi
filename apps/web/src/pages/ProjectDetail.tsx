@@ -1,19 +1,96 @@
-import { useState, useEffect, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { X, List, Columns3, CalendarDays, GanttChart, Table2, Plus, MessageSquare } from 'lucide-react';
+import {
+  List, Columns3, CalendarDays, GanttChart, Table2, Plus, Lock, ChevronDown,
+  LayoutDashboard, ListChecks, Repeat, Settings2, Target, Rocket, CalendarClock,
+} from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
 import { useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
-import { Button, Input, Textarea, Select, Card, Badge, Skeleton, EmptyState, Spinner, fmtDate, cn } from '../components/ui';
+import {
+  Button, Input, Card, Badge, Skeleton, EmptyState, Spinner, Avatar, AvatarGroup,
+  StatusIcon, PriorityIcon, ProgressBar, ProgressRing, Tabs, SegmentedControl,
+  fmtDate, cn,
+} from '../components/ui';
+import { DropdownMenu, MenuItem, MenuLabel, MenuSeparator, Dialog, toast } from '../components/overlays';
 import { CalendarView } from '../components/views/CalendarView';
 import { TimelineView } from '../components/views/TimelineView';
 import { SpreadsheetView } from '../components/views/SpreadsheetView';
 import { SavedViewsBar, type SavedView } from '../components/views/SavedViewsBar';
-import { useT } from '../lib/i18n';
+import { RichEditor, EMPTY_DOC } from '../components/richtext/RichEditor';
+import { ProjectAccessPanel } from '../components/ProjectAccessPanel';
+import { ProjectIcon, projectColor } from '../components/project/ProjectIcon';
+import { LeadPicker, DatePickerMenu, type UserLite } from '../components/project/pickers';
+import { useT, extendDict } from '../lib/i18n';
+
+extendDict({
+  en: {
+    'projects.noLead': 'No lead',
+    'projects.lead': 'Lead',
+    'projects.clearDate': 'Clear date',
+    'projects.startDate': 'Start',
+    'projects.targetDate': 'Target',
+    'projects.setStart': 'Set start',
+    'projects.setTarget': 'Set target',
+    'projects.private': 'Private',
+    'projects.visibility': 'Visibility',
+    'projects.visWorkspace': 'Workspace',
+    'projects.visPrivate': 'Private',
+    'projects.visWorkspaceHint': 'Everyone in the workspace can see this project.',
+    'projects.visPrivateHint': 'Only members with access can see this project.',
+    'projects.completion': 'Completion',
+    'projects.byStatus': 'By status',
+    'projects.general': 'General',
+    'projects.access': 'Access',
+    'projects.conflict': 'This project changed elsewhere — reloaded the latest version.',
+    'projects.statusActive': 'Active',
+    'projects.statusPaused': 'Paused',
+    'projects.statusCompleted': 'Completed',
+    'projects.statusArchived': 'Archived',
+    'projects.newTaskInline': 'Add task…',
+    'projects.noTasks': 'No tasks in this project yet',
+    'projects.noTasksHint': 'Create a task to start planning the work.',
+    'projects.aboutPlaceholder': 'Write about this project — goals, scope, context…',
+    'projects.overviewEmpty': 'No tasks yet',
+    'projects.loadFailed': 'Could not load this project.',
+  },
+  uk: {
+    'projects.noLead': 'Без керівника',
+    'projects.lead': 'Керівник',
+    'projects.clearDate': 'Очистити дату',
+    'projects.startDate': 'Початок',
+    'projects.targetDate': 'Ціль',
+    'projects.setStart': 'Задати початок',
+    'projects.setTarget': 'Задати ціль',
+    'projects.private': 'Приватний',
+    'projects.visibility': 'Видимість',
+    'projects.visWorkspace': 'Робочий простір',
+    'projects.visPrivate': 'Приватний',
+    'projects.visWorkspaceHint': 'Усі в робочому просторі бачать цей проєкт.',
+    'projects.visPrivateHint': 'Проєкт бачать лише учасники з доступом.',
+    'projects.completion': 'Завершеність',
+    'projects.byStatus': 'За статусом',
+    'projects.general': 'Загальні',
+    'projects.access': 'Доступ',
+    'projects.conflict': 'Проєкт змінено деінде — завантажено найновішу версію.',
+    'projects.statusActive': 'Активний',
+    'projects.statusPaused': 'Призупинено',
+    'projects.statusCompleted': 'Завершено',
+    'projects.statusArchived': 'Архів',
+    'projects.newTaskInline': 'Додати задачу…',
+    'projects.noTasks': 'У цьому проєкті ще немає задач',
+    'projects.noTasksHint': 'Створіть задачу, щоб почати планувати роботу.',
+    'projects.aboutPlaceholder': 'Опишіть проєкт — цілі, обсяг, контекст…',
+    'projects.overviewEmpty': 'Задач поки немає',
+    'projects.loadFailed': 'Не вдалося завантажити проєкт.',
+  },
+});
 
 interface Project {
   id: string; name: string; key: string; status: string; kind?: string;
-  companyName?: string | null; description?: unknown; version?: number;
+  companyId?: string | null; companyName?: string | null; description?: unknown;
+  leadId?: string | null; startDate?: string | null; targetDate?: string | null;
+  visibility?: string; version?: number;
 }
 interface TaskStatus {
   id: string; name: string; category?: string; color?: string; position?: number; isDefault?: boolean;
@@ -21,111 +98,208 @@ interface TaskStatus {
 interface Task {
   id: string; number?: number; ref?: string; title: string; statusId: string; priority?: string;
   dueDate?: string | null; startDate?: string | null; estimate?: number | string | null; version?: number;
-  assignees?: { id: string; name?: string }[];
-}
-interface Comment {
-  id: string; body?: unknown; authorName?: string; createdAt?: string;
-}
-interface TaskDetail extends Task {
-  description?: unknown; version?: number; labels?: { id: string; name: string; color?: string }[]; comments?: Comment[];
+  parentId?: string | null; assigneeIds?: string[];
 }
 interface Cycle {
   id: string; name: string; startDate?: string; endDate?: string; status?: string; goal?: string;
   progress?: number; completedCount?: number; totalCount?: number; openCount?: number;
 }
 
-const PRIORITY_COLOR: Record<string, string> = {
-  urgent: '#ef4444', high: '#f97316', medium: '#eab308', low: '#3b82f6', none: '#9ca3af',
+const PROJECT_STATUS = ['active', 'paused', 'completed', 'archived'] as const;
+const STATUS_META: Record<string, { color: string; key: string }> = {
+  active: { color: '#22c55e', key: 'projects.statusActive' },
+  paused: { color: '#eab308', key: 'projects.statusPaused' },
+  completed: { color: '#5e6ad2', key: 'projects.statusCompleted' },
+  archived: { color: '#8a8f98', key: 'projects.statusArchived' },
 };
-const PROJECT_STATUS = ['active', 'paused', 'completed', 'archived'];
 
-function docToText(body: unknown): string {
-  if (!body) return '';
-  if (typeof body === 'string') return body;
-  const walk = (node: unknown): string => {
-    const n = node as { text?: string; content?: unknown[] } | null;
-    if (!n) return '';
-    if (typeof n.text === 'string') return n.text;
-    if (Array.isArray(n.content)) return n.content.map(walk).join('');
-    return '';
-  };
-  const b = body as { content?: unknown[] };
-  if (Array.isArray(b.content)) return b.content.map((n) => walk(n)).join('\n');
-  return walk(body);
-}
-function textToDoc(text: string) {
-  return {
-    type: 'doc',
-    content: text.split('\n').map((line) => ({
-      type: 'paragraph',
-      content: line ? [{ type: 'text', text: line }] : [],
-    })),
-  };
+function isOverdue(due: string | null | undefined, cat?: string): boolean {
+  if (!due) return false;
+  if (cat === 'done' || cat === 'canceled') return false;
+  const d = new Date(due); d.setHours(0, 0, 0, 0);
+  const now = new Date(); now.setHours(0, 0, 0, 0);
+  return d.getTime() < now.getTime();
 }
 
-const TABS = ['tasks', 'cycles', 'overview', 'settings'] as const;
+/* ───────────────────────── Page ───────────────────────── */
+
+const TABS = ['overview', 'tasks', 'cycles', 'settings'] as const;
 type Tab = typeof TABS[number];
-// i18n dictionary keys for the tab labels (ids stay untranslated).
-const TAB_LABEL_KEYS: Record<Tab, string> = {
-  tasks: 'common.tasks',
-  cycles: 'projects.cycles',
-  overview: 'projects.overview',
-  settings: 'nav.settings',
-};
 
-export function ProjectDetailPage({ id, taskId }: { id: string; taskId?: string }) {
+export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
   const t = useT();
   const navigate = useNavigate();
-  const [tab, setTab] = useState<Tab>('tasks');
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(taskId ?? null);
-
-  useEffect(() => { setSelectedTaskId(taskId ?? null); }, [taskId]);
+  const qc = useQueryClient();
+  const can = useCan();
+  const canWrite = can('projects.write') || can('projects.create');
+  const isAdmin = can('projects.write');
+  const [tab, setTab] = useState<Tab>('overview');
 
   const projectQ = useQuery<Project>({ queryKey: ['project', id], queryFn: () => api.get<Project>(`/projects/${id}`) });
-  const statusesQ = useQuery<TaskStatus[]>({ queryKey: ['task-statuses', id], queryFn: () => api.get<{ data: TaskStatus[] }>(`/projects/${id}/task-statuses`).then((r) => r.data) });
+  const statusesQ = useQuery<TaskStatus[]>({
+    queryKey: ['task-statuses', id],
+    queryFn: () => api.get<{ data: TaskStatus[] }>(`/projects/${id}/task-statuses`).then((r) => r.data),
+  });
+  const usersQ = useQuery<UserLite[]>({
+    queryKey: ['users', 'lookup'],
+    queryFn: () => api.get<{ data: UserLite[] }>('/users/lookup').then((r) => r.data),
+    staleTime: 5 * 60_000,
+  });
 
   const statuses = (statusesQ.data ?? []).slice().sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
   const project = projectQ.data;
+  const users = usersQ.data ?? [];
 
-  const openTask = (tid: string) => { setSelectedTaskId(tid); navigate(`/projects/${id}/tasks/${tid}`); };
-  const closeTask = () => { setSelectedTaskId(null); navigate(`/projects/${id}`); };
+  const openTask = (tid: string) => navigate(`/projects/${id}/tasks/${tid}`);
+
+  const patchProject = useMutation({
+    mutationFn: (body: Record<string, unknown>) => api.patch(`/projects/${id}`, { ...body, version: project?.version }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['project', id] }); qc.invalidateQueries({ queryKey: ['projects'] }); },
+    onError: (e) => {
+      if (e instanceof ApiError && (e.status === 409 || e.code === 'conflict')) {
+        qc.invalidateQueries({ queryKey: ['project', id] });
+        toast.error(t('projects.conflict'));
+      } else {
+        toast.error(e instanceof ApiError ? e.message : t('common.saveFailed'));
+      }
+    },
+  });
+
+  const tabDefs: { key: Tab; label: string; icon: ReactNode }[] = [
+    { key: 'overview', label: t('projects.overview'), icon: <LayoutDashboard size={14} /> },
+    { key: 'tasks', label: t('common.tasks'), icon: <ListChecks size={14} /> },
+    { key: 'cycles', label: t('projects.cycles'), icon: <Repeat size={14} /> },
+    { key: 'settings', label: t('nav.settings'), icon: <Settings2 size={14} /> },
+  ];
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="border-b border-border px-6 pt-4">
-        <div className="mb-3 flex items-center gap-2">
-          <Badge className="bg-muted font-mono text-muted-foreground">{project?.key ?? '…'}</Badge>
-          <h1 className="text-lg font-semibold">{projectQ.isLoading ? <Skeleton className="h-5 w-40" /> : project?.name}</h1>
-          {project?.status && <Badge className="bg-muted text-muted-foreground capitalize">{project.status}</Badge>}
-          {project?.companyName && <span className="text-sm text-muted-foreground">· {project.companyName}</span>}
-        </div>
-        <nav className="flex gap-1 text-sm">
-          {TABS.map((tb) => (
-            <button key={tb} onClick={() => setTab(tb)}
-              className={cn('rounded-t-md px-3 py-1.5 capitalize', tab === tb ? 'border-b-2 border-primary font-medium' : 'text-muted-foreground hover:text-foreground')}>
-              {t(TAB_LABEL_KEYS[tb])}
-            </button>
-          ))}
-        </nav>
+    <div className="page-enter flex h-full flex-col">
+      <ProjectHeader
+        project={project}
+        loading={projectQ.isLoading}
+        users={users}
+        canWrite={canWrite}
+        onPatch={(b) => patchProject.mutate(b)}
+      />
+      <div className="border-b border-border px-6">
+        <Tabs tabs={tabDefs} value={tab} onChange={setTab} className="pt-1" />
       </div>
 
       <div className="flex-1 overflow-auto">
-        {tab === 'tasks' && <TasksTab id={id} statuses={statuses} statusesLoading={statusesQ.isLoading} projectKey={project?.key} onOpen={openTask} />}
+        {tab === 'overview' && <OverviewTab id={id} statuses={statuses} project={project} canWrite={canWrite} onPatch={(b) => patchProject.mutate(b)} />}
+        {tab === 'tasks' && <TasksTab id={id} statuses={statuses} statusesLoading={statusesQ.isLoading} projectKey={project?.key} users={users} onOpen={openTask} />}
         {tab === 'cycles' && <CyclesTab id={id} />}
-        {tab === 'overview' && <OverviewTab id={id} statuses={statuses} project={project} />}
-        {tab === 'settings' && <SettingsTab project={project} />}
+        {tab === 'settings' && <SettingsTab project={project} isAdmin={isAdmin} onPatch={(b) => patchProject.mutate(b)} pending={patchProject.isPending} />}
       </div>
-
-      {selectedTaskId && (
-        <TaskPeek key={selectedTaskId} taskId={selectedTaskId} projectId={id} projectKey={project?.key} statuses={statuses} onClose={closeTask} />
-      )}
     </div>
   );
 }
 
-/* ---------------- Tasks ---------------- */
+/* ───────────────────────── Header ───────────────────────── */
 
-// `labelKey` is an i18n dictionary key, translated at render time.
+function ProjectHeader({ project, loading, users, canWrite, onPatch }: {
+  project?: Project; loading: boolean; users: UserLite[]; canWrite: boolean;
+  onPatch: (body: Record<string, unknown>) => void;
+}) {
+  const t = useT();
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+
+  if (loading || !project) {
+    return (
+      <div className="px-6 pt-4">
+        <div className="flex items-center gap-3">
+          <Skeleton className="h-8 w-8 rounded-lg" />
+          <Skeleton className="h-6 w-56" />
+        </div>
+        <Skeleton className="mt-3 h-5 w-72" />
+      </div>
+    );
+  }
+
+  const meta = STATUS_META[project.status] ?? { color: '#8a8f98', key: '' };
+  const commitName = () => {
+    setEditingName(false);
+    const v = nameDraft.trim();
+    if (v && v !== project.name) onPatch({ name: v });
+  };
+
+  return (
+    <div className="px-6 pt-4">
+      <div className="flex items-start gap-3">
+        <ProjectIcon seed={project.key || project.id} size={34} radius={9} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            {editingName ? (
+              <input
+                autoFocus
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onBlur={commitName}
+                onKeyDown={(e) => { if (e.key === 'Enter') commitName(); if (e.key === 'Escape') setEditingName(false); }}
+                className="min-w-0 flex-1 rounded-md border border-primary/60 bg-transparent px-1.5 py-0.5 text-lg font-semibold outline-none focus:ring-2 focus:ring-ring/25"
+              />
+            ) : (
+              <h1
+                onClick={() => { if (canWrite) { setNameDraft(project.name); setEditingName(true); } }}
+                className={cn('truncate rounded-md px-1.5 py-0.5 text-lg font-semibold leading-tight -ml-1.5',
+                  canWrite && 'cursor-text hover:bg-muted')}
+              >
+                {project.name}
+              </h1>
+            )}
+
+            {/* Status menu */}
+            {canWrite ? (
+              <DropdownMenu
+                trigger={
+                  <span className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-border bg-card px-2 py-0.5 text-xs font-medium transition-colors hover:bg-muted">
+                    <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: meta.color }} />
+                    <span className="text-muted-foreground">{meta.key ? t(meta.key) : project.status}</span>
+                    <ChevronDown size={12} className="text-faint" />
+                  </span>
+                }
+                align="start" width={170}
+              >
+                <MenuLabel>{t('common.status')}</MenuLabel>
+                {PROJECT_STATUS.map((s) => (
+                  <MenuItem key={s} checked={project.status === s} onSelect={() => { if (s !== project.status) onPatch({ status: s }); }}
+                    icon={<span className="h-2 w-2 rounded-full" style={{ backgroundColor: STATUS_META[s]!.color }} />}>
+                    {t(STATUS_META[s]!.key)}
+                  </MenuItem>
+                ))}
+              </DropdownMenu>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2 py-0.5 text-xs font-medium">
+                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: meta.color }} />
+                <span className="text-muted-foreground">{meta.key ? t(meta.key) : project.status}</span>
+              </span>
+            )}
+
+            <Badge className="bg-muted font-mono text-[11px] text-muted-foreground">{project.key}</Badge>
+            {project.companyName && <span className="truncate text-[13px] text-muted-foreground">· {project.companyName}</span>}
+          </div>
+
+          {/* Properties row */}
+          <div className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-1 text-[13px] text-muted-foreground">
+            <LeadPicker value={project.leadId} users={users} onSelect={(uid) => onPatch({ leadId: uid })} disabled={!canWrite} />
+            <span className="text-faint">·</span>
+            <DatePickerMenu value={project.startDate} onChange={(v) => onPatch({ startDate: v })} placeholder={t('projects.setStart')} icon={<Rocket size={14} className="text-faint" />} disabled={!canWrite} />
+            <DatePickerMenu value={project.targetDate} onChange={(v) => onPatch({ targetDate: v })} placeholder={t('projects.setTarget')} icon={<Target size={14} className="text-faint" />} disabled={!canWrite} />
+            {project.visibility === 'private' && (
+              <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground">
+                <Lock size={13} className="text-faint" /> {t('projects.private')}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ───────────────────────── Tasks tab ───────────────────────── */
+
 const TASK_VIEWS = [
   { key: 'list', labelKey: 'tasks.list', icon: List },
   { key: 'board', labelKey: 'tasks.board', icon: Columns3 },
@@ -139,8 +313,14 @@ function isTaskView(v: unknown): v is TaskView {
   return typeof v === 'string' && TASK_VIEWS.some((tv) => tv.key === v);
 }
 
-function TasksTab({ id, statuses, statusesLoading, projectKey, onOpen }: {
-  id: string; statuses: TaskStatus[]; statusesLoading: boolean; projectKey?: string; onOpen: (tid: string) => void;
+function refLabel(t: Task, projectKey?: string): string {
+  if (t.ref) return t.ref;
+  if (t.number == null) return '';
+  return projectKey ? `${projectKey}-${t.number}` : `#${t.number}`;
+}
+
+function TasksTab({ id, statuses, statusesLoading, projectKey, users, onOpen }: {
+  id: string; statuses: TaskStatus[]; statusesLoading: boolean; projectKey?: string; users: UserLite[]; onOpen: (tid: string) => void;
 }) {
   const t = useT();
   const qc = useQueryClient();
@@ -160,42 +340,67 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, onOpen }: {
   const tasksQ = useQuery<Task[]>({ queryKey: ['tasks', id], queryFn: () => api.get<{ data: Task[] }>(`/tasks${qs({ projectId: id })}`).then((r) => r.data) });
   const tasks = tasksQ.data ?? [];
 
+  const userById = useMemo(() => {
+    const m = new Map<string, UserLite>();
+    for (const u of users) m.set(u.id, u);
+    return m;
+  }, [users]);
+  const resolveUsers = (ids?: string[]) => (ids ?? []).map((uid) => userById.get(uid) ?? { id: uid, name: '?' });
+
   const addTask = useMutation({
     mutationFn: (vars: { title: string; statusId?: string }) => api.post('/tasks', { projectId: id, title: vars.title, statusId: vars.statusId }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks', id] }),
-    onError: (e) => alert(e instanceof ApiError ? e.message : t('tasks.createFailed')),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('tasks.createFailed')),
   });
 
-  const byStatus = (sid: string) => tasks.filter((t) => t.statusId === sid);
+  const move = useMutation({
+    mutationFn: (vars: { taskId: string; statusId: string; version?: number }) =>
+      api.patch(`/tasks/${vars.taskId}`, { statusId: vars.statusId, version: vars.version }),
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: ['tasks', id] });
+      const prev = qc.getQueryData<Task[]>(['tasks', id]);
+      qc.setQueryData<Task[]>(['tasks', id], (old) => (old ?? []).map((x) => x.id === vars.taskId ? { ...x, statusId: vars.statusId } : x));
+      return { prev };
+    },
+    onError: (e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(['tasks', id], ctx.prev);
+      toast.error(e instanceof ApiError ? e.message : t('common.saveFailed'));
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['tasks', id] }),
+  });
+
+  const byStatus = (sid: string) => tasks.filter((x) => x.statusId === sid);
   const loading = statusesLoading || tasksQ.isLoading;
 
   return (
     <div className="p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <div className="inline-flex overflow-hidden rounded-md border border-border">
-          {TASK_VIEWS.map((tv, i) => {
-            const Icon = tv.icon;
-            return (
-              <button key={tv.key} onClick={() => setView(tv.key)}
-                className={cn('flex items-center gap-1 px-2.5 py-1 text-xs', i > 0 && 'border-l border-border',
-                  view === tv.key ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/60')}>
-                <Icon size={13} /> {t(tv.labelKey)}
-              </button>
-            );
-          })}
-        </div>
+        <SegmentedControl
+          options={TASK_VIEWS.map((tv) => ({ key: tv.key, label: t(tv.labelKey), icon: <tv.icon size={14} />, title: t(tv.labelKey) }))}
+          value={view}
+          onChange={(v) => setView(v as TaskView)}
+        />
         <SavedViewsBar projectId={id} currentView={view}
           onApply={(v: SavedView) => { if (isTaskView(v.layout)) setView(v.layout); }} />
       </div>
 
       {loading ? (
-        <div className="space-y-2">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-9" />)}</div>
+        <div className="space-y-2">{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-9" />)}</div>
       ) : statuses.length === 0 ? (
-        <EmptyState title={t('projects.noWorkflow')} hint={t('projects.noWorkflowHint')} />
+        <EmptyState icon={<ListChecks size={20} />} title={t('projects.noWorkflow')} hint={t('projects.noWorkflowHint')} />
+      ) : tasks.length === 0 && view !== 'board' && view !== 'spreadsheet' ? (
+        <EmptyState
+          icon={<ListChecks size={20} />}
+          title={t('projects.noTasks')}
+          hint={canWrite ? t('projects.noTasksHint') : undefined}
+        />
       ) : view === 'list' ? (
-        <ListView statuses={statuses} byStatus={byStatus} onOpen={onOpen} canWrite={canWrite} onAdd={(title, statusId) => addTask.mutate({ title, statusId })} />
+        <ListView statuses={statuses} byStatus={byStatus} onOpen={onOpen} canWrite={canWrite} projectKey={projectKey}
+          resolveUsers={resolveUsers} onAdd={(title, statusId) => addTask.mutate({ title, statusId })} />
       ) : view === 'board' ? (
-        <BoardView statuses={statuses} byStatus={byStatus} onOpen={onOpen} canWrite={canWrite} onAdd={(title, statusId) => addTask.mutate({ title, statusId })} />
+        <BoardView statuses={statuses} byStatus={byStatus} onOpen={onOpen} canWrite={canWrite} projectKey={projectKey}
+          resolveUsers={resolveUsers} onAdd={(title, statusId) => addTask.mutate({ title, statusId })}
+          onMove={(taskId, statusId, version) => move.mutate({ taskId, statusId, version })} />
       ) : view === 'calendar' ? (
         <CalendarView tasks={tasks} projectKey={projectKey} onOpenTask={onOpen} />
       ) : view === 'timeline' ? (
@@ -207,65 +412,74 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, onOpen }: {
   );
 }
 
-function TaskRow({ t, onOpen }: { t: Task; onOpen: (tid: string) => void }) {
-  return (
-    <button onClick={() => onOpen(t.id)} className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-muted">
-      <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: PRIORITY_COLOR[t.priority ?? 'none'] ?? PRIORITY_COLOR.none }} />
-      {t.number != null && <span className="shrink-0 font-mono text-[11px] text-muted-foreground">#{t.number}</span>}
-      <span className="flex-1 truncate">{t.title}</span>
-      {t.assignees && t.assignees.length > 0 && (
-        <span className="shrink-0 text-xs text-muted-foreground">{t.assignees.map((a) => a.name).filter(Boolean).join(', ')}</span>
-      )}
-    </button>
-  );
-}
-
-function QuickAdd({ statusId, onAdd, placeholder }: { statusId?: string; onAdd: (title: string, statusId?: string) => void; placeholder: string }) {
+function QuickAdd({ statusId, onAdd, placeholder, variant = 'row' }: {
+  statusId?: string; onAdd: (title: string, statusId?: string) => void; placeholder: string; variant?: 'row' | 'card';
+}) {
   const [title, setTitle] = useState('');
   return (
     <form
       onSubmit={(e: FormEvent) => { e.preventDefault(); const v = title.trim(); if (!v) return; onAdd(v, statusId); setTitle(''); }}
-      className="flex items-center gap-2 px-3 py-1.5"
+      className={cn('flex items-center gap-2', variant === 'row' ? 'px-3 py-1.5' : 'px-2 py-1.5')}
     >
-      <Plus size={13} className="shrink-0 text-muted-foreground" />
+      <Plus size={13} className="shrink-0 text-faint" />
       <input
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         placeholder={placeholder}
-        className="h-7 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+        className="h-6 flex-1 bg-transparent text-[13px] outline-none placeholder:text-faint"
       />
     </form>
   );
 }
 
-function ListView({ statuses, byStatus, onOpen, canWrite, onAdd }: {
+/* ---- List view (grouped by status) ---- */
+
+function ListView({ statuses, byStatus, onOpen, canWrite, projectKey, resolveUsers, onAdd }: {
   statuses: TaskStatus[]; byStatus: (sid: string) => Task[]; onOpen: (tid: string) => void;
-  canWrite: boolean; onAdd: (title: string, statusId?: string) => void;
+  canWrite: boolean; projectKey?: string; resolveUsers: (ids?: string[]) => UserLite[];
+  onAdd: (title: string, statusId?: string) => void;
 }) {
   const t = useT();
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {statuses.map((s) => {
         const items = byStatus(s.id);
+        if (items.length === 0 && !canWrite) return null;
         return (
           <section key={s.id}>
-            <h3 className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color ?? '#9ca3af' }} />
-              {s.name}
-              <span className="rounded bg-muted px-1.5 py-0.5 tabular-nums">{items.length}</span>
+            <h3 className="mb-1.5 flex items-center gap-2 px-1 text-[13px] font-semibold">
+              <StatusIcon category={s.category} color={s.color} size={14} />
+              <span>{s.name}</span>
+              <span className="rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground">{items.length}</span>
             </h3>
             <div className="overflow-hidden rounded-lg border border-border bg-card">
-              {items.map((t, i) => (
-                <div key={t.id} className={cn(i > 0 && 'border-t border-border')}>
-                  <TaskRow t={t} onOpen={onOpen} />
-                </div>
-              ))}
+              {items.map((task, i) => {
+                const assignees = resolveUsers(task.assigneeIds);
+                const overdue = isOverdue(task.dueDate, s.category);
+                return (
+                  <button
+                    key={task.id}
+                    onClick={() => onOpen(task.id)}
+                    className={cn('flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors duration-150 hover:bg-muted/60',
+                      i > 0 && 'border-t border-border')}
+                  >
+                    <PriorityIcon priority={task.priority} size={15} />
+                    {refLabel(task, projectKey) && (
+                      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{refLabel(task, projectKey)}</span>
+                    )}
+                    <span className="flex-1 truncate text-[13px]">{task.title}</span>
+                    {task.dueDate && (
+                      <span className={cn('shrink-0 text-xs tabular-nums', overdue ? 'text-destructive' : 'text-muted-foreground')}>{fmtDate(task.dueDate)}</span>
+                    )}
+                    {assignees.length > 0 && <AvatarGroup users={assignees} size={20} max={3} />}
+                  </button>
+                );
+              })}
               {canWrite && (
                 <div className={cn(items.length > 0 && 'border-t border-border')}>
-                  <QuickAdd statusId={s.id} onAdd={onAdd} placeholder={t('tasks.addTask')} />
+                  <QuickAdd statusId={s.id} onAdd={onAdd} placeholder={t('projects.newTaskInline')} />
                 </div>
               )}
-              {items.length === 0 && !canWrite && <p className="px-3 py-2 text-xs text-muted-foreground">{t('tasks.noTasks')}</p>}
             </div>
           </section>
         );
@@ -274,39 +488,84 @@ function ListView({ statuses, byStatus, onOpen, canWrite, onAdd }: {
   );
 }
 
-function BoardView({ statuses, byStatus, onOpen, canWrite, onAdd }: {
+/* ---- Board view (drag & drop) ---- */
+
+function BoardView({ statuses, byStatus, onOpen, canWrite, projectKey, resolveUsers, onAdd, onMove }: {
   statuses: TaskStatus[]; byStatus: (sid: string) => Task[]; onOpen: (tid: string) => void;
-  canWrite: boolean; onAdd: (title: string, statusId?: string) => void;
+  canWrite: boolean; projectKey?: string; resolveUsers: (ids?: string[]) => UserLite[];
+  onAdd: (title: string, statusId?: string) => void;
+  onMove: (taskId: string, statusId: string, version?: number) => void;
 }) {
   const t = useT();
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overCol, setOverCol] = useState<string | null>(null);
+
   return (
     <div className="flex gap-3 overflow-x-auto pb-2">
       {statuses.map((s) => {
         const items = byStatus(s.id);
+        const isOver = overCol === s.id;
         return (
-          <div key={s.id} className="flex w-72 shrink-0 flex-col rounded-lg border border-border bg-muted/30">
-            <div className="flex items-center justify-between border-b border-border p-2.5">
-              <span className="flex items-center gap-1.5 text-sm font-medium">
-                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color ?? '#9ca3af' }} />
+          <div
+            key={s.id}
+            onDragOver={(e) => { if (dragId) { e.preventDefault(); setOverCol(s.id); } }}
+            onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOverCol((c) => (c === s.id ? null : c)); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              const taskId = e.dataTransfer.getData('text/task-id') || dragId;
+              setOverCol(null); setDragId(null);
+              if (!taskId) return;
+              const src = statuses.flatMap((st) => byStatus(st.id)).find((x) => x.id === taskId);
+              if (src && src.statusId !== s.id) onMove(taskId, s.id, src.version);
+            }}
+            className={cn(
+              'flex w-72 shrink-0 flex-col rounded-xl border transition-colors duration-150',
+              isOver ? 'border-primary/50 bg-primary/5' : 'border-border bg-muted/25',
+            )}
+          >
+            <div className="flex items-center justify-between px-3 py-2.5">
+              <span className="flex items-center gap-2 text-[13px] font-semibold">
+                <StatusIcon category={s.category} color={s.color} size={14} />
                 {s.name}
               </span>
               <span className="rounded bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground">{items.length}</span>
             </div>
-            <div className="flex-1 space-y-2 overflow-y-auto p-2">
-              {items.map((t) => (
-                <button key={t.id} onClick={() => onOpen(t.id)} className="block w-full text-left">
-                  <Card className="p-2.5 hover:border-primary/50">
-                    <div className="flex items-start gap-2">
-                      <span className="mt-1 inline-block h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: PRIORITY_COLOR[t.priority ?? 'none'] ?? PRIORITY_COLOR.none }} />
-                      <span className="text-sm leading-snug">{t.title}</span>
+            <div className="flex-1 space-y-2 overflow-y-auto px-2 pb-2">
+              {items.map((task) => {
+                const assignees = resolveUsers(task.assigneeIds);
+                const overdue = isOverdue(task.dueDate, s.category);
+                return (
+                  <div
+                    key={task.id}
+                    draggable={canWrite}
+                    onDragStart={(e) => { setDragId(task.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/task-id', task.id); }}
+                    onDragEnd={() => { setDragId(null); setOverCol(null); }}
+                    onClick={() => onOpen(task.id)}
+                    className={cn(
+                      'cursor-pointer rounded-lg border border-border bg-card p-2.5 text-left shadow-sm transition-all duration-150 hover:border-border-strong',
+                      canWrite && 'active:cursor-grabbing',
+                      dragId === task.id && 'opacity-40',
+                    )}
+                  >
+                    <div className="flex items-start gap-1.5">
+                      <span className="mt-0.5"><PriorityIcon priority={task.priority} size={14} /></span>
+                      <span className="flex-1 text-[13px] leading-snug">{task.title}</span>
                     </div>
-                    {t.number != null && <p className="mt-1 pl-4 font-mono text-[11px] text-muted-foreground">#{t.number}</p>}
-                  </Card>
-                </button>
-              ))}
+                    <div className="mt-2 flex items-center gap-2">
+                      {refLabel(task, projectKey) && (
+                        <span className="font-mono text-[11px] text-muted-foreground">{refLabel(task, projectKey)}</span>
+                      )}
+                      {task.dueDate && (
+                        <span className={cn('text-[11px] tabular-nums', overdue ? 'text-destructive' : 'text-muted-foreground')}>{fmtDate(task.dueDate)}</span>
+                      )}
+                      {assignees.length > 0 && <span className="ml-auto"><AvatarGroup users={assignees} size={18} max={3} /></span>}
+                    </div>
+                  </div>
+                );
+              })}
               {canWrite && (
-                <div className="rounded-md border border-dashed border-border">
-                  <QuickAdd statusId={s.id} onAdd={onAdd} placeholder={t('tasks.addTask')} />
+                <div className="rounded-lg border border-dashed border-border">
+                  <QuickAdd statusId={s.id} onAdd={onAdd} placeholder={t('projects.newTaskInline')} variant="card" />
                 </div>
               )}
             </div>
@@ -317,134 +576,101 @@ function BoardView({ statuses, byStatus, onOpen, canWrite, onAdd }: {
   );
 }
 
-/* ---------------- Task peek ---------------- */
+/* ───────────────────────── Overview tab ───────────────────────── */
 
-function TaskPeek({ taskId, projectId, projectKey, statuses, onClose }: {
-  taskId: string; projectId: string; projectKey?: string; statuses: TaskStatus[]; onClose: () => void;
+function OverviewTab({ id, statuses, project, canWrite, onPatch }: {
+  id: string; statuses: TaskStatus[]; project?: Project; canWrite: boolean;
+  onPatch: (body: Record<string, unknown>) => void;
 }) {
   const t = useT();
-  const qc = useQueryClient();
-  const taskQ = useQuery<TaskDetail>({
-    queryKey: ['task', taskId],
-    queryFn: () => api.get<TaskDetail>(`/tasks/${taskId}?include=assignees,labels,comments`),
-  });
-  const task = taskQ.data;
+  const { data, isLoading } = useQuery<Task[]>({ queryKey: ['tasks', id], queryFn: () => api.get<{ data: Task[] }>(`/tasks${qs({ projectId: id })}`).then((r) => r.data) });
+  const tasks = data ?? [];
 
-  const [title, setTitle] = useState('');
-  const [desc, setDesc] = useState('');
-  const [comment, setComment] = useState('');
-
+  // Debounced description editor.
+  const [doc, setDoc] = useState<unknown>(EMPTY_DOC);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (task) { setTitle(task.title ?? ''); setDesc(docToText(task.description)); }
-    // Reset only when a different task loads.
+    setDoc(project?.description ?? EMPTY_DOC);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task?.id]);
+  }, [project?.id]);
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
-  const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ['task', taskId] });
-    qc.invalidateQueries({ queryKey: ['tasks', projectId] });
+  const onDescChange = (next: unknown) => {
+    setDoc(next);
+    if (!canWrite) return;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => { onPatch({ description: next }); }, 900);
   };
 
-  const patch = useMutation({
-    mutationFn: (body: Record<string, unknown>) => api.patch(`/tasks/${taskId}`, { ...body, version: task?.version }),
-    onSuccess: invalidate,
-    onError: (e) => alert(e instanceof ApiError ? e.message : t('common.saveFailed')),
-  });
+  const catOf = (sid: string) => statuses.find((s) => s.id === sid)?.category;
+  const total = tasks.length;
+  const done = tasks.filter((x) => catOf(x.statusId) === 'done').length;
+  const inProgress = tasks.filter((x) => catOf(x.statusId) === 'in_progress').length;
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  const accent = project ? projectColor(project.key || project.id) : undefined;
 
-  const addComment = useMutation({
-    mutationFn: (text: string) => api.post(`/tasks/${taskId}/comments`, {
-      body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] },
-    }),
-    onSuccess: () => { setComment(''); qc.invalidateQueries({ queryKey: ['task', taskId] }); },
-    onError: (e) => alert(e instanceof ApiError ? e.message : t('tasks.addCommentFailed')),
-  });
-
-  const keyLabel = projectKey && task?.number != null ? `${projectKey}-${task.number}` : task?.number != null ? `#${task.number}` : '';
+  const perStatus = statuses.map((s) => ({ s, n: tasks.filter((x) => x.statusId === s.id).length }));
 
   return (
-    <>
-      <div className="fixed inset-0 z-30 bg-black/20" onClick={onClose} />
-      <aside className="fixed right-0 top-0 z-40 flex h-screen w-full max-w-md flex-col border-l border-border bg-card shadow-xl">
-        <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-          <span className="font-mono text-xs text-muted-foreground">{keyLabel}</span>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X size={16} /></button>
+    <div className="grid gap-6 p-6 lg:grid-cols-[1fr_320px]">
+      {/* Left: description */}
+      <div className="min-w-0 order-2 lg:order-1">
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('projects.about')}</h3>
+        <div className="rounded-lg border border-border bg-card p-3">
+          {project ? (
+            <RichEditor key={project.id} value={doc} onChange={onDescChange} editable={canWrite} placeholder={t('projects.aboutPlaceholder')} />
+          ) : (
+            <Skeleton className="h-24" />
+          )}
         </div>
+      </div>
 
-        {taskQ.isLoading ? (
-          <div className="space-y-3 p-4"><Skeleton className="h-6 w-3/4" /><Skeleton className="h-20" /></div>
-        ) : taskQ.isError || !task ? (
-          <div className="p-4 text-sm text-destructive">{t('tasks.loadFailed')}</div>
-        ) : (
-          <div className="flex-1 space-y-5 overflow-y-auto p-4">
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              onBlur={() => { if (title.trim() && title !== task.title) patch.mutate({ title }); }}
-              className="w-full bg-transparent text-base font-semibold outline-none"
-            />
-
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-medium text-muted-foreground">{t('common.status')}</label>
-              <Select
-                value={task.statusId}
-                onChange={(e) => patch.mutate({ statusId: e.target.value })}
-                disabled={patch.isPending}
-              >
-                {statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </Select>
+      {/* Right: stats */}
+      <div className="order-1 space-y-4 lg:order-2">
+        <Card className="p-4">
+          <div className="flex items-center gap-4">
+            <div className="relative grid place-items-center">
+              <ProgressRing value={pct} size={72} stroke={6} color={pct === 100 ? '#22c55e' : accent} />
+              <span className="absolute text-lg font-semibold tabular-nums">{pct}%</span>
             </div>
-
-            {task.labels && task.labels.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {task.labels.map((l) => <Badge key={l.id} color={l.color}>{l.name}</Badge>)}
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-muted-foreground">{t('projects.completion')}</p>
+              {isLoading ? <Skeleton className="mt-1 h-6 w-24" /> : (
+                <p className="text-sm"><span className="text-lg font-semibold tabular-nums">{done}</span>
+                  <span className="text-muted-foreground"> / {total} {t('projects.done').toLowerCase()}</span></p>
+              )}
+              <div className="mt-2 flex gap-3 text-xs text-muted-foreground">
+                <span><span className="font-medium text-foreground tabular-nums">{inProgress}</span> {t('projects.inProgress').toLowerCase()}</span>
               </div>
-            )}
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">{t('public.description')}</label>
-              <Textarea
-                rows={4}
-                value={desc}
-                onChange={(e) => setDesc(e.target.value)}
-                onBlur={() => { if (desc !== docToText(task.description)) patch.mutate({ description: textToDoc(desc) }); }}
-                placeholder={t('tasks.addDescription')}
-              />
-            </div>
-
-            <div>
-              <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                <MessageSquare size={13} /> {t('tasks.comments')}
-              </h3>
-              <div className="space-y-3">
-                {(task.comments ?? []).map((c) => (
-                  <div key={c.id} className="text-sm">
-                    <div className="mb-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-                      <span className="font-medium text-foreground">{c.authorName ?? t('common.someone')}</span>
-                      <span>{fmtDate(c.createdAt)}</span>
-                    </div>
-                    <p className="whitespace-pre-wrap">{docToText(c.body)}</p>
-                  </div>
-                ))}
-                {(task.comments ?? []).length === 0 && <p className="text-xs text-muted-foreground">{t('tasks.noComments')}</p>}
-              </div>
-              <form
-                onSubmit={(e: FormEvent) => { e.preventDefault(); const v = comment.trim(); if (!v) return; addComment.mutate(v); }}
-                className="mt-3 space-y-2"
-              >
-                <Textarea rows={2} value={comment} onChange={(e) => setComment(e.target.value)} placeholder={t('tasks.writeComment')} />
-                <div className="flex justify-end">
-                  <Button type="submit" size="sm" disabled={addComment.isPending || !comment.trim()}>{t('tasks.comment')}</Button>
-                </div>
-              </form>
             </div>
           </div>
-        )}
-      </aside>
-    </>
+        </Card>
+
+        <Card className="p-4">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('projects.byStatus')}</h3>
+          {total === 0 ? (
+            <p className="text-[13px] text-muted-foreground">{t('projects.overviewEmpty')}</p>
+          ) : (
+            <div className="space-y-2.5">
+              {perStatus.map(({ s, n }) => (
+                <div key={s.id}>
+                  <div className="mb-1 flex items-center gap-2 text-[13px]">
+                    <StatusIcon category={s.category} color={s.color} size={13} />
+                    <span className="flex-1 truncate">{s.name}</span>
+                    <span className="tabular-nums text-muted-foreground">{n}</span>
+                  </div>
+                  <ProgressBar value={total > 0 ? (n / total) * 100 : 0} color={s.color} />
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+    </div>
   );
 }
 
-/* ---------------- Cycles ---------------- */
+/* ───────────────────────── Cycles tab ───────────────────────── */
 
 function cyclePercent(c: Cycle): number | null {
   if (typeof c.progress === 'number') return Math.max(0, Math.min(100, c.progress));
@@ -467,64 +693,51 @@ function CyclesTab({ id }: { id: string }) {
   const [goal, setGoal] = useState('');
   const [error, setError] = useState<string | null>(null);
 
+  const reset = () => { setName(''); setStart(''); setEnd(''); setGoal(''); setError(null); };
   const mut = useMutation({
     mutationFn: () => api.post('/cycles', { projectId: id, name, startDate: start || undefined, endDate: end || undefined, goal: goal || undefined }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cycles', id] }); setAdding(false); setName(''); setStart(''); setEnd(''); setGoal(''); },
-    onError: (e) => setError(e instanceof ApiError ? e.message : t('projects.createCycleFailed')),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cycles', id] }); setAdding(false); reset(); },
+    onError: (e) => { const m = e instanceof ApiError ? e.message : t('projects.createCycleFailed'); setError(m); toast.error(m); },
   });
 
   const cycles = data ?? [];
 
   return (
-    <div className="max-w-2xl p-6">
+    <div className="max-w-3xl p-6">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-sm font-semibold">{t('projects.cycles')}</h2>
-        {canWrite && !adding && <Button size="sm" variant="outline" onClick={() => setAdding(true)}><Plus size={14} /> {t('projects.newCycle')}</Button>}
+        {canWrite && <Button size="sm" variant="outline" onClick={() => setAdding(true)}><Plus size={14} /> {t('projects.newCycle')}</Button>}
       </div>
 
-      {adding && (
-        <Card className="mb-4 p-4">
-          <form onSubmit={(e: FormEvent) => { e.preventDefault(); setError(null); if (!name.trim()) { setError(t('common.nameRequired')); return; } mut.mutate(); }} className="space-y-3">
-            <Input autoFocus placeholder={t('projects.cycleNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} />
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1"><label className="text-xs text-muted-foreground">{t('projects.start')}</label><Input type="date" value={start} onChange={(e) => setStart(e.target.value)} /></div>
-              <div className="space-y-1"><label className="text-xs text-muted-foreground">{t('projects.end')}</label><Input type="date" value={end} onChange={(e) => setEnd(e.target.value)} /></div>
-            </div>
-            <Input placeholder={t('projects.goalPlaceholder')} value={goal} onChange={(e) => setGoal(e.target.value)} />
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            <div className="flex justify-end gap-2">
-              <Button type="button" size="sm" variant="outline" onClick={() => setAdding(false)}>{t('common.cancel')}</Button>
-              <Button type="submit" size="sm" disabled={mut.isPending}>{mut.isPending ? <Spinner /> : t('common.create')}</Button>
-            </div>
-          </form>
-        </Card>
-      )}
-
       {isLoading ? (
-        <div className="space-y-2">{[0, 1].map((i) => <Skeleton key={i} className="h-20" />)}</div>
+        <div className="grid gap-3 sm:grid-cols-2">{[0, 1].map((i) => <Skeleton key={i} className="h-28" />)}</div>
       ) : cycles.length === 0 ? (
-        <EmptyState title={t('projects.noCycles')} hint={t('projects.noCyclesHint')} />
+        <EmptyState icon={<CalendarClock size={20} />} title={t('projects.noCycles')} hint={t('projects.noCyclesHint')}
+          action={canWrite ? <Button size="sm" variant="outline" onClick={() => setAdding(true)}><Plus size={14} /> {t('projects.newCycle')}</Button> : undefined} />
       ) : (
-        <div className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           {cycles.map((c) => {
             const pct = cyclePercent(c);
             return (
               <Card key={c.id} className="p-4">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">{c.name}</span>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate font-medium">{c.name}</span>
                   {c.status && <Badge className="bg-muted capitalize text-muted-foreground">{c.status}</Badge>}
                 </div>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {fmtDate(c.startDate)} – {fmtDate(c.endDate)}{c.goal ? ` · ${c.goal}` : ''}
+                <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <CalendarDays size={12} className="text-faint" />
+                  {fmtDate(c.startDate)} – {fmtDate(c.endDate)}
                 </p>
+                {c.goal && <p className="mt-1.5 line-clamp-2 text-[13px] text-muted-foreground">{c.goal}</p>}
                 {pct != null && (
                   <div className="mt-3">
                     <div className="mb-1 flex justify-between text-xs text-muted-foreground">
-                      <span>{t('projects.progress')}</span><span className="tabular-nums">{pct}%</span>
+                      <span>{t('projects.progress')}</span>
+                      <span className="tabular-nums">
+                        {c.completedCount != null && c.totalCount != null ? `${c.completedCount}/${c.totalCount} · ` : ''}{pct}%
+                      </span>
                     </div>
-                    <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                      <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
-                    </div>
+                    <ProgressBar value={pct} />
                   </div>
                 )}
               </Card>
@@ -532,106 +745,99 @@ function CyclesTab({ id }: { id: string }) {
           })}
         </div>
       )}
+
+      <Dialog open={adding} onClose={() => { setAdding(false); reset(); }} title={t('projects.newCycle')} width={440}>
+        <form onSubmit={(e: FormEvent) => { e.preventDefault(); setError(null); if (!name.trim()) { setError(t('common.nameRequired')); return; } mut.mutate(); }} className="space-y-3 px-4 pb-4 pt-1">
+          <Input autoFocus placeholder={t('projects.cycleNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1"><label className="text-xs text-muted-foreground">{t('projects.start')}</label><Input type="date" value={start} onChange={(e) => setStart(e.target.value)} /></div>
+            <div className="space-y-1"><label className="text-xs text-muted-foreground">{t('projects.end')}</label><Input type="date" value={end} onChange={(e) => setEnd(e.target.value)} /></div>
+          </div>
+          <Input placeholder={t('projects.goalPlaceholder')} value={goal} onChange={(e) => setGoal(e.target.value)} />
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" size="sm" variant="ghost" onClick={() => { setAdding(false); reset(); }}>{t('common.cancel')}</Button>
+            <Button type="submit" size="sm" disabled={mut.isPending}>{mut.isPending ? <Spinner /> : t('common.create')}</Button>
+          </div>
+        </form>
+      </Dialog>
     </div>
   );
 }
 
-/* ---------------- Overview ---------------- */
+/* ───────────────────────── Settings tab ───────────────────────── */
 
-function OverviewTab({ id, statuses, project }: { id: string; statuses: TaskStatus[]; project?: Project }) {
-  const t = useT();
-  const { data } = useQuery<Task[]>({ queryKey: ['tasks', id], queryFn: () => api.get<{ data: Task[] }>(`/tasks${qs({ projectId: id })}`).then((r) => r.data) });
-  const tasks = data ?? [];
-  const catOf = (sid: string) => statuses.find((s) => s.id === sid)?.category;
-  const done = tasks.filter((t) => catOf(t.statusId) === 'done').length;
-  const inProgress = tasks.filter((t) => catOf(t.statusId) === 'in_progress').length;
-  const open = tasks.filter((t) => { const c = catOf(t.statusId); return c !== 'done' && c !== 'canceled'; }).length;
-
-  const tiles: { label: string; value: ReactNode }[] = [
-    { label: t('projects.totalTasks'), value: tasks.length },
-    { label: t('projects.open'), value: open },
-    { label: t('projects.inProgress'), value: inProgress },
-    { label: t('projects.done'), value: done },
-  ];
-
+function SettingRow({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
-    <div className="space-y-6 p-6">
-      <div className="grid gap-4 sm:grid-cols-4">
-        {tiles.map((tile) => (
-          <Card key={tile.label} className="p-4">
-            <p className="text-xs text-muted-foreground">{tile.label}</p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums">{tile.value}</p>
-          </Card>
-        ))}
+    <div className="flex items-start justify-between gap-4 py-3">
+      <div className="min-w-0">
+        <p className="text-[13px] font-medium">{label}</p>
+        {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
       </div>
-      {project?.description != null && docToText(project.description) && (
-        <Card className="p-4">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('projects.about')}</h3>
-          <p className="whitespace-pre-wrap text-sm">{docToText(project.description)}</p>
-        </Card>
-      )}
+      <div className="w-64 shrink-0">{children}</div>
     </div>
   );
 }
 
-/* ---------------- Settings ---------------- */
-
-function SettingsTab({ project }: { project?: Project }) {
+function SettingsTab({ project, isAdmin, onPatch, pending }: {
+  project?: Project; isAdmin: boolean; onPatch: (body: Record<string, unknown>) => void; pending: boolean;
+}) {
   const t = useT();
-  const qc = useQueryClient();
-  const can = useCan();
-  const canWrite = can('projects.write');
   const [name, setName] = useState('');
-  const [status, setStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (project) { setName(project.name ?? ''); setStatus(project.status ?? 'active'); }
+    if (project) setName(project.name ?? '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project?.id]);
 
-  const mut = useMutation({
-    mutationFn: () => api.patch(`/projects/${project?.id}`, { name, status, version: project?.version }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['project', project?.id] }),
-    onError: (e) => setError(e instanceof ApiError ? e.message : t('common.saveFailed')),
-  });
-
   if (!project) return <div className="p-6"><Skeleton className="h-40" /></div>;
 
-  if (!canWrite) {
-    return (
-      <div className="max-w-lg space-y-3 p-6 text-sm">
-        <div><span className="text-muted-foreground">{t('common.name')}:</span> {project.name}</div>
-        <div><span className="text-muted-foreground">{t('projects.key')}:</span> <span className="font-mono">{project.key}</span></div>
-        <div><span className="text-muted-foreground">{t('common.status')}:</span> {project.status}</div>
-        <p className="text-xs text-muted-foreground">{t('projects.adminRightsHint')}</p>
-      </div>
-    );
-  }
+  const saveName = () => {
+    setError(null);
+    if (!name.trim()) { setError(t('common.nameRequired')); return; }
+    if (name.trim() !== project.name) onPatch({ name: name.trim() });
+  };
 
   return (
-    <div className="max-w-lg p-6">
-      <form onSubmit={(e: FormEvent) => { e.preventDefault(); setError(null); if (!name.trim()) { setError(t('common.nameRequired')); return; } mut.mutate(); }} className="space-y-4">
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">{t('common.name')}</label>
-          <Input value={name} onChange={(e) => setName(e.target.value)} />
+    <div className="max-w-2xl space-y-8 p-6">
+      {/* General */}
+      <section>
+        <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('projects.general')}</h2>
+        <div className="divide-y divide-border rounded-lg border border-border bg-card px-4">
+          <SettingRow label={t('common.name')}>
+            <div className="flex gap-2">
+              <Input value={name} disabled={!isAdmin} onChange={(e) => setName(e.target.value)} onBlur={saveName}
+                onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
+            </div>
+          </SettingRow>
+          <SettingRow label={t('projects.key')} hint={t('projects.keyImmutable')}>
+            <Input value={project.key} disabled className="font-mono" />
+          </SettingRow>
+          <SettingRow label={t('common.status')}>
+            <div className="flex flex-wrap gap-1.5">
+              {PROJECT_STATUS.map((s) => (
+                <button key={s} disabled={!isAdmin} onClick={() => { if (s !== project.status) onPatch({ status: s }); }}
+                  className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors',
+                    project.status === s ? 'border-primary/40 bg-primary/10 text-foreground' : 'border-border bg-card text-muted-foreground hover:bg-muted',
+                    !isAdmin && 'pointer-events-none opacity-60')}>
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: STATUS_META[s]!.color }} />
+                  {t(STATUS_META[s]!.key)}
+                </button>
+              ))}
+            </div>
+          </SettingRow>
         </div>
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">{t('projects.key')}</label>
-          <Input value={project.key} disabled className="font-mono" />
-          <p className="text-xs text-muted-foreground">{t('projects.keyImmutable')}</p>
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">{t('common.status')}</label>
-          <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-full">
-            {PROJECT_STATUS.map((s) => <option key={s} value={s} className="capitalize">{s}</option>)}
-          </Select>
-        </div>
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        <div className="flex justify-end">
-          <Button type="submit" size="sm" disabled={mut.isPending}>{mut.isPending ? <Spinner /> : t('common.save')}</Button>
-        </div>
-      </form>
+        {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+        {!isAdmin && <p className="mt-2 text-xs text-muted-foreground">{t('projects.adminRightsHint')}</p>}
+        {pending && <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground"><Spinner className="h-3 w-3" /> {t('common.loading')}</p>}
+      </section>
+
+      {/* Access */}
+      <section>
+        <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('projects.access')}</h2>
+        <ProjectAccessPanel projectId={project.id} canManage={isAdmin} />
+      </section>
     </div>
   );
 }

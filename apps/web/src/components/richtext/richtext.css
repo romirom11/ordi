@@ -1,9 +1,13 @@
 /* Rich text styles for the Tiptap editor + read-only renderer (PRD §9.3, §8.3).
-   Scoped under .ordi-prose; uses the app's hsl(var(--...)) tokens so dark mode works. */
+   Scoped under .ordi-prose; uses the app's hsl(var(--...)) tokens so dark mode works.
+   Menu chrome (slash / bubble / mention) is global (portal-mounted to <body>). */
+
+/* ───────────────────────── Prose ───────────────────────── */
 
 .ordi-prose {
-  font-size: 0.875rem;
+  font-size: 0.9375rem;
   line-height: 1.6;
+  color: hsl(var(--foreground));
   word-break: break-word;
 }
 .ordi-prose:focus {
@@ -11,7 +15,7 @@
 }
 
 .ordi-prose p {
-  margin: 0.375rem 0;
+  margin: 0.35rem 0;
 }
 .ordi-prose > :first-child {
   margin-top: 0;
@@ -21,54 +25,65 @@
 }
 
 .ordi-prose h1 {
-  margin: 1rem 0 0.375rem;
-  font-size: 1.5rem;
+  margin: 1.2em 0 0.4em;
+  font-size: 1.5em;
   font-weight: 600;
-  line-height: 1.3;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
 }
 .ordi-prose h2 {
-  margin: 0.875rem 0 0.375rem;
-  font-size: 1.25rem;
+  margin: 1em 0 0.35em;
+  font-size: 1.25em;
   font-weight: 600;
   line-height: 1.3;
+  letter-spacing: -0.005em;
 }
 .ordi-prose h3 {
-  margin: 0.75rem 0 0.25rem;
-  font-size: 1.0625rem;
+  margin: 0.9em 0 0.3em;
+  font-size: 1.1em;
   font-weight: 600;
-  line-height: 1.3;
+  line-height: 1.35;
 }
 
-.ordi-prose ul {
-  margin: 0.375rem 0;
+.ordi-prose ul,
+.ordi-prose ol {
+  margin: 0.4rem 0;
   padding-left: 1.5rem;
+}
+.ordi-prose ul {
   list-style: disc;
 }
 .ordi-prose ol {
-  margin: 0.375rem 0;
-  padding-left: 1.5rem;
   list-style: decimal;
 }
+.ordi-prose ul ul {
+  list-style: circle;
+}
 .ordi-prose li {
-  margin: 0.125rem 0;
+  margin: 0.15rem 0;
+  padding-left: 0.15rem;
+}
+.ordi-prose li::marker {
+  color: hsl(var(--faint));
 }
 .ordi-prose li > p {
   margin: 0;
 }
 
-/* Task lists */
+/* Task lists — checkboxes styled like the app Checkbox */
 .ordi-prose ul[data-type='taskList'] {
-  padding-left: 0.125rem;
+  padding-left: 0.1rem;
   list-style: none;
 }
 .ordi-prose ul[data-type='taskList'] li {
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
+  padding-left: 0;
 }
 .ordi-prose ul[data-type='taskList'] li > label {
   flex: 0 0 auto;
-  margin-top: 0.3rem;
+  margin-top: 0.28rem;
   user-select: none;
 }
 .ordi-prose ul[data-type='taskList'] li > div {
@@ -76,108 +91,271 @@
   min-width: 0;
 }
 .ordi-prose ul[data-type='taskList'] input[type='checkbox'] {
+  width: 0.95rem;
+  height: 0.95rem;
   accent-color: hsl(var(--primary));
   cursor: pointer;
 }
 .ordi-prose ul[data-type='taskList'] li[data-checked='true'] > div {
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--faint));
   text-decoration: line-through;
 }
 
+/* Inline code */
 .ordi-prose code {
   border-radius: 0.25rem;
   background: hsl(var(--muted));
-  padding: 0.125rem 0.3rem;
+  padding: 0.1em 0.35em;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.8em;
+  font-size: 0.85em;
+  color: hsl(var(--foreground));
 }
+
+/* Code block */
 .ordi-prose pre {
-  margin: 0.5rem 0;
+  margin: 0.6rem 0;
   overflow-x: auto;
-  border-radius: 0.375rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
   background: hsl(var(--muted));
-  padding: 0.75rem;
-  font-size: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82em;
+  line-height: 1.55;
 }
 .ordi-prose pre code {
   border-radius: 0;
   background: transparent;
   padding: 0;
   font-size: inherit;
+  color: inherit;
 }
 
 .ordi-prose blockquote {
-  margin: 0.5rem 0;
-  border-left: 2px solid hsl(var(--border));
-  padding-left: 0.75rem;
+  margin: 0.6rem 0;
+  border-left: 2px solid hsl(var(--border-strong));
+  padding-left: 0.85rem;
   color: hsl(var(--muted-foreground));
+}
+.ordi-prose blockquote p {
+  margin: 0.2rem 0;
 }
 
 .ordi-prose hr {
-  margin: 1rem 0;
+  margin: 1.1rem 0;
   border: none;
   border-top: 1px solid hsl(var(--border));
+}
+.ordi-prose hr.ProseMirror-selectednode {
+  border-top-color: hsl(var(--primary));
 }
 
 .ordi-prose a {
   color: hsl(var(--primary));
   text-decoration: underline;
+  text-decoration-color: hsl(var(--primary) / 0.4);
   text-underline-offset: 2px;
+  cursor: pointer;
+  transition: text-decoration-color 150ms;
+}
+.ordi-prose a:hover {
+  text-decoration-color: hsl(var(--primary));
 }
 
-/* Mention chips (both editor nodes and read-only rendering) */
+.ordi-prose strong {
+  font-weight: 650;
+}
+
+/* Mention chips (editor nodes + read-only rendering) */
 .ordi-prose .ordi-mention,
 .ordi-prose span[data-type='mention'] {
   border-radius: 0.25rem;
-  background: hsl(var(--primary) / 0.12);
-  padding: 0.0625rem 0.25rem;
+  background: hsl(var(--primary) / 0.1);
+  padding: 0.05em 0.3em;
   color: hsl(var(--primary));
   font-weight: 500;
+  font-size: 0.9em;
   white-space: nowrap;
 }
 
-/* Placeholder (tiptap placeholder extension) */
-.ordi-prose p.is-editor-empty:first-child::before {
+/* Per-node placeholder (tiptap placeholder extension) */
+.ordi-prose .is-empty::before {
   content: attr(data-placeholder);
   float: left;
   height: 0;
   pointer-events: none;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--faint));
 }
 
-/* ProseMirror selection niceties */
+/* ProseMirror selection */
 .ordi-prose .ProseMirror-selectednode {
   outline: 2px solid hsl(var(--ring) / 0.4);
+  border-radius: 0.25rem;
+}
+.ordi-prose ::selection {
+  background: hsl(var(--primary) / 0.24);
 }
 
-/* Mention suggestion dropdown (plain DOM, appended to body) */
+/* ───────────────────────── Slash command menu ───────────────────────── */
+
+.ordi-rt-menu {
+  width: 17rem;
+  max-height: 20rem;
+  overflow-y: auto;
+  padding: 0.3rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.6rem;
+  background: hsl(var(--elevated));
+  color: hsl(var(--foreground));
+  box-shadow: var(--shadow-pop);
+  animation: dropdown-in var(--duration-fast, 250ms) var(--ease-smooth-out, ease) both;
+  transform-origin: top left;
+}
+.ordi-rt-menu-empty {
+  padding: 0.5rem 0.6rem;
+  font-size: 0.8125rem;
+  color: hsl(var(--faint));
+}
+.ordi-rt-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.35rem 0.4rem;
+  border-radius: 0.4rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms;
+}
+.ordi-rt-menu-item[data-active='true'] {
+  background: hsl(var(--muted));
+}
+.ordi-rt-menu-icon {
+  display: grid;
+  place-items: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  flex: 0 0 auto;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.4rem;
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+}
+.ordi-rt-menu-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+.ordi-rt-menu-title {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: hsl(var(--foreground));
+}
+.ordi-rt-menu-hint {
+  font-size: 0.6875rem;
+  color: hsl(var(--faint));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ───────────────────────── Bubble toolbar ───────────────────────── */
+
+.ordi-rt-bubble {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  height: 2rem;
+  padding: 0 0.2rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.6rem;
+  background: hsl(var(--elevated));
+  box-shadow: var(--shadow-pop);
+  animation: pop-in var(--duration-fast, 250ms) var(--ease-smooth-out, ease) both;
+}
+.ordi-rt-blockmenu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  z-index: 70;
+  min-width: 9rem;
+  padding: 0.25rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+  background: hsl(var(--elevated));
+  box-shadow: var(--shadow-pop);
+  animation: dropdown-in var(--duration-fast, 250ms) var(--ease-smooth-out, ease) both;
+  transform-origin: top left;
+}
+.ordi-rt-blockmenu-item {
+  display: block;
+  width: 100%;
+  padding: 0.3rem 0.5rem;
+  border-radius: 0.35rem;
+  text-align: left;
+  font-size: 0.8125rem;
+  color: hsl(var(--foreground));
+  cursor: pointer;
+  transition: background-color 120ms;
+}
+.ordi-rt-blockmenu-item:hover {
+  background: hsl(var(--muted));
+}
+
+/* ───────────────────────── Mention dropdown ───────────────────────── */
+
 .ordi-mention-dropdown {
   position: fixed;
   z-index: 60;
-  min-width: 10rem;
-  max-width: 16rem;
-  max-height: 14rem;
+  width: 15rem;
+  max-height: 16rem;
   overflow-y: auto;
   border: 1px solid hsl(var(--border));
-  border-radius: 0.375rem;
-  background: hsl(var(--card));
-  color: hsl(var(--card-foreground));
-  box-shadow: 0 4px 12px hsl(var(--foreground) / 0.1);
-  padding: 0.25rem;
-  font-size: 0.875rem;
+  border-radius: 0.6rem;
+  background: hsl(var(--elevated));
+  color: hsl(var(--foreground));
+  box-shadow: var(--shadow-pop);
+  padding: 0.3rem;
+  font-size: 0.8125rem;
+  animation: dropdown-in var(--duration-fast, 250ms) var(--ease-smooth-out, ease) both;
+  transform-origin: top left;
 }
 .ordi-mention-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
   width: 100%;
   overflow: hidden;
-  border-radius: 0.25rem;
-  padding: 0.25rem 0.5rem;
+  border-radius: 0.4rem;
+  padding: 0.3rem 0.4rem;
   text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   cursor: pointer;
+  transition: background-color 120ms;
 }
 .ordi-mention-item.is-selected,
 .ordi-mention-item:hover {
   background: hsl(var(--muted));
+}
+.ordi-mention-avatar {
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: 0 0 auto;
+  border-radius: 9999px;
+  color: white;
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1;
+  user-select: none;
+}
+.ordi-mention-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ordi-mention-empty {
+  padding: 0.4rem 0.5rem;
+  color: hsl(var(--faint));
 }

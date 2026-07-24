@@ -1,7 +1,8 @@
 import { useState, type KeyboardEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../../lib/api';
-import { Select, cn } from '../ui';
+import { Select, PriorityIcon, cn } from '../ui';
+import { toast } from '../overlays';
 
 interface SheetStatus { id: string; name: string; category?: string }
 interface SheetTask {
@@ -18,9 +19,6 @@ interface SheetTask {
 }
 
 const PRIORITIES = ['none', 'low', 'medium', 'high', 'urgent'] as const;
-const PRIORITY_COLOR: Record<string, string> = {
-  urgent: '#ef4444', high: '#f97316', medium: '#eab308', low: '#3b82f6', none: '#9ca3af',
-};
 
 const cellInput = 'h-7 w-full rounded border border-transparent bg-transparent px-1.5 text-sm outline-none focus:border-input focus:ring-1 focus:ring-ring/40';
 
@@ -37,13 +35,13 @@ export function SpreadsheetView({ tasks, statuses, projectId, onOpenTask }: {
     mutationFn: (vars: { id: string; body: Record<string, unknown>; version?: number }) =>
       api.patch(`/tasks/${vars.id}`, vars.version != null ? { ...vars.body, version: vars.version } : vars.body),
     onSuccess: invalidate,
-    onError: (e) => { alert(e instanceof ApiError ? e.message : 'Could not save changes.'); invalidate(); },
+    onError: (e) => { toast.error(e instanceof ApiError ? e.message : 'Could not save changes.'); invalidate(); },
   });
 
   const bulk = useMutation({
     mutationFn: (body: { taskIds: string[]; statusId?: string; priority?: string }) => api.post('/tasks/bulk', body),
     onSuccess: () => { invalidate(); setSelected(new Set()); },
-    onError: (e) => alert(e instanceof ApiError ? e.message : 'Bulk update failed.'),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Bulk update failed.'),
   });
 
   const patchField = (t: SheetTask, body: Record<string, unknown>) =>
@@ -131,8 +129,7 @@ export function SpreadsheetView({ tasks, statuses, projectId, onOpenTask }: {
                 <td className="px-2 py-1">
                   <button onClick={() => onOpenTask(t.id)} title="Open task"
                     className="inline-flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground hover:text-foreground hover:underline">
-                    <span className="inline-block h-1.5 w-1.5 rounded-full"
-                      style={{ backgroundColor: PRIORITY_COLOR[t.priority ?? 'none'] ?? PRIORITY_COLOR.none }} />
+                    <PriorityIcon priority={t.priority} size={12} />
                     {t.ref ?? (t.number != null ? `#${t.number}` : '—')}
                   </button>
                 </td>
