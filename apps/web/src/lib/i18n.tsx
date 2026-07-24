@@ -541,6 +541,11 @@ const en: Dict = {
   'tasks.noComments': 'No comments yet.',
   'tasks.noTasks': 'No tasks',
   'tasks.writeComment': 'Write a comment…',
+  // desktop
+  'desktop.connectTitle': 'Connect to your ordi instance to get started.',
+  'desktop.instanceUrl': 'Instance URL',
+  'desktop.connect': 'Connect',
+  'desktop.connectFailed': 'Could not reach this instance. Check the URL and try again.',
 };
 
 const uk: Dict = {
@@ -1067,6 +1072,11 @@ const uk: Dict = {
   'tasks.noComments': 'Коментарів поки немає.',
   'tasks.noTasks': 'Немає задач',
   'tasks.writeComment': 'Напишіть коментар…',
+  // desktop
+  'desktop.connectTitle': 'Підключіться до вашого інстансу ordi, щоб почати.',
+  'desktop.instanceUrl': 'URL інстансу',
+  'desktop.connect': 'Підключитися',
+  'desktop.connectFailed': 'Не вдалося зʼєднатися з інстансом. Перевірте URL і спробуйте ще раз.',
 };
 
 const DICTS: Record<Locale, Dict> = { en, uk };

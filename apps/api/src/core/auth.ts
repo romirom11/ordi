@@ -25,11 +25,20 @@ async function resolveActor(c: Parameters<MiddlewareHandler<AppEnv>>[0]): Promis
   if (authHeader?.startsWith('Bearer ')) {
     const raw = authHeader.slice(7).trim();
     const [token] = await db.select().from(schema.apiTokens).where(eq(schema.apiTokens.hash, sha256(raw)));
-    if (!token || token.revokedAt) return null;
-    userId = token.userId;
-    tokenScopes = (token.scopes as string[]) ?? [];
-    readOnly = token.readOnly;
-    db.update(schema.apiTokens).set({ lastUsedAt: new Date() }).where(eq(schema.apiTokens.id, token.id)).catch(() => {});
+    if (token) {
+      if (token.revokedAt) return null;
+      userId = token.userId;
+      tokenScopes = (token.scopes as string[]) ?? [];
+      readOnly = token.readOnly;
+      db.update(schema.apiTokens).set({ lastUsedAt: new Date() }).where(eq(schema.apiTokens.id, token.id)).catch(() => {});
+    } else {
+      // Bearer session token (desktop/Tauri client, PRD §18): the tauri://
+      // origin cannot share same-site cookies, so the login-issued session
+      // token is presented as a bearer credential with full role scope.
+      const [session] = await db.select().from(schema.sessions).where(eq(schema.sessions.token, raw));
+      if (!session || session.expiresAt < new Date()) return null;
+      userId = session.userId;
+    }
   } else if (cookieToken) {
     const [session] = await db.select().from(schema.sessions).where(eq(schema.sessions.token, cookieToken));
     if (!session || session.expiresAt < new Date()) return null;

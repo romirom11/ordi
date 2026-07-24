@@ -1,5 +1,33 @@
-/** Thin fetch client for the ordi API. Cookie-based auth (credentials: include). */
-const BASE = '/api/v1';
+/**
+ * Thin fetch client for the ordi API. Web uses same-origin cookies; the desktop
+ * (Tauri) build points at a configured instance URL (PRD §18 first launch) and
+ * authenticates with a bearer session token, since the tauri:// origin cannot
+ * share same-site cookies with the API domain.
+ */
+function storedInstanceUrl(): string {
+  try { return (localStorage.getItem('ordi:apiUrl') ?? '').replace(/\/+$/, ''); } catch { return ''; }
+}
+
+export function setInstanceUrl(url: string): void {
+  try { localStorage.setItem('ordi:apiUrl', url.replace(/\/+$/, '')); } catch { /* private mode */ }
+}
+
+export function getInstanceUrl(): string {
+  return storedInstanceUrl();
+}
+
+export function setSessionToken(token: string | null): void {
+  try {
+    if (token) localStorage.setItem('ordi:sessionToken', token);
+    else localStorage.removeItem('ordi:sessionToken');
+  } catch { /* private mode */ }
+}
+
+function sessionToken(): string | null {
+  try { return localStorage.getItem('ordi:sessionToken'); } catch { return null; }
+}
+
+const BASE = `${storedInstanceUrl()}/api/v1`;
 
 export interface ApiErrorShape {
   error: { code: string; message: string; details?: unknown };
@@ -18,9 +46,12 @@ export class ApiError extends Error {
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = body ? { 'Content-Type': 'application/json' } : {};
+  const token = sessionToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(BASE + path, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
+    headers,
     credentials: 'include',
     body: body ? JSON.stringify(body) : undefined,
   });

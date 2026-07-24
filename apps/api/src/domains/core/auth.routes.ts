@@ -62,14 +62,17 @@ export function authRoutes() {
     setCookie(c, SESSION_COOKIE, token, {
       httpOnly: true, sameSite: 'Lax', secure: env.isProd, path: '/', maxAge: 30 * 24 * 3600,
     });
-    return c.json({ ok: true, userId: user.id });
+    // sessionToken doubles as a bearer credential for the desktop client
+    // (tauri:// origin cannot use same-site cookies); web ignores it.
+    return c.json({ ok: true, userId: user.id, sessionToken: token });
   });
 
   app.post('/logout', async (c) => {
-    const token = c.req.header('cookie')?.match(/ordi_session=([^;]+)/)?.[1];
-    if (token) {
-      const { db } = getDb();
-      await db.delete(schema.sessions).where(eq(schema.sessions.token, token));
+    const cookieTok = c.req.header('cookie')?.match(/ordi_session=([^;]+)/)?.[1];
+    const bearer = c.req.header('Authorization')?.match(/^Bearer (.+)$/)?.[1];
+    const { db } = getDb();
+    for (const token of [cookieTok, bearer]) {
+      if (token) await db.delete(schema.sessions).where(eq(schema.sessions.token, token));
     }
     deleteCookie(c, SESSION_COOKIE, { path: '/' });
     return c.json({ ok: true });
