@@ -7,6 +7,10 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+# tauri-action uploads the bundles as release assets.
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:

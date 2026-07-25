@@ -1,0 +1,47 @@
+name: Release
+
+# Cut a release whenever master's package.json version has no tag yet:
+# create tag v<version> + a published GitHub release (notes from
+# docs/releases/v<version>.md), then dispatch the desktop builds for that
+# tag. The explicit dispatch matters – tags created with GITHUB_TOKEN do
+# not fire the desktop workflow's own `push: tags` trigger.
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  tag-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Check whether the tag already exists
+        id: guard
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/v${{ steps.v.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Create tag and release
+        if: steps.guard.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="${{ steps.v.outputs.version }}"
+          NOTES="docs/releases/v$V.md"
+          if [ -f "$NOTES" ]; then
+            gh release create "v$V" --target "$GITHUB_SHA" --title "ordi v$V" --notes-file "$NOTES"
+          else
+            gh release create "v$V" --target "$GITHUB_SHA" --title "ordi v$V" --generate-notes
+          fi
+      - name: Dispatch desktop builds for the tag
+        if: steps.guard.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run desktop.yml --ref "v${{ steps.v.outputs.version }}"
