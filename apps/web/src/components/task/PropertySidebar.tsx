@@ -12,6 +12,7 @@ import {
 import { DropdownMenu, MenuItem, MenuLabel, MenuSeparator, useMenuClose } from '../overlays';
 import { GitBlock } from './GitBlock';
 import { useT, extendDict } from '../../lib/i18n';
+import { TaskTimer } from './TaskTimer';
 import type { TaskDetail, TaskLabel, TaskPatch, TaskStatus, UserLite } from './types';
 
 extendDict({
@@ -215,7 +216,8 @@ export function PropertySidebar({ task, statuses, users, labels, onPatch, hasRep
 
   return (
     <div className="flex flex-col gap-0.5 py-3">
-      <p className="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('task.properties')}</p>
+      <TaskTimer taskId={task.id} />
+      <p className="px-3 pb-1.5 pt-2 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('task.properties')}</p>
 
       {/* Status */}
       <Row label={t('common.status')}>

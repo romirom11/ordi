@@ -246,7 +246,19 @@ export async function getTimer(actor: Actor) {
   const [timer] = await db.select().from(schema.activeTimers).where(eq(schema.activeTimers.userId, actor.userId));
   if (!timer) return null;
   const elapsedSeconds = Math.max(0, Math.floor((Date.now() - timer.startedAt.getTime()) / 1000));
-  return { ...timer, elapsedSeconds };
+  // The header indicator shows which task is being timed, so hand back its ref
+  // and title rather than making every caller look them up.
+  const [task] = await db
+    .select({ number: schema.tasks.number, title: schema.tasks.title, key: schema.projects.key })
+    .from(schema.tasks)
+    .innerJoin(schema.projects, eq(schema.projects.id, schema.tasks.projectId))
+    .where(eq(schema.tasks.id, timer.taskId));
+  return {
+    ...timer,
+    elapsedSeconds,
+    ref: task ? `${task.key}-${task.number}` : null,
+    title: task?.title ?? null,
+  };
 }
 
 // ── Rates ──

@@ -30,9 +30,14 @@ export async function buildAccessContext(
  * every project they're a member of. One query, cached on the request actor.
  */
 const cacheKey = Symbol('accessibleProjectIds');
-export async function accessibleProjectIds(actor: Actor): Promise<string[]> {
+export async function accessibleProjectIds(
+  actor: Actor,
+  /** Long-lived connections (SSE) must be able to see projects created after
+   *  they started, so they ask for a fresh read rather than the request cache. */
+  opts?: { fresh?: boolean },
+): Promise<string[]> {
   const anyActor = actor as unknown as Record<symbol, string[] | undefined>;
-  if (anyActor[cacheKey]) return anyActor[cacheKey]!;
+  if (!opts?.fresh && anyActor[cacheKey]) return anyActor[cacheKey]!;
   const { db } = getDb();
   const memberIds = [...actor.access.projectMemberships.keys()];
   let rows: { id: string }[];

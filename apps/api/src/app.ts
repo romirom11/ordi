@@ -5,6 +5,7 @@ import type { AppEnv } from './context';
 import { env } from './env';
 import { handleError } from './lib/errors';
 import { authMiddleware } from './core/auth';
+import { moduleGate } from './core/modules';
 import { getDb, sql } from '@ordi/db';
 
 // domain routers
@@ -83,6 +84,7 @@ export function createApp() {
   // Authenticated API
   const api = new Hono<AppEnv>();
   api.use('*', authMiddleware);
+  api.use('*', moduleGate); // a module switched off answers 404, not just hidden nav
   api.route('/auth', authRoutes());
   api.route('/setup', setupRoutes()); // first-run setup (public; locked once an owner exists)
   api.route('/me', meRoutes());

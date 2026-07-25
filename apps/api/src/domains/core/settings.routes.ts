@@ -6,6 +6,7 @@ import { requireAuth, currentActor } from '../../core/auth';
 import { guard } from '../../core/rbac';
 import { emailConfigured, trySendEmail, verifyEmailTransport } from '../../lib/email';
 import { encryptIntegrationSecrets, invalidateRuntimeConfig, runtimeConfig } from '../../lib/runtime-config';
+import { invalidateModuleCache } from '../../core/modules';
 import { integrationsConfigSchema } from '@ordi/shared';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
@@ -72,6 +73,7 @@ export function settingsRoutes() {
     } else {
       await db.insert(schema.workspaceSettings).values({ id: 'workspace', ...(allowed as any) });
     }
+    if (patch.modules !== undefined) invalidateModuleCache();
     return c.json({ ok: true });
   });
 

@@ -466,7 +466,8 @@ function WidgetBody({ type, points }: { type: string; points: { key: string; val
     );
   }
 
-  // 'bar' and 'line' (line renders as bar fallback)
+  if (type === 'line') return <LineChart points={points} />;
+
   const max = Math.max(...points.map((p) => p.value), 1);
   return (
     <div className="space-y-2">
@@ -479,6 +480,51 @@ function WidgetBody({ type, points }: { type: string; points: { key: string; val
           <ProgressBar value={(p.value / max) * 100} color={CHART_COLORS[i % CHART_COLORS.length]} />
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * Hand-rolled line chart – the app draws its own SVG rather than pulling in a
+ * charting library for a handful of points.
+ */
+function LineChart({ points }: { points: { key: string; value: number }[] }) {
+  const t = useT();
+  if (points.length === 0) return null;
+  if (points.length === 1) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <span className="text-4xl font-bold tabular-nums">{points[0]!.value}</span>
+      </div>
+    );
+  }
+
+  const W = 100;
+  const H = 40;
+  const max = Math.max(...points.map((p) => p.value), 1);
+  const stepX = W / (points.length - 1);
+  const xy = points.map((p, i) => [i * stepX, H - (p.value / max) * H] as const);
+  const line = xy.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join(' ');
+  const area = `0,${H} ${line} ${W},${H}`;
+  const color = CHART_COLORS[0]!;
+
+  return (
+    <div className="flex h-full flex-col">
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-24 w-full overflow-visible" role="img"
+        aria-label={t('dashboards.lineChart', 'Line chart')}>
+        <polygon points={area} fill={color} opacity={0.12} />
+        <polyline points={line} fill="none" stroke={color} strokeWidth={1.2}
+          vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+        {xy.map(([x, y], i) => (
+          <circle key={i} cx={x} cy={y} r={1.6} fill={color} vectorEffect="non-scaling-stroke">
+            <title>{`${points[i]!.key}: ${points[i]!.value}`}</title>
+          </circle>
+        ))}
+      </svg>
+      <div className="mt-2 flex justify-between gap-2 text-[10px] text-faint">
+        <span className="truncate">{points[0]!.key}</span>
+        <span className="truncate">{points[points.length - 1]!.key}</span>
+      </div>
     </div>
   );
 }

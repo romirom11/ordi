@@ -59,9 +59,32 @@ export async function updateCompany(actor: Actor, id: string, input: any) {
   return getCompany(id);
 }
 
+/**
+ * Deleting a client that still has invoices or projects would leave those
+ * records pointing at something the app no longer shows anywhere – an invoice
+ * with no client is a bookkeeping problem, not a tidy-up. Refuse, and point at
+ * archiving, which is what "we stopped working with them" actually means.
+ */
 export async function softDeleteCompany(actor: Actor, id: string) {
   const { db } = getDb();
   await getCompany(id);
+
+  const rows = await db.execute(sql`
+    select
+      (select count(*)::int from invoices where company_id = ${id} and deleted_at is null) as invoices,
+      (select count(*)::int from projects where company_id = ${id} and deleted_at is null) as projects,
+      (select count(*)::int from deals where company_id = ${id}) as deals
+  `) as unknown as { invoices: number; projects: number; deals: number }[];
+  const invoices = Number(rows[0]?.invoices ?? 0);
+  const projects = Number(rows[0]?.projects ?? 0);
+  const deals = Number(rows[0]?.deals ?? 0);
+
+  if (invoices > 0 || projects > 0 || deals > 0) {
+    throw err.domain('Cannot delete a client that still has invoices, projects or deals. Archive it instead.', {
+      invoices, projects, deals,
+    });
+  }
+
   await db.update(schema.companies).set({ deletedAt: new Date() }).where(eq(schema.companies.id, id));
   await writeActivity(db, { entityType: 'company', entityId: id, action: 'deleted', actorId: actor.userId, actorType: actor.actorType });
 }
