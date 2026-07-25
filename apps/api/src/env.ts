@@ -41,6 +41,8 @@ export const env = {
       'http://tauri.localhost',
     ]),
   ],
+  /** GitHub repo the in-app download page offers desktop builds from. */
+  desktopReleasesRepo: process.env.DESKTOP_RELEASES_REPO ?? 'romirom11/ordi',
   /** disable workers (e.g. in tests) */
   workersEnabled: process.env.WORKERS_ENABLED !== 'false',
 };

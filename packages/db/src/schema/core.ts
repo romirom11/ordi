@@ -49,6 +49,33 @@ export const sessions = pgTable('sessions', {
   ...timestamps,
 });
 
+/**
+ * Pending "sign in through the browser" handshakes from the desktop app.
+ *
+ * The desktop client keeps a secret verifier and sends only its hash, so a
+ * different local app that hijacks the ordi:// deep link still cannot exchange
+ * the code for a session (PKCE).
+ */
+export const desktopAuthRequests = pgTable('desktop_auth_requests', {
+  id: pk(),
+  /** Ties the browser page back to the desktop window that opened it. */
+  state: text('state').notNull().unique(),
+  /** sha256 of the verifier the desktop app kept to itself. */
+  codeChallenge: text('code_challenge').notNull(),
+  /** What the desktop calls itself, shown on the approval screen. */
+  deviceLabel: text('device_label').notNull().default(''),
+  /** Set once a signed-in user approves; the session is created on exchange. */
+  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  /** One-time code handed to the browser, redeemed by the desktop app. */
+  code: text('code').unique(),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  consumedAt: timestamp('consumed_at', { withTimezone: true }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  ...timestamps,
+}, (t) => ({
+  expiresIdx: index('desktop_auth_expires_idx').on(t.expiresAt),
+}));
+
 export const invites = pgTable('invites', {
   id: pk(),
   email: text('email').notNull(),

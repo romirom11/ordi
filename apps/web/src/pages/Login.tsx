@@ -1,8 +1,8 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { KeyRound } from 'lucide-react';
+import { KeyRound, Globe } from 'lucide-react';
 import { api, ApiError, setSessionToken } from '../lib/api';
-import { isTauri } from '../lib/desktop';
+import { isTauri, beginBrowserLogin, listenForAuthDeepLink } from '../lib/desktop';
 import { Button, Input, Card, Spinner } from '../components/ui';
 import { BrandMark } from '../components/BrandMark';
 import { useT } from '../lib/i18n';
@@ -27,11 +27,19 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [errorKey, setErrorKey] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [browserLogin, setBrowserLogin] = useState(false);
 
   function fail(message: string) {
     setError(message);
     setErrorKey((k) => k + 1);
   }
+
+  // The app shell is not mounted on this screen, so the ordi://auth deep link
+  // that finishes a browser sign-in has to be picked up here.
+  useEffect(() => listenForAuthDeepLink((key) => {
+    setBrowserLogin(false);
+    fail(t(key));
+  }), [t]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -44,7 +52,10 @@ export function LoginPage() {
       // Desktop (tauri:// origin) cannot use same-site cookies – keep the
       // session token and send it as a bearer credential instead.
       if (isTauri && res.sessionToken) setSessionToken(res.sessionToken);
-      window.location.href = '/';
+      // Only ever bounce back to a path on this origin – never to a URL a link
+      // could have put in the query string.
+      const next = new URLSearchParams(window.location.search).get('next');
+      window.location.href = next?.startsWith('/') && !next.startsWith('//') ? next : '/';
     } catch (err) {
       if (err instanceof ApiError) {
         const details = err.details as { totpRequired?: boolean } | undefined;
@@ -131,6 +142,35 @@ export function LoginPage() {
             {loading ? <Spinner /> : t('auth.signIn')}
           </Button>
         </form>
+
+        {/* Desktop only: let the browser session do the work instead of
+            retyping credentials into a second app. */}
+        {isTauri && (
+          <>
+            <div className="my-4 flex items-center gap-3 text-[11px] uppercase tracking-wider text-faint">
+              <span className="h-px flex-1 bg-border" />
+              {t('auth.or')}
+              <span className="h-px flex-1 bg-border" />
+            </div>
+            <Button
+              variant="outline"
+              className="w-full"
+              disabled={browserLogin}
+              onClick={() => {
+                setBrowserLogin(true);
+                beginBrowserLogin().catch(() => {
+                  setBrowserLogin(false);
+                  fail(t('desktop.browserLoginFailed'));
+                });
+              }}
+            >
+              {browserLogin ? <Spinner /> : <><Globe size={14} /> {t('desktop.signInWithBrowser')}</>}
+            </Button>
+            {browserLogin && (
+              <p className="mt-2.5 text-center text-xs text-muted-foreground">{t('desktop.browserLoginWaiting')}</p>
+            )}
+          </>
+        )}
       </Card>
     </div>
   );

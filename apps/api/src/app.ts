@@ -25,6 +25,7 @@ import { openApiDoc, docsHtml } from './domains/core/openapi';
 import { dashboardRoutes } from './domains/core/dashboard.routes';
 import { streamRoutes } from './domains/core/stream.routes';
 import { settingsRoutes } from './domains/core/settings.routes';
+import { desktopRoutes } from './domains/core/desktop.routes';
 import { crmRoutes } from './domains/crm/routes';
 import { projectsRoutes } from './domains/projects/routes';
 import { tasksRoutes } from './domains/projects/tasks.routes';
@@ -98,6 +99,7 @@ export function createApp() {
   api.route('/', dashboardRoutes()); // /dashboard, /dashboards
   api.route('/stream', streamRoutes());
   api.route('/settings', settingsRoutes());
+  api.route('/desktop', desktopRoutes()); // where to download the desktop app
   api.route('/', crmRoutes()); // /companies, /contacts, /deals, /deal-stages, /notes
   api.route('/', projectsRoutes()); // /projects, /project-types, /task-statuses...
   api.route('/', tasksRoutes()); // /tasks, /cycles, /labels, /me/tasks, /drafts

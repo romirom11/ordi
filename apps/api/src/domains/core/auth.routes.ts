@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { setCookie, deleteCookie } from 'hono/cookie';
-import { getDb, schema, eq, and } from '@ordi/db';
+import { getDb, schema, eq, and, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import { z } from 'zod';
 import * as OTPAuth from 'otpauth';
@@ -205,5 +205,97 @@ export function authRoutes() {
   });
 
   app.route('/totp', totp);
+
+  // ── Desktop sign-in through the browser ────────────────────────────────────
+  // The desktop app opens the browser, the signed-in user approves, and the
+  // browser hands back a one-time code over the ordi:// deep link. The desktop
+  // proves it started the flow with a verifier it never sent (PKCE), so another
+  // local app that grabs the deep link cannot redeem the code.
+  const desktop = new Hono<AppEnv>();
+
+  /** What the browser shows on the approval screen. */
+  desktop.get('/request', async (c) => {
+    const state = c.req.query('state') ?? '';
+    const { db } = getDb();
+    const [row] = await db.select().from(schema.desktopAuthRequests)
+      .where(eq(schema.desktopAuthRequests.state, state));
+    if (!row || row.expiresAt < new Date()) throw err.notFound('This sign-in request expired');
+    return c.json({ deviceLabel: row.deviceLabel, approved: !!row.approvedAt });
+  });
+
+  /** Called by the desktop app before it opens the browser. */
+  desktop.post('/start', async (c) => {
+    const body = z.object({
+      state: z.string().min(16).max(128),
+      codeChallenge: z.string().length(64),
+      deviceLabel: z.string().max(120).default(''),
+    }).parse(await c.req.json());
+
+    const { db } = getDb();
+    // Opportunistic cleanup – these rows are short-lived and never read again.
+    await db.delete(schema.desktopAuthRequests)
+      .where(sql`${schema.desktopAuthRequests.expiresAt} < now()`);
+    await db.insert(schema.desktopAuthRequests).values({
+      id: ulid(),
+      state: body.state,
+      codeChallenge: body.codeChallenge,
+      deviceLabel: body.deviceLabel,
+      expiresAt: new Date(Date.now() + 10 * 60_000),
+    });
+    return c.json({ ok: true });
+  });
+
+  /** The signed-in browser user approves the waiting desktop app. */
+  desktop.post('/approve', requireAuth, async (c) => {
+    const body = z.object({ state: z.string() }).parse(await c.req.json());
+    const actor = currentActor(c);
+    const { db } = getDb();
+    const [row] = await db.select().from(schema.desktopAuthRequests)
+      .where(eq(schema.desktopAuthRequests.state, body.state));
+    if (!row || row.expiresAt < new Date()) throw err.notFound('This sign-in request expired');
+    if (row.consumedAt) throw err.domain('This sign-in request was already used');
+
+    const code = generateToken(32);
+    await db.update(schema.desktopAuthRequests)
+      .set({ userId: actor.userId, code, approvedAt: new Date() })
+      .where(eq(schema.desktopAuthRequests.id, row.id));
+    await writeActivity(db, {
+      entityType: 'user', entityId: actor.userId!, action: 'desktop.authorize',
+      actorId: actor.userId, actorType: actor.actorType, diff: { device: row.deviceLabel },
+    });
+    return c.json({ code });
+  });
+
+  /** The desktop app redeems the code with the verifier it kept. */
+  desktop.post('/exchange', async (c) => {
+    const ip = c.req.header('x-forwarded-for') ?? 'local';
+    checkRate(`desktop-exchange:${ip}`, 20, 60_000);
+    const body = z.object({
+      code: z.string().min(16),
+      verifier: z.string().min(32).max(200),
+    }).parse(await c.req.json());
+
+    const { db } = getDb();
+    const [row] = await db.select().from(schema.desktopAuthRequests)
+      .where(eq(schema.desktopAuthRequests.code, body.code));
+    if (!row || !row.userId || !row.approvedAt) throw err.unauthenticated('Invalid sign-in code');
+    if (row.consumedAt || row.expiresAt < new Date()) throw err.unauthenticated('Invalid sign-in code');
+    if (sha256(body.verifier) !== row.codeChallenge) throw err.unauthenticated('Invalid sign-in code');
+
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, row.userId));
+    if (!user || !user.isActive) throw err.unauthenticated('Invalid sign-in code');
+
+    const token = generateToken();
+    await db.insert(schema.sessions).values({
+      id: ulid(), userId: user.id, token,
+      expiresAt: new Date(Date.now() + 30 * 24 * 3600_000),
+      ipAddress: ip, userAgent: row.deviceLabel,
+    });
+    // Single use: burn the request rather than leaving a redeemable code around.
+    await db.delete(schema.desktopAuthRequests).where(eq(schema.desktopAuthRequests.id, row.id));
+    return c.json({ sessionToken: token, userId: user.id });
+  });
+
+  app.route('/desktop', desktop);
   return app;
 }

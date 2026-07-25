@@ -5,6 +5,7 @@ import {
   Clock, Receipt, Users, Settings, Search, LogOut, LayoutGrid, CalendarRange,
   SquarePen, Sun, Moon, Monitor, ChevronDown, ChevronRight, GripVertical, User as UserIcon,
   SquareArrowOutUpRight, Link as LinkIcon, ArrowUp, ArrowDown,
+  MonitorDown,
 } from 'lucide-react';
 import { Link, usePathname, useNavigate } from '../lib/router';
 import { useMe, useCan } from '../lib/auth';
@@ -12,7 +13,7 @@ import { api, setSessionToken } from '../lib/api';
 import { useRealtime } from '../lib/sse';
 import { useT, extendDict } from '../lib/i18n';
 import { useTheme, type ThemePref } from '../lib/theme';
-import { initDesktop, restartDesktop } from '../lib/desktop';
+import { initDesktop, restartDesktop, isTauri } from '../lib/desktop';
 import { TabsProvider, useTabs } from '../lib/tabs';
 import { cn, Avatar, Kbd, Tooltip, IconButton } from './ui';
 import { ContextMenu, DropdownMenu, MenuItem, MenuSeparator, MenuLabel, Toaster, toast, type ContextMenuEntry } from './overlays';
@@ -366,6 +367,12 @@ function ShellInner({ children }: { children: ReactNode }) {
               <MenuItem icon={<Settings size={14} />} onSelect={() => navigate('/settings')}>{t('nav.settings')}</MenuItem>
             )}
             <MenuItem icon={<UserIcon size={14} />} onSelect={() => navigate('/profile')}>{t('nav.profile')}</MenuItem>
+            {/* Pointless inside the desktop app – it is already the desktop app. */}
+            {!isTauri && (
+              <MenuItem icon={<MonitorDown size={14} />} onSelect={() => navigate('/download')}>
+                {t('desktop.download')}
+              </MenuItem>
+            )}
             <MenuSeparator />
             <MenuLabel>{t('theme.title')}</MenuLabel>
             {themeItems.map((it) => (

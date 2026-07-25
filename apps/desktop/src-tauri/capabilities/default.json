@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the ordi web layer may ask the desktop shell to do: OS notifications, the taskbar badge, native events (quick-add shortcut, deep links) and applying an update.",
+  "description": "What the ordi web layer may ask the desktop shell to do: OS notifications, the taskbar badge, native events (quick-add shortcut, deep links), opening the browser for sign-in, and applying an update.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -9,6 +9,7 @@
     "notification:default",
     "updater:default",
     "process:allow-restart",
-    "deep-link:default"
+    "deep-link:default",
+    "opener:allow-open-url"
   ]
 }

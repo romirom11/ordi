@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { EVENT_TYPES, GIT_PROVIDERS } from '@ordi/shared';
 import {
-  Github, Slack, GitBranch, Plus, Trash2, ChevronRight, ExternalLink, Webhook as WebhookIcon,
+  Github, Slack, GitBranch, Plus, Trash2, ChevronRight, ExternalLink, Webhook as WebhookIcon, Mail,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useCan } from '../../lib/auth';
@@ -17,6 +17,13 @@ import { useT, extendDict } from '../../lib/i18n';
 extendDict({
   en: {
     'settings.integrationsDesc': 'Connect GitHub and Slack, and send outgoing webhooks.',
+    // Email
+    'settings.emailTitle': 'Email',
+    'settings.emailDesc': 'Invites, invoices and reminders are sent over SMTP configured in the server .env.',
+    'settings.emailCheck': 'Test connection',
+    'settings.emailOk': 'Connected – outgoing email works.',
+    'settings.emailFailed': 'Could not reach the SMTP server. Many hosting providers block outbound SMTP ports.',
+    'settings.emailNotConfigured': 'SMTP is not configured – set SMTP_URL in the server .env.',
     // GitHub
     'settings.githubTitle': 'GitHub',
     'settings.githubDesc': 'Link repositories to projects – branches and PRs show up on tasks.',
@@ -63,6 +70,13 @@ extendDict({
   },
   uk: {
     'settings.integrationsDesc': 'Підключіть GitHub і Slack та надсилайте вихідні вебхуки.',
+    // Email
+    'settings.emailTitle': 'Пошта',
+    'settings.emailDesc': 'Запрошення, рахунки й нагадування надсилаються через SMTP із .env серверу.',
+    'settings.emailCheck': 'Перевірити зʼєднання',
+    'settings.emailOk': 'Підключено – вихідна пошта працює.',
+    'settings.emailFailed': 'Не вдалося досягти SMTP-сервера. Багато хостингів блокують вихідні SMTP-порти.',
+    'settings.emailNotConfigured': 'SMTP не налаштовано – задайте SMTP_URL у .env серверу.',
     // GitHub
     'settings.githubTitle': 'GitHub',
     'settings.githubDesc': 'Звʼяжіть репозиторії з проєктами – гілки та PR-и зʼявляться в задачах.',
@@ -572,9 +586,57 @@ export function IntegrationsPanel() {
   return (
     <div className="space-y-6">
       <SectionHead title={t('settings.integrations')} desc={t('settings.integrationsDesc')} />
+      <EmailCard />
       <GitHubCard />
       <SlackCard />
       <WebhooksSection />
     </div>
+  );
+}
+
+/**
+ * Outgoing mail status. Blocked SMTP ports are the usual reason invites and
+ * invoices never arrive, and the symptom (nothing happens) gives no clue, so
+ * the check is one click away.
+ */
+function EmailCard() {
+  const t = useT();
+  const [state, setState] = useState<{ configured: boolean; ok: boolean; error?: string } | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  const check = async () => {
+    setChecking(true);
+    try {
+      setState(await api.get<{ configured: boolean; ok: boolean; error?: string }>('/settings/email/health'));
+    } catch {
+      setState({ configured: true, ok: false, error: 'unknown' });
+    }
+    setChecking(false);
+  };
+
+  return (
+    <Card className="p-4">
+      <div className="flex items-start gap-3">
+        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-muted text-foreground">
+          <Mail size={18} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-semibold">{t('settings.emailTitle')}</div>
+          <p className="mt-0.5 text-xs text-muted-foreground">{t('settings.emailDesc')}</p>
+          {state && (
+            <p className={cn('mt-2 text-xs', state.ok ? 'text-success' : 'text-destructive')}>
+              {!state.configured
+                ? t('settings.emailNotConfigured')
+                : state.ok
+                  ? t('settings.emailOk')
+                  : `${t('settings.emailFailed')} (${state.error})`}
+            </p>
+          )}
+        </div>
+        <Button size="sm" variant="outline" disabled={checking} onClick={() => void check()}>
+          {checking ? <Spinner /> : t('settings.emailCheck')}
+        </Button>
+      </div>
+    </Card>
   );
 }

@@ -123,7 +123,8 @@ so the books actually balance.
 - **Built-in MCP server** – point Claude or Cursor at your workspace; the agent gets
   exactly the permissions of its API token, nothing more.
 - **Desktop app** – macOS, Windows and Linux, with native notifications, a global
-  quick-add shortcut and signed auto-updates.
+  quick-add shortcut, signed auto-updates, and sign-in through your browser
+  instead of retyping credentials. Downloadable from inside the web app.
 - **English and Ukrainian**, dark and light.
 
 ## Quick start

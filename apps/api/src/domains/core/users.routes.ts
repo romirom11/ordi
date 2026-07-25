@@ -8,7 +8,7 @@ import { guard } from '../../core/rbac';
 import { generateToken } from '../../lib/crypto';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
-import { queueEmail } from '../../lib/email';
+import { trySendEmail } from '../../lib/email';
 import { asLocale, loadBranding, renderEmail, tr } from '../../lib/email-templates';
 import { env } from '../../env';
 
@@ -60,13 +60,15 @@ export function usersRoutes() {
       cta: { label: tr(locale, 'invite.cta'), url: inviteUrl },
       note: tr(locale, 'invite.expiry'),
     });
-    await queueEmail({
+    // The invite exists whether or not the mail goes out; hand the link back so
+    // the admin can pass it on themselves when SMTP is unavailable.
+    const delivery = await trySendEmail({
       to: body.email,
       subject: tr(locale, 'invite.subject', vars),
       body: rendered.text,
       html: rendered.html,
     });
-    return c.json({ id, inviteUrl: `${env.appUrl}/accept-invite?token=${token}` }, 201);
+    return c.json({ id, inviteUrl, emailSent: delivery.sent, emailError: delivery.error }, 201);
   });
 
   app.patch('/:id/role', guard('users.manage'), async (c) => {

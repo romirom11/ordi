@@ -63,6 +63,8 @@ extendDict({
     'settings.roleUpdated': 'Role updated',
     'settings.inviteSent': 'Invitation created',
     'settings.inviteCopyHint': 'Share this link so they can set up their account.',
+    'settings.inviteEmailFailed': 'The invite was created, but the email could not be sent. Share this link instead, and check your SMTP settings.',
+    'settings.inviteNoEmail': 'Invite created – email not sent',
     'settings.noUsers': 'No members yet',
     'settings.permissions': 'Permissions',
     'settings.systemRoleLocked': 'System role – permissions are fixed.',
@@ -114,6 +116,8 @@ extendDict({
     'settings.roleUpdated': 'Роль оновлено',
     'settings.inviteSent': 'Запрошення створено',
     'settings.inviteCopyHint': 'Надішліть це посилання, щоб вони налаштували обліковий запис.',
+    'settings.inviteEmailFailed': 'Запрошення створено, але лист не вдалося надіслати. Передайте це посилання вручну і перевірте налаштування SMTP.',
+    'settings.inviteNoEmail': 'Запрошення створено – лист не надіслано',
     'settings.noUsers': 'Ще немає учасників',
     'settings.permissions': 'Дозволи',
     'settings.systemRoleLocked': 'Системна роль – дозволи незмінні.',
@@ -540,14 +544,22 @@ function InviteDialog({ open, onClose, roles }: { open: boolean; onClose: () => 
   const [name, setName] = useState('');
   const [roleId, setRoleId] = useState('');
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [emailSent, setEmailSent] = useState(true);
 
   useEffect(() => {
-    if (open) { setEmail(''); setName(''); setRoleId(roles.find((r) => !r.isSystem)?.id ?? roles[0]?.id ?? ''); setInviteUrl(null); }
+    if (open) { setEmail(''); setName(''); setRoleId(roles.find((r) => !r.isSystem)?.id ?? roles[0]?.id ?? ''); setInviteUrl(null); setEmailSent(true); }
   }, [open, roles]);
 
   const invite = useMutation({
-    mutationFn: () => api.post<{ inviteUrl?: string }>('/users/invite', { email, name, roleId }),
-    onSuccess: (r) => { setInviteUrl(r?.inviteUrl ?? null); qc.invalidateQueries({ queryKey: ['users'] }); toast(t('settings.inviteSent')); },
+    mutationFn: () => api.post<{ inviteUrl?: string; emailSent?: boolean }>('/users/invite', { email, name, roleId }),
+    onSuccess: (r) => {
+      setInviteUrl(r?.inviteUrl ?? null);
+      setEmailSent(r?.emailSent !== false);
+      qc.invalidateQueries({ queryKey: ['users'] });
+      // The invite is valid either way; only the delivery may have failed.
+      if (r?.emailSent === false) toast.info(t('settings.inviteNoEmail'));
+      else toast(t('settings.inviteSent'));
+    },
     onError: () => toast.error(t('settings.saveFailed')),
   });
 
@@ -562,8 +574,10 @@ function InviteDialog({ open, onClose, roles }: { open: boolean; onClose: () => 
           </Select>
         </Field>
         {inviteUrl ? (
-          <div className="rounded-md border border-border bg-muted/50 p-3">
-            <p className="mb-2 text-xs text-muted-foreground">{t('settings.inviteCopyHint')}</p>
+          <div className={cn('rounded-md border p-3', emailSent ? 'border-border bg-muted/50' : 'border-warning/40 bg-warning/5')}>
+            <p className="mb-2 text-xs text-muted-foreground">
+              {emailSent ? t('settings.inviteCopyHint') : t('settings.inviteEmailFailed')}
+            </p>
             <div className="flex items-center gap-2">
               <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{inviteUrl}</span>
               <Button size="xs" variant="outline" onClick={() => { navigator.clipboard?.writeText(inviteUrl); toast(t('common.copy')); }}><Copy size={12} /></Button>

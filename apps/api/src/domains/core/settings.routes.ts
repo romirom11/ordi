@@ -4,6 +4,7 @@ import { workspaceSettingsUpdateSchema } from '@ordi/shared';
 import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { guard } from '../../core/rbac';
+import { emailConfigured, verifyEmailTransport } from '../../lib/email';
 
 /**
  * Mask a secret webhook URL for GET responses shown to non-managers: keep the
@@ -68,6 +69,14 @@ export function settingsRoutes() {
       await db.insert(schema.workspaceSettings).values({ id: 'workspace', ...(allowed as any) });
     }
     return c.json({ ok: true });
+  });
+
+  // Is outgoing mail actually working? Blocked SMTP ports are the single most
+  // common reason invites and invoices silently do not arrive.
+  app.get('/email/health', guard('settings.manage'), async (c) => {
+    if (!emailConfigured()) return c.json({ configured: false, ok: false });
+    const result = await verifyEmailTransport();
+    return c.json({ configured: true, ...result });
   });
 
   // Trash (PRD §14.7): list soft-deleted across the main business entities.

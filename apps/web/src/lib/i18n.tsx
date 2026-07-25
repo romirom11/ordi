@@ -554,6 +554,11 @@ const en: Dict = {
   'desktop.connectFailed': 'Could not reach this instance. Check the URL and try again.',
   'desktop.updateReady': 'ordi {version} is installed and applies on restart.',
   'desktop.restart': 'Restart',
+  'desktop.signInWithBrowser': 'Sign in with browser',
+  'desktop.browserLoginWaiting': 'Approve the sign-in in your browser, then come back here.',
+  'desktop.browserLoginFailed': 'Browser sign-in did not complete. Try again.',
+  'desktop.download': 'Download desktop app',
+  'auth.or': 'or',
 };
 
 const uk: Dict = {
@@ -1093,6 +1098,11 @@ const uk: Dict = {
   'desktop.connectFailed': 'Не вдалося зʼєднатися з інстансом. Перевірте URL і спробуйте ще раз.',
   'desktop.updateReady': 'ordi {version} встановлено, застосується після перезапуску.',
   'desktop.restart': 'Перезапустити',
+  'desktop.signInWithBrowser': 'Увійти через браузер',
+  'desktop.browserLoginWaiting': 'Підтвердьте вхід у браузері й поверніться сюди.',
+  'desktop.browserLoginFailed': 'Вхід через браузер не завершився. Спробуйте ще раз.',
+  'desktop.download': 'Завантажити застосунок',
+  'auth.or': 'або',
 };
 
 const DICTS: Record<Locale, Dict> = { en, uk };

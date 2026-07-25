@@ -50,6 +50,13 @@
       "when": 1784933736222,
       "tag": "0006_dash_cleanup",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784974531484,
+      "tag": "0007_quick_genesis",
+      "breakpoints": true
     }
   ]
 }

@@ -17,6 +17,7 @@ import { SettingsPage } from './pages/Settings';
 import { DashboardsPage } from './pages/Dashboards';
 import { ResourcingPage } from './pages/Resourcing';
 import { ProfilePage } from './pages/Profile';
+import { DownloadPage } from './pages/Download';
 import { ModuleGate } from './components/ModuleGate';
 
 const routes: RouteDef[] = [
@@ -44,6 +45,7 @@ const routes: RouteDef[] = [
   { pattern: '/dashboards/:id', render: (p) => <ModuleGate module="dashboards"><DashboardsPage id={p.id} /></ModuleGate> },
   { pattern: '/resourcing', render: () => <ModuleGate module="resourcing"><ResourcingPage /></ModuleGate> },
   { pattern: '/profile', render: () => <ProfilePage /> },
+  { pattern: '/download', render: () => <DownloadPage /> },
 ];
 
 export function AppRoutes() {
