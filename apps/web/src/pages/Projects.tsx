@@ -276,9 +276,25 @@ export function ProjectsPage() {
   );
 }
 
+/** Cyrillic romanized so non-Latin names still suggest a key (keys are A-Z only). */
+const TRANSLIT: Record<string, string> = {
+  а: 'a', б: 'b', в: 'v', г: 'h', ґ: 'g', д: 'd', е: 'e', є: 'ye', ж: 'zh', з: 'z',
+  и: 'y', і: 'i', ї: 'yi', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p',
+  р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh',
+  щ: 'shch', ю: 'yu', я: 'ya', ы: 'y', э: 'e', ё: 'e', ь: '', ъ: '',
+};
+
+function romanize(value: string): string {
+  return value.replace(/[Ѐ-ӿ]/g, (ch) => {
+    const lower = ch.toLowerCase();
+    const mapped = TRANSLIT[lower] ?? '';
+    return ch === lower ? mapped : mapped.toUpperCase();
+  });
+}
+
 /** Suggest a project key from the name: initials for multi-word, first 3 letters otherwise. */
 function deriveProjectKey(name: string): string {
-  const words = name.toUpperCase().replace(/[^A-Z0-9\s]/gi, ' ').trim().split(/\s+/).filter(Boolean);
+  const words = romanize(name).toUpperCase().replace(/[^A-Z0-9\s]/gi, ' ').trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return '';
   const k = (words.length === 1 ? words[0]!.slice(0, 3) : words.map((w) => w[0]!).join('').slice(0, 5))
     .replace(/[^A-Z]/g, '');

@@ -25,3 +25,20 @@ export function useUsersLookup(): UseQueryResult<UserLookup[]> {
     staleTime: 5 * 60_000,
   });
 }
+
+export type ProjectMemberRole = 'admin' | 'member' | 'viewer';
+
+export interface ProjectMember {
+  projectId: string;
+  userId: string;
+  role: ProjectMemberRole;
+  canWriteTasks: boolean;
+}
+
+/** Members of one project – read by both the properties rail and the access panel. */
+export function useProjectMembers(projectId: string): UseQueryResult<ProjectMember[]> {
+  return useQuery({
+    queryKey: ['project-members', projectId],
+    queryFn: () => api.get<{ data: ProjectMember[] }>(`/projects/${projectId}/members`).then((r) => r.data),
+  });
+}

@@ -36,6 +36,8 @@ jobs:
       - run: pnpm install --frozen-lockfile=false
       - name: Typecheck
         run: pnpm typecheck
+      - name: Query cache shapes
+        run: pnpm check:query-shapes
       - name: Unit + integration tests
         run: pnpm test
       - name: Build web

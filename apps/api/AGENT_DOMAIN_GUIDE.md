@@ -1,4 +1,4 @@
-# ordi API — Domain module authoring guide
+# ordi API – Domain module authoring guide
 
 You are implementing ONE domain module inside `apps/api/src/domains/<domain>/`.
 **Only create files inside your assigned domain folder.** Never edit shared files,
@@ -6,21 +6,21 @@ You are implementing ONE domain module inside `apps/api/src/domains/<domain>/`.
 
 ## Read first
 - `docs/prd.md` (relevant sections listed in your task)
-- `apps/api/src/domains/crm/routes.ts` and `apps/api/src/domains/crm/service.ts` — the reference pattern. Mirror its style exactly.
+- `apps/api/src/domains/crm/routes.ts` and `apps/api/src/domains/crm/service.ts` – the reference pattern. Mirror its style exactly.
 
 ## Available imports & signatures
 
 ### DB (`@ordi/db`)
 - `getDb()` → `{ db, sql, close }`. Use `const { db } = getDb();`
 - Query builders re-exported: `eq, and, or, ne, gt, gte, lt, lte, inArray, notInArray, isNull, isNotNull, desc, asc, count, sum, like, ilike, sql`, plus type `SQL`.
-- `schema.*` — every table. Money/numeric columns are **strings** in Drizzle (`numeric`), so write `String(amount)` on insert/update and `Number(x)` when reading.
+- `schema.*` – every table. Money/numeric columns are **strings** in Drizzle (`numeric`), so write `String(amount)` on insert/update and `Number(x)` when reading.
 - Tables you can use (snake_case in SQL, camelCase in schema objects): see `packages/db/src/schema/*`. Key ones per domain listed in your task.
 - Every editable business table has `version` (bumped by DB trigger), `createdAt`, `updatedAt`, `createdBy`, most have `deletedAt` (soft delete) and `customFields`.
-- Tasks get their per-project `number` from a DB trigger — insert with `number: 0`.
+- Tasks get their per-project `number` from a DB trigger – insert with `number: 0`.
 
 ### Auth / RBAC / context
-- `import { requireAuth, currentActor } from '../../core/auth'` — `app.use('*', requireAuth)` then `const actor = currentActor(c)`.
-- `import { guard } from '../../core/rbac'` — `guard('finance.read')` as route middleware. Every route needs a `guard(...)` (or is a public route in the `public` domain).
+- `import { requireAuth, currentActor } from '../../core/auth'` – `app.use('*', requireAuth)` then `const actor = currentActor(c)`.
+- `import { guard } from '../../core/rbac'` – `guard('finance.read')` as route middleware. Every route needs a `guard(...)` (or is a public route in the `public` domain).
 - `actor`: `{ userId, actorType, roleId, roleName, email, name, locale, readOnly, access }`. `actor.access.permissions` is a `Set<string>`. `actor.access.projectMemberships: Map<projectId, 'admin'|'member'|'viewer'>`, `spaceMemberships: Map<spaceId,'editor'|'viewer'>`.
 
 ### Resource access
@@ -38,7 +38,7 @@ You are implementing ONE domain module inside `apps/api/src/domains/<domain>/`.
 ### Activity log (with redaction, mandatory on mutations)
 - `import { writeActivity } from '../../core/activity'`
   - `await writeActivity(db, { entityType, entityId, action, before?, after?, actorId: actor.userId, actorType: actor.actorType })`
-- `import { recordSensitiveAccess } from '../../core/activity'` — call when reading compensation/sensitive fields.
+- `import { recordSensitiveAccess } from '../../core/activity'` – call when reading compensation/sensitive fields.
 
 ### Events (outbox)
 - `import { emit } from '../../core/events'`
@@ -48,7 +48,7 @@ You are implementing ONE domain module inside `apps/api/src/domains/<domain>/`.
 ### Zod schemas (`@ordi/shared`)
 - All input schemas already exist (e.g. `taskInputSchema`, `invoiceInputSchema`, `leaveRequestInputSchema`). Parse with `schema.parse(await c.req.json())`. Query params via `c.req.query('x')`.
 
-### Pure calc (`@ordi/shared`) — USE THESE, don't reimplement
+### Pure calc (`@ordi/shared`) – USE THESE, don't reimplement
 - `computeDocumentTotals`, `computePaidState`, `wouldOverpay` (money)
 - `hourlyCostRate`, `overheadPerHour`, `compensationAt`, `computeProfitability`, `utilization` (cost)
 - `computeAging` (finance), `leaveDays, availableBalance, carryForward, rangesOverlap` (leave)

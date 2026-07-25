@@ -60,7 +60,7 @@ services:
     ports:
       - "8080:80"
 
-  # Local mail catcher — point SMTP_URL at it to see real rendered email
+  # Local mail catcher – point SMTP_URL at it to see real rendered email
   # without sending anything outside. UI: http://localhost:8025
   mailpit:
     image: axllent/mailpit:latest

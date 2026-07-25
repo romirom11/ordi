@@ -10,6 +10,7 @@ import {
 } from './pickers';
 import { ProjectProgressPanel } from './ProjectProgress';
 import { useT, extendDict } from '../../lib/i18n';
+import { useProjectMembers } from '../../lib/queries';
 
 extendDict({
   en: {
@@ -48,7 +49,6 @@ interface ProjectLite {
 }
 interface ProjectTypeLite { id: string; name: string; color?: string; requiresClient?: boolean }
 interface LabelLite { id: string; name: string; color?: string | null }
-interface MemberLite { userId: string; role: string }
 
 const PRIORITIES = ['none', 'low', 'medium', 'high', 'urgent'] as const;
 const PRIORITY_KEY: Record<string, string> = {
@@ -89,10 +89,7 @@ export function PropertiesRail({ project, users, canWrite, onPatch, onManageMemb
     staleTime: 5 * 60_000,
   });
   const labels = labelsQ.data ?? [];
-  const membersQ = useQuery<MemberLite[]>({
-    queryKey: ['project-members', project.id],
-    queryFn: () => api.get<{ data: MemberLite[] }>(`/projects/${project.id}/members`).then((r) => r.data),
-  });
+  const membersQ = useProjectMembers(project.id);
   const memberUsers = (membersQ.data ?? [])
     .map((m) => users.find((u) => u.id === m.userId))
     .filter((u): u is UserLite => !!u);

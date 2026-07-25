@@ -81,7 +81,7 @@ FROM "invoices" i
 WHERE EXISTS (SELECT 1 FROM "ledger_transactions" t WHERE t."id" = 'LTXINV' || i."id")
   AND NOT EXISTS (SELECT 1 FROM "ledger_postings" p WHERE p."id" = 'LPINVC' || i."id");--> statement-breakpoint
 INSERT INTO "ledger_transactions" ("id", "date", "description", "status", "source_type", "source_id", "project_id", "company_id", "created_by")
-SELECT 'LTXRVI' || i."id", i."issue_date", 'Reversal — invoice ' || i."number" || ' canceled', 'posted', 'reversal', 'LTXINV' || i."id", i."project_id", i."company_id", i."created_by"
+SELECT 'LTXRVI' || i."id", i."issue_date", 'Reversal – invoice ' || i."number" || ' canceled', 'posted', 'reversal', 'LTXINV' || i."id", i."project_id", i."company_id", i."created_by"
 FROM "invoices" i
 WHERE i."deleted_at" IS NULL AND i."status" = 'canceled' AND i."sent_at" IS NOT NULL AND i."total" > 0
   AND NOT EXISTS (SELECT 1 FROM "ledger_transactions" t WHERE t."source_type" = 'reversal' AND t."source_id" = 'LTXINV' || i."id");--> statement-breakpoint
@@ -96,7 +96,7 @@ FROM "invoices" i
 WHERE EXISTS (SELECT 1 FROM "ledger_transactions" t WHERE t."id" = 'LTXRVI' || i."id")
   AND NOT EXISTS (SELECT 1 FROM "ledger_postings" p WHERE p."id" = 'LPRVID' || i."id");--> statement-breakpoint
 INSERT INTO "ledger_transactions" ("id", "date", "description", "status", "source_type", "source_id", "project_id", "company_id", "created_by")
-SELECT 'LTXPAY' || p."id", p."date", 'Payment — invoice ' || i."number", 'posted', 'payment', p."id", i."project_id", i."company_id", p."created_by"
+SELECT 'LTXPAY' || p."id", p."date", 'Payment – invoice ' || i."number", 'posted', 'payment', p."id", i."project_id", i."company_id", p."created_by"
 FROM "payments" p JOIN "invoices" i ON i."id" = p."invoice_id"
 WHERE i."deleted_at" IS NULL AND p."amount" > 0
   AND NOT EXISTS (SELECT 1 FROM "ledger_transactions" t WHERE t."source_type" = 'payment' AND t."source_id" = p."id");--> statement-breakpoint

@@ -7,7 +7,7 @@ import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Globe, Lock, Plus, Trash2, Users as UsersIcon } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
-import { useUsersLookup } from '../lib/queries';
+import { useProjectMembers, useUsersLookup, type ProjectMemberRole } from '../lib/queries';
 import { useT, extendDict } from '../lib/i18n';
 import { Avatar, Badge, Button, IconButton, SegmentedControl, Select, Skeleton, Spinner, Switch, cn } from './ui';
 import { ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, toast } from './overlays';
@@ -60,8 +60,7 @@ extendDict({
   },
 });
 
-type MemberRole = 'admin' | 'member' | 'viewer';
-interface Member { projectId: string; userId: string; role: MemberRole; canWriteTasks: boolean }
+type MemberRole = ProjectMemberRole;
 interface ProjectDetail { id: string; visibility: 'workspace' | 'private'; version: number }
 interface LookupUser { id: string; name?: string | null; avatar?: string | null }
 
@@ -70,7 +69,7 @@ export function ProjectAccessPanel({ projectId, canManage }: { projectId: string
   const qc = useQueryClient();
 
   const project = useQuery({ queryKey: ['project', projectId], queryFn: () => api.get<ProjectDetail>(`/projects/${projectId}`) });
-  const members = useQuery({ queryKey: ['project-members', projectId], queryFn: () => api.get<{ data: Member[] }>(`/projects/${projectId}/members`) });
+  const members = useProjectMembers(projectId);
   const lookup = useUsersLookup();
 
   const userById = useMemo(() => {
@@ -104,7 +103,7 @@ export function ProjectAccessPanel({ projectId, canManage }: { projectId: string
 
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
 
-  const memberList = members.data?.data ?? [];
+  const memberList = members.data ?? [];
   const memberIds = new Set(memberList.map((m) => m.userId));
   const addable = (lookup.data ?? []).filter((u) => !memberIds.has(u.id));
   const visibility = project.data?.visibility ?? 'workspace';

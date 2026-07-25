@@ -1,12 +1,12 @@
-# ordi web — page authoring guide
+# ordi web – page authoring guide
 
 You implement React 19 page components under `apps/web/src/pages/`. Each page is a named export used by `apps/web/src/routes.tsx` / `main.tsx`. Only create files under `apps/web/src/pages/`. Do not edit shared/config/components (they already exist).
 
 ## Building blocks (import these)
-- `import { api, qs } from '../lib/api'` — `api.get/post/patch/del<T>(path)`; `qs({...})` builds a query string. Cookie auth is automatic. Errors throw `ApiError` with `.status`, `.code`, `.message`.
+- `import { api, qs } from '../lib/api'` – `api.get/post/patch/del<T>(path)`; `qs({...})` builds a query string. Cookie auth is automatic. Errors throw `ApiError` with `.status`, `.code`, `.message`.
 - `import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'`.
 - `import { Link, useNavigate, useSearchParams } from '../lib/router'` (public pages: `../../lib/router`).
-- `import { useMe, useCan } from '../lib/auth'` — `const can = useCan(); can('finance.read')`. Public pages must NOT use these.
+- `import { useMe, useCan } from '../lib/auth'` – `const can = useCan(); can('finance.read')`. Public pages must NOT use these.
 - UI: `import { Button, Input, Textarea, Select, Card, Badge, PageHeader, EmptyState, Spinner, Skeleton, fmtMoney, fmtDate, cn } from '../components/ui'` (public: `../../components/ui`).
 - Icons: `lucide-react`.
 
@@ -16,7 +16,7 @@ You implement React 19 page components under `apps/web/src/pages/`. Each page is
 - Permissions form the UI: hide sections/actions the user can't use (`can(...)`). Don't render finance tiles without `finance.read`, etc.
 - Use `useQueryClient().invalidateQueries({queryKey:[...]})` after mutations. Optimistic where easy; always show errors (a simple inline message or `alert` is acceptable, prefer inline).
 - Keep components typecheck-clean (strict). Type API responses loosely with interfaces at the top of the file; `any` is acceptable for nested JSON.
-- Peek panels: for task/invoice detail you may use a right-side drawer (fixed right panel) or a full page — your call; keep it simple.
+- Peek panels: for task/invoice detail you may use a right-side drawer (fixed right panel) or a full page – your call; keep it simple.
 
 ## API endpoints (all under /api/v1, cookie auth)
 - me: `GET /me` -> {user, permissions[], projectMemberships[], spaceMemberships[]}
@@ -34,4 +34,4 @@ You implement React 19 page components under `apps/web/src/pages/`. Each page is
 - Public (no auth): `GET /i/:token`, `GET /q/:token`, `POST /q/:token/decision {decision,comment}`, `GET /portal/:token`, `GET /intake/:token`, `POST /intake/:token`, `GET /careers/:token`, `POST /careers/:token`.
 - Auth: `POST /auth/login {email,password,totp?}`, `POST /auth/logout`, `GET /auth/invite/:token`, `POST /auth/accept-invite {token,name,password}`.
 
-Numeric/money values may arrive as strings — wrap with Number() before math and use fmtMoney for display.
+Numeric/money values may arrive as strings – wrap with Number() before math and use fmtMoney for display.
