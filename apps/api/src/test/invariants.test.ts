@@ -122,3 +122,44 @@ describe('dead-letter replay (PRD §3.3)', () => {
     expect((await reqAs(users.finance!.cookie).get('/dlq')).status).toBe(403);
   });
 });
+
+describe('module toggles are enforced by the API, not just the navigation', () => {
+  it('a disabled module stops answering, and settings stay reachable to re-enable it', async () => {
+    const owner = reqAs(users.owner!.cookie);
+    expect((await owner.get('/invoices')).status).toBe(200);
+
+    await owner.patch('/settings/workspace', { modules: { finance: false } });
+    const gated = await owner.get('/invoices');
+    expect(gated.status).toBe(404);
+    expect((await json(gated)).error.message).toMatch(/finance/i);
+
+    // Turning it back on must never be gated by the thing you turned off.
+    expect((await owner.get('/settings/workspace')).status).toBe(200);
+    // Core work is not owned by any module.
+    expect((await owner.get('/projects')).status).toBe(200);
+
+    await owner.patch('/settings/workspace', { modules: { finance: true } });
+    expect((await owner.get('/invoices')).status).toBe(200);
+  });
+});
+
+describe('a client with records cannot be deleted out from under them', () => {
+  it('refuses while a deal exists and allows it once the client is empty', async () => {
+    const owner = reqAs(users.owner!.cookie);
+    const company = await json(owner.post('/companies', { name: 'Deletable Ltd', defaultCurrency: 'USD' }));
+
+    const empty = await owner.del(`/companies/${company.id}`);
+    expect(empty.status).toBe(200);
+
+    const withDeal = await json(owner.post('/companies', { name: 'Has A Deal Ltd', defaultCurrency: 'USD' }));
+    const stage = await json(owner.post('/deal-stages', { name: 'Open', position: 0, probability: 10 }));
+    const deal = await owner.post('/deals', { companyId: withDeal.id, title: 'Open deal', stageId: stage.id, amount: 1000, currency: 'USD' });
+    expect(deal.status).toBe(201);
+
+    const refused = await owner.del(`/companies/${withDeal.id}`);
+    expect(refused.status).toBe(422);
+    const body = await json(refused);
+    expect(body.error.code).toBe('domain_rule');
+    expect(body.error.details.deals).toBe(1);
+  });
+});
