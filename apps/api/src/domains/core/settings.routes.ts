@@ -4,7 +4,11 @@ import { workspaceSettingsUpdateSchema } from '@ordi/shared';
 import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { guard } from '../../core/rbac';
-import { emailConfigured, verifyEmailTransport } from '../../lib/email';
+import { emailConfigured, trySendEmail, verifyEmailTransport } from '../../lib/email';
+import { encryptIntegrationSecrets, invalidateRuntimeConfig, runtimeConfig } from '../../lib/runtime-config';
+import { integrationsConfigSchema } from '@ordi/shared';
+import { err } from '../../lib/errors';
+import { writeActivity } from '../../core/activity';
 
 /**
  * Mask a secret webhook URL for GET responses shown to non-managers: keep the
@@ -74,9 +78,84 @@ export function settingsRoutes() {
   // Is outgoing mail actually working? Blocked SMTP ports are the single most
   // common reason invites and invoices silently do not arrive.
   app.get('/email/health', guard('settings.manage'), async (c) => {
-    if (!emailConfigured()) return c.json({ configured: false, ok: false });
+    if (!await emailConfigured()) return c.json({ configured: false, ok: false });
     const result = await verifyEmailTransport();
     return c.json({ configured: true, ...result });
+  });
+
+  /** Prove delivery end to end, not just that the port answers. */
+  app.post('/email/test', guard('settings.manage'), async (c) => {
+    const actor = currentActor(c);
+    const { db } = getDb();
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, actor.userId!));
+    if (!user?.email) throw err.validation('Your account has no email address');
+    const result = await trySendEmail({
+      to: user.email,
+      subject: 'ordi test email',
+      body: 'If you are reading this, outgoing email from your ordi instance works.',
+      html: '<p>If you are reading this, outgoing email from your ordi instance works.</p>',
+    });
+    return c.json({ ...result, to: user.email });
+  });
+
+  // Integration settings that would otherwise need a server restart to change.
+  // Secrets are never returned – only whether one is set, and where the
+  // effective value comes from.
+  app.get('/integrations-config', guard('settings.manage'), async (c) => {
+    const cfg = await runtimeConfig();
+    return c.json({
+      smtp: cfg.smtp
+        ? {
+          host: cfg.smtp.host, port: cfg.smtp.port, secure: cfg.smtp.secure,
+          user: cfg.smtp.user, from: cfg.smtp.from, hasPassword: !!cfg.smtp.pass,
+        }
+        : null,
+      smtpSource: cfg.smtpSource,
+      github: cfg.github ? { clientId: cfg.github.clientId, hasSecret: !!cfg.github.clientSecret } : null,
+      githubSource: cfg.githubSource,
+      slack: cfg.slack ? { clientId: cfg.slack.clientId, hasSecret: !!cfg.slack.clientSecret } : null,
+      slackSource: cfg.slackSource,
+    });
+  });
+
+  app.patch('/integrations-config', guard('settings.manage'), async (c) => {
+    const patch = integrationsConfigSchema.parse(await c.req.json());
+    const { db } = getDb();
+    const [existing] = await db.select().from(schema.workspaceSettings)
+      .where(eq(schema.workspaceSettings.id, 'workspace'));
+    const current = ((existing?.integrations ?? {}) as Record<string, unknown>);
+
+    // An omitted secret means "keep the stored one" – the UI never receives it,
+    // so it cannot send it back.
+    const encrypted = encryptIntegrationSecrets(patch);
+    const merged: Record<string, unknown> = { ...current };
+    for (const key of ['smtp', 'github', 'slack'] as const) {
+      const incoming = encrypted[key];
+      if (incoming === undefined) continue;
+      const prev = (current[key] ?? {}) as Record<string, unknown>;
+      const next = { ...prev, ...incoming } as Record<string, unknown>;
+      for (const secretKey of ['pass', 'clientSecret']) {
+        if (next[secretKey] === '' || next[secretKey] === undefined) {
+          if (prev[secretKey]) next[secretKey] = prev[secretKey];
+          else delete next[secretKey];
+        }
+      }
+      merged[key] = next;
+    }
+
+    if (existing) {
+      await db.update(schema.workspaceSettings).set({ integrations: merged })
+        .where(eq(schema.workspaceSettings.id, 'workspace'));
+    } else {
+      await db.insert(schema.workspaceSettings).values({ id: 'workspace', integrations: merged });
+    }
+    invalidateRuntimeConfig();
+    await writeActivity(db, {
+      entityType: 'workspace', entityId: 'workspace', action: 'integrations_config_updated',
+      actorId: currentActor(c).userId, actorType: currentActor(c).actorType,
+      diff: { keys: Object.keys(patch) },
+    });
+    return c.json({ ok: true });
   });
 
   // Trash (PRD §14.7): list soft-deleted across the main business entities.

@@ -28,14 +28,14 @@ export function integrationsRoutes() {
   // ── GitHub OAuth (PRD §13.1) ──
   // Is the GitHub OAuth app configured on this server? (auth only)
   app.get('/integrations/git/oauth/status', async (c) => {
-    return c.json({ configured: githubOAuthConfigured() });
+    return c.json({ configured: await githubOAuthConfigured() });
   });
 
   // Begin the OAuth flow: returns the GitHub authorize URL with a signed state.
   app.get('/integrations/git/oauth/start', guard('integrations.manage'), async (c) => {
-    if (!githubOAuthConfigured()) throw err.domain('GitHub OAuth is not configured');
+    if (!await githubOAuthConfigured()) throw err.domain('GitHub OAuth is not configured');
     const actor = currentActor(c);
-    const url = buildGithubAuthorizeUrl(signOAuthState(actor.userId));
+    const url = await buildGithubAuthorizeUrl(signOAuthState(actor.userId));
     return c.json({ url });
   });
 
@@ -68,7 +68,7 @@ export function integrationsRoutes() {
       teamName: schema.slackConnections.teamName,
     }).from(schema.slackConnections).orderBy(desc(schema.slackConnections.createdAt)).limit(1);
     return c.json({
-      configured: slackOAuthConfigured(),
+      configured: await slackOAuthConfigured(),
       connected: Boolean(conn),
       teamName: conn?.teamName ?? null,
     });
@@ -76,9 +76,9 @@ export function integrationsRoutes() {
 
   // Begin the OAuth flow: returns the Slack authorize URL with a signed state.
   app.get('/integrations/slack/oauth/start', guard('integrations.manage'), async (c) => {
-    if (!slackOAuthConfigured()) throw err.domain('Slack OAuth is not configured');
+    if (!await slackOAuthConfigured()) throw err.domain('Slack OAuth is not configured');
     const actor = currentActor(c);
-    const url = buildSlackAuthorizeUrl(signOAuthState(actor.userId));
+    const url = await buildSlackAuthorizeUrl(signOAuthState(actor.userId));
     return c.json({ url });
   });
 

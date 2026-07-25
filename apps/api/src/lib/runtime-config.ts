@@ -1,0 +1,141 @@
+/**
+ * Integration settings that can be configured from the UI instead of the
+ * server .env: SMTP, and the GitHub/Slack OAuth apps.
+ *
+ * Values live in `workspace_settings.integrations`; secrets are encrypted at
+ * rest and never leave the API. Environment variables remain the fallback, so
+ * existing deployments keep working untouched – but anything set in the UI
+ * wins, because that is the more explicit and more recent decision.
+ */
+import { getDb, schema, eq } from '@ordi/db';
+import { env } from '../env';
+import { decrypt, encrypt } from './crypto';
+
+export interface SmtpConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+  from: string;
+}
+
+export interface OAuthAppConfig {
+  clientId: string;
+  clientSecret: string;
+}
+
+export interface RuntimeConfig {
+  smtp: SmtpConfig | null;
+  /** Where the effective SMTP settings came from, for the settings screen. */
+  smtpSource: 'db' | 'env' | 'none';
+  github: OAuthAppConfig | null;
+  githubSource: 'db' | 'env' | 'none';
+  slack: OAuthAppConfig | null;
+  slackSource: 'db' | 'env' | 'none';
+}
+
+/** Stored shape – secrets here are ciphertext. */
+interface StoredIntegrations {
+  smtp?: { host?: string; port?: number; secure?: boolean; user?: string; pass?: string; from?: string };
+  github?: { clientId?: string; clientSecret?: string };
+  slack?: { clientId?: string; clientSecret?: string };
+}
+
+/** SMTP_URL as the same shape, so both sources resolve identically. */
+function smtpFromEnv(): SmtpConfig | null {
+  if (!env.smtpUrl) return null;
+  try {
+    const u = new URL(env.smtpUrl);
+    return {
+      host: u.hostname,
+      port: Number(u.port) || (u.protocol === 'smtps:' ? 465 : 587),
+      secure: u.protocol === 'smtps:',
+      user: decodeURIComponent(u.username),
+      pass: decodeURIComponent(u.password),
+      from: env.smtpFrom,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Decrypt a stored secret, tolerating values written before encryption existed. */
+function readSecret(value: string | undefined): string {
+  if (!value) return '';
+  try {
+    return decrypt(value);
+  } catch {
+    return value;
+  }
+}
+
+let cache: { at: number; value: RuntimeConfig } | null = null;
+const TTL_MS = 30_000;
+
+async function resolve(): Promise<RuntimeConfig> {
+  const { db } = getDb();
+  const [ws] = await db.select().from(schema.workspaceSettings)
+    .where(eq(schema.workspaceSettings.id, 'workspace'));
+  const stored = ((ws?.integrations ?? {}) as StoredIntegrations);
+
+  const envSmtp = smtpFromEnv();
+  const dbSmtp = stored.smtp?.host
+    ? {
+      host: stored.smtp.host,
+      port: stored.smtp.port ?? 587,
+      secure: stored.smtp.secure ?? false,
+      user: stored.smtp.user ?? '',
+      pass: readSecret(stored.smtp.pass),
+      from: stored.smtp.from || env.smtpFrom,
+    }
+    : null;
+
+  const dbGithub = stored.github?.clientId
+    ? { clientId: stored.github.clientId, clientSecret: readSecret(stored.github.clientSecret) }
+    : null;
+  const envGithub = env.githubOAuthClientId && env.githubOAuthClientSecret
+    ? { clientId: env.githubOAuthClientId, clientSecret: env.githubOAuthClientSecret }
+    : null;
+
+  const dbSlack = stored.slack?.clientId
+    ? { clientId: stored.slack.clientId, clientSecret: readSecret(stored.slack.clientSecret) }
+    : null;
+  const envSlack = env.slackClientId && env.slackClientSecret
+    ? { clientId: env.slackClientId, clientSecret: env.slackClientSecret }
+    : null;
+
+  return {
+    smtp: dbSmtp ?? envSmtp,
+    smtpSource: dbSmtp ? 'db' : envSmtp ? 'env' : 'none',
+    github: dbGithub ?? envGithub,
+    githubSource: dbGithub ? 'db' : envGithub ? 'env' : 'none',
+    slack: dbSlack ?? envSlack,
+    slackSource: dbSlack ? 'db' : envSlack ? 'env' : 'none',
+  };
+}
+
+export async function runtimeConfig(): Promise<RuntimeConfig> {
+  if (!cache || Date.now() - cache.at > TTL_MS) {
+    cache = { at: Date.now(), value: await resolve() };
+  }
+  return cache.value;
+}
+
+/** Call after writing settings so the next read sees them immediately. */
+export function invalidateRuntimeConfig(): void {
+  cache = null;
+}
+
+/** Encrypt the secrets in an incoming patch before it is stored. */
+export function encryptIntegrationSecrets(patch: {
+  smtp?: { pass?: string } & Record<string, unknown>;
+  github?: { clientSecret?: string } & Record<string, unknown>;
+  slack?: { clientSecret?: string } & Record<string, unknown>;
+}): typeof patch {
+  const out = { ...patch };
+  if (out.smtp?.pass) out.smtp = { ...out.smtp, pass: encrypt(out.smtp.pass) };
+  if (out.github?.clientSecret) out.github = { ...out.github, clientSecret: encrypt(out.github.clientSecret) };
+  if (out.slack?.clientSecret) out.slack = { ...out.slack, clientSecret: encrypt(out.slack.clientSecret) };
+  return out;
+}

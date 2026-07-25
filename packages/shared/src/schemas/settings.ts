@@ -41,3 +41,28 @@ export const workspaceSettingsUpdateSchema = z.object({
   integrations: integrationsSchema.optional(),
   invoiceSettings: invoiceSettingsSchema.optional(),
 });
+
+/**
+ * Integration settings editable from the UI (Settings → Integrations).
+ * Secrets are write-only: the API never returns them, so an omitted or empty
+ * secret means "keep whatever is stored".
+ */
+export const integrationsConfigSchema = z.object({
+  smtp: z.object({
+    host: z.string().min(1),
+    port: z.number().int().min(1).max(65535),
+    secure: z.boolean(),
+    user: z.string().default(''),
+    pass: z.string().optional(),
+    from: z.string().min(1),
+  }).optional(),
+  github: z.object({
+    clientId: z.string(),
+    clientSecret: z.string().optional(),
+  }).optional(),
+  slack: z.object({
+    clientId: z.string(),
+    clientSecret: z.string().optional(),
+  }).optional(),
+});
+export type IntegrationsConfigInput = z.infer<typeof integrationsConfigSchema>;

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { EVENT_TYPES, GIT_PROVIDERS } from '@ordi/shared';
 import {
-  Github, Slack, GitBranch, Plus, Trash2, ChevronRight, ExternalLink, Webhook as WebhookIcon, Mail,
+  Github, Slack, GitBranch, Plus, Trash2, ChevronRight, ExternalLink, Webhook as WebhookIcon,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useCan } from '../../lib/auth';
@@ -11,24 +11,17 @@ import {
 } from '../ui';
 import { Dialog, ConfirmDialog, toast } from '../overlays';
 import { SectionHead, Field, RowList } from './primitives';
+import { EmailCard, OAuthCredentials } from './integrationsConfig';
 import { Hint } from '../Hint';
 import { useT, extendDict } from '../../lib/i18n';
 
 extendDict({
   en: {
     'settings.integrationsDesc': 'Connect GitHub and Slack, and send outgoing webhooks.',
-    // Email
-    'settings.emailTitle': 'Email',
-    'settings.emailDesc': 'Invites, invoices and reminders are sent over SMTP configured in the server .env.',
-    'settings.emailCheck': 'Test connection',
-    'settings.emailOk': 'Connected – outgoing email works.',
-    'settings.emailFailed': 'Could not reach the SMTP server. Many hosting providers block outbound SMTP ports.',
-    'settings.emailNotConfigured': 'SMTP is not configured – set SMTP_URL in the server .env.',
     // GitHub
     'settings.githubTitle': 'GitHub',
     'settings.githubDesc': 'Link repositories to projects – branches and PRs show up on tasks.',
     'settings.connectGithub': 'Connect GitHub',
-    'settings.githubNotConfigured': 'OAuth is not configured. Set GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET in the server .env.',
     'settings.advancedToken': 'Advanced: connect with a token',
     'settings.connectedGithub': 'GitHub is connected.',
     'settings.repoLinkHint': 'Link repositories to a project in that project’s settings.',
@@ -43,7 +36,6 @@ extendDict({
     'settings.slackTitle': 'Slack',
     'settings.slackDesc': 'Get notified about events (tasks, deals, invoices) in Slack.',
     'settings.connectSlack': 'Connect Slack',
-    'settings.slackNotConfigured': 'OAuth is not configured. Set SLACK_CLIENT_ID and SLACK_CLIENT_SECRET in the server .env.',
     'settings.slackConnectedTo': 'Connected to {team}',
     'settings.slackChannelHint': 'The notification channel is chosen in each project’s settings.',
     'settings.slackDisconnect': 'Disconnect',
@@ -70,18 +62,10 @@ extendDict({
   },
   uk: {
     'settings.integrationsDesc': 'Підключіть GitHub і Slack та надсилайте вихідні вебхуки.',
-    // Email
-    'settings.emailTitle': 'Пошта',
-    'settings.emailDesc': 'Запрошення, рахунки й нагадування надсилаються через SMTP із .env серверу.',
-    'settings.emailCheck': 'Перевірити зʼєднання',
-    'settings.emailOk': 'Підключено – вихідна пошта працює.',
-    'settings.emailFailed': 'Не вдалося досягти SMTP-сервера. Багато хостингів блокують вихідні SMTP-порти.',
-    'settings.emailNotConfigured': 'SMTP не налаштовано – задайте SMTP_URL у .env серверу.',
     // GitHub
     'settings.githubTitle': 'GitHub',
     'settings.githubDesc': 'Звʼяжіть репозиторії з проєктами – гілки та PR-и зʼявляться в задачах.',
     'settings.connectGithub': 'Підключити GitHub',
-    'settings.githubNotConfigured': 'OAuth не налаштовано. Задайте GITHUB_OAUTH_CLIENT_ID і GITHUB_OAUTH_CLIENT_SECRET у .env серверу.',
     'settings.advancedToken': 'Розширено: підключення через токен',
     'settings.connectedGithub': 'GitHub підключено.',
     'settings.repoLinkHint': 'Привʼязка репозиторіїв до проєкту – у налаштуваннях конкретного проєкту.',
@@ -96,7 +80,6 @@ extendDict({
     'settings.slackTitle': 'Slack',
     'settings.slackDesc': 'Отримуйте сповіщення про події (задачі, угоди, інвойси) у Slack.',
     'settings.connectSlack': 'Підключити Slack',
-    'settings.slackNotConfigured': 'OAuth не налаштовано. Задайте SLACK_CLIENT_ID і SLACK_CLIENT_SECRET у .env серверу.',
     'settings.slackConnectedTo': 'Підключено до {team}',
     'settings.slackChannelHint': 'Канал для сповіщень обирається в налаштуваннях кожного проєкту.',
     'settings.slackDisconnect': 'Відключити',
@@ -202,11 +185,10 @@ function GitHubCard() {
         )}
       </div>
 
-      {/* Not-configured setup note */}
+      {/* Credentials live here rather than in the server .env, so a workspace
+          owner can set up the OAuth app without shell access. */}
       {oauth.isSuccess && !configured && (
-        <div className="mt-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-          {t('settings.githubNotConfigured')}
-        </div>
+        <OAuthCredentials provider="github" callbackPath="/api/v1/integrations/git/oauth/callback" />
       )}
 
       {/* Existing connections */}
@@ -362,11 +344,8 @@ function SlackCard() {
         )}
       </div>
 
-      {/* Not configured – env setup note */}
       {status.isSuccess && !configured && (
-        <div className="mt-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-          {t('settings.slackNotConfigured')}
-        </div>
+        <OAuthCredentials provider="slack" callbackPath="/api/v1/integrations/slack/oauth/callback" />
       )}
 
       {/* Connected state */}
@@ -591,52 +570,5 @@ export function IntegrationsPanel() {
       <SlackCard />
       <WebhooksSection />
     </div>
-  );
-}
-
-/**
- * Outgoing mail status. Blocked SMTP ports are the usual reason invites and
- * invoices never arrive, and the symptom (nothing happens) gives no clue, so
- * the check is one click away.
- */
-function EmailCard() {
-  const t = useT();
-  const [state, setState] = useState<{ configured: boolean; ok: boolean; error?: string } | null>(null);
-  const [checking, setChecking] = useState(false);
-
-  const check = async () => {
-    setChecking(true);
-    try {
-      setState(await api.get<{ configured: boolean; ok: boolean; error?: string }>('/settings/email/health'));
-    } catch {
-      setState({ configured: true, ok: false, error: 'unknown' });
-    }
-    setChecking(false);
-  };
-
-  return (
-    <Card className="p-4">
-      <div className="flex items-start gap-3">
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-muted text-foreground">
-          <Mail size={18} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-semibold">{t('settings.emailTitle')}</div>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t('settings.emailDesc')}</p>
-          {state && (
-            <p className={cn('mt-2 text-xs', state.ok ? 'text-success' : 'text-destructive')}>
-              {!state.configured
-                ? t('settings.emailNotConfigured')
-                : state.ok
-                  ? t('settings.emailOk')
-                  : `${t('settings.emailFailed')} (${state.error})`}
-            </p>
-          )}
-        </div>
-        <Button size="sm" variant="outline" disabled={checking} onClick={() => void check()}>
-          {checking ? <Spinner /> : t('settings.emailCheck')}
-        </Button>
-      </div>
-    </Card>
   );
 }

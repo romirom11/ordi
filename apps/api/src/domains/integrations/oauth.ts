@@ -6,11 +6,12 @@
 import { timingSafeEqual } from 'node:crypto';
 import { env } from '../../env';
 import { hmacSha256 } from '../../lib/crypto';
+import { runtimeConfig } from '../../lib/runtime-config';
 
 const STATE_TTL_MS = 10 * 60_000; // 10 minutes
 
-export function githubOAuthConfigured(): boolean {
-  return Boolean(env.githubOAuthClientId && env.githubOAuthClientSecret);
+export async function githubOAuthConfigured(): Promise<boolean> {
+  return Boolean((await runtimeConfig()).github);
 }
 
 interface StatePayload { userId: string; exp: number }
@@ -44,9 +45,10 @@ export function githubCallbackUrl(): string {
   return `${env.apiUrl.replace(/\/$/, '')}/api/v1/integrations/git/oauth/callback`;
 }
 
-export function buildGithubAuthorizeUrl(state: string): string {
+export async function buildGithubAuthorizeUrl(state: string): Promise<string> {
+  const app = (await runtimeConfig()).github;
   const params = new URLSearchParams({
-    client_id: env.githubOAuthClientId,
+    client_id: app?.clientId ?? '',
     scope: 'repo',
     state,
     redirect_uri: githubCallbackUrl(),
@@ -56,12 +58,13 @@ export function buildGithubAuthorizeUrl(state: string): string {
 
 /** Exchange an OAuth code for an access token. Throws on failure. */
 export async function exchangeGithubCode(code: string): Promise<{ token: string; tokenType: string }> {
+  const app = (await runtimeConfig()).github;
   const res = await fetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({
-      client_id: env.githubOAuthClientId,
-      client_secret: env.githubOAuthClientSecret,
+      client_id: app?.clientId ?? '',
+      client_secret: app?.clientSecret ?? '',
       code,
       redirect_uri: githubCallbackUrl(),
     }),
@@ -80,8 +83,8 @@ export async function exchangeGithubCode(code: string): Promise<{ token: string;
 /** Bot scopes requested from Slack (read channels + post messages). */
 export const SLACK_SCOPES = 'channels:read,groups:read,chat:write';
 
-export function slackOAuthConfigured(): boolean {
-  return Boolean(env.slackClientId && env.slackClientSecret);
+export async function slackOAuthConfigured(): Promise<boolean> {
+  return Boolean((await runtimeConfig()).slack);
 }
 
 /** The redirect URL registered with the Slack app. */
@@ -89,9 +92,10 @@ export function slackCallbackUrl(): string {
   return `${env.apiUrl.replace(/\/$/, '')}/api/v1/integrations/slack/oauth/callback`;
 }
 
-export function buildSlackAuthorizeUrl(state: string): string {
+export async function buildSlackAuthorizeUrl(state: string): Promise<string> {
+  const app = (await runtimeConfig()).slack;
   const params = new URLSearchParams({
-    client_id: env.slackClientId,
+    client_id: app?.clientId ?? '',
     scope: SLACK_SCOPES,
     state,
     redirect_uri: slackCallbackUrl(),
@@ -108,12 +112,13 @@ export interface SlackConnectionResult {
 
 /** Exchange an OAuth code for a bot token via oauth.v2.access. Throws on failure. */
 export async function exchangeSlackCode(code: string): Promise<SlackConnectionResult> {
+  const app = (await runtimeConfig()).slack;
   const res = await fetch('https://slack.com/api/oauth.v2.access', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
-      client_id: env.slackClientId,
-      client_secret: env.slackClientSecret,
+      client_id: app?.clientId ?? '',
+      client_secret: app?.clientSecret ?? '',
       code,
       redirect_uri: slackCallbackUrl(),
     }).toString(),
