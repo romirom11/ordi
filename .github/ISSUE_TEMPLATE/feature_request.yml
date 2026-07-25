@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest something ordi should do
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you hitting
+      description: >
+        Describe the situation, not the solution. What are you trying to get done,
+        and where does ordi get in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+      description: Optional. If you already have a shape in mind, describe it.
+  - type: textarea
+    id: workaround
+    attributes:
+      label: How you handle it now
+      description: Another tool, a spreadsheet, doing it by hand – whatever it is.
+  - type: markdown
+    attributes:
+      value: |
+        ordi is opinionated by design and aims to stay simple for teams of 3 to 50.
+        Requests that fit one workflow but add complexity for everyone else may be
+        declined – that is not a judgement of the idea.

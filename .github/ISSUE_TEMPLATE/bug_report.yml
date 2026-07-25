@@ -1,0 +1,50 @@
+name: Bug report
+description: Something does not work the way it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security vulnerabilities do not go here – report them privately at
+        https://github.com/romirom11/ordi/security/advisories/new
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what happened, and what you expected instead.
+      placeholder: |
+        1. Opened a project
+        2. Switched to Settings and back to Overview
+        3. The page showed an error screen instead of the overview
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release tag, or commit if you build from source.
+      placeholder: v1.0.2
+    validations:
+      required: true
+  - type: dropdown
+    id: how
+    attributes:
+      label: How are you running ordi
+      options:
+        - Docker (docker compose)
+        - From source
+        - Desktop app
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: errors
+    attributes:
+      label: Errors
+      description: Browser console output or API logs, if there were any.
+      render: text
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: Screenshots, browser and OS, which modules you have enabled.

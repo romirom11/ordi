@@ -403,7 +403,8 @@ export function ContextMenu({ items, children, disabled, className }: {
 /* ───────────────────────── Toasts ───────────────────────── */
 
 export type ToastKind = 'success' | 'error' | 'info';
-interface Toast { id: number; kind: ToastKind; message: string; leaving?: boolean }
+interface ToastAction { label: string; onSelect: () => void }
+interface Toast { id: number; kind: ToastKind; message: string; action?: ToastAction; leaving?: boolean }
 
 let toastId = 0;
 let toasts: Toast[] = [];
@@ -425,6 +426,11 @@ export function toast(message: string, kind: ToastKind = 'success') {
 }
 toast.error = (m: string) => toast(m, 'error');
 toast.info = (m: string) => toast(m, 'info');
+/** A toast the user must act on – it stays until dismissed or acted upon. */
+toast.action = (message: string, action: ToastAction, kind: ToastKind = 'info') => {
+  toasts = [...toasts, { id: ++toastId, kind, message, action }];
+  emit();
+};
 
 const ICONS: Record<ToastKind, ReactNode> = {
   success: <CheckCircle2 size={15} className="text-success" />,
@@ -449,6 +455,14 @@ export function Toaster() {
         >
           <span className="mt-px shrink-0">{ICONS[t.kind]}</span>
           <span className="flex-1 leading-snug">{t.message}</span>
+          {t.action && (
+            <button
+              onClick={() => { t.action!.onSelect(); dismiss(t.id); }}
+              className="shrink-0 font-medium text-primary transition-colors hover:underline"
+            >
+              {t.action.label}
+            </button>
+          )}
           <button onClick={() => dismiss(t.id)} className="shrink-0 text-faint transition-colors hover:text-foreground"><X size={13} /></button>
         </div>
       ))}

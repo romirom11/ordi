@@ -35,6 +35,16 @@ export function setBadge(count: number): void {
 interface DesktopHandlers {
   onQuickAdd: () => void;
   onNavigate: (to: string) => void;
+  /** A newer version was downloaded and installed; it applies on restart. */
+  onUpdateReady: (version: string) => void;
+}
+
+/** Restart into the version staged by the updater. */
+export function restartDesktop(): void {
+  if (!isTauri) return;
+  try {
+    t()?.process?.relaunch?.();
+  } catch { /* plugin absent */ }
 }
 
 /** Resolve an ordi://task/KEY-42 deep link to an in-app route via search. */
@@ -63,6 +73,10 @@ export function initDesktop(handlers: DesktopHandlers): () => void {
       unlisteners.push(ev.listen('deep-link://new-url', (e: { payload: unknown }) => {
         const urls = Array.isArray(e?.payload) ? (e.payload as string[]) : [String(e?.payload ?? '')];
         for (const u of urls) void resolveDeepLink(u, handlers.onNavigate);
+      }));
+      // The Rust side stages updates on launch and announces the staged version.
+      unlisteners.push(ev.listen('ordi://update-ready', (e: { payload: unknown }) => {
+        handlers.onUpdateReady(String(e?.payload ?? ''));
       }));
     }
   } catch { /* best-effort */ }

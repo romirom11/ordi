@@ -552,6 +552,8 @@ const en: Dict = {
   'desktop.instanceUrl': 'Instance URL',
   'desktop.connect': 'Connect',
   'desktop.connectFailed': 'Could not reach this instance. Check the URL and try again.',
+  'desktop.updateReady': 'ordi {version} is installed and applies on restart.',
+  'desktop.restart': 'Restart',
 };
 
 const uk: Dict = {
@@ -1089,6 +1091,8 @@ const uk: Dict = {
   'desktop.instanceUrl': 'URL інстансу',
   'desktop.connect': 'Підключитися',
   'desktop.connectFailed': 'Не вдалося зʼєднатися з інстансом. Перевірте URL і спробуйте ще раз.',
+  'desktop.updateReady': 'ordi {version} встановлено, застосується після перезапуску.',
+  'desktop.restart': 'Перезапустити',
 };
 
 const DICTS: Record<Locale, Dict> = { en, uk };

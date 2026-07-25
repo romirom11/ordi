@@ -12,7 +12,7 @@ import { api, setSessionToken } from '../lib/api';
 import { useRealtime } from '../lib/sse';
 import { useT, extendDict } from '../lib/i18n';
 import { useTheme, type ThemePref } from '../lib/theme';
-import { initDesktop } from '../lib/desktop';
+import { initDesktop, restartDesktop } from '../lib/desktop';
 import { TabsProvider, useTabs } from '../lib/tabs';
 import { cn, Avatar, Kbd, Tooltip, IconButton } from './ui';
 import { ContextMenu, DropdownMenu, MenuItem, MenuSeparator, MenuLabel, Toaster, toast, type ContextMenuEntry } from './overlays';
@@ -153,7 +153,11 @@ function ShellInner({ children }: { children: ReactNode }) {
   useEffect(() => initDesktop({
     onQuickAdd: () => setQuickOpen(true),
     onNavigate: navigate,
-  }), [navigate]);
+    onUpdateReady: (version) => toast.action(
+      t('desktop.updateReady', 'Update installed').replace('{version}', version),
+      { label: t('desktop.restart'), onSelect: restartDesktop },
+    ),
+  }), [navigate, t]);
 
   // Keyboard scheme (PRD §17.1): ⌘K palette, C new task, T stop timer,
   // G then D/P/C/F/K/T/M navigation. (Tab shortcuts live in TabStrip.)

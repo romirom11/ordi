@@ -6,11 +6,29 @@
 
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{ShortcutState, GlobalShortcutExt};
+use tauri_plugin_updater::UpdaterExt;
+
+/// Look for a newer release and stage it in the background. The web layer is
+/// told once the update is installed so it can offer a restart; a failure here
+/// (offline, GitHub unreachable, no release yet) must stay silent.
+async fn stage_update(app: tauri::AppHandle) {
+    let updater = match app.updater() {
+        Ok(updater) => updater,
+        Err(_) => return,
+    };
+    if let Ok(Some(update)) = updater.check().await {
+        let version = update.version.clone();
+        if update.download_and_install(|_, _| {}, || {}).await.is_ok() {
+            let _ = app.emit("ordi://update-ready", version);
+        }
+    }
+}
 
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -38,6 +56,8 @@ fn main() {
             let _ = app
                 .global_shortcut()
                 .register("CommandOrControl+Shift+O");
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(stage_update(handle));
             Ok(())
         })
         .run(tauri::generate_context!())

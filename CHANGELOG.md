@@ -1,0 +1,34 @@
+# Changelog
+
+Release notes for each version live in [`docs/releases`](docs/releases) and are
+published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
+
+## v1.1.0
+
+- Desktop auto-update over GitHub releases: updates are signed, staged in the
+  background on launch, and applied on restart from an in-app prompt.
+- Desktop capabilities are declared explicitly, which fixes native notifications,
+  the taskbar badge, the global quick-add shortcut and `ordi://` deep links in
+  packaged builds.
+- The demo seed now creates a full agency workspace – a live project with a
+  sprint, labels, milestones and burn-up history, two clients with a deal
+  pipeline, invoices with ledger entries and payments, logged time with rates,
+  and a knowledge base.
+- Open-source release: AGPL-3.0, rewritten README, contributing and security
+  policies.
+
+## v1.0.2
+
+- Fixed a crash on the project page caused by two components storing different
+  shapes under the same query cache key, and added a CI guard for that class of
+  bug.
+- Project keys are suggested for Cyrillic names.
+
+## v1.0.1
+
+- Fixed the desktop app failing to connect to instances behind the standard
+  nginx deployment.
+
+## v1.0.0
+
+First release.

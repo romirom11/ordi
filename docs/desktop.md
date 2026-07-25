@@ -87,9 +87,36 @@ node scripts/gen-desktop-icons.mjs
 - **Релізні білди**: пуш тега `v*` → `.github/workflows/desktop.yml` →
   tauri-action збирає **macOS universal / Windows msi / Linux AppImage+deb**
   і кладе їх у draft-реліз GitHub.
-- **Підписаний updater**: секрети `TAURI_SIGNING_PRIVATE_KEY` і
-  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` у GitHub + реальний endpoint у
-  `tauri.conf.json → plugins.updater.endpoints` (зараз плейсхолдер).
+## 6a. Автооновлення
+
+Увімкнене і працює через GitHub-релізи:
+
+- `bundle.createUpdaterArtifacts: true` – tauri-action кладе в реліз підписані
+  артефакти оновлення разом із `latest.json`.
+- `plugins.updater.endpoints` вказує на
+  `https://github.com/romirom11/ordi/releases/latest/download/latest.json`
+  (працює, бо репозиторій публічний).
+- `plugins.updater.pubkey` – публічний ключ; приватний лежить у секреті
+  репозиторію `TAURI_SIGNING_PRIVATE_KEY` (без пароля, тому
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` порожній). Оновлення без валідного
+  підпису застосунок відхиляє.
+- Потік: на старті Rust (`stage_update` у `src/main.rs`) фоново перевіряє
+  оновлення, завантажує і встановлює його, після чого емітить подію
+  `ordi://update-ready`. Веб-шар показує тост із кнопкою «Перезапустити»,
+  яка викликає `process.relaunch()`.
+
+Ротація ключа: `pnpm --filter @ordi/desktop exec tauri signer generate`,
+новий публічний ключ у `tauri.conf.json`, новий приватний – у секрет.
+Клієнти зі старим ключем перестануть приймати оновлення, тому нову версію
+доведеться поставити вручну.
+
+## 6b. Дозволи (capabilities)
+
+Tauri 2 не дає веб-шару нічого без capability-файлу, тому
+`src-tauri/capabilities/default.json` явно дозволяє: `core:default` (події),
+`core:window:allow-set-badge-count` (бейдж), `notification:default`,
+`updater:default`, `process:allow-restart`, `deep-link:default`. Без цього
+файлу нативні сповіщення, бейдж і deep links мовчки не працюють.
 
 ## 7. Статус верифікації
 
