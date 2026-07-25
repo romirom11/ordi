@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import { ulid } from 'ulid';
 import type { AppEnv } from './context';
@@ -35,6 +35,15 @@ import { peopleRoutes } from './domains/people/routes';
 import { integrationsRoutes } from './domains/integrations/routes';
 import { publicRoutes } from './domains/public/routes';
 
+async function readyz(c: Context) {
+  try {
+    await getDb().db.execute(sql`select 1`);
+    return c.json({ status: 'ready' });
+  } catch {
+    return c.json({ status: 'not_ready' }, 503);
+  }
+}
+
 export function createApp() {
   const app = new Hono<AppEnv>();
 
@@ -52,16 +61,12 @@ export function createApp() {
 
   app.onError((e, c) => handleError(e, c));
 
-  // Health (PRD §19.2)
+  // Health (PRD §19.2). Also exposed under /api/v1 so it is reachable through
+  // web proxies that forward only /api/* – the desktop instance gate uses that.
   app.get('/healthz', (c) => c.json({ status: 'ok' }));
-  app.get('/readyz', async (c) => {
-    try {
-      await getDb().db.execute(sql`select 1`);
-      return c.json({ status: 'ready' });
-    } catch {
-      return c.json({ status: 'not_ready' }, 503);
-    }
-  });
+  app.get('/api/v1/healthz', (c) => c.json({ status: 'ok' }));
+  app.get('/readyz', (c) => readyz(c));
+  app.get('/api/v1/readyz', (c) => readyz(c));
 
   // Public routes (no auth): invoices/quotes/portal/intake/careers/git webhooks.
   // Mounted twice: at the root (direct API access) and under /api/v1, because the

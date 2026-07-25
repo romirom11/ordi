@@ -43,15 +43,37 @@ function InstanceGate() {
     setError(null);
     setChecking(true);
     const clean = url.replace(/\/+$/, '');
-    try {
-      const res = await fetch(`${clean}/healthz`, { signal: AbortSignal.timeout(8000) });
-      if (!res.ok) throw new Error(String(res.status));
-      setInstanceUrl(clean);
-      window.location.reload();
-    } catch {
-      setError(t('desktop.connectFailed'));
-      setChecking(false);
+    // Probe through the /api/ prefix – deployments route only /api/* to the
+    // API service, so a root /healthz would hit the SPA fallback instead
+    // (and, served as CORS-less static HTML, fail from the tauri:// origin).
+    // The openapi fallback keeps older API versions without /api/v1/healthz
+    // connectable.
+    const probes = [
+      async () => {
+        const res = await fetch(`${clean}/api/v1/healthz`, { signal: AbortSignal.timeout(8000) });
+        if (!res.ok) throw new Error(String(res.status));
+        const body = (await res.json()) as { status?: string };
+        if (body.status !== 'ok') throw new Error('not an ordi instance');
+      },
+      async () => {
+        const res = await fetch(`${clean}/api/docs/openapi.json`, { signal: AbortSignal.timeout(8000) });
+        if (!res.ok) throw new Error(String(res.status));
+        const body = (await res.json()) as { openapi?: string };
+        if (!body.openapi) throw new Error('not an ordi instance');
+      },
+    ];
+    for (const probe of probes) {
+      try {
+        await probe();
+        setInstanceUrl(clean);
+        window.location.reload();
+        return;
+      } catch {
+        // try the next probe
+      }
     }
+    setError(t('desktop.connectFailed'));
+    setChecking(false);
   };
 
   return (

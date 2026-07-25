@@ -31,7 +31,16 @@ export const env = {
     secretKey: process.env.S3_SECRET_KEY ?? '',
     region: process.env.S3_REGION ?? 'auto',
   },
-  corsOrigins: (process.env.CORS_ORIGINS ?? 'http://localhost:5173,tauri://localhost').split(','),
+  // Desktop (Tauri) origins are always allowed on top of the configured list –
+  // the desktop app authenticates with bearer tokens, and forgetting them in
+  // CORS_ORIGINS would silently lock every desktop client out.
+  corsOrigins: [
+    ...new Set([
+      ...(process.env.CORS_ORIGINS ?? 'http://localhost:5173').split(','),
+      'tauri://localhost',
+      'http://tauri.localhost',
+    ]),
+  ],
   /** disable workers (e.g. in tests) */
   workersEnabled: process.env.WORKERS_ENABLED !== 'false',
 };
