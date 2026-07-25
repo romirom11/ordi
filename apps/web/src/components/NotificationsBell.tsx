@@ -9,12 +9,57 @@ import {
   Bell, Inbox, CheckSquare, AtSign, Receipt, CalendarRange, FileCheck2, BookText, CheckCheck,
 } from 'lucide-react';
 import { api } from '../lib/api';
-import { useT } from '../lib/i18n';
+import { useNavigate } from '../lib/router';
+import { useT, extendDict } from '../lib/i18n';
 import { setBadge } from '../lib/desktop';
 import { cn, fmtRelative } from './ui';
 import { ContextMenu } from './overlays';
 
+extendDict({
+  en: {
+    'notif.task.assigned': 'Task assigned to you',
+    'notif.task.status_changed': 'Task status changed',
+    'notif.comment.mentioned': 'You were mentioned',
+    'notif.page.mentioned': 'You were mentioned on a page',
+    'notif.invoice.paid': 'Invoice paid',
+    'notif.payment.recorded': 'Payment recorded',
+    'notif.quote.accepted': 'Quote accepted',
+    'notif.leave.requested': 'Leave request pending',
+    'notif.leave.decided': 'Leave request decided',
+    'notif.git.pr_merged': 'Pull request merged',
+  },
+  uk: {
+    'notif.task.assigned': 'Вам призначено задачу',
+    'notif.task.status_changed': 'Змінено статус задачі',
+    'notif.comment.mentioned': 'Вас згадали',
+    'notif.page.mentioned': 'Вас згадали на сторінці',
+    'notif.invoice.paid': 'Рахунок оплачено',
+    'notif.payment.recorded': 'Зафіксовано оплату',
+    'notif.quote.accepted': 'Кошторис прийнято',
+    'notif.leave.requested': 'Запит на відпустку',
+    'notif.leave.decided': 'Рішення щодо відпустки',
+    'notif.git.pr_merged': 'Пулреквест злито',
+  },
+});
+
 interface Notif { id: string; type: string; entityRef: string | null; payload: Record<string, unknown>; readAt: string | null; createdAt: string }
+
+/** Deep link for a notification, mirroring the server-side email links. */
+function notifLink(n: Notif): string | null {
+  const p = n.payload ?? {};
+  const projectId = p.projectId as string | undefined;
+  const taskId = (p.taskId as string | undefined) ?? (p.id as string | undefined);
+  if (n.type.startsWith('task.') || n.type === 'comment.mentioned') {
+    return projectId && taskId ? `/projects/${projectId}/tasks/${taskId}` : '/my-tasks';
+  }
+  if (n.type === 'page.mentioned' && p.spaceId && p.pageId) return `/kb/${p.spaceId as string}/${p.pageId as string}`;
+  if (n.type === 'invoice.paid' || n.type === 'payment.recorded') {
+    return p.invoiceId ? `/finance/invoices/${p.invoiceId as string}` : '/finance';
+  }
+  if (n.type === 'quote.accepted') return '/finance';
+  if (n.type.startsWith('leave.')) return '/people';
+  return null;
+}
 
 /** Icon per notification type family. */
 function notifIcon(type: string): ReactNode {
@@ -30,6 +75,7 @@ function notifIcon(type: string): ReactNode {
 export function NotificationsBell() {
   const t = useT();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const { data } = useQuery({
@@ -100,23 +146,33 @@ export function NotificationsBell() {
                 <span className="text-[13px]">{t('common.nothingYet')}</span>
               </div>
             )}
-            {(data?.data ?? []).map((n, i) => (
-              <div
-                key={n.id}
-                className={cn('row-enter flex items-start gap-2.5 rounded-md px-2 py-2 transition-colors duration-150 hover:bg-muted', n.readAt && 'opacity-55')}
-                style={{ ['--i' as string]: Math.min(i, 8) }}
-              >
-                <span className="relative mt-px grid h-6 w-6 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
-                  {notifIcon(n.type)}
-                  {!n.readAt && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-primary ring-2 ring-elevated" />}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13px] font-medium capitalize">{n.type.replace(/[._]/g, ' ')}</div>
-                  {n.entityRef && <div className="truncate font-mono text-[11px] text-muted-foreground">{n.entityRef}</div>}
-                </div>
-                <span className="shrink-0 pt-px text-[11px] tabular-nums text-faint">{fmtRelative(n.createdAt)}</span>
-              </div>
-            ))}
+            {(data?.data ?? []).map((n, i) => {
+              const to = notifLink(n);
+              return (
+                <button
+                  key={n.id}
+                  type="button"
+                  disabled={!to}
+                  onClick={() => { if (to) { setOpen(false); navigate(to); } }}
+                  className={cn(
+                    'row-enter flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left transition-colors duration-150 hover:bg-muted',
+                    n.readAt && 'opacity-55',
+                    !to && 'cursor-default',
+                  )}
+                  style={{ ['--i' as string]: Math.min(i, 8) }}
+                >
+                  <span className="relative mt-px grid h-6 w-6 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
+                    {notifIcon(n.type)}
+                    {!n.readAt && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-primary ring-2 ring-elevated" />}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[13px] font-medium">{t(`notif.${n.type}`, n.type.replace(/[._]/g, ' '))}</div>
+                    {n.entityRef && <div className="truncate font-mono text-[11px] text-muted-foreground">{n.entityRef}</div>}
+                  </div>
+                  <span className="shrink-0 pt-px text-[11px] tabular-nums text-faint">{fmtRelative(n.createdAt)}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}

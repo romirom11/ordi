@@ -43,7 +43,7 @@ extendDict({
     'finance.status.overdue': 'Прострочено',
     'finance.status.accepted': 'Прийнято',
     'finance.status.declined': 'Відхилено',
-    'finance.status.expired': 'Прострочено (пропозиція)',
+    'finance.status.expired': 'Термін минув',
     'finance.status.open': 'Відкрито',
     'finance.openInNewTab': 'Відкрити в новій вкладці',
     'finance.copyLink': 'Скопіювати посилання',
@@ -401,7 +401,7 @@ function InvoicesView() {
       <div className="mb-4 flex items-center gap-3">
         <Select value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">{t('common.allStatuses')}</option>
-          {['draft', 'sent', 'viewed', 'partially_paid', 'paid', 'canceled'].map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
+          {['draft', 'sent', 'viewed', 'partially_paid', 'paid', 'canceled'].map((s) => <option key={s} value={s}>{t(`finance.status.${s}`, s.replace('_', ' '))}</option>)}
         </Select>
         {can('finance.write') && <Button size="sm" className="ml-auto" onClick={() => setShowForm(true)}><Plus size={14} /> {t('finance.newInvoice')}</Button>}
       </div>
@@ -446,7 +446,7 @@ function QuotesView() {
       <div className="mb-4 flex items-center gap-3">
         <Select value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">{t('common.allStatuses')}</option>
-          {['draft', 'sent', 'viewed', 'accepted', 'declined', 'expired'].map((s) => <option key={s} value={s}>{s}</option>)}
+          {['draft', 'sent', 'viewed', 'accepted', 'declined', 'expired'].map((s) => <option key={s} value={s}>{t(`finance.status.${s}`, s)}</option>)}
         </Select>
         {can('finance.write') && <Button size="sm" className="ml-auto" onClick={() => setShowForm(true)}><Plus size={14} /> {t('finance.newQuote')}</Button>}
       </div>

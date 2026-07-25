@@ -130,6 +130,8 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
   const t = useT();
   const qc = useQueryClient();
   const titleRef = useRef<HTMLInputElement>(null);
+  const submitting = useRef(false);
+  const submitRef = useRef<() => void>(() => {});
 
   const [projectId, setProjectId] = useState('');
   const [statusId, setStatusId] = useState('');
@@ -231,9 +233,29 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
       }
     },
     onError: (e: Error) => toast.error(e instanceof ApiError ? e.message : t('tasks.createFailed')),
+    onSettled: () => { submitting.current = false; },
   });
   const canCreate = parsed.title.trim() !== '' && !!projectId && !create.isPending;
-  const submit = () => { if (canCreate) create.mutate(); };
+  // `isPending` only flips on the next render, so two Cmd+Enter handlers firing in
+  // the same tick (rich editor + shortcut) used to create the task twice.
+  const submit = () => {
+    if (!canCreate || submitting.current) return;
+    submitting.current = true;
+    create.mutate();
+  };
+  submitRef.current = submit;
+
+  // The chip menus (status, assignee, due date…) unmount on close and drop focus
+  // to <body>, where a React onKeyDown inside the dialog never sees the event –
+  // so the shortcut lives on the window while the composer is open.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submitRef.current(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
 
   const selectedLabels = labels.filter((l) => labelIds.includes(l.id));
   const selectedUsers = users.filter((u) => assigneeIds.includes(u.id));
@@ -242,9 +264,6 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
   return (
     <Dialog open={open} onClose={onClose} title={t('tasks.newTask')} width={640}>
       <div
-        onKeyDown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submit(); }
-        }}
         onMouseDown={(e) => {
           // Dialog stops mousedown propagation, so DropdownMenu's document-level
           // outside-click handler never fires for clicks inside the dialog.

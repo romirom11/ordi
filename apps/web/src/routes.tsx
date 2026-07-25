@@ -1,4 +1,5 @@
-import { Routes, type RouteDef } from './lib/router';
+import { Routes, usePathname, type RouteDef } from './lib/router';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { DashboardPage } from './pages/Dashboard';
 import { MyTasksPage } from './pages/MyTasks';
 import { CompanyDetailPage } from './pages/CompanyDetail';
@@ -16,34 +17,41 @@ import { SettingsPage } from './pages/Settings';
 import { DashboardsPage } from './pages/Dashboards';
 import { ResourcingPage } from './pages/Resourcing';
 import { ProfilePage } from './pages/Profile';
+import { ModuleGate } from './components/ModuleGate';
 
 const routes: RouteDef[] = [
   { pattern: '/', render: () => <DashboardPage /> },
   { pattern: '/my-tasks', render: () => <MyTasksPage /> },
-  { pattern: '/crm', render: () => <CrmPage /> },
-  { pattern: '/crm/:tab', render: (p) => <CrmPage tab={p.tab} /> },
-  { pattern: '/companies', render: () => <CrmPage tab="clients" /> },
-  { pattern: '/companies/:id', render: (p) => <CompanyDetailPage id={p.id!} /> },
-  { pattern: '/deals', render: () => <CrmPage tab="deals" /> },
+  { pattern: '/crm', render: () => <ModuleGate module="crm"><CrmPage /></ModuleGate> },
+  { pattern: '/crm/:tab', render: (p) => <ModuleGate module="crm"><CrmPage tab={p.tab} /></ModuleGate> },
+  { pattern: '/companies', render: () => <ModuleGate module="crm"><CrmPage tab="clients" /></ModuleGate> },
+  { pattern: '/companies/:id', render: (p) => <ModuleGate module="crm"><CompanyDetailPage id={p.id!} /></ModuleGate> },
+  { pattern: '/deals', render: () => <ModuleGate module="crm"><CrmPage tab="deals" /></ModuleGate> },
   { pattern: '/projects', render: () => <ProjectsPage /> },
   { pattern: '/projects/:id', render: (p) => <ProjectDetailPage id={p.id!} /> },
   { pattern: '/projects/:id/tasks/:taskId', render: (p) => <TaskPage projectId={p.id!} taskId={p.taskId!} /> },
-  { pattern: '/kb', render: () => <KbPage /> },
-  { pattern: '/kb/:spaceId', render: (p) => <KbPage spaceId={p.spaceId} /> },
-  { pattern: '/kb/:spaceId/:pageId', render: (p) => <KbPage spaceId={p.spaceId} pageId={p.pageId} /> },
-  { pattern: '/time', render: () => <TimePage /> },
-  { pattern: '/finance', render: () => <FinancePage /> },
-  { pattern: '/finance/invoices/:id', render: (p) => <InvoiceDetailPage id={p.id!} /> },
-  { pattern: '/people', render: () => <PeoplePage /> },
-  { pattern: '/people/:id', render: (p) => <EmployeePage id={p.id!} /> },
+  { pattern: '/kb', render: () => <ModuleGate module="kb"><KbPage /></ModuleGate> },
+  { pattern: '/kb/:spaceId', render: (p) => <ModuleGate module="kb"><KbPage spaceId={p.spaceId} /></ModuleGate> },
+  { pattern: '/kb/:spaceId/:pageId', render: (p) => <ModuleGate module="kb"><KbPage spaceId={p.spaceId} pageId={p.pageId} /></ModuleGate> },
+  { pattern: '/time', render: () => <ModuleGate module="time"><TimePage /></ModuleGate> },
+  { pattern: '/finance', render: () => <ModuleGate module="finance"><FinancePage /></ModuleGate> },
+  { pattern: '/finance/invoices/:id', render: (p) => <ModuleGate module="finance"><InvoiceDetailPage id={p.id!} /></ModuleGate> },
+  { pattern: '/people', render: () => <ModuleGate module="people"><PeoplePage /></ModuleGate> },
+  { pattern: '/people/:id', render: (p) => <ModuleGate module="people"><EmployeePage id={p.id!} /></ModuleGate> },
   { pattern: '/settings', render: () => <SettingsPage /> },
   { pattern: '/settings/:section', render: (p) => <SettingsPage section={p.section} /> },
-  { pattern: '/dashboards', render: () => <DashboardsPage /> },
-  { pattern: '/dashboards/:id', render: (p) => <DashboardsPage id={p.id} /> },
-  { pattern: '/resourcing', render: () => <ResourcingPage /> },
+  { pattern: '/dashboards', render: () => <ModuleGate module="dashboards"><DashboardsPage /></ModuleGate> },
+  { pattern: '/dashboards/:id', render: (p) => <ModuleGate module="dashboards"><DashboardsPage id={p.id} /></ModuleGate> },
+  { pattern: '/resourcing', render: () => <ModuleGate module="resourcing"><ResourcingPage /></ModuleGate> },
   { pattern: '/profile', render: () => <ProfilePage /> },
 ];
 
 export function AppRoutes() {
-  return <Routes routes={routes} />;
+  // Keyed by pathname so a crash on one page doesn't poison the next route.
+  const path = usePathname();
+  return (
+    <ErrorBoundary key={path}>
+      <Routes routes={routes} />
+    </ErrorBoundary>
+  );
 }

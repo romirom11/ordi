@@ -152,12 +152,14 @@ export async function getInvoiceRow(id: string) {
 export async function getInvoice(id: string) {
   const { db } = getDb();
   const inv = await getInvoiceRow(id);
-  const [items, pays, credits] = await Promise.all([
+  const [items, pays, credits, company] = await Promise.all([
     db.select().from(schema.invoiceItems).where(eq(schema.invoiceItems.invoiceId, id)).orderBy(schema.invoiceItems.position),
     db.select().from(schema.payments).where(eq(schema.payments.invoiceId, id)).orderBy(desc(schema.payments.date)),
     db.select().from(schema.creditNotes).where(eq(schema.creditNotes.invoiceId, id)).orderBy(desc(schema.creditNotes.date)),
+    db.select({ name: schema.companies.name }).from(schema.companies).where(eq(schema.companies.id, inv.companyId)),
   ]);
-  return { ...withOverdue(inv), items, payments: pays, creditNotes: credits };
+  // companyName mirrors the list endpoint so the detail header can name the client.
+  return { ...withOverdue(inv), companyName: company[0]?.name ?? null, items, payments: pays, creditNotes: credits };
 }
 
 export async function createInvoice(actor: Actor, input: any) {

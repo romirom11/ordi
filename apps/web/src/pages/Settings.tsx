@@ -122,7 +122,7 @@ extendDict({
     'settings.backToRoles': 'Усі ролі',
     'settings.member': 'учасник',
     'settings.members': 'учасників',
-    'settings.invoices': 'Інвойси',
+    'settings.invoices': 'Рахунки',
     'settings.saveFailed': 'Не вдалося зберегти зміни',
     'settings.conflict': 'Хтось інший вніс зміни – завантажено найновіше.',
     // Permission catalog (labels come from the shared package in English).

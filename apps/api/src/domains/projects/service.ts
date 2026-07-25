@@ -16,6 +16,7 @@ import { emit } from '../../core/events';
 import { assertVersion } from '../../core/locking';
 import { assertProject, accessibleProjectIds } from '../../core/access';
 import { buildCustomFieldFilter } from '../../core/customfields';
+import { extractMentions } from '../kb/service';
 import { encrypt, generateToken } from '../../lib/crypto';
 import { queueEmail } from '../../lib/email';
 import { asLocale, loadBranding, renderEmail, tr } from '../../lib/email-templates';
@@ -417,9 +418,9 @@ export async function createTask(actor: Actor, input: any) {
 
   const task = await loadTask(id);
   const ref = await taskRef(task);
-  await emit({ type: 'task.created', aggregateType: 'task', aggregateId: id, payload: { ref, projectId: input.projectId }, actorId: actor.userId, actorType: actor.actorType });
+  await emit({ type: 'task.created', aggregateType: 'task', aggregateId: id, payload: { ref, taskId: id, projectId: input.projectId }, actorId: actor.userId, actorType: actor.actorType });
   if (assigneeIds.length) {
-    await emit({ type: 'task.assigned', aggregateType: 'task', aggregateId: id, payload: { assigneeIds, ref, projectId: input.projectId }, actorId: actor.userId, actorType: actor.actorType });
+    await emit({ type: 'task.assigned', aggregateType: 'task', aggregateId: id, payload: { assigneeIds, ref, taskId: id, projectId: input.projectId }, actorId: actor.userId, actorType: actor.actorType });
   }
   await writeActivity(db, { entityType: 'task', entityId: id, action: 'created', after: input, actorId: actor.userId, actorType: actor.actorType });
   return { ...task, ref };
@@ -507,10 +508,10 @@ export async function updateTask(actor: Actor, id: string, input: any) {
 
   const ref = await taskRef(before);
   if (input.statusId !== undefined && input.statusId !== before.statusId) {
-    await emit({ type: 'task.status_changed', aggregateType: 'task', aggregateId: id, payload: { ref, assigneeIds: finalAssignees, createdBy: before.createdBy, projectId: before.projectId }, actorId: actor.userId, actorType: actor.actorType });
+    await emit({ type: 'task.status_changed', aggregateType: 'task', aggregateId: id, payload: { ref, taskId: id, assigneeIds: finalAssignees, createdBy: before.createdBy, projectId: before.projectId }, actorId: actor.userId, actorType: actor.actorType });
   }
   if (newAssignees.length) {
-    await emit({ type: 'task.assigned', aggregateType: 'task', aggregateId: id, payload: { assigneeIds: newAssignees, ref, projectId: before.projectId }, actorId: actor.userId, actorType: actor.actorType });
+    await emit({ type: 'task.assigned', aggregateType: 'task', aggregateId: id, payload: { assigneeIds: newAssignees, ref, taskId: id, projectId: before.projectId }, actorId: actor.userId, actorType: actor.actorType });
   }
   await writeActivity(db, { entityType: 'task', entityId: id, action: 'updated', before, after: patch, actorId: actor.userId, actorType: actor.actorType });
   const task = await loadTask(id);
@@ -627,10 +628,20 @@ export async function addComment(actor: Actor, taskId: string, input: any) {
   await assertProject(actor, task.projectId, 'member');
   const id = ulid();
   await db.insert(schema.comments).values({ id, taskId, authorId: actor.userId, body: input.body ?? {} });
-  const mentions: string[] = input.mentions ?? [];
+  // Mentions come from the explicit list plus any parsed out of the comment body,
+  // so a client that only sends the tiptap doc still notifies the mentioned users.
+  const mentions = [...new Set<string>([...(input.mentions ?? []), ...extractMentions(input.body).users])]
+    .filter((u) => u !== actor.userId);
   if (mentions.length) {
     const ref = await taskRef(task);
-    await emit({ type: 'comment.mentioned', aggregateType: 'comment', aggregateId: id, payload: { mentions, ref }, actorId: actor.userId, actorType: actor.actorType });
+    await emit({
+      type: 'comment.mentioned',
+      aggregateType: 'comment',
+      aggregateId: id,
+      payload: { mentions, ref, taskId, projectId: task.projectId, commentId: id },
+      actorId: actor.userId,
+      actorType: actor.actorType,
+    });
   }
   await writeActivity(db, { entityType: 'comment', entityId: id, action: 'created', actorId: actor.userId, actorType: actor.actorType });
   return { id };

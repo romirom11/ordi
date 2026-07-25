@@ -30,6 +30,10 @@ extendDict({
     'finance.status.canceled': 'Canceled',
     'finance.paymentDetails': 'Payment details',
     'finance.notes': 'Notes',
+    'finance.method.bank': 'Bank transfer',
+    'finance.method.card': 'Card',
+    'finance.method.cash': 'Cash',
+    'finance.method.other': 'Other',
   },
   uk: {
     'finance.timeline': 'Хронологія',
@@ -51,6 +55,10 @@ extendDict({
     'finance.status.canceled': 'Скасовано',
     'finance.paymentDetails': 'Реквізити для оплати',
     'finance.notes': 'Примітки',
+    'finance.method.bank': 'Банківський переказ',
+    'finance.method.card': 'Картка',
+    'finance.method.cash': 'Готівка',
+    'finance.method.other': 'Інше',
   },
 });
 
@@ -317,7 +325,7 @@ export function InvoiceDetailPage({ id }: { id: string }) {
             <div className="col-span-2 space-y-1">
               <label className="text-xs font-medium text-muted-foreground">{t('finance.method')}</label>
               <Select value={pay.method} onChange={(e) => setPay((p) => ({ ...p, method: e.target.value }))} className="block w-full">
-                {['bank', 'card', 'cash', 'other'].map((m) => <option key={m} value={m}>{m}</option>)}
+                {['bank', 'card', 'cash', 'other'].map((m) => <option key={m} value={m}>{t(`finance.method.${m}`)}</option>)}
               </Select>
             </div>
           </div>

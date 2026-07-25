@@ -6,7 +6,9 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowRight, Building2, FileText, Receipt, Search, SquareCheck } from 'lucide-react';
+import type { ModuleKey } from '@ordi/shared';
 import { api, qs } from '../lib/api';
+import { useModules } from './ModuleGate';
 import { Kbd, Spinner, cn } from './ui';
 import { useT, extendDict } from '../lib/i18n';
 
@@ -38,20 +40,29 @@ extendDict({
 interface SearchResult { id: string; title: string; kind: string; url: string }
 
 /** Static navigation commands so "⌘K → finance → ↵" jumps straight to a section. */
-const NAV_COMMANDS: { labelKey: string; to: string }[] = [
+const NAV_COMMANDS: { labelKey: string; to: string; module?: ModuleKey }[] = [
   { labelKey: 'nav.dashboard', to: '/' },
   { labelKey: 'nav.myTasks', to: '/my-tasks' },
   { labelKey: 'nav.projects', to: '/projects' },
-  { labelKey: 'nav.crm', to: '/crm' },
-  { labelKey: 'nav.knowledge', to: '/kb' },
-  { labelKey: 'nav.time', to: '/time' },
-  { labelKey: 'nav.finance', to: '/finance' },
-  { labelKey: 'nav.people', to: '/people' },
-  { labelKey: 'nav.resourcing', to: '/resourcing' },
-  { labelKey: 'nav.dashboards', to: '/dashboards' },
+  { labelKey: 'nav.crm', to: '/crm', module: 'crm' },
+  { labelKey: 'nav.knowledge', to: '/kb', module: 'kb' },
+  { labelKey: 'nav.time', to: '/time', module: 'time' },
+  { labelKey: 'nav.finance', to: '/finance', module: 'finance' },
+  { labelKey: 'nav.people', to: '/people', module: 'people' },
+  { labelKey: 'nav.resourcing', to: '/resourcing', module: 'resourcing' },
+  { labelKey: 'nav.dashboards', to: '/dashboards', module: 'dashboards' },
   { labelKey: 'nav.settings', to: '/settings' },
   { labelKey: 'nav.profile', to: '/profile' },
 ];
+
+/** Search hits that belong to a module the workspace switched off are dropped. */
+const KIND_MODULE: Record<string, ModuleKey> = {
+  company: 'crm',
+  deal: 'crm',
+  invoice: 'finance',
+  quote: 'finance',
+  page: 'kb',
+};
 
 const KIND_ICON: Record<string, ReactNode> = {
   task: <SquareCheck size={15} className="text-primary" />,
@@ -64,6 +75,7 @@ export function CommandPalette({ open, onClose, onNavigate }: {
   open: boolean; onClose: () => void; onNavigate: (to: string) => void;
 }) {
   const t = useT();
+  const { enabled } = useModules();
   const [q, setQ] = useState('');
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
@@ -73,11 +85,13 @@ export function CommandPalette({ open, onClose, onNavigate }: {
     queryFn: () => api.get<{ data: SearchResult[] }>('/search' + qs({ q })),
     enabled: open && q.length > 1,
   });
-  const results = q.length > 1 ? data?.data ?? [] : [];
+  const results = (q.length > 1 ? data?.data ?? [] : [])
+    .filter((r) => { const m = KIND_MODULE[r.kind]; return !m || enabled(m); });
 
   // Navigation commands matched client-side against the localized labels.
   const navMatches = q.trim().length > 0
-    ? NAV_COMMANDS.filter((c) => t(c.labelKey).toLowerCase().includes(q.trim().toLowerCase()))
+    ? NAV_COMMANDS.filter((c) => (!c.module || enabled(c.module))
+      && t(c.labelKey).toLowerCase().includes(q.trim().toLowerCase()))
     : [];
   const totalCount = navMatches.length + results.length;
 

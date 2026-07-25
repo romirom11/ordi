@@ -17,6 +17,10 @@ extendDict({
     'dashboards.widgetDeleted': 'Widget deleted',
     'dashboards.widgetAdded': 'Widget added',
     'dashboards.dashboardCreated': 'Dashboard created',
+    'dashboards.widgetsFew': 'widgets',
+    'dashboards.src.tasks': 'Tasks',
+    'dashboards.src.invoices': 'Invoices',
+    'dashboards.src.deals': 'Deals',
   },
   uk: {
     'dashboards.widgetsLabel': 'віджетів',
@@ -25,6 +29,10 @@ extendDict({
     'dashboards.widgetDeleted': 'Віджет видалено',
     'dashboards.widgetAdded': 'Віджет додано',
     'dashboards.dashboardCreated': 'Дашборд створено',
+    'dashboards.widgetsFew': 'віджети',
+    'dashboards.src.tasks': 'Задачі',
+    'dashboards.src.invoices': 'Рахунки',
+    'dashboards.src.deals': 'Угоди',
   },
 });
 
@@ -52,6 +60,15 @@ export function DashboardsPage({ id }: { id?: string }) {
   return id ? <DashboardDetailView id={id} /> : <DashboardListView />;
 }
 
+/** Slavic plural buckets: 1 віджет · 2-4 віджети · 5+ віджетів (English collapses to two). */
+function pluralKey(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'dashboards.widget';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'dashboards.widgetsFew';
+  return 'dashboards.widgetsLabel';
+}
+
 /** Extra request per card (same pattern as ProjectProgress in Projects.tsx) – the list
  * endpoint doesn't include widgets, but the detail endpoint (shared cache key) does. */
 function DashboardCardMeta({ id }: { id: string }) {
@@ -65,7 +82,7 @@ function DashboardCardMeta({ id }: { id: string }) {
   return (
     <span className="inline-flex items-center gap-1 tabular-nums">
       <LayoutGrid size={12} />
-      {q.isLoading ? '–' : `${n} ${t('dashboards.widgetsLabel')}`}
+      {q.isLoading ? '–' : `${n} ${t(pluralKey(n))}`}
     </span>
   );
 }
@@ -326,6 +343,18 @@ function DashboardDetailView({ id }: { id: string }) {
   );
 }
 
+/**
+ * Group keys come back as raw enum values (`partially_paid`, `urgent`). Reuse the
+ * translations the finance and task pages already register, and fall back to a
+ * humanised form so a free-text groupBy never shows snake_case.
+ */
+function pointLabel(t: (k: string, f?: string) => string, source: string | undefined, key: string): string {
+  const humanized = key.replace(/_/g, ' ');
+  if (source === 'invoices' || source === 'deals') return t(`finance.status.${key}`, humanized);
+  if (source === 'tasks') return t(`task.priority.${key}`, humanized);
+  return humanized;
+}
+
 function WidgetCard({ dashboardId, widget, index, deleting, onDelete }: {
   dashboardId: string; widget: Widget; index: number; deleting: boolean; onDelete: () => void;
 }) {
@@ -345,12 +374,13 @@ function WidgetCard({ dashboardId, widget, index, deleting, onDelete }: {
     },
   });
 
+  const sourceLabel = widget.source ? t(`dashboards.src.${widget.source}`, widget.source) : widget.widgetType;
   const title = widget.config?.groupBy
-    ? `${widget.source ?? ''} by ${widget.config.groupBy}`.trim()
-    : widget.source ?? widget.widgetType;
+    ? `${sourceLabel} · ${widget.config.groupBy}`
+    : sourceLabel;
 
   const points: { key: string; value: number }[] = (data.data?.data ?? []).map((p) => ({
-    key: p.key != null && p.key !== '' ? String(p.key) : '–',
+    key: p.key != null && p.key !== '' ? pointLabel(t, widget.source, String(p.key)) : '–',
     value: Number(p.value ?? 0),
   }));
   const forbidden = (data.data as { forbidden?: boolean } | undefined)?.forbidden === true;

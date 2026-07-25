@@ -27,6 +27,10 @@ function invalidateFor(qc: QueryClient, type: string, data: any): void {
     if (data?.projectId) inv(['tasks', data.projectId]);
     inv(['me-tasks']);
     inv(['cycles']);
+  } else if (type.startsWith('comment.')) {
+    // comments ride along with the task detail query
+    if (data?.taskId) inv(['task', data.taskId]);
+    inv(['task-audit']);
   } else if (type.startsWith('deal.')) {
     inv(['deals']);
   } else if (type.startsWith('invoice.') || type.startsWith('payment.') || type.startsWith('quote.')) {

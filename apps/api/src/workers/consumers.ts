@@ -136,7 +136,8 @@ const sse: Consumer = {
     const p = ev.payload as any;
     broadcaster.broadcast({
       event: ev.type,
-      data: { aggregateType: ev.aggregateType, aggregateId: ev.aggregateId, ...p },
+      // actorId travels with the payload so clients can skip pings for their own actions.
+      data: { aggregateType: ev.aggregateType, aggregateId: ev.aggregateId, actorId: ev.actorId, ...p },
       projectScope: p.projectId ? [p.projectId] : undefined,
     });
   },

@@ -35,7 +35,10 @@ export function searchRoutes() {
         select t.id, (p.key || '-' || t.number) as ref, t.title, 'task' as kind, t.project_id
         from tasks t join projects p on p.id = t.project_id
         where t.deleted_at is null and t.project_id in ${sql.raw('(' + projectIds.map((id) => `'${id}'`).join(',') + ')')}
-        and (${tsq ? sql`t.search_vector @@ to_tsquery('simple', ${tsq})` : sql`false`} or t.title ilike ${'%' + q + '%'})
+        and (${tsq ? sql`t.search_vector @@ to_tsquery('simple', ${tsq})` : sql`false`}
+          or t.title ilike ${'%' + q + '%'}
+          or (p.key || '-' || t.number) ilike ${'%' + q + '%'})
+        order by case when (p.key || '-' || t.number) ilike ${'%' + q + '%'} then 0 else 1 end, t.number desc
         limit 8`);
       results.push(...(rows as any[]).map((r) => ({ id: r.id, title: `${r.ref} ${r.title}`, kind: 'task', url: `/projects/${r.project_id}/tasks/${r.id}` })));
     }
