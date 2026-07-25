@@ -126,6 +126,12 @@ node scripts/gen-desktop-icons.mjs
 
 - `bundle.createUpdaterArtifacts: true` – tauri-action кладе в реліз підписані
   артефакти оновлення разом із `latest.json`.
+- **`app` обовʼязково має бути в `bundle.targets`**: на macOS пакет оновлення
+  робиться саме з `.app`-бандла. Без нього збірка дає лише `.dmg` для ручної
+  установки, а в `latest.json` не буде платформ `darwin-*` – і Mac-клієнти
+  мовчки ніколи не побачать оновлення. Перевірка після релізу:
+  `curl -sSL .../releases/latest/download/latest.json | jq '.platforms | keys'`
+  має містити `darwin-aarch64` і `darwin-x86_64`.
 - `plugins.updater.endpoints` вказує на
   `https://github.com/romirom11/ordi/releases/latest/download/latest.json`
   (працює, бо репозиторій публічний).
