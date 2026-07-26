@@ -42,6 +42,16 @@ extendDict({
     'mcp.copied': 'Copied to clipboard.',
     'mcp.oauthTitle': 'Connect a client',
     'mcp.oauthHint': 'Add ordi as a remote MCP server: the client opens the browser, you sign in and approve. No token to copy.',
+    'mcp.checking': 'Checking discovery…',
+    'mcp.checkOk': 'Discovery reachable at {issuer}',
+    'mcp.checkNotApi': 'Your proxy answers /.well-known/ with the web app, not the API',
+    'mcp.checkNotApiFix': 'MCP clients look for {url} at the root of this domain. Route /.well-known/ to the API, the same place /api/ goes.',
+    'mcp.checkScheme': 'Discovery advertises {issuer} on an https site',
+    'mcp.checkSchemeFix': 'The API cannot see the original scheme. Pass X-Forwarded-Proto through your proxy, or set APP_URL to {origin}.',
+    'mcp.checkHost': 'Discovery advertises {issuer}, not this address',
+    'mcp.checkHostFix': 'Pass the Host header through your proxy, or set APP_URL to {origin}.',
+    'mcp.checkFailed': 'Could not reach the discovery document',
+    'mcp.checkFailedFix': 'MCP clients read {url} before anything else. Until it answers, connecting will fail.',
     'mcp.oauthCopied': 'URL copied.',
     'mcp.desktopSteps': 'Settings -> Connectors -> Add custom connector, paste the URL above. No config file needed.',
     'mcp.codexHint': 'Add to ~/.codex/config.toml. Older Codex versions without remote MCP support can use the token setup below.',
@@ -94,6 +104,16 @@ extendDict({
     'mcp.copied': 'Скопійовано в буфер обміну.',
     'mcp.oauthTitle': 'Підключити клієнта',
     'mcp.oauthHint': 'Додайте ordi як remote MCP-сервер: клієнт відкриє браузер, ви входите і підтверджуєте. Токен копіювати не треба.',
+    'mcp.checking': 'Перевіряємо дискавері…',
+    'mcp.checkOk': 'Дискавері доступне на {issuer}',
+    'mcp.checkNotApi': 'Ваш проксі віддає на /.well-known/ вебзастосунок, а не API',
+    'mcp.checkNotApiFix': 'MCP-клієнти шукають {url} у корені цього домену. Спрямуйте /.well-known/ в API, туди ж, куди йде /api/.',
+    'mcp.checkScheme': 'Дискавері віддає {issuer} на https-сайті',
+    'mcp.checkSchemeFix': 'API не бачить оригінальної схеми. Передайте X-Forwarded-Proto через проксі або задайте APP_URL = {origin}.',
+    'mcp.checkHost': 'Дискавері віддає {issuer}, а не цю адресу',
+    'mcp.checkHostFix': 'Передайте заголовок Host через проксі або задайте APP_URL = {origin}.',
+    'mcp.checkFailed': 'Не вдалося отримати документ дискавері',
+    'mcp.checkFailedFix': 'MCP-клієнти читають {url} найпершим. Поки він не відповідає, підключення не спрацює.',
     'mcp.oauthCopied': 'URL скопійовано.',
     'mcp.desktopSteps': 'Settings -> Connectors -> Add custom connector, вставте URL вище. Конфіг-файл не потрібен.',
     'mcp.codexHint': 'Додайте в ~/.codex/config.toml. Старіші версії Codex без remote MCP можуть використати варіант із токеном нижче.',
@@ -180,6 +200,7 @@ export function McpPanel() {
           </Button>
         </div>
         <ClientSetup mcpUrl={mcpUrl} />
+        <DiscoveryCheck />
       </div>
 
       {/* ── Access: who can currently act as you ── */}
@@ -371,6 +392,80 @@ type McpClient = 'claude-code' | 'claude-desktop' | 'cursor' | 'codex';
  * One client, one snippet. Everyone connects the same way (the URL above);
  * this only answers "where do I paste it" for the tool the person uses.
  */
+/**
+ * MCP clients read the OAuth discovery document from the *root* of this domain
+ * before anything else, and a deployment that proxies only /api/ to the API
+ * answers it with the SPA's index.html. The client then reports something
+ * opaque ("couldn't register with the sign-in service") with no hint that the
+ * cause is one missing proxy route, so name it here instead.
+ */
+function DiscoveryCheck() {
+  const t = useT();
+  const origin = appOrigin();
+  const url = `${origin}/.well-known/oauth-authorization-server`;
+
+  const check = useQuery({
+    queryKey: ['mcp-discovery', origin],
+    staleTime: 60_000,
+    retry: false,
+    queryFn: async (): Promise<{ ok: true; issuer: string } | { ok: false; kind: 'notApi' | 'failed' | 'scheme' | 'host'; issuer?: string }> => {
+      let res: Response;
+      try { res = await fetch(url, { headers: { accept: 'application/json' } }); }
+      catch { return { ok: false, kind: 'failed' }; }
+      const text = await res.text();
+      if (!res.ok) return { ok: false, kind: 'failed' };
+      // The SPA fallback answers 200 with HTML – the single most common cause.
+      if (text.trimStart().startsWith('<')) return { ok: false, kind: 'notApi' };
+      let issuer: string;
+      try { issuer = String((JSON.parse(text) as { issuer?: unknown }).issuer ?? ''); }
+      catch { return { ok: false, kind: 'notApi' }; }
+      if (!issuer) return { ok: false, kind: 'failed' };
+      if (issuer === origin) return { ok: true, issuer };
+      try {
+        const a = new URL(issuer);
+        const b = new URL(origin);
+        if (a.host === b.host) return { ok: false, kind: 'scheme', issuer };
+      } catch { /* unparseable issuer – report it as a host mismatch */ }
+      return { ok: false, kind: 'host', issuer };
+    },
+  });
+
+  if (check.isPending) {
+    return (
+      <div className="mt-3 flex items-center gap-2 text-[11px] text-faint">
+        <Spinner className="h-3 w-3" /> {t('mcp.checking')}
+      </div>
+    );
+  }
+  if (!check.data) return null;
+
+  if (check.data.ok) {
+    return (
+      <div className="mt-3 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <Check size={12} className="text-success" />
+        {t('mcp.checkOk').replace('{issuer}', check.data.issuer)}
+      </div>
+    );
+  }
+
+  const { kind, issuer } = check.data;
+  const title = t(`mcp.check${kind === 'notApi' ? 'NotApi' : kind === 'scheme' ? 'Scheme' : kind === 'host' ? 'Host' : 'Failed'}`)
+    .replace('{issuer}', issuer ?? '');
+  const fix = t(`mcp.check${kind === 'notApi' ? 'NotApi' : kind === 'scheme' ? 'Scheme' : kind === 'host' ? 'Host' : 'Failed'}Fix`)
+    .replace('{url}', url)
+    .replace('{origin}', origin);
+
+  return (
+    <div className="mt-3 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 p-2.5">
+      <TriangleAlert size={13} className="mt-px shrink-0 text-warning" />
+      <div className="min-w-0">
+        <div className="text-[12px] font-medium">{title}</div>
+        <div className="mt-0.5 break-words text-[11px] text-muted-foreground">{fix}</div>
+      </div>
+    </div>
+  );
+}
+
 function ClientSetup({ mcpUrl }: { mcpUrl: string }) {
   const t = useT();
   const [client, setClient] = useState<McpClient>('claude-code');

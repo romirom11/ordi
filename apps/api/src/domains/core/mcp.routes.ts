@@ -35,11 +35,40 @@ export function publicOrigin(c: Context): string {
   const first = (v: string | undefined) => v?.split(',')[0]?.trim() || undefined;
   const host = first(c.req.header('x-forwarded-host')) ?? first(c.req.header('host'));
   if (!host) return env.appUrl;
-  let proto = first(c.req.header('x-forwarded-proto'));
-  if (!proto) {
-    try { proto = new URL(c.req.url).protocol.replace(':', ''); } catch { proto = 'http'; }
-  }
-  return `${proto}://${host}`;
+  return `${publicProto(c, host)}://${host}`;
+}
+
+/**
+ * The scheme the *client* used. Inside the container the socket is always
+ * plain http, so this has to come from somewhere else, and advertising
+ * http:// URLs for an https site makes every MCP client refuse the connector.
+ *
+ * APP_URL wins when it names this very host, ahead of the forwarded headers.
+ * That inversion is deliberate. X-Forwarded-Proto is set by the *nearest*
+ * proxy, and a common self-hosted chain – Cloudflare tunnel terminating TLS,
+ * then a router reached over plain http that overwrites the header with its
+ * own entrypoint's scheme – reports http for a site that is https everywhere
+ * the user can see. An operator who wrote APP_URL=https://this.host has
+ * stated what the site is; a hop header contradicting that for the same host
+ * describes the last hop, not the client. The host itself still comes from
+ * the request, so serving several domains keeps working.
+ */
+function publicProto(c: Context, host: string): string {
+  const first = (v: string | undefined) => v?.split(',')[0]?.trim() || undefined;
+
+  try {
+    const configured = new URL(env.appUrl);
+    if (configured.host === host) return configured.protocol.replace(':', '');
+  } catch { /* APP_URL unparseable – fall through to the headers */ }
+
+  const xfp = first(c.req.header('x-forwarded-proto'));
+  if (xfp) return xfp;
+
+  // RFC 7239: Forwarded: for=...;proto=https;host=...
+  const fwd = /proto=("?)([A-Za-z]+)\1/.exec(c.req.header('forwarded') ?? '');
+  if (fwd) return fwd[2]!.toLowerCase();
+
+  try { return new URL(c.req.url).protocol.replace(':', ''); } catch { return 'http'; }
 }
 
 function resourceMetadataUrl(c: Context): string {

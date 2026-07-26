@@ -3,6 +3,25 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.6.0
+
+- One container is the whole application: the API serves the built web app
+  itself (SPA fallback, immutable cache on hashed assets, build-time gzip,
+  API paths never swallowed by the HTML fallback). nginx is gone from the
+  deployment story - point the domain at api:3000 and that is all. This
+  removes the routing boundary that kept breaking real deployments, most
+  visibly MCP clients failing to connect because /.well-known/ never reached
+  the API. The nginx web image remains for one more release (deprecated,
+  upstream configurable via API_UPSTREAM).
+- APP_URL decides the scheme for its own host, ahead of X-Forwarded-Proto: a
+  Cloudflare tunnel reaching a router over plain http made the API advertise
+  http:// URLs for an https site.
+- Settings - MCP checks the discovery document from the instance's own root
+  and says what is wrong: the proxy answering /.well-known/ with the web app,
+  a mismatched scheme or host, or an unreachable document.
+- docker-compose.prod.yml for PaaS or compose-behind-a-router deployments: no
+  published ports, required env values enforced.
+
 ## v1.5.6
 
 - MCP connectors (Claude, Cursor) could not register: OAuth discovery built

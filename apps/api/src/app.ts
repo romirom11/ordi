@@ -39,6 +39,7 @@ import { financeRoutes } from './domains/finance/routes';
 import { peopleRoutes } from './domains/people/routes';
 import { integrationsRoutes } from './domains/integrations/routes';
 import { publicRoutes } from './domains/public/routes';
+import { mountWeb, webDistDir } from './web';
 
 async function readyz(c: Context) {
   try {
@@ -145,6 +146,12 @@ export function createApp() {
   api.route('/', integrationsRoutes()); // /integrations, /webhooks, /git
 
   app.route('/api/v1', api);
+
+  // The built SPA, when present (the Docker image bundles it; `pnpm dev`
+  // does not, Vite serves the app there). Registered last so every API
+  // route above wins first, and the SPA fallback answers everything else.
+  const dist = webDistDir();
+  if (dist) mountWeb(app, dist);
 
   return app;
 }
