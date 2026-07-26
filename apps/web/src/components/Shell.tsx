@@ -5,7 +5,7 @@ import {
   Clock, Receipt, Users, Settings, Search, LogOut, LayoutGrid, CalendarRange,
   SquarePen, Sun, Moon, Monitor, ChevronDown, ChevronRight, GripVertical, User as UserIcon,
   SquareArrowOutUpRight, Link as LinkIcon, ArrowUp, ArrowDown,
-  MonitorDown,
+  MonitorDown, UserPlus,
 } from 'lucide-react';
 import { Link, usePathname, useNavigate } from '../lib/router';
 import { useMe, useCan } from '../lib/auth';
@@ -376,26 +376,24 @@ function ShellInner({ children }: { children: ReactNode }) {
               </button>
             }
           >
+            {/* Workspace things only. Anything personal – profile, theme,
+                sign out – belongs to the account button in the footer, which
+                is where people look for it. */}
             <MenuLabel>{wsName}</MenuLabel>
             {(can('settings.manage') || can('users.manage') || can('roles.manage')) && (
               <MenuItem icon={<Settings size={14} />} onSelect={() => navigate('/settings')}>{t('nav.settings')}</MenuItem>
             )}
-            <MenuItem icon={<UserIcon size={14} />} onSelect={() => navigate('/profile')}>{t('nav.profile')}</MenuItem>
+            {can('users.manage') && (
+              <MenuItem icon={<UserPlus size={14} />} onSelect={() => navigate('/settings/users')}>
+                {t('settings.inviteUser')}
+              </MenuItem>
+            )}
             {/* Pointless inside the desktop app – it is already the desktop app. */}
             {!isTauri && (
               <MenuItem icon={<MonitorDown size={14} />} onSelect={() => navigate('/download')}>
                 {t('desktop.download')}
               </MenuItem>
             )}
-            <MenuSeparator />
-            <MenuLabel>{t('theme.title')}</MenuLabel>
-            {themeItems.map((it) => (
-              <MenuItem key={it.key} icon={it.icon} checked={themePref === it.key} onSelect={() => setThemePref(it.key)}>
-                {it.label}
-              </MenuItem>
-            ))}
-            <MenuSeparator />
-            <MenuItem icon={<LogOut size={14} />} danger onSelect={logout}>{t('nav.signOut')}</MenuItem>
           </DropdownMenu>
         </div>
 
@@ -466,29 +464,54 @@ function ShellInner({ children }: { children: ReactNode }) {
           })}
         </nav>
 
-        {/* Footer */}
+        {/* Footer: one identity row. The account opens its menu on a left
+            click (the old row only had a right-click menu, which nobody
+            finds), and the bell sits beside it instead of owning a row. */}
         <div className="space-y-1 p-2.5">
           <TimerIndicator />
-          <NotificationsBell />
-          <ContextMenu
-            items={[
-              { key: 'profile', label: t('nav.profile'), icon: <UserIcon size={13} />, onSelect: () => navigate('/profile') },
-              { key: 'newtab', label: t('ctx.openInNewTab'), icon: <SquareArrowOutUpRight size={13} />, onSelect: () => tabs?.openInNewTab('/profile') },
-              { type: 'separator' },
-              { key: 'signout', label: t('nav.signOut'), icon: <LogOut size={13} />, danger: true, onSelect: logout },
-            ]}
-          >
-          <Link
-            to="/profile"
-            className={cn(
-              'flex items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] transition-colors duration-150',
-              path.startsWith('/profile') ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-            )}
-          >
-            <Avatar name={me.user.name} src={me.user.avatar} size={18} />
-            <span className="truncate">{me.user.name}</span>
-          </Link>
-          </ContextMenu>
+          <div className="flex items-center gap-1">
+            <ContextMenu
+              items={[
+                { key: 'profile', label: t('nav.profile'), icon: <UserIcon size={13} />, onSelect: () => navigate('/profile') },
+                { key: 'newtab', label: t('ctx.openInNewTab'), icon: <SquareArrowOutUpRight size={13} />, onSelect: () => tabs?.openInNewTab('/profile') },
+                { type: 'separator' },
+                { key: 'signout', label: t('nav.signOut'), icon: <LogOut size={13} />, danger: true, onSelect: logout },
+              ]}
+            >
+              <DropdownMenu
+                width={210}
+                side="top"
+                className="min-w-0 flex-1"
+                trigger={
+                  <button
+                    className={cn(
+                      'flex min-w-0 w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150',
+                      path.startsWith('/profile')
+                        ? 'bg-muted font-medium text-foreground'
+                        : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                    )}
+                  >
+                    <Avatar name={me.user.name} src={me.user.avatar} size={20} />
+                    <span className="min-w-0 flex-1 truncate">{me.user.name}</span>
+                    <ChevronDown size={13} className="shrink-0 text-faint" />
+                  </button>
+                }
+              >
+                <MenuLabel>{me.user.email}</MenuLabel>
+                <MenuItem icon={<UserIcon size={14} />} onSelect={() => navigate('/profile')}>{t('nav.profile')}</MenuItem>
+                <MenuSeparator />
+                <MenuLabel>{t('theme.title')}</MenuLabel>
+                {themeItems.map((it) => (
+                  <MenuItem key={it.key} icon={it.icon} checked={themePref === it.key} onSelect={() => setThemePref(it.key)}>
+                    {it.label}
+                  </MenuItem>
+                ))}
+                <MenuSeparator />
+                <MenuItem icon={<LogOut size={14} />} danger onSelect={logout}>{t('nav.signOut')}</MenuItem>
+              </DropdownMenu>
+            </ContextMenu>
+            <NotificationsBell />
+          </div>
         </div>
       </aside>
 

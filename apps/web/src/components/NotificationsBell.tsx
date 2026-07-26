@@ -1,9 +1,11 @@
 /**
- * NotificationsBell – sidebar-footer "Inbox" item. Renders a nav-style row
- * (bell icon + label + unread badge); clicking opens the notifications panel
- * as a popover anchored bottom-left, opening upward.
+ * NotificationsBell – the bell in the sidebar's identity row. An icon button
+ * with a live unread count, sitting beside the account button rather than
+ * taking a nav-style row of its own: the bell and the badge already say what
+ * a text label would, and the row it used to occupy was competing with real
+ * navigation. Clicking opens the panel upward, anchored to the sidebar.
  */
-import { useState, useEffect, useRef, type ReactNode } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Bell, Inbox, CheckSquare, AtSign, Receipt, CalendarRange, FileCheck2, BookText, CheckCheck,
@@ -12,7 +14,7 @@ import { api } from '../lib/api';
 import { useNavigate } from '../lib/router';
 import { useT, extendDict } from '../lib/i18n';
 import { setBadge } from '../lib/desktop';
-import { cn, fmtRelative } from './ui';
+import { cn, fmtRelative, Tooltip } from './ui';
 import { ContextMenu } from './overlays';
 
 extendDict({
@@ -78,6 +80,19 @@ export function NotificationsBell() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  // The bell sits at the right edge of a narrow sidebar, so a panel anchored to
+  // it would hang off the left of the screen. Line the panel up with the
+  // sidebar's own left edge instead and let it grow rightwards over the page.
+  const [panelPos, setPanelPos] = useState<{ left: number; bottom: number }>({ left: 10, bottom: 10 });
+  useLayoutEffect(() => {
+    if (!open || !rootRef.current) return;
+    const bell = rootRef.current.getBoundingClientRect();
+    const rail = rootRef.current.closest('aside')?.getBoundingClientRect();
+    setPanelPos({
+      left: Math.max(8, (rail?.left ?? bell.left) + 10),
+      bottom: Math.max(8, window.innerHeight - bell.top + 6),
+    });
+  }, [open]);
   const { data } = useQuery({
     queryKey: ['notifications'],
     queryFn: () => api.get<{ data: Notif[]; unread: number }>('/notifications'),
@@ -108,28 +123,39 @@ export function NotificationsBell() {
           { key: 'read', label: t('notifications.markAllRead'), icon: <CheckCheck size={13} />, disabled: unread === 0, onSelect: () => readAll.mutate() },
         ]}
       >
-      <button
-        onClick={() => setOpen((o) => !o)}
-        aria-label={t('notifications.title')}
-        aria-expanded={open}
-        className={cn(
-          'flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] transition-colors duration-150',
-          open ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-        )}
-      >
-        <Bell size={16} className="shrink-0 text-faint" />
-        <span className="flex-1 truncate text-left">{t('notifications.title')}</span>
-        {unread > 0 && (
-          <span className="anim-pop-in grid h-[18px] min-w-[18px] shrink-0 place-items-center rounded-full bg-primary px-1 text-[10px] font-semibold tabular-nums text-primary-foreground">
-            {unread > 99 ? '99+' : unread}
-          </span>
-        )}
-      </button>
+      <Tooltip label={t('notifications.title')} side="top">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          aria-label={unread > 0 ? `${t('notifications.title')} (${unread})` : t('notifications.title')}
+          aria-expanded={open}
+          className={cn(
+            'relative grid h-7 w-7 shrink-0 place-items-center rounded-md transition-colors duration-150',
+            open ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+          )}
+        >
+          <Bell size={16} />
+          {unread > 0 && (
+            <span className={cn(
+              'anim-pop-in absolute -right-0.5 -top-0.5 grid h-[15px] place-items-center rounded-full',
+              'bg-primary px-1 text-[9px] font-semibold leading-none tabular-nums text-primary-foreground',
+              'ring-2 ring-background',
+              unread > 9 ? 'min-w-[19px]' : 'min-w-[15px]',
+            )}>
+              {unread > 99 ? '99+' : unread}
+            </span>
+          )}
+        </button>
+      </Tooltip>
       </ContextMenu>
       {open && (
         <div
-          className="absolute bottom-full left-0 z-50 mb-1.5 w-80 overflow-hidden rounded-lg border border-border bg-elevated shadow-pop"
-          style={{ animation: 'dropdown-in 250ms var(--ease-smooth-out) both', transformOrigin: 'bottom left' }}
+          className="fixed z-50 w-80 overflow-hidden rounded-lg border border-border bg-elevated shadow-pop"
+          style={{
+            left: panelPos.left,
+            bottom: panelPos.bottom,
+            animation: 'dropdown-in 250ms var(--ease-smooth-out) both',
+            transformOrigin: 'bottom left',
+          }}
         >
           <div className="flex items-center justify-between border-b border-border px-3 py-2">
             <span className="text-[13px] font-semibold">{t('notifications.title')}</span>
