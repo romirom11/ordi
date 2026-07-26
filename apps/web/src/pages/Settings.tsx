@@ -871,9 +871,11 @@ function CustomFieldsPanel() {
   const [entityType, setEntityType] = useState('companies');
   const fields = useQuery({ queryKey: ['customFields', entityType], queryFn: () => api.get<{ data: CustomField[] }>('/custom-fields' + qs({ entityType })) });
   const [form, setForm] = useState({ key: '', label: '', type: 'text' });
+  // Content first: the add form appears when adding is what you came to do.
+  const [adding, setAdding] = useState(false);
   const create = useMutation({
     mutationFn: () => api.post('/custom-fields', { entityType, key: form.key, label: form.label, type: form.type }),
-    onSuccess: () => { setForm({ key: '', label: '', type: 'text' }); qc.invalidateQueries({ queryKey: ['customFields', entityType] }); toast(t('common.saved')); },
+    onSuccess: () => { setForm({ key: '', label: '', type: 'text' }); setAdding(false); qc.invalidateQueries({ queryKey: ['customFields', entityType] }); toast(t('common.saved')); },
     onError: () => toast.error(t('settings.saveFailed')),
   });
   const rows = fields.data?.data ?? [];
@@ -882,23 +884,29 @@ function CustomFieldsPanel() {
     <div>
       <SectionHead title={t('settings.customFields')} desc={t('settings.customFieldsDesc')}
         actions={
-          <Select value={entityType} onChange={(e) => setEntityType(e.target.value)} className="w-36">
-            {ENTITY_TYPES.map((et) => <option key={et} value={et}>{et}</option>)}
-          </Select>
+          <div className="flex items-center gap-2">
+            <Select value={entityType} onChange={(e) => setEntityType(e.target.value)} className="w-36">
+              {ENTITY_TYPES.map((et) => <option key={et} value={et}>{et}</option>)}
+            </Select>
+            {!adding && <Button size="sm" onClick={() => setAdding(true)}><Plus size={14} /> {t('settings.addField')}</Button>}
+          </div>
         } />
 
-      <Card className="mb-4 p-3">
-        <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); if (form.key && form.label) create.mutate(); }}>
-          <Field label={t('projects.key')} className="w-32"><Input value={form.key} onChange={(e) => setForm((f) => ({ ...f, key: e.target.value }))} placeholder="budget" /></Field>
-          <Field label={t('settings.fieldLabel')} className="w-40"><Input value={form.label} onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))} /></Field>
-          <Field label={t('dashboards.type')} className="w-32">
-            <Select value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))} className="w-full">
-              {FIELD_TYPES.map((ft) => <option key={ft} value={ft}>{ft}</option>)}
-            </Select>
-          </Field>
-          <Button type="submit" size="sm" disabled={!form.key || !form.label || create.isPending}><Plus size={14} /> {t('settings.addField')}</Button>
-        </form>
-      </Card>
+      {adding && (
+        <Card className="anim-pop-in mb-4 p-3">
+          <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); if (form.key && form.label) create.mutate(); }}>
+            <Field label={t('projects.key')} className="w-32"><Input autoFocus value={form.key} onChange={(e) => setForm((f) => ({ ...f, key: e.target.value }))} placeholder="budget" /></Field>
+            <Field label={t('settings.fieldLabel')} className="w-40"><Input value={form.label} onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))} /></Field>
+            <Field label={t('dashboards.type')} className="w-32">
+              <Select value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))} className="w-full">
+                {FIELD_TYPES.map((ft) => <option key={ft} value={ft}>{ft}</option>)}
+              </Select>
+            </Field>
+            <Button type="submit" size="sm" disabled={!form.key || !form.label || create.isPending}><Plus size={14} /> {t('settings.addField')}</Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setAdding(false)}>{t('common.cancel')}</Button>
+          </form>
+        </Card>
+      )}
 
       {fields.isLoading ? (
         <Skeleton className="h-24 w-full" />
