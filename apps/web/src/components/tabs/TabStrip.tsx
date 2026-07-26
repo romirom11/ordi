@@ -223,7 +223,7 @@ export function TabStrip() {
   return (
     <div className="shrink-0" data-tauri-drag-region={isMacDesktop || undefined}>
       <div
-        className={cn('flex items-center gap-1 pb-1 pr-1 pt-1.5', isMacDesktop ? 'pl-[84px]' : 'pl-2.5')}
+        className="flex items-center gap-1 pb-1 pl-2.5 pr-1 pt-1.5"
         role="tablist"
         data-tauri-drag-region={isMacDesktop || undefined}
       >
@@ -251,8 +251,8 @@ export function TabStrip() {
             <Plus size={14} />
           </button>
         </Tooltip>
-        {/* Leftover width doubles as the window drag handle on macOS. */}
-        <div className="min-w-2 flex-1 self-stretch" data-tauri-drag-region={isMacDesktop || undefined} />
+        {/* Leftover width is a generous drag handle on macOS. */}
+        <div className="min-w-6 flex-1 self-stretch" data-tauri-drag-region={isMacDesktop || undefined} />
       </div>
       {/* Floating tip (bottom-left card) – appears once a second tab is opened. */}
       {tabs.tabs.length > 1 && (

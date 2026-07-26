@@ -3,6 +3,16 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.5.4
+
+- macOS: fixed the v1.5.3 title bar. The window is draggable again (the
+  capability was missing core:window:allow-start-dragging) and the traffic
+  lights no longer cover the workspace switcher: they are positioned via
+  trafficLightPosition onto the sidebar's first row, with the switcher beside
+  them, so window buttons, switcher, nav arrows and tabs share one row.
+- A long workspace name no longer escapes the sidebar and runs under the tab
+  strip; it truncates with an ellipsis (affected the web build too).
+
 ## v1.5.3
 
 - The desktop version banner's update button actually updates: it runs the
