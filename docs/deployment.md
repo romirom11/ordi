@@ -19,7 +19,16 @@
 ## 1. Варіант A – Dokploy (рекомендований)
 
 1. **Створіть проєкт → Compose** і вкажіть цей репозиторій та
-   `docker-compose.yml` (Dokploy збере обидва Dockerfile сам).
+   **`docker-compose.prod.yml`** (Dokploy збере обидва Dockerfile сам).
+   `docker-compose.yml` у корені – для локальної розробки: він прибиває
+   значення до `localhost` і публікує порти на хост.
+
+   > **Не пишіть власний nginx-конфіг для сервісу `web`.** Образ уже несе
+   > `docker/nginx.conf`, який окрім `/api/` віддає в API ще `/healthz`,
+   > `/readyz` і **`/.well-known/`**. Останній – обовʼязковий: MCP-клієнти
+   > читають OAuth-дискавері саме за фіксованою адресою в корені домену
+   > (RFC 8414/9728), шлях обирає клієнт. Підмінили конфіг файловим маунтом –
+   > і конектор у Claude/Cursor не підключиться, хоча сайт працює.
 2. **Environment** (мінімум для прод):
    ```bash
    AUTH_SECRET=$(openssl rand -hex 32)
@@ -30,8 +39,10 @@
    `APP_URL=https://ordi.example.com`, `CORS_ORIGINS=https://ordi.example.com,tauri://localhost`.
    `APP_URL` потрапляє в email-и та публічні лінки PDF – він мусить бути
    реальним доменом.
-3. **Домен + HTTPS**: у Dokploy привʼяжіть домен до сервісу `web` (порт 80) –
-   Traefik видасть сертифікат. API назовні відкривати не потрібно: весь трафік
+3. **Домен + HTTPS**: у Dokploy привʼяжіть домен до сервісу `web` (порт 80,
+   Path `/`) – Traefik видасть сертифікат. Більше жодних правил маршрутизації
+   не треба: nginx усередині `web` сам розводить `/api/`, `/healthz` і
+   `/.well-known/` в API. API назовні відкривати не потрібно: весь трафік
    (у т.ч. SSE і публічні сторінки) ходить через nginx за шляхом `/api/`.
    Git-вебхуки теж працюють через web-домен: `https://ordi.example.com/api/v1/integrations/git/<provider>/webhook`.
 4. **Сховище файлів**: залиште вбудований MinIO (створіть бакет `ordi` у

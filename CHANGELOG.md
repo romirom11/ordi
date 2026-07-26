@@ -3,6 +3,20 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.5.7
+
+- MCP connectors could still fail behind a proxy chain that sets
+  X-Forwarded-Proto itself (Cloudflare tunnel to a router reached over plain
+  http): the API advertised http:// URLs for an https site. APP_URL now
+  decides the scheme for its own host, ahead of the forwarded headers.
+- Settings - MCP checks the discovery document from the instance's own root
+  and says what is wrong: the proxy answering /.well-known/ with the web app,
+  a mismatched scheme or host, or an unreachable document. That failure used
+  to be visible only as an opaque message inside the client.
+- docker-compose.prod.yml for PaaS deployments (Dokploy, Coolify), so the
+  nginx config that routes /.well-known/ to the API is version-controlled
+  instead of hand-written per instance.
+
 ## v1.5.6
 
 - MCP connectors (Claude, Cursor) could not register: OAuth discovery built

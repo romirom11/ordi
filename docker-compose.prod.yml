@@ -1,0 +1,77 @@
+# Production stack, meant for a PaaS that puts its own router in front
+# (Dokploy/Traefik, Coolify, plain docker compose behind nginx or Caddy).
+#
+# Point the router at the `web` service on port 80 with path `/` and nothing
+# else: `web` is our nginx image, and it already routes /api/ and the OAuth
+# discovery paths to the API. Hand-writing a config for it is the usual way to
+# end up with an instance where MCP clients cannot connect, because
+# /.well-known/ has to reach the API and a hand-rolled config rarely says so.
+#
+# Everything is configured through env vars; nothing is published to the host,
+# because the router reaches the containers over the compose network.
+#
+# Required: POSTGRES_PASSWORD, AUTH_SECRET, ENCRYPTION_KEY, APP_URL.
+# APP_URL must be the public https address, e.g. https://ordi.example.com – it
+# is what emails, PDF links and the OAuth discovery documents are built from.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ordi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-ordi}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ordi}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      # Migrations run on boot (see the image's CMD), so a fresh volume and an
+      # upgraded image both end up at the right schema without extra steps.
+      DATABASE_URL: postgres://${POSTGRES_USER:-ordi}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ordi}
+      APP_URL: ${APP_URL:?set APP_URL to the public https address}
+      API_URL: ${APP_URL}/api
+      CORS_ORIGINS: ${CORS_ORIGINS:-${APP_URL}}
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY (32-byte hex)}
+      SMTP_URL: ${SMTP_URL:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_BUCKET: ${S3_BUCKET:-ordi}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      S3_REGION: ${S3_REGION:-auto}
+      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
+      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
+      SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-}
+      SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # The only service the router should know about. Serves the SPA and proxies
+  # /api/, /healthz, /readyz and /.well-known/ to the API.
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    restart: unless-stopped
+    expose:
+      - "80"
+    depends_on:
+      - api
+
+volumes:
+  db_data:
