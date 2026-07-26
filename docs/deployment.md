@@ -10,35 +10,20 @@
 |---|---|---|---|
 | `db` | postgres:16-alpine | 5432 | том `db_data`; PITR – див. operations.md |
 | `minio` | minio/minio | 9000/9001 | опційно – замініть на R2/S3 |
-| `api` | `docker/Dockerfile.api` | 3000 | сам запускає міграції перед стартом |
-| `web` | `docker/Dockerfile.web` | 80 | nginx: статика SPA + проксі `/api/` → `api:3000` |
+| `api` | `docker/Dockerfile.api` | 3000 | **весь застосунок**: міграції, API, воркери і зібраний веб |
 
-Назва сервісу API має бути **`api`** – nginx у web-образі проксіює на
-`http://api:3000` (див. `docker/nginx.conf`).
+З v1.6.0 **один контейнер – це весь застосунок**: `api` сам віддає SPA,
+`/api/*`, SSE і OAuth-дискавері для MCP (`/.well-known/*`). Окремого
+веб-сервера немає і налаштовувати між контейнерами нічого. (Старий
+nginx-образ `docker/Dockerfile.web` ще збирається як deprecated для тих, хто
+його запінив, і буде видалений у наступних релізах.)
 
 ## 1. Варіант A – Dokploy (рекомендований)
 
 1. **Створіть проєкт → Compose** і вкажіть цей репозиторій та
-   **`docker-compose.prod.yml`** (Dokploy збере обидва Dockerfile сам).
+   **`docker-compose.prod.yml`** (Dokploy збере Dockerfile сам).
    `docker-compose.yml` у корені – для локальної розробки: він прибиває
    значення до `localhost` і публікує порти на хост.
-
-   > **Не пишіть власний nginx-конфіг для сервісу `web`.** Образ несе
-   > шаблон (`docker/nginx.conf.template`), який окрім `/api/` віддає в API
-   > ще `/healthz`, `/readyz` і **`/.well-known/`**. Останній – обовʼязковий:
-   > MCP-клієнти читають OAuth-дискавері за фіксованою адресою в корені
-   > домену (RFC 8414/9728), шлях обирає клієнт, не ми. Підмінили конфіг
-   > файловим маунтом – він завмер у дні написання, мовчки пропускає всі
-   > наступні маршрути, і конектор у Claude/Cursor не підключається, хоча
-   > сайт працює.
-   >
-   > Єдине, що буває треба налаштувати – **імʼя API-сервісу в мережі**. Для
-   > цього є змінна середовища `API_UPSTREAM` (типово `api:3000`). Деплоїте
-   > api і web окремими застосунками, і API зветься, скажімо, `ordi-api` –
-   > поставте на сервісі web `API_UPSTREAM=ordi-api:3000`, і крапка. Якщо у
-   > вас уже стоїть файловий маунт на `/etc/nginx/conf.d/default.conf` –
-   > зніміть його і задайте `API_UPSTREAM`, інакше оновлення конфіга вас не
-   > досягають.
 2. **Environment** (мінімум для прод):
    ```bash
    AUTH_SECRET=$(openssl rand -hex 32)
@@ -49,12 +34,15 @@
    `APP_URL=https://ordi.example.com`, `CORS_ORIGINS=https://ordi.example.com,tauri://localhost`.
    `APP_URL` потрапляє в email-и та публічні лінки PDF – він мусить бути
    реальним доменом.
-3. **Домен + HTTPS**: у Dokploy привʼяжіть домен до сервісу `web` (порт 80,
-   Path `/`) – Traefik видасть сертифікат. Більше жодних правил маршрутизації
-   не треба: nginx усередині `web` сам розводить `/api/`, `/healthz` і
-   `/.well-known/` в API. API назовні відкривати не потрібно: весь трафік
-   (у т.ч. SSE і публічні сторінки) ходить через nginx за шляхом `/api/`.
-   Git-вебхуки теж працюють через web-домен: `https://ordi.example.com/api/v1/integrations/git/<provider>/webhook`.
+3. **Домен + HTTPS**: у Dokploy привʼяжіть домен до сервісу **`api`**
+   (**порт 3000**, Path `/`) – Traefik видасть сертифікат. Більше жодних
+   правил маршрутизації: цей самий сервіс віддає і сайт, і `/api/*` (у т.ч.
+   SSE), і `/.well-known/*` для MCP-конекторів.
+   Git-вебхуки: `https://ordi.example.com/api/v1/integrations/git/<provider>/webhook`.
+
+   **Оновлюєтесь із версії до v1.6.0?** Переведіть домен із сервісу `web`
+   (порт 80) на `api` (порт 3000), видаліть сервіс `web` і будь-який ручний
+   маунт nginx-конфіга, який ви для нього робили. Жодних нових env.
 4. **Сховище файлів**: залиште вбудований MinIO (створіть бакет `ordi` у
    консолі на :9001) або приберіть сервіс і вкажіть R2/S3:
    `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_REGION`.
@@ -77,7 +65,8 @@ cp .env.example .env            # AUTH_SECRET, ENCRYPTION_KEY, SMTP_URL, дом�
 docker compose up -d --build
 docker compose exec api pnpm --filter @ordi/api seed   # одноразово
 ```
-Далі поставте перед `web:8080` будь-який TLS-термінатор (Caddy/Traefik/nginx).
+Далі поставте перед `api` (хост-порт 8080 або 3000) будь-який TLS-термінатор
+(Caddy/Traefik/nginx) – він проксіює все на один порт, без окремих правил.
 
 <a id="updating"></a>
 ## 3. Оновлення (нові релізи)

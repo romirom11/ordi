@@ -1,11 +1,9 @@
 # Production stack, meant for a PaaS that puts its own router in front
 # (Dokploy/Traefik, Coolify, plain docker compose behind nginx or Caddy).
 #
-# Point the router at the `web` service on port 80 with path `/` and nothing
-# else: `web` is our nginx image, and it already routes /api/ and the OAuth
-# discovery paths to the API. Hand-writing a config for it is the usual way to
-# end up with an instance where MCP clients cannot connect, because
-# /.well-known/ has to reach the API and a hand-rolled config rarely says so.
+# One service is the whole application: `api` serves the SPA, the REST API,
+# SSE and the OAuth discovery paths MCP clients need. Point the router at the
+# `api` service, port 3000, path `/` - and add no other routing rule.
 #
 # Everything is configured through env vars; nothing is published to the host,
 # because the router reaches the containers over the compose network.
@@ -30,11 +28,14 @@ services:
       timeout: 5s
       retries: 10
 
+  # The whole application: REST API, workers, and the built web app.
   api:
     build:
       context: .
       dockerfile: docker/Dockerfile.api
     restart: unless-stopped
+    expose:
+      - "3000"
     environment:
       NODE_ENV: production
       # Migrations run on boot (see the image's CMD), so a fresh volume and an
@@ -60,22 +61,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-
-  # The only service the router should know about. Serves the SPA and proxies
-  # /api/, /healthz, /readyz and /.well-known/ to the API.
-  web:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.web
-    restart: unless-stopped
-    environment:
-      # Where nginx finds the API on the container network. Override when the
-      # platform renames services (e.g. Dokploy isolated deploys: ordi-api:3000).
-      API_UPSTREAM: ${API_UPSTREAM:-api:3000}
-    expose:
-      - "80"
-    depends_on:
-      - api
 
 volumes:
   db_data:

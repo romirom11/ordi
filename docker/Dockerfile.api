@@ -1,4 +1,27 @@
-# ordi API image (Node 22 LTS). Runs migrations then the API + workers.
+# ordi image (Node 22 LTS): the whole application in one container.
+# Runs migrations, then the API + workers, and serves the built SPA itself -
+# point your domain at this container's port 3000 and you are done. No nginx,
+# no cross-container routing to configure, and the OAuth discovery paths MCP
+# clients need (/.well-known/*) are just routes on the same server.
+
+# ── SPA build stage ──
+FROM node:22-slim AS webbuild
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+RUN corepack enable
+WORKDIR /app
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml* .npmrc tsconfig.base.json ./
+COPY packages/shared/package.json packages/shared/
+COPY apps/web/package.json apps/web/
+RUN pnpm install --frozen-lockfile=false --filter @ordi/web...
+COPY packages/shared packages/shared
+COPY apps/web apps/web
+RUN pnpm --filter @ordi/web build
+# Precompress text assets once at build time; the server picks the .gz up via
+# Accept-Encoding (serveStatic precompressed) instead of compressing per request.
+RUN find apps/web/dist -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' -o -name '*.svg' -o -name '*.json' -o -name '*.txt' -o -name '*.map' \) -exec gzip -k -9 {} +
+
+# ── API stage ──
 FROM node:22-slim AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
@@ -21,6 +44,10 @@ COPY packages/shared packages/shared
 COPY packages/db packages/db
 COPY packages/mcp packages/mcp
 COPY apps/api apps/api
+
+# The built SPA, served by the API itself (apps/api/src/web.ts finds it at
+# ../web/dist relative to its cwd; override with WEB_DIST).
+COPY --from=webbuild /app/apps/web/dist apps/web/dist
 
 ENV NODE_ENV=production
 EXPOSE 3000

@@ -77,10 +77,10 @@ jobs:
             -e ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000 \
             -e WORKERS_ENABLED=false \
             ordi-api:ci
+          ok=""
           for i in $(seq 1 60); do
             if curl -fsS http://localhost:3000/api/v1/healthz >/dev/null 2>&1; then
-              echo "API image boots and answers healthz"
-              exit 0
+              ok=1; break
             fi
             # Surface a crash immediately instead of burning the whole timeout.
             if [ "$(docker inspect -f '{{.State.Running}}' ordi-svc-api)" != "true" ]; then
@@ -88,9 +88,39 @@ jobs:
             fi
             sleep 2
           done
-          echo "API never became healthy:"; docker logs ordi-svc-api; exit 1
+          if [ -z "$ok" ]; then echo "API never became healthy:"; docker logs ordi-svc-api; exit 1; fi
+          echo "API image boots and answers healthz"
 
-      - name: Boot the web image and check OAuth discovery through nginx
+          # One container is the whole app: it must serve the SPA...
+          home=$(curl -fsS http://localhost:3000/)
+          case "$home" in
+            *'<div id="root">'*) echo "SPA served by the API image" ;;
+            *) echo "API image did not serve the SPA shell:"; echo "$home" | head -5; exit 1 ;;
+          esac
+          # ...with hashed assets resolvable and long-cached...
+          asset=$(echo "$home" | grep -o '/assets/[^"]*\.js' | head -1)
+          hdrs=$(curl -fsSI "http://localhost:3000$asset")
+          case "$hdrs" in
+            *immutable*) echo "assets served with immutable cache" ;;
+            *) echo "asset missing immutable cache header:"; echo "$hdrs"; exit 1 ;;
+          esac
+          # ...OAuth discovery advertising the public host on the same port...
+          meta=$(curl -fsS -H 'Host: ordi.example.com' -H 'X-Forwarded-Proto: https' \
+            http://localhost:3000/.well-known/oauth-authorization-server)
+          case "$meta" in
+            *'"registration_endpoint":"https://ordi.example.com/api/v1/oauth/register"'*) echo "discovery OK on the single container" ;;
+            *) echo "discovery wrong through the API image: $meta"; exit 1 ;;
+          esac
+          # ...and unknown API paths must stay API-shaped, not SPA HTML.
+          notfound=$(curl -sS http://localhost:3000/api/v1/definitely-not-a-route)
+          case "$notfound" in
+            *'<div id="root">'*) echo "SPA fallback swallowed an API 404"; exit 1 ;;
+            *) echo "API 404s stay API-shaped" ;;
+          esac
+
+      # The nginx web image is deprecated but still shipped for deployments
+      # that pin it - keep it booting and routing until it is removed.
+      - name: Boot the deprecated web image and check OAuth discovery through nginx
         run: |
           docker run -d --name web --network ordi-ci -p 8080:80 \
             -e API_UPSTREAM=ordi-svc-api:3000 ordi-web:ci
