@@ -16,7 +16,7 @@ const TABLES = [
   'kb_page_versions', 'kb_page_comments', 'kb_page_links', 'kb_pages', 'space_members', 'kb_spaces',
   'leave_requests', 'leave_balances', 'compensation', 'employees', 'applicants', 'job_openings', 'interviews',
   'deals', 'contacts', 'companies', 'notes', 'activity_log', 'events', 'processed_events',
-  'dead_letter_events', 'notifications', 'sessions', 'api_tokens', 'invites', 'role_permissions',
+  'dead_letter_events', 'notifications', 'sessions', 'api_tokens', 'oauth_auth_codes', 'oauth_clients', 'invites', 'role_permissions',
   'roles', 'users', 'deal_stages', 'applicant_stages', 'leave_types', 'tax_rates',
   'number_sequences', 'task_number_counters',
 ];

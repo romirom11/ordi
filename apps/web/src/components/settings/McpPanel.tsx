@@ -40,8 +40,11 @@ extendDict({
     'mcp.tokenRevoked': 'Token revoked.',
     'mcp.revokeFailed': 'Could not revoke the token.',
     'mcp.copied': 'Copied to clipboard.',
+    'mcp.oauthTitle': 'Connect by URL (recommended)',
+    'mcp.oauthHint': 'Add this URL as a remote MCP server in Claude, Cursor or any OAuth-capable client. It opens the browser, you sign in and approve – no token to copy. The granted access appears below and can be revoked anytime.',
+    'mcp.oauthCopied': 'URL copied.',
     'mcp.connect': 'Connect a client',
-    'mcp.connectHint': 'Run the command from the root of the ordi repo (the built ordi-mcp bin works as an alternative). Replace YOUR_TOKEN with a token created above.',
+    'mcp.connectHint': 'The stdio fallback for clients without OAuth support. Run the command from the root of the ordi repo (the built ordi-mcp bin works as an alternative). Replace YOUR_TOKEN with a token created above.',
     'mcp.snippetClaudeDesktop': 'Claude Desktop · claude_desktop_config.json',
     'mcp.snippetClaudeCode': 'Claude Code',
     'mcp.snippetCursor': 'Cursor · ~/.cursor/mcp.json',
@@ -82,8 +85,11 @@ extendDict({
     'mcp.tokenRevoked': 'Токен відкликано.',
     'mcp.revokeFailed': 'Не вдалося відкликати токен.',
     'mcp.copied': 'Скопійовано в буфер обміну.',
+    'mcp.oauthTitle': 'Підключення за URL (рекомендовано)',
+    'mcp.oauthHint': 'Додайте цей URL як remote MCP-сервер у Claude, Cursor чи будь-якому клієнті з OAuth. Відкриється браузер, ви входите і підтверджуєте – токен копіювати не треба. Наданий доступ зʼявиться нижче, його можна відкликати будь-коли.',
+    'mcp.oauthCopied': 'URL скопійовано.',
     'mcp.connect': 'Підключення клієнта',
-    'mcp.connectHint': 'Команду запускайте з кореня репозиторію ordi (альтернатива – зібраний бінарник ordi-mcp). Замініть YOUR_TOKEN на токен, створений вище.',
+    'mcp.connectHint': 'Stdio-варіант для клієнтів без підтримки OAuth. Команду запускайте з кореня репозиторію ordi (альтернатива – зібраний бінарник ordi-mcp). Замініть YOUR_TOKEN на токен, створений вище.',
     'mcp.snippetClaudeDesktop': 'Claude Desktop · claude_desktop_config.json',
     'mcp.snippetClaudeCode': 'Claude Code',
     'mcp.snippetCursor': 'Cursor · ~/.cursor/mcp.json',
@@ -143,10 +149,23 @@ export function McpPanel() {
   });
 
   const rows = tokens.data?.data ?? [];
+  const mcpUrl = `${window.location.origin}/api/v1/mcp`;
 
   return (
     <div>
       <SectionHead title={t('settings.mcp')} desc={t('settings.mcpDesc')} />
+
+      {/* ── Remote MCP over OAuth: paste the URL, log in, done ── */}
+      <div className="mb-6 rounded-lg border border-primary/30 bg-primary/5 p-4">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-primary">{t('mcp.oauthTitle')}</div>
+        <p className="mt-1 text-xs text-muted-foreground">{t('mcp.oauthHint')}</p>
+        <div className="mt-2.5 flex items-center gap-2">
+          <code className="min-w-0 flex-1 truncate rounded-md border border-border bg-surface px-2.5 py-1.5 font-mono text-[12px]">{mcpUrl}</code>
+          <Button size="sm" variant="outline" onClick={() => { navigator.clipboard?.writeText(mcpUrl); toast(t('mcp.oauthCopied')); }}>
+            <Copy size={13} />
+          </Button>
+        </div>
+      </div>
 
       {/* ── Tokens ── */}
       <div className="mb-2 flex items-end justify-between gap-3">
