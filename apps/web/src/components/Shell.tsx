@@ -22,6 +22,7 @@ import { TimerIndicator } from './TimerIndicator';
 import { NotificationsBell } from './NotificationsBell';
 import { QuickCreateTask } from './QuickCreateTask';
 import { TabStrip } from './tabs/TabStrip';
+import { VersionGuard } from './VersionGuard';
 
 extendDict({
   en: {
@@ -481,6 +482,7 @@ function ShellInner({ children }: { children: ReactNode }) {
       {/* Content column: tab strip above the Linear-style inset surface */}
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden pb-2 pr-2 pt-1.5">
         <TabStrip />
+        <VersionGuard />
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-sm">
           <div key={contentKey} className="page-enter flex min-h-0 flex-1 flex-col overflow-auto">
             {children}

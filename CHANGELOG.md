@@ -15,6 +15,8 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 - Project members and labels are managed from the properties rail: members in a
   popover, labels with search and inline creation.
 - The product mark is now the same artwork as the desktop app icon.
+- The server reports its version in /healthz; the app shows a reload prompt
+  when the server moved ahead and warns on desktop when the server is behind.
 
 ## v1.1.0
 

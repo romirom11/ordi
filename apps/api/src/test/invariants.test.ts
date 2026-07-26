@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { getDb, schema, eq, and } from '@ordi/db';
 import { ulid } from 'ulid';
-import { resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
+import { app, resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
 import { processOutboxOnce } from '../workers/relay';
 import { emit } from '../core/events';
 
@@ -193,5 +193,16 @@ describe('a pending invite is visible until it is accepted', () => {
     expect((await owner.del(`/users/invites/${row.id}`)).status).toBe(200);
     const after = await json(owner.get('/users/invites'));
     expect((after.data as any[]).some((r) => r.id === row.id)).toBe(false);
+  });
+});
+
+describe('the server tells clients what version it runs', () => {
+  it('healthz reports a semver, matching on both paths', async () => {
+    const root = await (await app.request('/healthz')).json() as { status: string; version?: string };
+    const proxied = await (await app.request('/api/v1/healthz')).json() as { status: string; version?: string };
+    expect(root.status).toBe('ok');
+    expect(root.version).toMatch(/^\d+\.\d+\.\d+$/);
+    // The desktop instance gate reads the /api/v1 path – they must agree.
+    expect(proxied.version).toBe(root.version);
   });
 });
