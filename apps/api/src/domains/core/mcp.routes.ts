@@ -35,11 +35,39 @@ export function publicOrigin(c: Context): string {
   const first = (v: string | undefined) => v?.split(',')[0]?.trim() || undefined;
   const host = first(c.req.header('x-forwarded-host')) ?? first(c.req.header('host'));
   if (!host) return env.appUrl;
-  let proto = first(c.req.header('x-forwarded-proto'));
-  if (!proto) {
-    try { proto = new URL(c.req.url).protocol.replace(':', ''); } catch { proto = 'http'; }
-  }
-  return `${proto}://${host}`;
+  return `${publicProto(c, host)}://${host}`;
+}
+
+/**
+ * The scheme the *client* used. Inside the container the socket is always
+ * plain http, so this has to come from somewhere else, and a proxy that drops
+ * the forwarded headers would otherwise make us advertise http:// URLs for an
+ * https site - which no MCP client will accept.
+ *
+ * Order: the two standard forwarded headers, then Cloudflare's CF-Visitor
+ * (extremely common in front of self-hosted instances), then APP_URL when it
+ * names this very host - an operator who configured https://this.host is
+ * telling us the scheme, and that is better evidence than our own socket.
+ */
+function publicProto(c: Context, host: string): string {
+  const first = (v: string | undefined) => v?.split(',')[0]?.trim() || undefined;
+  const xfp = first(c.req.header('x-forwarded-proto'));
+  if (xfp) return xfp;
+
+  // RFC 7239: Forwarded: for=...;proto=https;host=...
+  const fwd = /proto=("?)([A-Za-z]+)\1/.exec(c.req.header('forwarded') ?? '');
+  if (fwd) return fwd[2]!.toLowerCase();
+
+  // Cloudflare: CF-Visitor: {"scheme":"https"}
+  const cf = /"scheme"\s*:\s*"([A-Za-z]+)"/.exec(c.req.header('cf-visitor') ?? '');
+  if (cf) return cf[1]!.toLowerCase();
+
+  try {
+    const configured = new URL(env.appUrl);
+    if (configured.host === host) return configured.protocol.replace(':', '');
+  } catch { /* APP_URL unparseable – fall through */ }
+
+  try { return new URL(c.req.url).protocol.replace(':', ''); } catch { return 'http'; }
 }
 
 function resourceMetadataUrl(c: Context): string {

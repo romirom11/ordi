@@ -68,6 +68,25 @@ describe('OAuth for MCP clients', () => {
     })).json() as any;
     expect(fwd.issuer).toBe('https://ordi.example.com');
 
+    // Proxies that drop X-Forwarded-Proto still must not produce http:// URLs
+    // for an https site. Falling back to APP_URL's scheme when it names this
+    // very host is the operator telling us what the site is.
+    const noXfp: Record<string, string>[] = [
+      { forwarded: 'for=203.0.113.7;proto=https;host=ordi.example.com' },
+      { 'cf-visitor': '{"scheme":"https"}' },
+    ];
+    for (const extra of noXfp) {
+      const m = await (await app.request('/.well-known/oauth-authorization-server', {
+        headers: { host: 'ordi.example.com', ...extra },
+      })).json() as any;
+      expect(m.issuer).toBe('https://ordi.example.com');
+    }
+    const configured = new URL(process.env.APP_URL ?? 'http://localhost:5173');
+    const viaAppUrl = await (await app.request('/.well-known/oauth-authorization-server', {
+      headers: { host: configured.host },
+    })).json() as any;
+    expect(viaAppUrl.issuer).toBe(`${configured.protocol}//${configured.host}`);
+
     // The 401 that starts the whole dance points at the same host.
     const res = await app.request('/api/v1/mcp', { method: 'POST', body: '{}', headers });
     expect(res.headers.get('WWW-Authenticate')).toContain('https://ordi.example.com/api/v1/.well-known/oauth-protected-resource');
