@@ -40,17 +40,27 @@ export function publicOrigin(c: Context): string {
 
 /**
  * The scheme the *client* used. Inside the container the socket is always
- * plain http, so this has to come from somewhere else, and a proxy that drops
- * the forwarded headers would otherwise make us advertise http:// URLs for an
- * https site - which no MCP client will accept.
+ * plain http, so this has to come from somewhere else, and advertising
+ * http:// URLs for an https site makes every MCP client refuse the connector.
  *
- * Order: the two standard forwarded headers, then Cloudflare's CF-Visitor
- * (extremely common in front of self-hosted instances), then APP_URL when it
- * names this very host - an operator who configured https://this.host is
- * telling us the scheme, and that is better evidence than our own socket.
+ * APP_URL wins when it names this very host, ahead of the forwarded headers.
+ * That inversion is deliberate. X-Forwarded-Proto is set by the *nearest*
+ * proxy, and a common self-hosted chain – Cloudflare tunnel terminating TLS,
+ * then a router reached over plain http that overwrites the header with its
+ * own entrypoint's scheme – reports http for a site that is https everywhere
+ * the user can see. An operator who wrote APP_URL=https://this.host has
+ * stated what the site is; a hop header contradicting that for the same host
+ * describes the last hop, not the client. The host itself still comes from
+ * the request, so serving several domains keeps working.
  */
 function publicProto(c: Context, host: string): string {
   const first = (v: string | undefined) => v?.split(',')[0]?.trim() || undefined;
+
+  try {
+    const configured = new URL(env.appUrl);
+    if (configured.host === host) return configured.protocol.replace(':', '');
+  } catch { /* APP_URL unparseable – fall through to the headers */ }
+
   const xfp = first(c.req.header('x-forwarded-proto'));
   if (xfp) return xfp;
 

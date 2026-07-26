@@ -81,11 +81,19 @@ describe('OAuth for MCP clients', () => {
       })).json() as any;
       expect(m.issuer).toBe('https://ordi.example.com');
     }
+    // APP_URL wins over a contradicting X-Forwarded-Proto for its own host:
+    // Cloudflare tunnel -> Traefik over plain http reports http for an https
+    // site, and the operator's APP_URL is the better evidence.
     const configured = new URL(process.env.APP_URL ?? 'http://localhost:5173');
     const viaAppUrl = await (await app.request('/.well-known/oauth-authorization-server', {
-      headers: { host: configured.host },
+      headers: { host: configured.host, 'x-forwarded-proto': 'gopher' },
     })).json() as any;
     expect(viaAppUrl.issuer).toBe(`${configured.protocol}//${configured.host}`);
+    // ...but only for that host. Any other domain still follows the headers.
+    const other = await (await app.request('/.well-known/oauth-authorization-server', {
+      headers: { host: 'second.example.com', 'x-forwarded-proto': 'http' },
+    })).json() as any;
+    expect(other.issuer).toBe('http://second.example.com');
 
     // The 401 that starts the whole dance points at the same host.
     const res = await app.request('/api/v1/mcp', { method: 'POST', body: '{}', headers });
