@@ -58,6 +58,33 @@ export const sessions = pgTable('sessions', {
  * different local app that hijacks the ordi:// deep link still cannot exchange
  * the code for a session (PKCE).
  */
+/**
+ * OAuth clients registered dynamically (RFC 7591) by MCP clients – Claude,
+ * Cursor and friends. Public clients only: no secret is stored, PKCE carries
+ * the proof instead.
+ */
+export const oauthClients = pgTable('oauth_clients', {
+  id: pk(),
+  name: text('name').notNull().default(''),
+  /** Exact-match redirect URIs; loopback URIs may vary the port (RFC 8252). */
+  redirectUris: jsonb('redirect_uris').notNull().default([]),
+  ...timestamps,
+});
+
+/** Single-use authorization codes; PKCE S256 only, ten-minute lifetime. */
+export const oauthAuthCodes = pgTable('oauth_auth_codes', {
+  id: pk(),
+  code: text('code').notNull().unique(),
+  clientId: text('client_id').notNull().references(() => oauthClients.id, { onDelete: 'cascade' }),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /** base64url(sha256(verifier)) as sent by the client. */
+  codeChallenge: text('code_challenge').notNull(),
+  /** The exact redirect the code was issued for; the exchange must repeat it. */
+  redirectUri: text('redirect_uri').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const desktopAuthRequests = pgTable('desktop_auth_requests', {
   id: pk(),
   /** Ties the browser page back to the desktop window that opened it. */

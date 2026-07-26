@@ -7,6 +7,8 @@ import { handleError } from './lib/errors';
 import { authMiddleware } from './core/auth';
 import { moduleGate } from './core/modules';
 import { SERVER_VERSION } from './version';
+import { oauthRoutes } from './domains/core/oauth.routes';
+import { mcpRoutes, authorizationServerMetadata, protectedResourceMetadata } from './domains/core/mcp.routes';
 import { getDb, sql } from '@ordi/db';
 
 // domain routers
@@ -55,12 +57,21 @@ export function createApp() {
     await next();
   });
 
-  app.use('*', cors({
+  // OAuth discovery/registration/token and the MCP endpoint are consumed by
+  // third-party MCP clients (some browser-based), so they get open CORS; the
+  // rest of the API stays locked to the app's own origins.
+  const publicOAuthPath = (path: string): boolean =>
+    path.startsWith('/.well-known/') || path.includes('/.well-known/')
+    || path === '/api/v1/oauth/register' || path === '/api/v1/oauth/token'
+    || path === '/api/v1/mcp';
+  const openCors = cors({ origin: '*', allowHeaders: ['Content-Type', 'Authorization', 'mcp-protocol-version'] });
+  const appCors = cors({
     origin: (origin) => (env.corsOrigins.includes(origin) || !origin ? origin : env.corsOrigins[0]!),
     credentials: true,
     allowHeaders: ['Content-Type', 'Authorization', 'x-request-id'],
     allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-  }));
+  });
+  app.use('*', (c, next) => (publicOAuthPath(c.req.path) ? openCors(c, next) : appCors(c, next)));
 
   app.onError((e, c) => handleError(e, c));
 
@@ -70,6 +81,27 @@ export function createApp() {
   app.get('/api/v1/healthz', (c) => c.json({ status: 'ok', version: SERVER_VERSION }));
   app.get('/readyz', (c) => readyz(c));
   app.get('/api/v1/readyz', (c) => readyz(c));
+
+  // OAuth discovery for MCP clients (RFC 8414 / RFC 9728). Served on every
+  // path variant clients try: at the root, with the issuer path inserted, and
+  // under /api/v1 for proxies that forward only /api/*.
+  const asMeta = (c: Context) => c.json(authorizationServerMetadata());
+  const prMeta = (c: Context) => c.json(protectedResourceMetadata());
+  for (const base of ['', '/api/v1']) {
+    app.get(`${base}/.well-known/oauth-authorization-server`, asMeta);
+    app.get(`${base}/.well-known/oauth-authorization-server/*`, asMeta);
+    app.get(`${base}/.well-known/oauth-protected-resource`, prMeta);
+    app.get(`${base}/.well-known/oauth-protected-resource/*`, prMeta);
+    // Some clients probe OIDC discovery first; answer with the same document.
+    app.get(`${base}/.well-known/openid-configuration`, asMeta);
+    app.get(`${base}/.well-known/openid-configuration/*`, asMeta);
+  }
+
+  // OAuth grant endpoints + hosted MCP. Outside the authed router: register
+  // and token are anonymous by design, /mcp does its own bearer handling so it
+  // can answer 401 with the discovery header instead of the app error shape.
+  app.route('/api/v1/oauth', oauthRoutes());
+  app.route('/api/v1/mcp', mcpRoutes());
 
   // Public routes (no auth): invoices/quotes/portal/intake/careers/git webhooks.
   // Mounted twice: at the root (direct API access) and under /api/v1, because the

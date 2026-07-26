@@ -29,9 +29,15 @@ importers:
       '@hono/zod-validator':
         specifier: ^0.4.2
         version: 0.4.3(hono@4.12.31)(zod@3.25.76)
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.29.0
+        version: 1.29.0(zod@3.25.76)
       '@ordi/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@ordi/mcp':
+        specifier: workspace:*
+        version: link:../../packages/mcp
       '@ordi/shared':
         specifier: workspace:*
         version: link:../../packages/shared

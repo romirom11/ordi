@@ -3,6 +3,13 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.5.0
+
+- MCP over OAuth: add <instance>/api/v1/mcp as a remote MCP server in Claude or
+  Cursor, sign in through the browser and approve – no token copying. Grants
+  appear in Settings → MCP and are revocable like any token; the stdio server
+  with ORDI_API_TOKEN remains for clients without OAuth.
+
 ## v1.4.1
 
 - The server reports its version in /healthz; the app compares it with its own
