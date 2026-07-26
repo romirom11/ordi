@@ -26,6 +26,7 @@ import {
 } from '../ui';
 import { DropdownMenu, MenuItem, MenuSeparator, Dialog, ConfirmDialog, toast } from '../overlays';
 import { Hint } from '../Hint';
+import { DateField } from '../DatePicker';
 
 extendDict({
   en: {
@@ -490,7 +491,7 @@ function SubscriptionDialog({ mode, sub, companies, onClose, onSaved }: {
             </Select>
           </LabeledField>
           <LabeledField label={t('subs.nextDate')}>
-            <Input type="date" value={nextDate} onChange={(e) => setNextDate(e.target.value)} />
+            <DateField value={nextDate} onChange={(v) => setNextDate(v ?? '')} />
           </LabeledField>
         </div>
         <div className="grid grid-cols-2 gap-3">

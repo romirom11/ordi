@@ -3,7 +3,8 @@ import {
   Building2, CalendarDays, ChevronDown, Circle, Globe, Lock, UserCircle2, X,
 } from 'lucide-react';
 import { Avatar, cn, fmtDate } from '../ui';
-import { DropdownMenu, MenuItem, MenuLabel, MenuSeparator } from '../overlays';
+import { DropdownMenu, MenuItem, MenuLabel, MenuSeparator, useMenuClose } from '../overlays';
+import { Calendar } from '../DatePicker';
 import { useT, extendDict } from '../../lib/i18n';
 
 export interface UserLite { id: string; name: string; avatar?: string | null }
@@ -96,6 +97,12 @@ export function LeadPicker({ value, users, onSelect, disabled }: {
 
 /* ───────────────────────────── Dates ───────────────────────────── */
 
+/** The shared calendar inside a menu: picking a day applies it and closes. */
+function CalendarInMenu({ value, onSelect }: { value?: string | null; onSelect: (day: string) => void }) {
+  const close = useMenuClose();
+  return <Calendar value={value} onSelect={(day) => { onSelect(day); close(); }} />;
+}
+
 export function DateRailPicker({ value, onChange, placeholder, icon, disabled }: {
   value?: string | null; onChange: (v: string | null) => void; placeholder: string; icon?: ReactNode; disabled?: boolean;
 }) {
@@ -108,15 +115,8 @@ export function DateRailPicker({ value, onChange, placeholder, icon, disabled }:
   );
   if (disabled) return trigger;
   return (
-    <DropdownMenu trigger={trigger} align="start" width={210} className="w-full">
-      <div className="p-1.5">
-        <input
-          type="date"
-          defaultValue={value ? value.slice(0, 10) : ''}
-          onChange={(e) => onChange(e.target.value || null)}
-          className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-[13px] outline-none transition-colors duration-150 hover:border-border-strong focus:border-primary/60"
-        />
-      </div>
+    <DropdownMenu trigger={trigger} align="start" width={264} className="w-full">
+      <CalendarInMenu value={value} onSelect={(day) => onChange(day)} />
       {value && (<><MenuSeparator /><MenuItem icon={<X size={14} />} danger onSelect={() => onChange(null)}>{t('projects.clearDate')}</MenuItem></>)}
     </DropdownMenu>
   );

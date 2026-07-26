@@ -35,6 +35,7 @@ import {
   type Grouping, type TaskFilters, type TaskViewPrefs,
 } from '../components/project/taskViewPrefs';
 import { useT, extendDict } from '../lib/i18n';
+import { DateField } from '../components/DatePicker';
 
 extendDict({
   en: {
@@ -969,6 +970,7 @@ function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageM
             project={project}
             users={users}
             canWrite={canWrite}
+            canManageMembers={isAdmin}
             onPatch={onPatch}
             onManageMembers={onManageMembers}
           />
@@ -1079,8 +1081,8 @@ function CyclesTab({ id }: { id: string }) {
         >
           <Input autoFocus placeholder={t('projects.cycleNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} />
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1"><label className="text-xs text-muted-foreground">{t('projects.start')}</label><Input type="date" value={start} onChange={(e) => setStart(e.target.value)} /></div>
-            <div className="space-y-1"><label className="text-xs text-muted-foreground">{t('projects.end')}</label><Input type="date" value={end} onChange={(e) => setEnd(e.target.value)} /></div>
+            <div className="space-y-1"><label className="text-xs text-muted-foreground">{t('projects.start')}</label><DateField value={start} onChange={(v) => setStart(v ?? '')} clearable={false} /></div>
+            <div className="space-y-1"><label className="text-xs text-muted-foreground">{t('projects.end')}</label><DateField value={end} onChange={(v) => setEnd(v ?? '')} clearable={false} min={start || undefined} /></div>
           </div>
           <Input placeholder={t('projects.goalPlaceholder')} value={goal} onChange={(e) => setGoal(e.target.value)} />
           {error && <p className="text-sm text-destructive">{error}</p>}

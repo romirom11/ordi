@@ -16,6 +16,7 @@ import { RichEditor, EMPTY_DOC } from './richtext/RichEditor';
 import { docIsEmpty } from './richtext/RichText';
 import { useUsersLookup } from '../lib/queries';
 import { useT, extendDict } from '../lib/i18n';
+import { Calendar } from './DatePicker';
 
 extendDict({
   en: {
@@ -113,17 +114,12 @@ function ToggleItem({ children, icon, checked, onToggle }: {
 }
 
 /** Native date input inside a menu – picking a date applies it and closes. */
-function DatePickInput({ value, onSet, ariaLabel }: { value: string; onSet: (v: string) => void; ariaLabel: string }) {
+/** The shared calendar inside a menu – picking a day applies it and closes. */
+function DatePickInput({ value, onSet }: {
+  value: string | null; onSet: (v: string) => void; ariaLabel?: string;
+}) {
   const close = useMenuClose();
-  return (
-    <input
-      type="date"
-      aria-label={ariaLabel}
-      defaultValue={value}
-      onChange={(e) => { if (e.target.value) { onSet(e.target.value); close(); } }}
-      className="h-7 w-full rounded-md border border-input bg-transparent px-2 text-[13px] outline-none transition-colors duration-150 hover:border-border-strong focus:border-primary/60"
-    />
-  );
+  return <Calendar value={value} onSelect={(day) => { onSet(day); close(); }} />;
 }
 
 export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -478,7 +474,7 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
 
             {/* Due date */}
             <DropdownMenu
-              width={210}
+              width={264}
               trigger={
                 <ChipButton muted={!dueDate}>
                   <CalendarDays size={13} className={dueDate ? undefined : 'text-muted-foreground'} />
@@ -488,9 +484,7 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
               }
             >
               <MenuLabel>{t('qc.dueDate')}</MenuLabel>
-              <div className="px-2 pb-1.5">
-                <DatePickInput value={dueDate} onSet={setDueDate} ariaLabel={t('qc.pickDate')} />
-              </div>
+              <DatePickInput value={dueDate || null} onSet={setDueDate} />
               {dueDate && (
                 <>
                   <MenuSeparator />

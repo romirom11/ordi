@@ -10,6 +10,7 @@ import { Plus, Trash2, Wallet, AlertTriangle, CheckCircle2, Receipt, FileStack, 
 import { useT, extendDict } from '../lib/i18n';
 import { RecurringExpensesSection } from '../components/finance/subscriptions';
 import { TransactionsTab, AddIncomeDialog } from '../components/finance/ledger';
+import { DateField } from '../components/DatePicker';
 
 extendDict({
   en: {
@@ -339,7 +340,7 @@ function DocForm({ kind, companies, onSubmit, pending }: { kind: 'invoice' | 'qu
         </div>
         <div className="space-y-1">
           <label className="text-xs font-medium text-muted-foreground">{kind === 'invoice' ? t('finance.dueDate') : t('public.validUntil')}</label>
-          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <DateField value={date} onChange={(v) => setDate(v ?? '')} />
         </div>
       </div>
       <div className="space-y-2">
@@ -611,7 +612,7 @@ function ExpensesView() {
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">{t('common.date')}</label>
-                <Input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} />
+                <DateField value={form.date} onChange={(v) => setForm((f) => ({ ...f, date: v ?? '' }))} clearable={false} />
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">{t('finance.category')}</label>

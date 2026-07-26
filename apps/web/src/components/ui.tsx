@@ -3,6 +3,7 @@ import { forwardRef, Fragment, type ButtonHTMLAttributes, type InputHTMLAttribut
 import { ChevronRight } from 'lucide-react';
 import { usePageTitle } from '../lib/tabs';
 import { Link } from '../lib/router';
+import { appLocale, formatDay } from '../lib/dates';
 
 export function cn(...args: Parameters<typeof clsx>): string {
   return clsx(...args);
@@ -543,14 +544,7 @@ export function SegmentedControl<T extends string>({ options, value, onChange, c
 /* ───────────────────────── Formatters ───────────────────────── */
 
 /** BCP-47 locale matching the APP language (not the browser), for date/number formatting. */
-export function appLocale(): string | undefined {
-  try {
-    const l = localStorage.getItem('ordi:locale');
-    if (l === 'uk') return 'uk-UA';
-    if (l === 'en') return 'en-US';
-  } catch { /* SSR / private mode */ }
-  return undefined;
-}
+export { appLocale, formatDay, formatDateTime } from '../lib/dates';
 
 const money = new Map<string, Intl.NumberFormat>();
 export function fmtMoney(amount: number | string, currency = 'USD'): string {
@@ -560,11 +554,9 @@ export function fmtMoney(amount: number | string, currency = 'USD'): string {
   return money.get(key)!.format(Number(amount));
 }
 
+/** Compact rendering of a calendar day, honouring the user's date format. */
 export function fmtDate(d?: string | null): string {
-  if (!d) return '–';
-  const date = new Date(d);
-  const sameYear = date.getFullYear() === new Date().getFullYear();
-  return date.toLocaleDateString(appLocale(), sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
+  return formatDay(d, { compact: true }) || '–';
 }
 
 export function fmtRelative(d?: string | null): string {

@@ -3,6 +3,19 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.4.0
+
+- One calendar across the whole app, replacing every native browser date input,
+  with keyboard navigation and a Today shortcut.
+- Date format is a personal preference (Profile → Preferences) and applies
+  everywhere a date is written.
+- Pending invites appear in the members list with copy link, resend and revoke.
+- Each in-app tab keeps its own back/forward history, driven by arrows in the
+  tab strip or Alt+←/→.
+- Project members and labels are managed from the properties rail: members in a
+  popover, labels with search and inline creation.
+- The product mark is now the same artwork as the desktop app icon.
+
 ## v1.1.0
 
 - Desktop auto-update over GitHub releases: updates are signed, staged in the

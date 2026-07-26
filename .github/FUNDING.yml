@@ -1,0 +1,3 @@
+# Shows the Sponsor button on the repository. GitHub's funding file has no field
+# for a wallet address, so this points at the README section that carries it.
+custom: ['https://github.com/romirom11/ordi#support-the-project']

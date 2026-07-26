@@ -6,6 +6,7 @@ import { Button, IconButton, Input, Select, Card, Avatar, PageHeader, PageBody, 
 import { Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator, toast } from '../components/overlays';
 import { ChevronLeft, ChevronRight, Plus, Trash2, Users } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
+import { DateField } from '../components/DatePicker';
 
 extendDict({
   en: {
@@ -363,11 +364,11 @@ function ResourcingView() {
             <div />
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">{t('resourcing.from')}</label>
-              <Input type="date" value={form.fromDate} onChange={(e) => setForm((f) => ({ ...f, fromDate: e.target.value }))} />
+              <DateField value={form.fromDate} onChange={(v) => setForm((f) => ({ ...f, fromDate: v ?? '' }))} clearable={false} />
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">{t('resourcing.to')}</label>
-              <Input type="date" value={form.toDate} onChange={(e) => setForm((f) => ({ ...f, toDate: e.target.value }))} />
+              <DateField value={form.toDate} onChange={(v) => setForm((f) => ({ ...f, toDate: v ?? '' }))} clearable={false} min={form.fromDate || undefined} />
             </div>
           </div>
           {(formError || addAllocation.isError) && (

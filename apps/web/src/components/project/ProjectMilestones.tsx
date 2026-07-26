@@ -7,8 +7,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, CalendarDays, Diamond, Plus, Trash2, X } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { Checkbox, IconButton, Skeleton, fmtDate, cn } from '../ui';
-import { DropdownMenu, MenuItem, MenuSeparator, toast } from '../overlays';
+import { DropdownMenu, MenuItem, MenuSeparator, toast, useMenuClose } from '../overlays';
+import { Calendar } from '../DatePicker';
 import { useT, extendDict } from '../../lib/i18n';
+
+/** Picking a target date applies it and closes the menu. */
+function MilestoneCalendar({ value, onSelect }: { value?: string | null; onSelect: (day: string) => void }) {
+  const close = useMenuClose();
+  return <Calendar value={value} onSelect={(day) => { onSelect(day); close(); }} />;
+}
 
 extendDict({
   en: {
@@ -123,7 +130,7 @@ export function ProjectMilestones({ projectId, canWrite }: { projectId: string; 
               {canWrite ? (
                 <DropdownMenu
                   align="end"
-                  width={210}
+                  width={264}
                   trigger={
                     <button
                       type="button"
@@ -137,14 +144,10 @@ export function ProjectMilestones({ projectId, canWrite }: { projectId: string; 
                     </button>
                   }
                 >
-                  <div className="p-1.5">
-                    <input
-                      type="date"
-                      defaultValue={m.targetDate ? m.targetDate.slice(0, 10) : ''}
-                      onChange={(e) => patch.mutate({ id: m.id, body: { targetDate: e.target.value || null } })}
-                      className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-[13px] outline-none transition-colors duration-150 hover:border-border-strong focus:border-primary/60"
-                    />
-                  </div>
+                  <MilestoneCalendar
+                    value={m.targetDate}
+                    onSelect={(day) => patch.mutate({ id: m.id, body: { targetDate: day } })}
+                  />
                   {m.targetDate && (
                     <>
                       <MenuSeparator />

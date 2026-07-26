@@ -126,3 +126,11 @@ export const BLOCKED_FILE_EXTENSIONS = ['exe', 'bat', 'cmd', 'sh', 'msi', 'com',
 /** Workspace feature modules (PRD §14.7). Missing key or true = enabled. */
 export const MODULE_KEYS = ['crm', 'kb', 'time', 'finance', 'people', 'resourcing', 'dashboards'] as const;
 export type ModuleKey = (typeof MODULE_KEYS)[number];
+
+/**
+ * How a person wants dates written. 'auto' follows their language; the rest are
+ * explicit patterns so a Ukrainian speaker can still read ISO, and an English
+ * speaker can still read day-first.
+ */
+export const DATE_FORMATS = ['auto', 'dd.MM.yyyy', 'dd/MM/yyyy', 'MM/dd/yyyy', 'yyyy-MM-dd', 'd MMM yyyy'] as const;
+export type DateFormat = (typeof DATE_FORMATS)[number];

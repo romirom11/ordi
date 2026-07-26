@@ -20,6 +20,7 @@ import {
   Badge, Button, Card, EmptyState, Input, Select, Skeleton, Spinner, cn, fmtMoney, fmtDate,
 } from '../ui';
 import { Dialog, ConfirmDialog, DropdownMenu, MenuItem, toast } from '../overlays';
+import { DateField } from '../DatePicker';
 
 extendDict({
   en: {
@@ -243,9 +244,9 @@ export function TransactionsTab() {
               </option>
             ))}
           </Select>
-          <div className="w-36 shrink-0"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
+          <div className="w-36 shrink-0"><DateField value={from} onChange={(v) => setFrom(v ?? '')} /></div>
           <span className="text-xs text-faint">–</span>
-          <div className="w-36 shrink-0"><Input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
+          <div className="w-36 shrink-0"><DateField value={to} onChange={(v) => setTo(v ?? '')} /></div>
         </div>
       </div>
 
@@ -427,7 +428,7 @@ export function AddIncomeDialog({ onClose }: { onClose: () => void }) {
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">{t('common.date')}</label>
-            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            <DateField value={date} onChange={(v) => setDate(v ?? '')} clearable={false} />
           </div>
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">{t('ledger.revenueAccount')}</label>

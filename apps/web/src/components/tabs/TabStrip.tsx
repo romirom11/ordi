@@ -6,7 +6,7 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  BookText, CalendarRange, CheckSquare, Clock, FolderKanban, Handshake,
+  ArrowLeft, ArrowRight, BookText, CalendarRange, CheckSquare, Clock, FolderKanban, Handshake,
   LayoutDashboard, LayoutGrid, Plus, Receipt, Settings, User as UserIcon,
   Users, X,
 } from 'lucide-react';
@@ -25,6 +25,8 @@ extendDict({
     'tabs.copyLink': 'Copy link',
     'tabs.linkCopied': 'Link copied',
     'tabs.newTabHint': 'Ctrl/Cmd+click any link to open it in a new tab. Alt+W closes the current one.',
+    'tabs.back': 'Back',
+    'tabs.forward': 'Forward',
   },
   uk: {
     'tabs.newTab': 'Нова вкладка',
@@ -34,8 +36,32 @@ extendDict({
     'tabs.copyLink': 'Копіювати посилання',
     'tabs.linkCopied': 'Посилання скопійовано',
     'tabs.newTabHint': 'Ctrl/Cmd+клік на будь-яке посилання відкриє його в новій вкладці. Alt+W закриває поточну.',
+    'tabs.back': 'Назад',
+    'tabs.forward': 'Вперед',
   },
 });
+
+/** Back / forward control. Disabled rather than hidden so the strip never shifts. */
+function NavArrow({ label, shortcut, disabled, onClick, children }: {
+  label: string; shortcut: string; disabled: boolean; onClick: () => void; children: ReactNode;
+}) {
+  const button = (
+    <button
+      type="button"
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        'grid h-6 w-6 place-items-center rounded-md transition-colors duration-150',
+        disabled ? 'cursor-default text-faint/40' : 'text-faint hover:bg-muted hover:text-foreground',
+      )}
+    >
+      {children}
+    </button>
+  );
+  // A disabled button emits no pointer events, so it gets no tooltip either.
+  return disabled ? button : <Tooltip label={`${label} · ${shortcut}`} side="bottom">{button}</Tooltip>;
+}
 
 /** Small icon per tab kind, derived from the URL. */
 function tabIcon(url: string): ReactNode {
@@ -94,6 +120,15 @@ export function TabStrip() {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.code === 'BracketRight' || e.code === 'BracketLeft')) {
         e.preventDefault();
         api.activateDelta(e.code === 'BracketRight' ? 1 : -1);
+        return;
+      }
+      // Alt+←/→ walks the active tab's own history, like a browser.
+      if (e.altKey && !e.metaKey && !e.ctrlKey && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
+        const target = e.target as HTMLElement | null;
+        // Never steal the caret from a text field.
+        if (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? '')) return;
+        e.preventDefault();
+        api.go(e.code === 'ArrowLeft' ? -1 : 1);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -186,6 +221,14 @@ export function TabStrip() {
   return (
     <div className="shrink-0">
       <div className="flex items-center gap-1 pb-1 pl-2.5 pr-1 pt-1.5" role="tablist">
+        <div className="mr-0.5 flex shrink-0 items-center">
+          <NavArrow label={t('tabs.back')} shortcut="Alt+←" disabled={!tabs.canGoBack} onClick={() => tabs.go(-1)}>
+            <ArrowLeft size={14} />
+          </NavArrow>
+          <NavArrow label={t('tabs.forward')} shortcut="Alt+→" disabled={!tabs.canGoForward} onClick={() => tabs.go(1)}>
+            <ArrowRight size={14} />
+          </NavArrow>
+        </div>
         <div
           ref={stripRef}
           className="flex min-w-0 items-center gap-1 overflow-x-auto"
