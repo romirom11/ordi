@@ -282,7 +282,7 @@ roles ──< role_permissions│              │      cycles ──┘  │   
 
 **finance:** number_sequences (doc_type, period_key, last_value; атомарно FOR UPDATE), tax_rates (name, rate_percent), quotes (company_id, project_id?, number, status: draft/sent/viewed/accepted/declined/expired, currency, issue_date, valid_until, subtotal, tax_total, total, public_token, accepted_at, converted_invoice_id, custom_fields), quote_items, invoices (company_id, project_id?, quote_id?, number, status: draft/sent/viewed/partially_paid/paid/canceled, is_overdue computed, currency, issue_date, due_date, discount_type/value, subtotal, tax_total, total, amount_paid, notes, terms, public_token, sent_at, reminders_paused bool, language uk|en, custom_fields), invoice_items (description, quantity, unit_price, tax_rate_id?, amount, position, source: manual|time|quote), payments (invoice_id, amount, currency, date, method, reference, notes), recurring_invoices (company_id, project_id?, frequency, next_issue_date, items_template JSONB, auto_send, status), credit_notes (invoice_id, amount, reason, date), expenses (company_id?, project_id?, category_id, amount, currency, date, description, attachment_id), expense_categories, reminder_rules (offset_days signed, template_id, active), email_templates (type, subject, body з плейсхолдерами), reminder_log (invoice_id, rule_id, sent_at).
 
-**integrations:** git_connections (provider: github/gitlab/gitea, installation/credentials JSONB encrypted, webhook_secret), git_repositories (connection_id, external_id, full_name, default_branch), project_repositories (project_id, repository_id), git_links (task_id, repository_id, type: branch/commit/pr/mr, external_ref, title, url, state: open/merged/closed, author, updated_at), git_automation_rules (project_id, trigger: pr_opened/pr_merged/pr_closed/branch_created, target_status_id).
+**integrations:** git_connections (provider: github/gitlab/gitea, installation/credentials JSONB encrypted, webhook_secret, installation_id + account_login для GitHub App, status: connected/revoked/suspended), git_repositories (connection_id, external_id, full_name, default_branch), project_repositories (project_id, repository_id), git_links (task_id, repository_id, type: branch/commit/pr/mr, external_ref, title, url, state: open/merged/closed, author, updated_at), git_automation_rules (project_id, trigger: pr_opened/pr_merged/pr_closed/branch_created, target_status_id).
 
 ### 5.4. Зафіксовані кардинальності (найдорожчі рішення)
 
@@ -599,7 +599,13 @@ departments (name, parent_id), positions (title), employees (user_id?, first/las
 **Призначення:** задачі звʼязані з реальним кодом: гілки, коміти, PR/MR видимі з задачі, статуси рухаються автоматично.
 
 **Підключення (integrations.manage):**
-- GitHub: GitHub App (installation у org), отримуємо repo-список і webhook централізовано.
+- GitHub: GitHub App через manifest flow – ordi створює App одним кліком
+  (POST маніфеста → GitHub повертає креденшели через одноразовий код);
+  вебхук і права реєструються централізовано, installation-вебхуки самі
+  створюють підключення і синхронізують repo-список. Креденшели App
+  (app id, приватний ключ, webhook-секрет) зберігаються у
+  workspace_settings.integrations (секрети AES-GCM). Legacy-шлях (OAuth
+  app / PAT) лишається робочим.
 - GitLab / Gitea (включно з self-hosted): URL інстансу + access token; вебхук на repo/групу з секретом.
 - Креденшели шифруються (AES-GCM, ключ у env). Налаштування → Інтеграції: статус підключення, перелік репозиторіїв, health останніх вебхуків.
 

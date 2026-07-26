@@ -25,12 +25,26 @@ export interface OAuthAppConfig {
   clientSecret: string;
 }
 
+/**
+ * A GitHub App owned by this ordi instance (created via the manifest flow or
+ * pasted in manually). The private key signs installation-token JWTs; the
+ * webhook secret verifies every incoming delivery for this app.
+ */
+export interface GithubAppConfig {
+  appId: string;
+  slug: string;
+  privateKey: string;
+  webhookSecret: string;
+  htmlUrl: string;
+}
+
 export interface RuntimeConfig {
   smtp: SmtpConfig | null;
   /** Where the effective SMTP settings came from, for the settings screen. */
   smtpSource: 'db' | 'env' | 'none';
   github: OAuthAppConfig | null;
   githubSource: 'db' | 'env' | 'none';
+  githubApp: GithubAppConfig | null;
   slack: OAuthAppConfig | null;
   slackSource: 'db' | 'env' | 'none';
 }
@@ -39,6 +53,7 @@ export interface RuntimeConfig {
 interface StoredIntegrations {
   smtp?: { host?: string; port?: number; secure?: boolean; user?: string; pass?: string; from?: string };
   github?: { clientId?: string; clientSecret?: string };
+  githubApp?: { appId?: string; slug?: string; privateKey?: string; webhookSecret?: string; htmlUrl?: string };
   slack?: { clientId?: string; clientSecret?: string };
 }
 
@@ -98,6 +113,16 @@ async function resolve(): Promise<RuntimeConfig> {
     ? { clientId: env.githubOAuthClientId, clientSecret: env.githubOAuthClientSecret }
     : null;
 
+  const dbGithubApp = stored.githubApp?.appId && stored.githubApp?.slug
+    ? {
+      appId: stored.githubApp.appId,
+      slug: stored.githubApp.slug,
+      privateKey: readSecret(stored.githubApp.privateKey),
+      webhookSecret: readSecret(stored.githubApp.webhookSecret),
+      htmlUrl: stored.githubApp.htmlUrl ?? `https://github.com/apps/${stored.githubApp.slug}`,
+    }
+    : null;
+
   const dbSlack = stored.slack?.clientId
     ? { clientId: stored.slack.clientId, clientSecret: readSecret(stored.slack.clientSecret) }
     : null;
@@ -110,6 +135,7 @@ async function resolve(): Promise<RuntimeConfig> {
     smtpSource: dbSmtp ? 'db' : envSmtp ? 'env' : 'none',
     github: dbGithub ?? envGithub,
     githubSource: dbGithub ? 'db' : envGithub ? 'env' : 'none',
+    githubApp: dbGithubApp,
     slack: dbSlack ?? envSlack,
     slackSource: dbSlack ? 'db' : envSlack ? 'env' : 'none',
   };
@@ -131,11 +157,45 @@ export function invalidateRuntimeConfig(): void {
 export function encryptIntegrationSecrets(patch: {
   smtp?: { pass?: string } & Record<string, unknown>;
   github?: { clientSecret?: string } & Record<string, unknown>;
+  githubApp?: { privateKey?: string; webhookSecret?: string } & Record<string, unknown>;
   slack?: { clientSecret?: string } & Record<string, unknown>;
 }): typeof patch {
   const out = { ...patch };
   if (out.smtp?.pass) out.smtp = { ...out.smtp, pass: encrypt(out.smtp.pass) };
   if (out.github?.clientSecret) out.github = { ...out.github, clientSecret: encrypt(out.github.clientSecret) };
+  if (out.githubApp) {
+    out.githubApp = { ...out.githubApp };
+    if (out.githubApp.privateKey) out.githubApp.privateKey = encrypt(out.githubApp.privateKey);
+    if (out.githubApp.webhookSecret) out.githubApp.webhookSecret = encrypt(out.githubApp.webhookSecret);
+  }
   if (out.slack?.clientSecret) out.slack = { ...out.slack, clientSecret: encrypt(out.slack.clientSecret) };
   return out;
+}
+
+/**
+ * Store (or replace) the GitHub App credentials, e.g. right after the manifest
+ * conversion handed them to us. Secrets are encrypted before they land.
+ */
+export async function storeGithubAppConfig(app: GithubAppConfig): Promise<void> {
+  const { db } = getDb();
+  const [existing] = await db.select().from(schema.workspaceSettings)
+    .where(eq(schema.workspaceSettings.id, 'workspace'));
+  const current = ((existing?.integrations ?? {}) as Record<string, unknown>);
+  const merged = {
+    ...current,
+    githubApp: {
+      appId: app.appId,
+      slug: app.slug,
+      privateKey: encrypt(app.privateKey),
+      webhookSecret: encrypt(app.webhookSecret),
+      htmlUrl: app.htmlUrl,
+    },
+  };
+  if (existing) {
+    await db.update(schema.workspaceSettings).set({ integrations: merged })
+      .where(eq(schema.workspaceSettings.id, 'workspace'));
+  } else {
+    await db.insert(schema.workspaceSettings).values({ id: 'workspace', integrations: merged });
+  }
+  invalidateRuntimeConfig();
 }

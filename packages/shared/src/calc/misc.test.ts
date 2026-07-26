@@ -12,6 +12,13 @@ describe('parseTaskRefs', () => {
   });
   it('ignores lowercase / non-matching', () => {
     expect(parseTaskRefs('branch feature-42 no ref')).toEqual([]);
+    expect(parseTaskRefs('encoded as utf-8 today')).toEqual([]);
+  });
+  it('anyCase matches our own lowercase branch convention and uppercases the key', () => {
+    const refs = parseTaskRefs('feature/kld-42-add-login-flow', { anyCase: true });
+    expect(refs).toEqual([{ key: 'KLD', number: 42, raw: 'kld-42' }]);
+    // Long words before a number still do not become refs (no word boundary mid-word).
+    expect(parseTaskRefs('branch feature-42 no ref', { anyCase: true })).toEqual([]);
   });
 });
 

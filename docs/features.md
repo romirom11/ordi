@@ -23,7 +23,7 @@
 
 | Фіча | Де |
 |---|---|
-| — | — |
+| GitHub App: створення в один клік, автореєстрація вебхука, синк репозиторіїв; фікси HMAC-підпису та lowercase-лінкування гілок | гілка `claude/github-app-integration` (відновлено з забутої `claude/duplicate-index-notices-ci7dpx`) |
 
 ## Готово
 

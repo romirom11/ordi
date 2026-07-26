@@ -36,6 +36,19 @@ extendDict({
     'settings.githubConnectError': 'Could not connect GitHub – please try again.',
     'settings.deleteConnection': 'Remove connection',
     'settings.deleteConnectionBody': 'Remove this git connection? Linked repositories will stop syncing.',
+    // GitHub App
+    'settings.ghAppReady': 'App ready',
+    'settings.ghAppCreate': 'Create GitHub App',
+    'settings.ghAppCreateHint': 'One click creates a GitHub App for this workspace – webhook and permissions included, no copying secrets.',
+    'settings.ghAppOrg': 'Organization (optional)',
+    'settings.ghAppOrgPlaceholder': 'my-company',
+    'settings.ghAppOrgHint': 'Leave empty to create the app on your personal account.',
+    'settings.ghAppInstall': 'Install',
+    'settings.ghAppInstallHint': 'Install the app on an organization or account and pick repositories – they sync automatically.',
+    'settings.ghAppCreated': 'GitHub App created – now install it',
+    'settings.ghAppInstalled': 'GitHub App installed, repositories synced',
+    'settings.ghAppError': 'GitHub App setup failed – please try again.',
+    'settings.ghAppBadgeApp': 'app',
     // Slack
     'settings.slackTitle': 'Slack',
     'settings.slackDesc': 'Get notified about events (tasks, deals, invoices) in Slack.',
@@ -84,6 +97,19 @@ extendDict({
     'settings.githubConnectError': 'Не вдалося підключити GitHub – спробуйте ще раз.',
     'settings.deleteConnection': 'Видалити підключення',
     'settings.deleteConnectionBody': 'Видалити це git-підключення? Повʼязані репозиторії перестануть синхронізуватися.',
+    // GitHub App
+    'settings.ghAppReady': 'App готовий',
+    'settings.ghAppCreate': 'Створити GitHub App',
+    'settings.ghAppCreateHint': 'Один клік створює GitHub App для цього воркспейсу – вебхук і права вже налаштовані, секрети копіювати не треба.',
+    'settings.ghAppOrg': 'Організація (необовʼязково)',
+    'settings.ghAppOrgPlaceholder': 'my-company',
+    'settings.ghAppOrgHint': 'Залиште порожнім, щоб створити застосунок на особистому акаунті.',
+    'settings.ghAppInstall': 'Встановити',
+    'settings.ghAppInstallHint': 'Встановіть застосунок на організацію чи акаунт і оберіть репозиторії – вони синхронізуються автоматично.',
+    'settings.ghAppCreated': 'GitHub App створено – тепер встановіть його',
+    'settings.ghAppInstalled': 'GitHub App встановлено, репозиторії синхронізовано',
+    'settings.ghAppError': 'Не вдалося налаштувати GitHub App – спробуйте ще раз.',
+    'settings.ghAppBadgeApp': 'app',
     // Slack
     'settings.slackTitle': 'Slack',
     'settings.slackDesc': 'Отримуйте сповіщення про події (задачі, угоди, інвойси) у Slack.',
@@ -114,7 +140,29 @@ extendDict({
   },
 });
 
-interface GitConnection { id: string; provider?: string | null; status?: string | null; instanceUrl?: string | null; createdAt?: string }
+interface GitConnection {
+  id: string; provider?: string | null; status?: string | null; instanceUrl?: string | null;
+  kind?: 'app' | 'token'; accountLogin?: string | null; createdAt?: string;
+}
+interface GithubAppStatus { configured: boolean; slug: string | null; htmlUrl: string | null; installUrl: string | null }
+
+/**
+ * The GitHub manifest flow requires a real form POST (not fetch): the browser
+ * navigates to GitHub carrying the manifest, GitHub creates the app and
+ * redirects back to the API's setup callback.
+ */
+function postManifestToGithub(actionUrl: string, manifest: string): void {
+  const form = document.createElement('form');
+  form.method = 'post';
+  form.action = actionUrl;
+  const input = document.createElement('input');
+  input.type = 'hidden';
+  input.name = 'manifest';
+  input.value = manifest;
+  form.appendChild(input);
+  document.body.appendChild(form);
+  form.submit();
+}
 interface Webhook { id: string; url?: string | null; active?: boolean; eventTypes?: string[] }
 interface WorkspaceFull { integrations?: { slackWebhookUrl?: string | null } }
 
@@ -129,15 +177,19 @@ function GitHubCard() {
   const t = useT();
   const qc = useQueryClient();
   const oauth = useQuery({ queryKey: ['gitOAuthStatus'], queryFn: () => api.get<{ configured: boolean }>('/integrations/git/oauth/status') });
+  const ghApp = useQuery({ queryKey: ['githubAppStatus'], queryFn: () => api.get<GithubAppStatus>('/integrations/github-app/status') });
   const connections = useQuery({ queryKey: ['gitConnections'], queryFn: () => api.get<{ data: GitConnection[] }>('/integrations/git/connections') });
   const conns = connections.data?.data ?? [];
   const configured = oauth.data?.configured;
+  const appConfigured = ghApp.data?.configured;
   const githubConnected = conns.some((c) => c.provider === 'github');
 
   const [connecting, setConnecting] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
   const [conn, setConn] = useState({ provider: 'github', instanceUrl: '', token: '' });
   const [toDelete, setToDelete] = useState<GitConnection | null>(null);
+  const [appOrg, setAppOrg] = useState('');
+  const [creatingApp, setCreatingApp] = useState(false);
 
   const connect = async () => {
     setConnecting(true);
@@ -147,6 +199,20 @@ function GitHubCard() {
     } catch {
       setConnecting(false);
       toast.error(t('settings.githubConnectError'));
+    }
+  };
+
+  const createApp = async () => {
+    setCreatingApp(true);
+    try {
+      const { actionUrl, manifest } = await api.post<{ actionUrl: string; manifest: string }>(
+        '/integrations/github-app/manifest',
+        { organization: appOrg.trim() || undefined },
+      );
+      postManifestToGithub(actionUrl, manifest);
+    } catch {
+      setCreatingApp(false);
+      toast.error(t('settings.ghAppError'));
     }
   };
 
@@ -181,21 +247,52 @@ function GitHubCard() {
           <div className="text-[13px] font-semibold">{t('settings.githubTitle')}</div>
           <p className="mt-0.5 text-xs text-muted-foreground">{t('settings.githubDesc')}</p>
         </div>
-        {oauth.isSuccess && (
-          <StatusChip tone={githubConnected ? 'ok' : configured ? 'muted' : 'off'}>
-            {githubConnected ? t('settings.stateConnected') : configured ? t('settings.stateReady') : t('settings.stateNone')}
+        {oauth.isSuccess && ghApp.isSuccess && (
+          <StatusChip tone={githubConnected ? 'ok' : (appConfigured || configured) ? 'muted' : 'off'}>
+            {githubConnected ? t('settings.stateConnected')
+              : appConfigured ? t('settings.ghAppReady')
+                : configured ? t('settings.stateReady') : t('settings.stateNone')}
           </StatusChip>
         )}
-        {configured && !githubConnected && (
-          <Button size="sm" onClick={connect} disabled={connecting}>
-            {connecting ? <Spinner /> : <Github size={14} />} {t('settings.connectGithub')}
+        {appConfigured && ghApp.data?.installUrl && (
+          <Button size="sm" onClick={() => { window.location.href = ghApp.data!.installUrl!; }}>
+            <Github size={14} /> {t('settings.ghAppInstall')}
           </Button>
         )}
       </div>
 
-      {/* Credentials live here rather than in the server .env, so a workspace
-          owner can set up the OAuth app without shell access. The form only
-          appears on demand – it is a one-time task, not daily reading. */}
+      {/* The GitHub App is the primary path: created from here via the
+          manifest flow, so the webhook URL, secret and permissions are all
+          registered by GitHub itself – nothing to copy by hand. */}
+      {ghApp.isSuccess && !appConfigured && (
+        <div className="mt-3 border-t border-border pt-3">
+          <p className="text-xs text-muted-foreground">{t('settings.ghAppCreateHint')}</p>
+          <form
+            className="mt-2 flex flex-wrap items-end gap-2"
+            onSubmit={(e) => { e.preventDefault(); void createApp(); }}
+          >
+            <Field label={t('settings.ghAppOrg')} className="w-44">
+              <Input value={appOrg} onChange={(e) => setAppOrg(e.target.value)} placeholder={t('settings.ghAppOrgPlaceholder')} />
+            </Field>
+            <Button type="submit" size="sm" disabled={creatingApp}>
+              {creatingApp ? <Spinner /> : <Github size={14} />} {t('settings.ghAppCreate')}
+            </Button>
+          </form>
+          <p className="mt-1 text-[11px] text-faint">{t('settings.ghAppOrgHint')}</p>
+        </div>
+      )}
+      {appConfigured && conns.length === 0 && (
+        <p className="mt-3 border-t border-border pt-3 text-xs text-muted-foreground">{t('settings.ghAppInstallHint')}</p>
+      )}
+
+      {/* Legacy: the per-user OAuth app. Still works, no longer promoted. */}
+      {oauth.isSuccess && configured && !githubConnected && (
+        <div className="mt-3 border-t border-border pt-3">
+          <Button size="sm" variant="outline" onClick={connect} disabled={connecting}>
+            {connecting ? <Spinner /> : <Github size={14} />} {t('settings.connectGithub')}
+          </Button>
+        </div>
+      )}
       {oauth.isSuccess && !configured && (
         <Disclosure label={t('settings.setupOauth')} className="mt-3 border-t border-border pt-3">
           <OAuthCredentials provider="github" callbackPath="/api/v1/integrations/git/oauth/callback" />
@@ -210,7 +307,9 @@ function GitHubCard() {
               <span className="text-muted-foreground">{providerIcon(c.provider)}</span>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[13px]">
-                  {c.provider ?? 'git'} · <span className="text-muted-foreground">{c.instanceUrl ?? 'github.com'}</span>
+                  {c.kind === 'app' && c.accountLogin
+                    ? <>{c.accountLogin} <Badge>{t('settings.ghAppBadgeApp')}</Badge></>
+                    : <>{c.provider ?? 'git'} · <span className="text-muted-foreground">{c.instanceUrl ?? 'github.com'}</span></>}
                 </div>
                 {c.createdAt && <div className="text-[11px] text-faint">{fmtDate(c.createdAt)}</div>}
               </div>
@@ -567,13 +666,18 @@ export function IntegrationsPanel() {
     const params = new URLSearchParams(window.location.search);
     const git = params.get('git');
     const slack = params.get('slack');
+    const ghApp = params.get('githubApp');
     if (git === 'connected') toast(t('settings.githubConnected'));
     else if (git === 'error') toast.error(t('settings.githubConnectError'));
     if (slack === 'connected') toast(t('settings.slackConnected'));
     else if (slack === 'error') toast.error(t('settings.slackConnectError'));
-    if (git || slack) {
+    if (ghApp === 'created') toast(t('settings.ghAppCreated'));
+    else if (ghApp === 'installed') toast(t('settings.ghAppInstalled'));
+    else if (ghApp === 'error') toast.error(t('settings.ghAppError'));
+    if (git || slack || ghApp) {
       params.delete('git');
       params.delete('slack');
+      params.delete('githubApp');
       const q = params.toString();
       window.history.replaceState(null, '', window.location.pathname + (q ? `?${q}` : '') + window.location.hash);
     }
