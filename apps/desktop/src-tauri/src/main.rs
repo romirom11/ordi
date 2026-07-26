@@ -5,6 +5,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use tauri::{Emitter, Manager};
+use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_global_shortcut::{ShortcutState, GlobalShortcutExt};
 use tauri_plugin_updater::UpdaterExt;
 
@@ -26,6 +27,25 @@ async fn stage_update(app: tauri::AppHandle) {
 
 fn main() {
     tauri::Builder::default()
+        // MUST be first (Tauri requirement). On Windows and Linux a deep link
+        // starts a NEW process; without this the running window never hears
+        // about ordi://auth and a browser sign-in can never finish.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+            // The second launch carries the URL in argv; hand it to the web
+            // layer under the same event name the plugin uses.
+            let urls: Vec<String> = argv
+                .into_iter()
+                .filter(|arg| arg.starts_with("ordi://"))
+                .collect();
+            if !urls.is_empty() {
+                let _ = app.emit("deep-link://new-url", urls);
+            }
+        }))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -57,6 +77,11 @@ fn main() {
             let _ = app
                 .global_shortcut()
                 .register("CommandOrControl+Shift+O");
+            // Windows and Linux only register the ordi:// scheme at install
+            // time; doing it at runtime too makes dev builds and portable
+            // installs handle deep links as well.
+            #[cfg(any(windows, target_os = "linux"))]
+            let _ = app.deep_link().register_all();
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(stage_update(handle));
             Ok(())

@@ -3,6 +3,13 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.5.1
+
+- Desktop "Sign in with browser" works again: PKCE hashing no longer needs
+  crypto.subtle (absent on the tauri:// origin), deep links reach the running
+  app instead of starting a second one, the verifier survives a relaunch, and
+  the code can be pasted by hand. Failures now name the step that failed.
+
 ## v1.5.0
 
 - MCP over OAuth: add <instance>/api/v1/mcp as a remote MCP server in Claude or

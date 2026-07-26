@@ -1,6 +1,6 @@
 [package]
 name = "ordi-desktop"
-version = "1.3.0"
+version = "1.5.1"
 description = "ordi desktop"
 edition = "2021"
 
@@ -10,6 +10,10 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-deep-link = "2"
+# Deep links only reach an ALREADY RUNNING app if a second launch hands its
+# argv over – without this, ordi://auth starts a fresh instance on Windows and
+# Linux and the sign-in never completes.
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-notification = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-autostart = "2"
