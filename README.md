@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/images/logo.png" alt="" width="96" height="96">
+
 # ordi
 
 **The operations system for small agencies and product teams.**
