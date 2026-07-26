@@ -3,6 +3,13 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.4.1
+
+- The server reports its version in /healthz; the app compares it with its own
+  build – browser tabs get a reload prompt after a deploy, the desktop app
+  warns when its server is behind, and Settings shows the running version plus
+  a link when a newer release exists.
+
 ## v1.4.0
 
 - One calendar across the whole app, replacing every native browser date input,
@@ -15,8 +22,6 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 - Project members and labels are managed from the properties rail: members in a
   popover, labels with search and inline creation.
 - The product mark is now the same artwork as the desktop app icon.
-- The server reports its version in /healthz; the app shows a reload prompt
-  when the server moved ahead and warns on desktop when the server is behind.
 
 ## v1.1.0
 
