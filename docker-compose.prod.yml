@@ -68,6 +68,10 @@ services:
       context: .
       dockerfile: docker/Dockerfile.web
     restart: unless-stopped
+    environment:
+      # Where nginx finds the API on the container network. Override when the
+      # platform renames services (e.g. Dokploy isolated deploys: ordi-api:3000).
+      API_UPSTREAM: ${API_UPSTREAM:-api:3000}
     expose:
       - "80"
     depends_on:
