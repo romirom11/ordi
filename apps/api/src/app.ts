@@ -6,6 +6,7 @@ import { env } from './env';
 import { handleError } from './lib/errors';
 import { authMiddleware } from './core/auth';
 import { moduleGate } from './core/modules';
+import { SERVER_VERSION } from './version';
 import { getDb, sql } from '@ordi/db';
 
 // domain routers
@@ -65,8 +66,8 @@ export function createApp() {
 
   // Health (PRD §19.2). Also exposed under /api/v1 so it is reachable through
   // web proxies that forward only /api/* – the desktop instance gate uses that.
-  app.get('/healthz', (c) => c.json({ status: 'ok' }));
-  app.get('/api/v1/healthz', (c) => c.json({ status: 'ok' }));
+  app.get('/healthz', (c) => c.json({ status: 'ok', version: SERVER_VERSION }));
+  app.get('/api/v1/healthz', (c) => c.json({ status: 'ok', version: SERVER_VERSION }));
   app.get('/readyz', (c) => readyz(c));
   app.get('/api/v1/readyz', (c) => readyz(c));
 

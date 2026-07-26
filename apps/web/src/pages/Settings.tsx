@@ -25,6 +25,7 @@ import { downscaleImage } from '../components/settings/image';
 import { usePageTitle } from '../lib/tabs';
 import { useT } from '../lib/i18n';
 import { extendDict } from '../lib/i18n';
+import { APP_VERSION, compareVersions, isVersion } from '../lib/version';
 
 extendDict({
   en: {
@@ -71,6 +72,7 @@ extendDict({
     'settings.revokeInvite': 'Revoke invite',
     'settings.inviteResent': 'Invitation sent again',
     'settings.inviteRevoked': 'Invitation revoked',
+    'settings.newVersion': '{version} is available',
     'settings.noUsers': 'No members yet',
     'settings.permissions': 'Permissions',
     'settings.systemRoleLocked': 'System role – permissions are fixed.',
@@ -130,6 +132,7 @@ extendDict({
     'settings.revokeInvite': 'Скасувати запрошення',
     'settings.inviteResent': 'Запрошення надіслано ще раз',
     'settings.inviteRevoked': 'Запрошення скасовано',
+    'settings.newVersion': 'Доступна {version}',
     'settings.noUsers': 'Ще немає учасників',
     'settings.permissions': 'Дозволи',
     'settings.systemRoleLocked': 'Системна роль – дозволи незмінні.',
@@ -242,6 +245,41 @@ const GROUPS: NavGroup[] = [
   },
 ];
 
+/**
+ * "ordi vX.Y.Z" under the settings nav, and – for people who can update the
+ * instance – a link when a newer release exists. The GitHub check is
+ * best-effort: air-gapped installs simply never see the link.
+ */
+function VersionFooter() {
+  const t = useT();
+  const can = useCan();
+  const latest = useQuery({
+    queryKey: ['latest-release'],
+    queryFn: async () => {
+      const res = await fetch('https://api.github.com/repos/romirom11/ordi/releases/latest');
+      if (!res.ok) return null;
+      const body = await res.json() as { tag_name?: string; html_url?: string };
+      const version = (body.tag_name ?? '').replace(/^v/, '');
+      return isVersion(version) ? { version, url: body.html_url ?? 'https://github.com/romirom11/ordi/releases/latest' } : null;
+    },
+    enabled: can('settings.manage'),
+    staleTime: 6 * 3600_000,
+    retry: false,
+  });
+
+  const newer = latest.data && compareVersions(latest.data.version, APP_VERSION) > 0 ? latest.data : null;
+  return (
+    <div className="mt-6 space-y-0.5 px-2 text-[11px] text-faint">
+      <div>ordi v{APP_VERSION}</div>
+      {newer && (
+        <a href={newer.url} target="_blank" rel="noreferrer" className="block text-primary hover:underline">
+          {t('settings.newVersion').replace('{version}', `v${newer.version}`)}
+        </a>
+      )}
+    </div>
+  );
+}
+
 export function SettingsPage({ section }: { section?: string }) {
   const t = useT();
   const can = useCan();
@@ -290,6 +328,7 @@ export function SettingsPage({ section }: { section?: string }) {
               </div>
             ))}
           </nav>
+          <VersionFooter />
         </aside>
         <div className="min-w-0 flex-1">
           <PageBody key={active.id} width="default" className="anim-fade-in">
