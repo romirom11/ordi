@@ -42,3 +42,44 @@ jobs:
         run: pnpm test
       - name: Build web
         run: pnpm --filter @ordi/web build
+
+  # The dev environment always has the whole workspace on disk, so a workspace
+  # package missing from a Dockerfile COPY is invisible until the container
+  # boots in production (that is exactly how @ordi/mcp broke v1.5.x deploys).
+  # Build both images and boot the API one against Postgres until it answers.
+  docker-images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API image
+        run: docker build -f docker/Dockerfile.api -t ordi-api:ci .
+      - name: Build web image
+        run: docker build -f docker/Dockerfile.web -t ordi-web:ci .
+      - name: Boot the API image and wait for healthz
+        run: |
+          docker network create ordi-ci
+          docker run -d --name pg --network ordi-ci \
+            -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=ordi \
+            postgres:16-alpine
+          for i in $(seq 1 30); do
+            docker exec pg pg_isready -U postgres >/dev/null 2>&1 && break
+            sleep 1
+          done
+          docker run -d --name api --network ordi-ci -p 3000:3000 \
+            -e DATABASE_URL=postgres://postgres:postgres@pg:5432/ordi \
+            -e AUTH_SECRET=ci-only-secret \
+            -e ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000 \
+            -e WORKERS_ENABLED=false \
+            ordi-api:ci
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3000/api/v1/healthz >/dev/null 2>&1; then
+              echo "API image boots and answers healthz"
+              exit 0
+            fi
+            # Surface a crash immediately instead of burning the whole timeout.
+            if [ "$(docker inspect -f '{{.State.Running}}' api)" != "true" ]; then
+              echo "API container exited:"; docker logs api; exit 1
+            fi
+            sleep 2
+          done
+          echo "API never became healthy:"; docker logs api; exit 1

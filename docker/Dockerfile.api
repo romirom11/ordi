@@ -5,16 +5,21 @@ ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
 WORKDIR /app
 
-# Install deps (workspace-aware)
+# Install deps (workspace-aware). Every workspace package the API depends on
+# must appear BOTH here and in the source COPY below – a missing one is not a
+# build error, it is a crash on boot (ERR_MODULE_NOT_FOUND), which is exactly
+# how @ordi/mcp slipped through once. CI now boots this image to catch that.
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml* .npmrc tsconfig.base.json ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/db/package.json packages/db/
+COPY packages/mcp/package.json packages/mcp/
 COPY apps/api/package.json apps/api/
 RUN pnpm install --frozen-lockfile=false --filter @ordi/api...
 
 # Copy sources
 COPY packages/shared packages/shared
 COPY packages/db packages/db
+COPY packages/mcp packages/mcp
 COPY apps/api apps/api
 
 ENV NODE_ENV=production

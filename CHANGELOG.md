@@ -3,6 +3,14 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.5.2
+
+- The API Docker image includes packages/mcp, fixing a crash on boot
+  (ERR_MODULE_NOT_FOUND '@ordi/mcp') introduced with the hosted MCP server.
+  CI now builds both images and boots the API one against Postgres, so a
+  workspace package missing from an image fails the build instead of the
+  deploy.
+
 ## v1.5.1
 
 - Desktop "Sign in with browser" works again: PKCE hashing no longer needs
