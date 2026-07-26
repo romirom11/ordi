@@ -17,6 +17,12 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   instead of a badged icon – at two digits the badge covered the bell.
 - Settings is a navigation row at the foot of the nav (gear icon, active
   state, permission-gated) instead of an item inside a dropdown.
+- MCP connectors (Claude, Cursor) could not register: OAuth discovery built
+  every endpoint from APP_URL, so a stale or default APP_URL advertised a
+  registration endpoint on localhost. Discovery now reports the host the
+  request actually arrived on, and the bundled nginx passes Host and
+  X-Forwarded-Proto through on the discovery routes (it did not, so it
+  advertised the internal api:3000).
 
 ## v1.5.4
 
