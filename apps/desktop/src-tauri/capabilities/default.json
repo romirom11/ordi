@@ -1,11 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the ordi web layer may ask the desktop shell to do: OS notifications, the taskbar badge, native events (quick-add shortcut, deep links), opening the browser for sign-in, and applying an update.",
-  "windows": ["main"],
+  "description": "What the ordi web layer may ask the desktop shell to do: OS notifications, the taskbar badge, native events (quick-add shortcut, deep links), opening the browser for sign-in, applying an update, and dragging the window by its custom title bar.",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-set-badge-count",
+    "core:window:allow-start-dragging",
     "notification:default",
     "updater:default",
     "process:allow-restart",

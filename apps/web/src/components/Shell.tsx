@@ -13,7 +13,7 @@ import { appOrigin, api, setSessionToken } from '../lib/api';
 import { useRealtime } from '../lib/sse';
 import { useT, extendDict } from '../lib/i18n';
 import { useTheme, type ThemePref } from '../lib/theme';
-import { initDesktop, restartDesktop, isTauri } from '../lib/desktop';
+import { initDesktop, restartDesktop, isTauri, isMacDesktop } from '../lib/desktop';
 import { TabsProvider, useTabs } from '../lib/tabs';
 import { cn, Avatar, Kbd, Tooltip, IconButton } from './ui';
 import { ContextMenu, DropdownMenu, MenuItem, MenuSeparator, MenuLabel, Toaster, toast, type ContextMenuEntry } from './overlays';
@@ -345,6 +345,10 @@ function ShellInner({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <aside className="flex w-56 shrink-0 flex-col">
+        {/* macOS overlay title bar: the traffic lights float over THIS corner,
+            so the sidebar owes them a strip. It doubles as the drag handle –
+            without a drag region the window cannot be moved at all. */}
+        {isMacDesktop && <div className="h-7 shrink-0" data-tauri-drag-region />}
         {/* Workspace header */}
         <div className="flex items-center gap-1 px-3 pb-1 pt-3">
           <DropdownMenu
