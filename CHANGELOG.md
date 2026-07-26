@@ -3,6 +3,21 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.7.0
+
+- New MCP tools `list_projects` and `list_companies`: the entry point for
+  obtaining ids. Until now every project/company tool demanded an id that no
+  tool could produce - an agent could work with a project only if it already
+  knew the project. Both return compact rows and pass through the same
+  permission filters as the web app.
+- Global search covers projects: name or key match ("Solovei" or "SOL"),
+  ranked key-first, limited to projects the actor can access. The `search`
+  tool description now states what it matches and points to the list tools
+  for enumeration.
+- Every MCP tool response is scrubbed before it reaches the model: lock
+  counters, soft-delete markers - and `portalToken`, the client-portal
+  secret the raw company row used to expose into an agent's context.
+
 ## v1.6.1
 
 - Every OAuth step logs its outcome: registrations, issued tokens, and every
