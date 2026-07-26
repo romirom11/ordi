@@ -163,3 +163,35 @@ describe('a client with records cannot be deleted out from under them', () => {
     expect(body.error.details.deals).toBe(1);
   });
 });
+
+describe('a pending invite is visible until it is accepted', () => {
+  it('lists, resends and revokes, and disappears once revoked', async () => {
+    const owner = reqAs(users.owner!.cookie);
+    const roles = await json(owner.get('/roles'));
+    const roleId = (roles.data as any[]).find((r) => r.key === 'member')!.id;
+
+    const created = await owner.post('/users/invite', { email: 'pending@example.com', name: 'Pending Person', roleId });
+    expect(created.status).toBe(201);
+    const invite = await json(created);
+
+    const listed = await json(owner.get('/users/invites'));
+    const row = (listed.data as any[]).find((r) => r.email === 'pending@example.com');
+    expect(row).toBeTruthy();
+    expect(row.name).toBe('Pending Person');
+    expect(row.roleId).toBe(roleId);
+    // The link is what an admin passes on by hand when email is unavailable.
+    expect(row.inviteUrl).toBe(invite.inviteUrl);
+    // The raw token never leaves the server in the listing payload.
+    expect(row.token).toBeUndefined();
+
+    expect((await owner.post(`/users/invites/${row.id}/resend`, {})).status).toBe(200);
+
+    // Only people who manage users may see or touch invites.
+    expect((await reqAs(users.member!.cookie).get('/users/invites')).status).toBe(403);
+    expect((await reqAs(users.member!.cookie).del(`/users/invites/${row.id}`)).status).toBe(403);
+
+    expect((await owner.del(`/users/invites/${row.id}`)).status).toBe(200);
+    const after = await json(owner.get('/users/invites'));
+    expect((after.data as any[]).some((r) => r.id === row.id)).toBe(false);
+  });
+});

@@ -65,6 +65,12 @@ extendDict({
     'settings.inviteCopyHint': 'Share this link so they can set up their account.',
     'settings.inviteEmailFailed': 'The invite was created, but the email could not be sent. Share this link instead, and check your SMTP settings.',
     'settings.inviteNoEmail': 'Invite created – email not sent',
+    'settings.pending': 'Pending',
+    'settings.copyInviteLink': 'Copy invite link',
+    'settings.resendInvite': 'Resend invite',
+    'settings.revokeInvite': 'Revoke invite',
+    'settings.inviteResent': 'Invitation sent again',
+    'settings.inviteRevoked': 'Invitation revoked',
     'settings.noUsers': 'No members yet',
     'settings.permissions': 'Permissions',
     'settings.systemRoleLocked': 'System role – permissions are fixed.',
@@ -118,6 +124,12 @@ extendDict({
     'settings.inviteCopyHint': 'Надішліть це посилання, щоб вони налаштували обліковий запис.',
     'settings.inviteEmailFailed': 'Запрошення створено, але лист не вдалося надіслати. Передайте це посилання вручну і перевірте налаштування SMTP.',
     'settings.inviteNoEmail': 'Запрошення створено – лист не надіслано',
+    'settings.pending': 'Очікує',
+    'settings.copyInviteLink': 'Скопіювати посилання',
+    'settings.resendInvite': 'Надіслати ще раз',
+    'settings.revokeInvite': 'Скасувати запрошення',
+    'settings.inviteResent': 'Запрошення надіслано ще раз',
+    'settings.inviteRevoked': 'Запрошення скасовано',
     'settings.noUsers': 'Ще немає учасників',
     'settings.permissions': 'Дозволи',
     'settings.systemRoleLocked': 'Системна роль – дозволи незмінні.',
@@ -466,12 +478,16 @@ function WorkspacePanel() {
 /* ────────────────────────────── Users ────────────────────────────── */
 
 interface UserRow { id: string; name?: string | null; email?: string | null; roleId?: string | null; isActive?: boolean; avatar?: string | null }
+interface PendingInvite { id: string; email: string; name?: string | null; roleId?: string | null; expiresAt?: string; inviteUrl: string }
 interface Role { id: string; key?: string; name: string; isSystem?: boolean; permissions?: string[]; userCount?: number }
 
 function UsersPanel() {
   const t = useT();
   const qc = useQueryClient();
   const users = useQuery({ queryKey: ['users'], queryFn: () => api.get<{ data: UserRow[] }>('/users') });
+  // Someone you invited exists, but is not a user yet – show them so the list
+  // reflects what you just did rather than looking like nothing happened.
+  const invites = useQuery({ queryKey: ['invites'], queryFn: () => api.get<{ data: PendingInvite[] }>('/users/invites') });
   const roles = useQuery({ queryKey: ['roles'], queryFn: () => api.get<{ data: Role[] }>('/roles') });
   const [inviteOpen, setInviteOpen] = useState(false);
 
@@ -486,9 +502,24 @@ function UsersPanel() {
     onError: () => toast.error(t('settings.saveFailed')),
   });
 
+  const revoke = useMutation({
+    mutationFn: (id: string) => api.del(`/users/invites/${id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['invites'] }); toast(t('settings.inviteRevoked')); },
+    onError: () => toast.error(t('settings.saveFailed')),
+  });
+  const resend = useMutation({
+    mutationFn: (id: string) => api.post<{ emailSent?: boolean }>(`/users/invites/${id}/resend`, {}),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['invites'] });
+      toast(r?.emailSent === false ? t('settings.inviteNoEmail') : t('settings.inviteResent'));
+    },
+    onError: () => toast.error(t('settings.saveFailed')),
+  });
+
   const roleList = roles.data?.data ?? [];
   const roleName = (id?: string | null) => roleList.find((r) => r.id === id)?.name ?? '–';
   const rows = users.data?.data ?? [];
+  const pending = invites.data?.data ?? [];
 
   return (
     <div>
@@ -497,12 +528,32 @@ function UsersPanel() {
 
       {users.isLoading ? (
         <div className="space-y-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
-      ) : rows.length === 0 ? (
+      ) : rows.length === 0 && pending.length === 0 ? (
         <EmptyState icon={<UsersIcon size={18} />} title={t('settings.noUsers')} />
       ) : (
         <RowList>
+          {pending.map((inv, i) => (
+            <AnimatedRow key={inv.id} index={i} className="flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-0">
+              <Avatar name={inv.name} size={28} className="opacity-60" />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-[13px] font-medium text-muted-foreground">{inv.name}</span>
+                  <Badge className="bg-warning/10 text-warning">{t('settings.pending')}</Badge>
+                </div>
+                <div className="truncate text-xs text-faint">{inv.email}</div>
+              </div>
+              <span className="w-36 shrink-0 text-xs text-muted-foreground">{roleName(inv.roleId)}</span>
+              <DropdownMenu align="end" trigger={<Button variant="ghost" size="sm" className="h-7 w-7 px-0"><MoreHorizontal size={15} /></Button>}>
+                <MenuItem icon={<Copy size={14} />} onSelect={() => { navigator.clipboard?.writeText(inv.inviteUrl); toast(t('common.copy')); }}>
+                  {t('settings.copyInviteLink')}
+                </MenuItem>
+                <MenuItem icon={<RotateCcw size={14} />} onSelect={() => resend.mutate(inv.id)}>{t('settings.resendInvite')}</MenuItem>
+                <MenuItem icon={<Trash2 size={14} />} danger onSelect={() => revoke.mutate(inv.id)}>{t('settings.revokeInvite')}</MenuItem>
+              </DropdownMenu>
+            </AnimatedRow>
+          ))}
           {rows.map((u, i) => (
-            <AnimatedRow key={u.id} index={i} className="flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-0">
+            <AnimatedRow key={u.id} index={pending.length + i} className="flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-0">
               <Avatar name={u.name} src={u.avatar} size={28} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
@@ -556,6 +607,7 @@ function InviteDialog({ open, onClose, roles }: { open: boolean; onClose: () => 
       setInviteUrl(r?.inviteUrl ?? null);
       setEmailSent(r?.emailSent !== false);
       qc.invalidateQueries({ queryKey: ['users'] });
+      qc.invalidateQueries({ queryKey: ['invites'] });
       // The invite is valid either way; only the delivery may have failed.
       if (r?.emailSent === false) toast.info(t('settings.inviteNoEmail'));
       else toast(t('settings.inviteSent'));

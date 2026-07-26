@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { getDb, schema, eq, sql } from '@ordi/db';
+import { getDb, schema, eq, and, isNull, gt, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import { inviteUserSchema, changeRoleSchema } from '@ordi/shared';
 import type { AppEnv } from '../../context';
@@ -34,6 +34,67 @@ export function usersRoutes() {
       id: schema.users.id, name: schema.users.name, avatar: schema.users.avatar,
     }).from(schema.users).where(eq(schema.users.isActive, true));
     return c.json({ data: rows });
+  });
+
+  /**
+   * Invites that have not been accepted yet. Without this the person you just
+   * invited is invisible until they sign up, which reads as "nothing happened".
+   * The link is included because the admin who sent it may need to pass it on
+   * by hand – this route already requires users.manage.
+   */
+  app.get('/invites', guard('users.manage'), async (c) => {
+    const { db } = getDb();
+    const rows = await db.select({
+      id: schema.invites.id, email: schema.invites.email, name: schema.invites.name,
+      roleId: schema.invites.roleId, expiresAt: schema.invites.expiresAt,
+      createdAt: schema.invites.createdAt, token: schema.invites.token,
+    }).from(schema.invites)
+      .where(and(isNull(schema.invites.acceptedAt), gt(schema.invites.expiresAt, new Date())));
+    return c.json({
+      data: rows.map(({ token, ...r }) => ({ ...r, inviteUrl: `${env.appUrl}/accept-invite?token=${token}` })),
+    });
+  });
+
+  app.delete('/invites/:id', guard('users.manage'), async (c) => {
+    const actor = currentActor(c);
+    const { db } = getDb();
+    const id = c.req.param('id');
+    const [invite] = await db.select().from(schema.invites).where(eq(schema.invites.id, id));
+    if (!invite) throw err.notFound('Invite not found');
+    await db.delete(schema.invites).where(eq(schema.invites.id, id));
+    await writeActivity(db, {
+      entityType: 'user', entityId: id, action: 'invite_revoked',
+      actorId: actor.userId, actorType: actor.actorType, diff: { email: invite.email },
+    });
+    return c.json({ ok: true });
+  });
+
+  /** Send the invite again and push its expiry out, without a new token. */
+  app.post('/invites/:id/resend', guard('users.manage'), async (c) => {
+    const actor = currentActor(c);
+    const { db } = getDb();
+    const [invite] = await db.select().from(schema.invites).where(eq(schema.invites.id, c.req.param('id')));
+    if (!invite || invite.acceptedAt) throw err.notFound('Invite not found');
+
+    const expiresAt = new Date(Date.now() + 7 * 24 * 3600_000);
+    await db.update(schema.invites).set({ expiresAt }).where(eq(schema.invites.id, invite.id));
+
+    const inviteUrl = `${env.appUrl}/accept-invite?token=${invite.token}`;
+    const branding = await loadBranding();
+    const locale = asLocale(actor.locale);
+    const vars = { workspace: branding.workspaceName };
+    const rendered = renderEmail({
+      locale, branding,
+      heading: tr(locale, 'invite.heading', vars),
+      paragraphs: [tr(locale, 'invite.body', vars)],
+      cta: { label: tr(locale, 'invite.cta'), url: inviteUrl },
+      note: tr(locale, 'invite.expiry'),
+    });
+    const delivery = await trySendEmail({
+      to: invite.email, subject: tr(locale, 'invite.subject', vars),
+      body: rendered.text, html: rendered.html,
+    });
+    return c.json({ inviteUrl, emailSent: delivery.sent, emailError: delivery.error });
   });
 
   app.post('/invite', guard('users.manage'), async (c) => {
