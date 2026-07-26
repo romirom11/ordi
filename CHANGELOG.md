@@ -9,6 +9,9 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   updater on demand, offers a restart only once a build is staged, says when
   the build is not published yet, and reports failures instead of silently
   doing nothing.
+- Links shown or copied inside the desktop app (MCP connect URL, copy-link
+  everywhere, OAuth redirect URLs) use the instance address instead of
+  tauri://localhost.
 
 ## v1.5.2
 

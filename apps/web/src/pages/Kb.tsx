@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '../lib/router';
 import { useTabs } from '../lib/tabs';
 import { useCan } from '../lib/auth';
-import { api, ApiError } from '../lib/api';
+import { appOrigin, api, ApiError } from '../lib/api';
 import {
   Button, IconButton, Input, Card, Badge, Breadcrumbs, EmptyState, Skeleton, Spinner, fmtDate, cn,
   type BreadcrumbItem,
@@ -466,7 +466,7 @@ export function KbPage({ spaceId, pageId }: { spaceId?: string; pageId?: string 
 
   const copyPageLink = async (sid: string, pid: string) => {
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}/kb/${sid}/${pid}`);
+      await navigator.clipboard.writeText(`${appOrigin()}/kb/${sid}/${pid}`);
       toast(t('kb.linkCopied'));
     } catch {
       toast.error(t('common.error'));

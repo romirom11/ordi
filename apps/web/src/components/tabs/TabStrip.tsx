@@ -15,6 +15,7 @@ import { tabFallbackTitle, useTabs, type TabItem } from '../../lib/tabs';
 import { cn, Tooltip } from '../ui';
 import { ContextMenu, toast, type ContextMenuEntry } from '../overlays';
 import { Hint } from '../Hint';
+import { appOrigin } from '../../lib/api';
 
 extendDict({
   en: {
@@ -175,7 +176,7 @@ export function TabStrip() {
         key: 'copy',
         label: t('tabs.copyLink'),
         onSelect: () => {
-          navigator.clipboard?.writeText(`${window.location.origin}${tab.url}`)
+          navigator.clipboard?.writeText(`${appOrigin()}${tab.url}`)
             .then(() => toast(t('tabs.linkCopied')))
             .catch(() => {});
         },

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Bot, Check, Copy, KeyRound, Plus, Trash2, TriangleAlert, Zap, BookOpen } from 'lucide-react';
-import { api } from '../../lib/api';
+import { appOrigin, api } from '../../lib/api';
 import { useMe } from '../../lib/auth';
 import { Button, Input, Badge, Checkbox, Switch, Skeleton, Spinner, EmptyState, fmtDate, fmtRelative, cn } from '../ui';
 import { Dialog, ConfirmDialog, toast } from '../overlays';
@@ -149,7 +149,7 @@ export function McpPanel() {
   });
 
   const rows = tokens.data?.data ?? [];
-  const mcpUrl = `${window.location.origin}/api/v1/mcp`;
+  const mcpUrl = `${appOrigin()}/api/v1/mcp`;
 
   return (
     <div>
@@ -355,7 +355,7 @@ function CreateTokenDialog({ open, onClose, onCreated }: { open: boolean; onClos
 
 function ConfigSnippets({ tokenValue }: { tokenValue: string }) {
   const t = useT();
-  const origin = window.location.origin;
+  const origin = appOrigin();
 
   const { desktopJson, codeCmd, cursorJson } = useMemo(() => {
     const serverEntry = {

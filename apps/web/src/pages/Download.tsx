@@ -5,7 +5,7 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { Apple, Monitor, Terminal, Download, ExternalLink } from 'lucide-react';
-import { api } from '../lib/api';
+import { appOrigin, api } from '../lib/api';
 import { Button, Card, PageBody, PageHeader, Spinner, cn } from '../components/ui';
 import { useT, extendDict } from '../lib/i18n';
 
@@ -135,7 +135,7 @@ export function DownloadPage() {
           )}
 
           <p className="mt-5 border-t border-border pt-4 text-xs leading-relaxed text-muted-foreground">
-            {t('download.connectHint').replace('{url}', window.location.origin)}
+            {t('download.connectHint').replace('{url}', appOrigin())}
           </p>
 
           <a

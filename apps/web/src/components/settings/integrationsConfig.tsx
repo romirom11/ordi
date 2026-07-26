@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Mail, KeyRound } from 'lucide-react';
-import { api } from '../../lib/api';
+import { appOrigin, api } from '../../lib/api';
 import { Button, Input, Card, Switch, Spinner, cn } from '../ui';
 import { toast } from '../overlays';
 import { Field } from './primitives';
@@ -251,7 +251,7 @@ export function OAuthCredentials({ provider, callbackPath }: { provider: 'github
       )}
       <p className="mt-2.5 text-xs text-muted-foreground">
         {t('settings.oauthCallback')}{' '}
-        <code className="font-mono text-[11px] text-foreground">{window.location.origin}{callbackPath}</code>
+        <code className="font-mono text-[11px] text-foreground">{appOrigin()}{callbackPath}</code>
       </p>
       <Button className="mt-3" size="sm" disabled={!clientId || save.isPending} onClick={() => save.mutate()}>
         {save.isPending ? <Spinner /> : t('common.save')}

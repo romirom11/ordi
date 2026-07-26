@@ -8,7 +8,7 @@ import { Search, Building2, ExternalLink, Copy, CircleDot, Trash2 } from 'lucide
 import { useNavigate } from '../../lib/router';
 import { useTabs } from '../../lib/tabs';
 import { useCan } from '../../lib/auth';
-import { api, ApiError } from '../../lib/api';
+import { appOrigin, api, ApiError } from '../../lib/api';
 import { useT } from '../../lib/i18n';
 import { Avatar, Button, Input, EmptyState, Skeleton, Tooltip, cn, fmtMoney } from '../ui';
 import { ContextMenu, ConfirmDialog, toast, type ContextMenuEntry } from '../overlays';
@@ -81,7 +81,7 @@ export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
     const url = `/companies/${c.id}`;
     const items: ContextMenuEntry[] = [
       { key: 'open', label: t('crm.openInNewTab'), icon: <ExternalLink size={14} />, onSelect: () => tabs?.openInNewTab(url) },
-      { key: 'copy', label: t('crm.copyLink'), icon: <Copy size={14} />, onSelect: () => { navigator.clipboard?.writeText(`${window.location.origin}${url}`).then(() => toast(t('crm.linkCopied'))); } },
+      { key: 'copy', label: t('crm.copyLink'), icon: <Copy size={14} />, onSelect: () => { navigator.clipboard?.writeText(`${appOrigin()}${url}`).then(() => toast(t('crm.linkCopied'))); } },
     ];
     if (canWrite) {
       items.push({
