@@ -6,6 +6,7 @@
  * best-effort – a missing plugin must never break the web app.
  */
 import { api, getInstanceUrl, setSessionToken } from './api';
+import { sha256Hex as sha256Fallback } from './sha256';
 
 export const isTauri: boolean =
   typeof window !== 'undefined' &&
@@ -48,12 +49,17 @@ export function restartDesktop(): void {
 }
 
 /** Open a URL in the user's real browser, not in the app window. */
-export async function openInBrowser(url: string): Promise<void> {
-  try {
-    await t()?.core?.invoke?.('plugin:opener|open_url', { url });
-  } catch {
-    window.open(url, '_blank');
+export async function openInBrowser(url: string): Promise<boolean> {
+  // Optional chaining would swallow a missing invoke and silently open
+  // nothing, so check for it before deciding the plugin handled the URL.
+  const invoke = t()?.core?.invoke;
+  if (typeof invoke === 'function') {
+    try {
+      await invoke('plugin:opener|open_url', { url });
+      return true;
+    } catch { /* fall through to the webview's own opener */ }
   }
+  return window.open(url, '_blank') !== null;
 }
 
 const VERIFIER_KEY = 'ordi:desktopAuthVerifier';
@@ -82,13 +88,25 @@ function readPending(): PendingLogin | null {
 
 function randomToken(bytes = 32): string {
   const buf = new Uint8Array(bytes);
-  crypto.getRandomValues(buf);
+  // getRandomValues is available outside secure contexts; subtle is not.
+  globalThis.crypto.getRandomValues(buf);
   return Array.from(buf, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * crypto.subtle exists only in a secure context, which the tauri:// origin is
+ * not on every platform. Use it when present, and a plain implementation
+ * otherwise – PKCE must not depend on the origin being trusted.
+ */
 async function sha256Hex(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+  try {
+    const subtle = globalThis.crypto?.subtle;
+    if (subtle) {
+      const digest = await subtle.digest('SHA-256', new TextEncoder().encode(value));
+      return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+    }
+  } catch { /* unavailable or blocked – fall back */ }
+  return sha256Fallback(value);
 }
 
 /** A human-readable name for this machine, shown on the browser approval screen. */
@@ -103,14 +121,35 @@ function deviceLabel(): string {
  * hand the browser only its hash so an app that hijacks the ordi:// scheme
  * cannot redeem the code it sees.
  */
+export class BrowserLoginError extends Error {
+  /** i18n key describing which step failed, so the UI can be specific. */
+  messageKey: string;
+  /** Set when the request exists but the browser did not open by itself. */
+  url?: string;
+  constructor(messageKey: string, url?: string) {
+    super(messageKey);
+    this.messageKey = messageKey;
+    this.url = url;
+  }
+}
+
 export async function beginBrowserLogin(): Promise<void> {
   const verifier = randomToken();
   const state = randomToken(16);
   const codeChallenge = await sha256Hex(verifier);
   localStorage.setItem(VERIFIER_KEY, JSON.stringify({ verifier, state, at: Date.now() }));
 
-  await api.post('/auth/desktop/start', { state, codeChallenge, deviceLabel: deviceLabel() });
-  await openInBrowser(`${getInstanceUrl()}/desktop-auth?state=${encodeURIComponent(state)}`);
+  try {
+    await api.post('/auth/desktop/start', { state, codeChallenge, deviceLabel: deviceLabel() });
+  } catch {
+    localStorage.removeItem(VERIFIER_KEY);
+    throw new BrowserLoginError('desktop.browserLoginNoServer');
+  }
+
+  const url = `${getInstanceUrl()}/desktop-auth?state=${encodeURIComponent(state)}`;
+  // The request is live either way; if we could not launch a browser the user
+  // can still open the link themselves, so keep it and say so.
+  if (!(await openInBrowser(url))) throw new BrowserLoginError('desktop.browserLoginNoBrowser', url);
 }
 
 /** True while a browser sign-in is waiting for its code. */

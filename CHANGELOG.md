@@ -3,15 +3,19 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.5.1
+
+- Desktop "Sign in with browser" works again: PKCE hashing no longer needs
+  crypto.subtle (absent on the tauri:// origin), deep links reach the running
+  app instead of starting a second one, the verifier survives a relaunch, and
+  the code can be pasted by hand. Failures now name the step that failed.
+
 ## v1.5.0
 
 - MCP over OAuth: add <instance>/api/v1/mcp as a remote MCP server in Claude or
   Cursor, sign in through the browser and approve – no token copying. Grants
   appear in Settings → MCP and are revocable like any token; the stdio server
   with ORDI_API_TOKEN remains for clients without OAuth.
-- Desktop browser sign-in works on Windows and Linux: deep links now reach the
-  running app instead of starting a second one, the PKCE verifier survives a
-  relaunch, and the code can be pasted by hand if the deep link never fires.
 
 ## v1.4.1
 

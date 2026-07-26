@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { KeyRound, Globe } from 'lucide-react';
 import { api, ApiError, setSessionToken } from '../lib/api';
-import { isTauri, beginBrowserLogin, completeBrowserLogin, hasPendingBrowserLogin, listenForAuthDeepLink } from '../lib/desktop';
+import { isTauri, beginBrowserLogin, BrowserLoginError, completeBrowserLogin, hasPendingBrowserLogin, listenForAuthDeepLink, openInBrowser } from '../lib/desktop';
 import { Button, Input, Card, Spinner } from '../components/ui';
 import { BrandMark } from '../components/BrandMark';
 import { useT } from '../lib/i18n';
@@ -31,6 +31,8 @@ export function LoginPage() {
   // with it – a deep link that relaunched the app is exactly when it is needed.
   const [browserLogin, setBrowserLogin] = useState(() => isTauri && hasPendingBrowserLogin());
   const [pastedCode, setPastedCode] = useState('');
+  /** Set when the request exists but no browser opened – offer the link. */
+  const [manualUrl, setManualUrl] = useState<string | null>(null);
 
   function fail(message: string) {
     setError(message);
@@ -160,10 +162,18 @@ export function LoginPage() {
               className="w-full"
               disabled={browserLogin}
               onClick={() => {
+                setError(null);
+                setManualUrl(null);
                 setBrowserLogin(true);
-                beginBrowserLogin().catch(() => {
+                beginBrowserLogin().catch((e: unknown) => {
+                  if (e instanceof BrowserLoginError && e.url) {
+                    // The sign-in is live; only launching a browser failed.
+                    setManualUrl(e.url);
+                    fail(t(e.messageKey));
+                    return;
+                  }
                   setBrowserLogin(false);
-                  fail(t('desktop.browserLoginFailed'));
+                  fail(t(e instanceof BrowserLoginError ? e.messageKey : 'desktop.browserLoginFailed'));
                 });
               }}
             >
@@ -172,6 +182,15 @@ export function LoginPage() {
             {browserLogin && (
               <div className="mt-3 space-y-2">
                 <p className="text-center text-xs text-muted-foreground">{t('desktop.browserLoginWaiting')}</p>
+                {manualUrl && (
+                  <button
+                    type="button"
+                    onClick={() => { void openInBrowser(manualUrl); }}
+                    className="w-full truncate rounded-md border border-border bg-muted px-2 py-1.5 text-center font-mono text-[11px] text-primary hover:border-border-strong"
+                  >
+                    {manualUrl}
+                  </button>
+                )}
                 {/* Deep links do not fire reliably everywhere (Linux above all),
                     so the code the browser shows can always be pasted instead. */}
                 <div className="flex gap-2">
