@@ -10,6 +10,8 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   lights no longer cover the workspace switcher: they are positioned via
   trafficLightPosition onto the sidebar's first row, with the switcher beside
   them, so window buttons, switcher, nav arrows and tabs share one row.
+- A long workspace name no longer escapes the sidebar and runs under the tab
+  strip; it truncates with an ellipsis (affected the web build too).
 
 ## v1.5.3
 

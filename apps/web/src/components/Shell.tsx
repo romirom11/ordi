@@ -356,8 +356,12 @@ function ShellInner({ children }: { children: ReactNode }) {
           className={cn('flex items-center gap-1 px-3 pb-1 pt-3', isMacDesktop && 'pl-[84px]')}
           data-tauri-drag-region={isMacDesktop || undefined}
         >
+          {/* The anchor is inline-flex by default, so the trigger's flex-1 had
+              nothing to shrink against and a long workspace name ran out of
+              the sidebar. Constrain the anchor and the name truncates. */}
           <DropdownMenu
             width={210}
+            className="min-w-0 flex-1"
             trigger={
               <button className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors duration-150 hover:bg-muted">
                 {wsLogo ? (
