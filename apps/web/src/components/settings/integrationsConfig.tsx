@@ -6,10 +6,10 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Mail, KeyRound } from 'lucide-react';
-import { api } from '../../lib/api';
+import { appOrigin, api } from '../../lib/api';
 import { Button, Input, Card, Switch, Spinner, cn } from '../ui';
 import { toast } from '../overlays';
-import { Field } from './primitives';
+import { Field, Disclosure, StatusChip } from './primitives';
 import { useT, extendDict } from '../../lib/i18n';
 
 extendDict({
@@ -23,6 +23,10 @@ extendDict({
     'settings.emailNotConfigured': 'Not configured yet.',
     'settings.emailTestSent': 'Test email sent to {to}',
     'settings.emailTestFailed': 'Could not send: {error}',
+    'settings.emailConfigured': 'Configured',
+    'settings.emailViaEnv': 'From server .env',
+    'settings.emailNone': 'Not configured',
+    'settings.emailEdit': 'SMTP settings',
     'settings.smtpHost': 'SMTP host',
     'settings.smtpPort': 'Port',
     'settings.smtpSecure': 'Implicit TLS (port 465)',
@@ -47,6 +51,10 @@ extendDict({
     'settings.emailNotConfigured': 'Ще не налаштовано.',
     'settings.emailTestSent': 'Тестовий лист надіслано на {to}',
     'settings.emailTestFailed': 'Не вдалося надіслати: {error}',
+    'settings.emailConfigured': 'Налаштовано',
+    'settings.emailViaEnv': 'Із серверного .env',
+    'settings.emailNone': 'Не налаштовано',
+    'settings.emailEdit': 'Налаштування SMTP',
     'settings.smtpHost': 'SMTP-хост',
     'settings.smtpPort': 'Порт',
     'settings.smtpSecure': 'Неявний TLS (порт 465)',
@@ -137,20 +145,13 @@ export function EmailCard() {
     setSending(false);
   };
 
-  return (
-    <Card className="p-4">
-      <div className="mb-3 flex items-start gap-3">
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-muted text-foreground">
-          <Mail size={18} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-semibold">{t('settings.emailTitle')}</div>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t('settings.emailDesc')}</p>
-        </div>
-      </div>
+  const source = cfg.data?.smtpSource ?? 'none';
+  const configured = source !== 'none';
 
-      <EnvNote source={cfg.data?.smtpSource ?? 'none'} />
+  if (cfg.isLoading) return <Card className="h-24 animate-pulse p-4"><span /></Card>;
 
+  const form_ = (
+    <>
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label={t('settings.smtpHost')}>
           <Input value={form.host} placeholder="smtp.example.com"
@@ -190,16 +191,48 @@ export function EmailCard() {
         </p>
       )}
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      <div className="mt-4">
         <Button size="sm" disabled={!form.host || !form.from || save.isPending} onClick={() => save.mutate()}>
           {save.isPending ? <Spinner /> : t('common.save')}
         </Button>
-        <Button size="sm" variant="outline" disabled={checking} onClick={() => void check()}>
-          {checking ? <Spinner /> : t('settings.emailCheck')}
-        </Button>
-        <Button size="sm" variant="ghost" disabled={sending} onClick={() => void sendTest()}>
-          {sending ? <Spinner /> : t('settings.emailSendTest')}
-        </Button>
+      </div>
+    </>
+  );
+
+  return (
+    <Card className="p-4">
+      <div className="flex items-start gap-3">
+        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-muted text-foreground">
+          <Mail size={18} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-semibold">{t('settings.emailTitle')}</div>
+          <p className="mt-0.5 text-xs text-muted-foreground">{t('settings.emailDesc')}</p>
+        </div>
+        <StatusChip tone={source === 'db' ? 'ok' : source === 'env' ? 'muted' : 'off'}>
+          {source === 'db' ? t('settings.emailConfigured') : source === 'env' ? t('settings.emailViaEnv') : t('settings.emailNone')}
+        </StatusChip>
+        {/* The two diagnostics stay one click away – they are what a configured
+            mailbox actually needs day to day. */}
+        {configured && (
+          <div className="flex shrink-0 gap-1.5">
+            <Button size="xs" variant="outline" disabled={checking} onClick={() => void check()}>
+              {checking ? <Spinner /> : t('settings.emailCheck')}
+            </Button>
+            <Button size="xs" variant="outline" disabled={sending} onClick={() => void sendTest()}>
+              {sending ? <Spinner /> : t('settings.emailSendTest')}
+            </Button>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-3">
+        <EnvNote source={source} />
+        {configured ? (
+          <Disclosure label={t('settings.emailEdit')}>
+            <div className="pt-3">{form_}</div>
+          </Disclosure>
+        ) : form_}
       </div>
     </Card>
   );
@@ -251,7 +284,7 @@ export function OAuthCredentials({ provider, callbackPath }: { provider: 'github
       )}
       <p className="mt-2.5 text-xs text-muted-foreground">
         {t('settings.oauthCallback')}{' '}
-        <code className="font-mono text-[11px] text-foreground">{window.location.origin}{callbackPath}</code>
+        <code className="font-mono text-[11px] text-foreground">{appOrigin()}{callbackPath}</code>
       </p>
       <Button className="mt-3" size="sm" disabled={!clientId || save.isPending} onClick={() => save.mutate()}>
         {save.isPending ? <Spinner /> : t('common.save')}

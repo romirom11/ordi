@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api, qs, ApiError } from '../lib/api';
+import { appOrigin, api, qs, ApiError } from '../lib/api';
 import { useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { useTabs } from '../lib/tabs';
@@ -519,9 +519,9 @@ function DocTable({ rows, loading, kind, onRow, companies }: {
         if (kind !== 'invoice' || !onRow) return <div key={r.id}>{row}</div>;
         const menu: ContextMenuEntry[] = [
           { key: 'open', label: t('finance.openInNewTab'), icon: <ExternalLink size={14} />, onSelect: () => tabs?.openInNewTab(detailUrl) },
-          { key: 'copy', label: t('finance.copyLink'), icon: <Copy size={14} />, onSelect: () => copyToClipboard(`${window.location.origin}${detailUrl}`, t('finance.linkCopied')) },
+          { key: 'copy', label: t('finance.copyLink'), icon: <Copy size={14} />, onSelect: () => copyToClipboard(`${appOrigin()}${detailUrl}`, t('finance.linkCopied')) },
           ...(r.publicToken
-            ? [{ key: 'copyPublic', label: t('finance.copyPublicLink'), icon: <Link2 size={14} />, onSelect: () => copyToClipboard(`${window.location.origin}/i/${r.publicToken}`, t('finance.linkCopied')) } as ContextMenuEntry]
+            ? [{ key: 'copyPublic', label: t('finance.copyPublicLink'), icon: <Link2 size={14} />, onSelect: () => copyToClipboard(`${appOrigin()}/i/${r.publicToken}`, t('finance.linkCopied')) } as ContextMenuEntry]
             : []),
         ];
         return <ContextMenu key={r.id} items={menu}>{row}</ContextMenu>;

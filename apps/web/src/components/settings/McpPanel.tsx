@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Bot, Check, Copy, KeyRound, Plus, Trash2, TriangleAlert, Zap, BookOpen } from 'lucide-react';
-import { api } from '../../lib/api';
+import { appOrigin, api } from '../../lib/api';
 import { useMe } from '../../lib/auth';
-import { Button, Input, Badge, Checkbox, Switch, Skeleton, Spinner, EmptyState, fmtDate, fmtRelative, cn } from '../ui';
+import { Button, Input, Badge, Checkbox, SegmentedControl, Switch, Skeleton, Spinner, EmptyState, fmtDate, fmtRelative, cn } from '../ui';
 import { Dialog, ConfirmDialog, toast } from '../overlays';
-import { SectionHead, Field, RowList, AnimatedRow } from './primitives';
+import { SectionHead, Field, RowList, AnimatedRow, Disclosure } from './primitives';
 import { useT, extendDict } from '../../lib/i18n';
 
 extendDict({
@@ -40,9 +40,16 @@ extendDict({
     'mcp.tokenRevoked': 'Token revoked.',
     'mcp.revokeFailed': 'Could not revoke the token.',
     'mcp.copied': 'Copied to clipboard.',
-    'mcp.oauthTitle': 'Connect by URL (recommended)',
-    'mcp.oauthHint': 'Add this URL as a remote MCP server in Claude, Cursor or any OAuth-capable client. It opens the browser, you sign in and approve – no token to copy. The granted access appears below and can be revoked anytime.',
+    'mcp.oauthTitle': 'Connect a client',
+    'mcp.oauthHint': 'Add ordi as a remote MCP server: the client opens the browser, you sign in and approve. No token to copy.',
     'mcp.oauthCopied': 'URL copied.',
+    'mcp.desktopSteps': 'Settings -> Connectors -> Add custom connector, paste the URL above. No config file needed.',
+    'mcp.codexHint': 'Add to ~/.codex/config.toml. Older Codex versions without remote MCP support can use the token setup below.',
+    'mcp.cursorHint': 'Add to ~/.cursor/mcp.json (or Cursor Settings -> MCP -> Add).',
+    'mcp.access': 'Access',
+    'mcp.accessHint': 'Everything currently allowed to act as you: OAuth grants from clients and hand-made tokens. Revoke anything you do not recognise.',
+    'mcp.stdioTitle': 'Without OAuth (stdio + token)',
+    'mcp.capabilitiesToggle': 'What the agent can do',
     'mcp.connect': 'Connect a client',
     'mcp.connectHint': 'The stdio fallback for clients without OAuth support. Run the command from the root of the ordi repo (the built ordi-mcp bin works as an alternative). Replace YOUR_TOKEN with a token created above.',
     'mcp.snippetClaudeDesktop': 'Claude Desktop · claude_desktop_config.json',
@@ -85,9 +92,16 @@ extendDict({
     'mcp.tokenRevoked': 'Токен відкликано.',
     'mcp.revokeFailed': 'Не вдалося відкликати токен.',
     'mcp.copied': 'Скопійовано в буфер обміну.',
-    'mcp.oauthTitle': 'Підключення за URL (рекомендовано)',
-    'mcp.oauthHint': 'Додайте цей URL як remote MCP-сервер у Claude, Cursor чи будь-якому клієнті з OAuth. Відкриється браузер, ви входите і підтверджуєте – токен копіювати не треба. Наданий доступ зʼявиться нижче, його можна відкликати будь-коли.',
+    'mcp.oauthTitle': 'Підключити клієнта',
+    'mcp.oauthHint': 'Додайте ordi як remote MCP-сервер: клієнт відкриє браузер, ви входите і підтверджуєте. Токен копіювати не треба.',
     'mcp.oauthCopied': 'URL скопійовано.',
+    'mcp.desktopSteps': 'Settings -> Connectors -> Add custom connector, вставте URL вище. Конфіг-файл не потрібен.',
+    'mcp.codexHint': 'Додайте в ~/.codex/config.toml. Старіші версії Codex без remote MCP можуть використати варіант із токеном нижче.',
+    'mcp.cursorHint': 'Додайте в ~/.cursor/mcp.json (або Cursor Settings -> MCP -> Add).',
+    'mcp.access': 'Доступ',
+    'mcp.accessHint': 'Все, що зараз може діяти від вашого імені: OAuth-гранти клієнтів і ручні токени. Відкликайте все, чого не впізнаєте.',
+    'mcp.stdioTitle': 'Без OAuth (stdio + токен)',
+    'mcp.capabilitiesToggle': 'Що вміє агент',
     'mcp.connect': 'Підключення клієнта',
     'mcp.connectHint': 'Stdio-варіант для клієнтів без підтримки OAuth. Команду запускайте з кореня репозиторію ordi (альтернатива – зібраний бінарник ordi-mcp). Замініть YOUR_TOKEN на токен, створений вище.',
     'mcp.snippetClaudeDesktop': 'Claude Desktop · claude_desktop_config.json',
@@ -149,14 +163,14 @@ export function McpPanel() {
   });
 
   const rows = tokens.data?.data ?? [];
-  const mcpUrl = `${window.location.origin}/api/v1/mcp`;
+  const mcpUrl = `${appOrigin()}/api/v1/mcp`;
 
   return (
     <div>
       <SectionHead title={t('settings.mcp')} desc={t('settings.mcpDesc')} />
 
-      {/* ── Remote MCP over OAuth: paste the URL, log in, done ── */}
-      <div className="mb-6 rounded-lg border border-primary/30 bg-primary/5 p-4">
+      {/* ── Connect: the URL + one snippet for the client you actually use ── */}
+      <div className="mb-8 rounded-lg border border-primary/30 bg-primary/5 p-4">
         <div className="text-[11px] font-semibold uppercase tracking-wider text-primary">{t('mcp.oauthTitle')}</div>
         <p className="mt-1 text-xs text-muted-foreground">{t('mcp.oauthHint')}</p>
         <div className="mt-2.5 flex items-center gap-2">
@@ -165,15 +179,13 @@ export function McpPanel() {
             <Copy size={13} />
           </Button>
         </div>
+        <ClientSetup mcpUrl={mcpUrl} />
       </div>
 
-      {/* ── Tokens ── */}
-      <div className="mb-2 flex items-end justify-between gap-3">
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">{t('mcp.tokens')}</div>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t('mcp.tokensHint')}</p>
-        </div>
-        <Button size="sm" onClick={() => setCreateOpen(true)}><Plus size={14} /> {t('mcp.createToken')}</Button>
+      {/* ── Access: who can currently act as you ── */}
+      <div className="mb-2">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">{t('mcp.access')}</div>
+        <p className="mt-0.5 text-xs text-muted-foreground">{t('mcp.accessHint')}</p>
       </div>
 
       {createdToken && (
@@ -239,22 +251,22 @@ export function McpPanel() {
         </RowList>
       )}
 
-      {/* ── Client config snippets ── */}
-      <div className="mt-8">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">{t('mcp.connect')}</div>
-        <p className="mb-3 mt-0.5 text-xs text-muted-foreground">{t('mcp.connectHint')}</p>
-        <ConfigSnippets tokenValue={createdToken ?? 'YOUR_TOKEN'} />
-      </div>
+      {/* ── Rarely needed: the token/stdio fallback and the tool reference ── */}
+      <Disclosure label={t('mcp.stdioTitle')} className="mt-8">
+        <div className="space-y-3 pt-3">
+          <p className="text-xs text-muted-foreground">{t('mcp.connectHint')}</p>
+          <Button size="sm" variant="outline" onClick={() => setCreateOpen(true)}><Plus size={14} /> {t('mcp.createToken')}</Button>
+          <ConfigSnippets tokenValue={createdToken ?? 'YOUR_TOKEN'} />
+        </div>
+      </Disclosure>
 
-      {/* ── Tool summary ── */}
-      <div className="mt-8">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">{t('mcp.capabilities')}</div>
-        <p className="mb-3 mt-0.5 text-xs text-muted-foreground">{t('mcp.capabilitiesHint')}</p>
-        <div className="space-y-3">
+      <Disclosure label={t('mcp.capabilitiesToggle')} className="mt-4">
+        <div className="space-y-3 pt-3">
+          <p className="text-xs text-muted-foreground">{t('mcp.capabilitiesHint')}</p>
           <ToolGroup icon={<BookOpen size={13} />} label={t('mcp.readTools')} tools={READ_TOOLS} />
           <ToolGroup icon={<Zap size={13} />} label={t('mcp.actionTools')} tools={ACTION_TOOLS} />
         </div>
-      </div>
+      </Disclosure>
 
       <CreateTokenDialog
         open={createOpen}
@@ -351,13 +363,61 @@ function CreateTokenDialog({ open, onClose, onCreated }: { open: boolean; onClos
   );
 }
 
+/* ─────────────────────── Per-client remote setup ─────────────────────── */
+
+type McpClient = 'claude-code' | 'claude-desktop' | 'cursor' | 'codex';
+
+/**
+ * One client, one snippet. Everyone connects the same way (the URL above);
+ * this only answers "where do I paste it" for the tool the person uses.
+ */
+function ClientSetup({ mcpUrl }: { mcpUrl: string }) {
+  const t = useT();
+  const [client, setClient] = useState<McpClient>('claude-code');
+
+  const snippet =
+    client === 'claude-code' ? `claude mcp add --transport http ordi ${mcpUrl}`
+    : client === 'cursor' ? JSON.stringify({ mcpServers: { ordi: { url: mcpUrl } } }, null, 2)
+    : client === 'codex' ? `[mcp_servers.ordi]\nurl = "${mcpUrl}"`
+    : null; // Claude Desktop is clicks, not config
+
+  const hint =
+    client === 'claude-desktop' ? t('mcp.desktopSteps')
+    : client === 'codex' ? t('mcp.codexHint')
+    : client === 'cursor' ? t('mcp.cursorHint')
+    : null;
+
+  return (
+    <div className="mt-3">
+      <SegmentedControl<McpClient>
+        value={client}
+        onChange={setClient}
+        className="h-7 text-xs"
+        options={[
+          { key: 'claude-code', label: 'Claude Code' },
+          { key: 'claude-desktop', label: 'Claude Desktop' },
+          { key: 'cursor', label: 'Cursor' },
+          { key: 'codex', label: 'Codex CLI' },
+        ]}
+      />
+      {snippet && (
+        <div className="mt-2 flex items-start gap-2">
+          <pre className="min-w-0 flex-1 overflow-x-auto rounded-md border border-border bg-surface px-2.5 py-2 font-mono text-[11px] leading-relaxed text-muted-foreground">{snippet}</pre>
+          <CopyButton value={snippet} label={t('common.copy')} />
+        </div>
+      )}
+      {hint && <p className="mt-2 text-xs text-muted-foreground">{hint}</p>}
+    </div>
+  );
+}
+
 /* ────────────────────────────── Config snippets ────────────────────────────── */
 
 function ConfigSnippets({ tokenValue }: { tokenValue: string }) {
   const t = useT();
-  const origin = window.location.origin;
+  const origin = appOrigin();
 
-  const { desktopJson, codeCmd, cursorJson } = useMemo(() => {
+  const { desktopJson, codeCmd, cursorJson, codexToml } = useMemo(() => {
     const serverEntry = {
       command: 'npx',
       args: ['tsx', 'packages/mcp/src/index.ts'],
@@ -367,6 +427,7 @@ function ConfigSnippets({ tokenValue }: { tokenValue: string }) {
       desktopJson: JSON.stringify({ mcpServers: { ordi: serverEntry } }, null, 2),
       codeCmd: `claude mcp add ordi -e ORDI_API_URL=${origin} -e ORDI_API_TOKEN=${tokenValue} -- npx tsx packages/mcp/src/index.ts`,
       cursorJson: JSON.stringify({ mcpServers: { ordi: serverEntry } }, null, 2),
+      codexToml: `[mcp_servers.ordi]\ncommand = "npx"\nargs = ["tsx", "packages/mcp/src/index.ts"]\nenv = { ORDI_API_URL = "${origin}", ORDI_API_TOKEN = "${tokenValue}" }`,
     };
   }, [origin, tokenValue]);
 
@@ -375,6 +436,7 @@ function ConfigSnippets({ tokenValue }: { tokenValue: string }) {
       <CodeBlock title={t('mcp.snippetClaudeDesktop')} code={desktopJson} />
       <CodeBlock title={t('mcp.snippetClaudeCode')} code={codeCmd} />
       <CodeBlock title={t('mcp.snippetCursor')} code={cursorJson} />
+      <CodeBlock title="Codex CLI · ~/.codex/config.toml" code={codexToml} />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Copy, ExternalLink, Link2, Settings, Trash2 } from 'lucide-react';
-import { api, ApiError } from '../../lib/api';
+import { appOrigin, api, ApiError } from '../../lib/api';
 import { useNavigate } from '../../lib/router';
 import { useTabs } from '../../lib/tabs';
 import { StatusIcon, PriorityIcon } from '../ui';
@@ -117,7 +117,7 @@ export function ProjectContextMenu({ project, canWrite, canDelete, onDeleted, ch
     items.push({ type: 'separator' });
   }
   items.push({ key: 'newtab', label: t('ctx.openNewTab'), icon: <ExternalLink size={15} />, onSelect: () => tabs?.openInNewTab(url) });
-  items.push({ key: 'copy', label: t('ctx.copyLink'), icon: <Link2 size={15} />, onSelect: () => copyToClipboard(window.location.origin + url, t('ctx.linkCopied')) });
+  items.push({ key: 'copy', label: t('ctx.copyLink'), icon: <Link2 size={15} />, onSelect: () => copyToClipboard(appOrigin() + url, t('ctx.linkCopied')) });
   items.push({ type: 'separator' });
   items.push({ key: 'settings', label: t('ctx.openSettings'), icon: <Settings size={15} />, onSelect: () => navigate(`${url}?section=settings`) });
   if (canDelete) {

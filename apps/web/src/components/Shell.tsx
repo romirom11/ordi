@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { Link, usePathname, useNavigate } from '../lib/router';
 import { useMe, useCan } from '../lib/auth';
-import { api, setSessionToken } from '../lib/api';
+import { appOrigin, api, setSessionToken } from '../lib/api';
 import { useRealtime } from '../lib/sse';
 import { useT, extendDict } from '../lib/i18n';
 import { useTheme, type ThemePref } from '../lib/theme';
@@ -278,7 +278,7 @@ function ShellInner({ children }: { children: ReactNode }) {
   };
 
   const copyLink = (to: string) => {
-    navigator.clipboard?.writeText(`${window.location.origin}${to}`)
+    navigator.clipboard?.writeText(`${appOrigin()}${to}`)
       .then(() => toast(t('ctx.linkCopied')))
       .catch(() => toast.error(t('common.error')));
   };

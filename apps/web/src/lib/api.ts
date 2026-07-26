@@ -16,6 +16,16 @@ export function getInstanceUrl(): string {
   return storedInstanceUrl();
 }
 
+/**
+ * The origin links should carry when shown or copied for a human. In the
+ * browser that is this origin; in the desktop app window.location.origin is
+ * tauri://localhost, which is meaningless outside the app – the configured
+ * instance URL is the address that actually opens.
+ */
+export function appOrigin(): string {
+  return storedInstanceUrl() || window.location.origin;
+}
+
 export function setSessionToken(token: string | null): void {
   try {
     if (token) localStorage.setItem('ordi:sessionToken', token);
@@ -25,6 +35,11 @@ export function setSessionToken(token: string | null): void {
 
 function sessionToken(): string | null {
   try { return localStorage.getItem('ordi:sessionToken'); } catch { return null; }
+}
+
+/** The desktop bearer credential, for callers that build their own requests (SSE). */
+export function getSessionToken(): string | null {
+  return sessionToken();
 }
 
 const BASE = `${storedInstanceUrl()}/api/v1`;

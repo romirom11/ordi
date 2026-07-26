@@ -3,6 +3,26 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.5.3
+
+- The desktop version banner's update button actually updates: it runs the
+  updater on demand, offers a restart only once a build is staged, says when
+  the build is not published yet, and reports failures instead of silently
+  doing nothing.
+- Links shown or copied inside the desktop app (MCP connect URL, copy-link
+  everywhere, OAuth redirect URLs) use the instance address instead of
+  tauri://localhost.
+- Realtime works on the desktop: the stream is read over fetch with bearer
+  auth against the instance URL, instead of EventSource, which could send
+  neither. Project events now refresh the projects list on every platform,
+  and the invoice PDF button opens in the real browser on desktop.
+- CI checks for browser idioms that break inside the desktop shell
+  (check:desktop-safe), so this class of bug fails the build.
+- Settings follow progressive disclosure: MCP leads with per-client connect
+  snippets (incl. Codex CLI), integrations show status chips with forms on
+  demand, invoice branding gets a large interactive preview. On macOS the tab
+  strip moves into the title bar.
+
 ## v1.5.2
 
 - The API Docker image includes packages/mcp, fixing a crash on boot

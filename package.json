@@ -1,6 +1,6 @@
 {
   "name": "ordi",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "private": true,
   "description": "The operations system for small agencies and product teams: projects, CRM, knowledge base, time, finance and people in one self-hosted app.",
   "license": "AGPL-3.0-only",
@@ -28,7 +28,8 @@
     "db:migrate": "pnpm --filter @ordi/db migrate",
     "db:seed": "pnpm --filter @ordi/api seed",
     "api:dev": "pnpm --filter @ordi/api dev",
-    "web:dev": "pnpm --filter @ordi/web dev"
+    "web:dev": "pnpm --filter @ordi/web dev",
+    "check:desktop-safe": "node scripts/check-desktop-safe.mjs"
   },
   "devDependencies": {
     "turbo": "^2.3.3",

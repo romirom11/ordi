@@ -5,7 +5,7 @@ import { api } from '../lib/api';
 import { useCan } from '../lib/auth';
 import { useT } from '../lib/i18n';
 import { Button, Select, Textarea, cn } from './ui';
-import { SectionHead } from './settings/primitives';
+import { SectionHead, Disclosure } from './settings/primitives';
 import { toast } from './overlays';
 
 /** CSV import/export (PRD §14.6): exports per domain permission; imports with dry-run. */
@@ -56,9 +56,11 @@ export function ImportExportPanel() {
 
   return (
     <div className="space-y-8">
-      {/* Export */}
+      <SectionHead title={t('settings.importExport', 'Import & export')} desc={t('settings.importExportDesc', 'Bulk import and export via CSV.')} />
+
+      {/* Export: one click per file – the everyday half of this page. */}
       <section>
-        <SectionHead title={t('importexport.export', 'Export CSV')} desc={t('settings.importExportDesc', 'Bulk import and export via CSV.')} />
+        <div className="mb-3 flex items-center gap-2 text-[13px] font-semibold"><Download size={15} /> {t('importexport.export', 'Export CSV')}</div>
         {visibleExports.length === 0 ? (
           <p className="text-[13px] text-muted-foreground">{t('common.noAccess')}</p>
         ) : (
@@ -76,15 +78,15 @@ export function ImportExportPanel() {
       {/* Import */}
       {visibleImports.length > 0 && (
         <section>
-          <div className="mb-3 flex items-center gap-2 text-[13px] font-semibold"><Upload size={15} /> {t('importexport.import', 'Import CSV')}</div>
-          <div className="space-y-3">
+          <Disclosure label={<span className="inline-flex items-center gap-2 font-semibold text-foreground"><Upload size={15} /> {t('importexport.import', 'Import CSV')}</span>}>
+          <div className="space-y-3 pt-3">
             <div className="flex flex-wrap items-center gap-2">
               <Select value={target} onChange={(e) => { setTarget(e.target.value); setResult(null); }} className="w-40">
                 {visibleImports.map((i) => <option key={i.key} value={i.key}>{i.label}</option>)}
               </Select>
               <span className="text-xs text-muted-foreground">{t('importexport.columns', 'Columns')}: <code className="rounded bg-muted px-1 font-mono text-[11px]">{targetDef.hint}</code></span>
             </div>
-            <Textarea rows={8} value={csv} onChange={(e) => setCsv(e.target.value)}
+            <Textarea rows={6} value={csv} onChange={(e) => setCsv(e.target.value)}
               placeholder={`${targetDef.hint}\n…`} className="font-mono text-[11px]" />
             <div className="flex items-center gap-2">
               <Button size="sm" variant="outline" disabled={!csv.trim() || run.isPending} onClick={() => run.mutate(true)}>
@@ -112,6 +114,7 @@ export function ImportExportPanel() {
               </div>
             )}
           </div>
+          </Disclosure>
         </section>
       )}
     </div>

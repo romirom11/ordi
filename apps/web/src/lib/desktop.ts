@@ -12,6 +12,14 @@ export const isTauri: boolean =
   typeof window !== 'undefined' &&
   (('__TAURI__' in window) || ('__TAURI_INTERNALS__' in window));
 
+/**
+ * macOS desktop runs with an overlay titlebar (tauri.conf titleBarStyle) –
+ * the traffic lights float over the webview, so the tab strip must leave room
+ * for them and act as the drag region. Other platforms keep native bars.
+ */
+export const isMacDesktop: boolean =
+  isTauri && typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent);
+
 function t(): any {
   return (window as any).__TAURI__;
 }
@@ -41,11 +49,38 @@ interface DesktopHandlers {
 }
 
 /** Restart into the version staged by the updater. */
-export function restartDesktop(): void {
-  if (!isTauri) return;
+export async function restartDesktop(): Promise<boolean> {
+  if (!isTauri) return false;
+  // The plugin's injected global is the nice path, but it is not guaranteed to
+  // exist – falling back to a raw invoke is what makes the button reliable.
   try {
-    t()?.process?.relaunch?.();
-  } catch { /* plugin absent */ }
+    const relaunch = t()?.process?.relaunch;
+    if (typeof relaunch === 'function') { await relaunch(); return true; }
+  } catch { /* fall through */ }
+  try {
+    const invoke = t()?.core?.invoke;
+    if (typeof invoke === 'function') { await invoke('plugin:process|restart'); return true; }
+  } catch { /* no way to restart */ }
+  return false;
+}
+
+/**
+ * Ask the shell to check for a desktop build and stage it if one is out.
+ * Resolves to 'staged' (restart applies it), 'none' (the release is not
+ * published yet – routine right after a server update, builds take a while)
+ * or 'error' (offline, GitHub unreachable, not a packaged build).
+ */
+export async function checkDesktopUpdate(): Promise<'staged' | 'none' | 'error'> {
+  if (!isTauri) return 'error';
+  try {
+    const invoke = t()?.core?.invoke;
+    if (typeof invoke !== 'function') return 'error';
+    const res = await invoke('check_update') as string;
+    if (typeof res === 'string' && res.startsWith('staged')) return 'staged';
+    return res === 'none' ? 'none' : 'error';
+  } catch {
+    return 'error';
+  }
 }
 
 /** Open a URL in the user's real browser, not in the app window. */

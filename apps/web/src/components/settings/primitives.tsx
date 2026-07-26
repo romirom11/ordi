@@ -1,4 +1,5 @@
 import { useState, type CSSProperties, type ReactNode } from 'react';
+import { ChevronRight } from 'lucide-react';
 import { cn } from '../ui';
 
 /**
@@ -70,4 +71,41 @@ export function Field({ label, children, className }: { label: ReactNode; childr
 /** A card-less list container with hairline-separated rows. */
 export function RowList({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cn('rounded-lg border border-border bg-card', className)}>{children}</div>;
+}
+
+/**
+ * Progressive disclosure (the Apple rule the whole settings area follows):
+ * secondary or state-dependent content stays behind a labelled toggle, primary
+ * actions never do. Used for advanced config, fallbacks and reference lists.
+ */
+export function Disclosure({ label, children, defaultOpen = false, className }: {
+  label: ReactNode; children: ReactNode; defaultOpen?: boolean; className?: string;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className={className}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex items-center gap-1 text-[13px] text-muted-foreground transition-colors duration-150 hover:text-foreground"
+      >
+        <ChevronRight size={14} className={cn('transition-transform duration-[250ms] ease-smooth-out', open && 'rotate-90')} />
+        {label}
+      </button>
+      <div className={cn('grid transition-[grid-template-rows] duration-[250ms] ease-smooth-out', open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')}>
+        <div className="overflow-hidden">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/** Tiny state chip for integration card headers: a dot plus a word. */
+export function StatusChip({ tone, children }: { tone: 'ok' | 'muted' | 'off'; children: ReactNode }) {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+      <span className={cn('h-1.5 w-1.5 rounded-full', tone === 'ok' ? 'bg-success' : tone === 'muted' ? 'bg-primary' : 'bg-faint')} />
+      {children}
+    </span>
+  );
 }
