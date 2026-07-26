@@ -7,7 +7,7 @@ import {
 import { api } from '../../lib/api';
 import { useCan } from '../../lib/auth';
 import {
-  Button, IconButton, Input, Select, Card, Badge, Skeleton, Spinner, cn,
+  Button, IconButton, Input, Select, Card, Badge, Skeleton, Spinner, fmtDate, cn,
 } from '../ui';
 import { Dialog, ConfirmDialog, toast } from '../overlays';
 import { SectionHead, Field, RowList } from './primitives';
@@ -113,11 +113,6 @@ interface WorkspaceFull { integrations?: { slackWebhookUrl?: string | null } }
 function providerIcon(provider?: string | null) {
   if (provider === 'github') return <Github size={15} />;
   return <GitBranch size={15} />;
-}
-
-function fmtDate(iso?: string) {
-  if (!iso) return '';
-  try { return new Date(iso).toLocaleDateString(); } catch { return ''; }
 }
 
 /* ─────────────── GitHub ─────────────── */

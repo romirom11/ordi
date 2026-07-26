@@ -7,6 +7,7 @@ import { applyStoredTheme, ThemeProvider } from './lib/theme';
 import { RouterProvider, usePathname } from './lib/router';
 import { useMeQuery, MeProvider } from './lib/auth';
 import { I18nProvider, guessLocale, rememberLocale } from './lib/i18n';
+import { rememberDateFormat } from './lib/dates';
 import { Shell } from './components/Shell';
 import { AppRoutes } from './routes';
 import { LoginPage } from './pages/Login';
@@ -133,6 +134,7 @@ function AuthedApp() {
     return null;
   }
   rememberLocale(me.data.user.locale);
+  rememberDateFormat(me.data.user.dateFormat ?? 'auto');
   return (
     <MeProvider me={me.data}>
       <I18nProvider locale={me.data.user.locale}>

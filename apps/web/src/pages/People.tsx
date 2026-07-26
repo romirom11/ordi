@@ -16,6 +16,7 @@ import {
 import { CreateProfileDialog, type CreateProfileTarget } from '../components/people/CreateProfileDialog';
 import { OrgStructureView } from '../components/people/OrgStructureView';
 import { useT, extendDict } from '../lib/i18n';
+import { DateField } from '../components/DatePicker';
 
 extendDict({
   en: {
@@ -437,11 +438,11 @@ function LeaveView() {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">{t('resourcing.from')}</label>
-              <Input type="date" value={form.fromDate} onChange={(e) => setForm((f) => ({ ...f, fromDate: e.target.value }))} />
+              <DateField value={form.fromDate} onChange={(v) => setForm((f) => ({ ...f, fromDate: v ?? '' }))} clearable={false} />
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">{t('resourcing.to')}</label>
-              <Input type="date" value={form.toDate} onChange={(e) => setForm((f) => ({ ...f, toDate: e.target.value }))} />
+              <DateField value={form.toDate} onChange={(v) => setForm((f) => ({ ...f, toDate: v ?? '' }))} clearable={false} min={form.fromDate || undefined} />
             </div>
           </div>
           <div className="space-y-1">

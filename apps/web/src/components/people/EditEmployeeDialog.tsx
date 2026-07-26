@@ -4,6 +4,7 @@ import { api, ApiError } from '../../lib/api';
 import { Button, Input, Select, Spinner } from '../ui';
 import { Dialog, toast } from '../overlays';
 import { useT, extendDict } from '../../lib/i18n';
+import { DateField } from '../DatePicker';
 
 extendDict({
   en: {
@@ -169,7 +170,7 @@ export function EditEmployeeDialog({ employee, open, onClose }: {
           </div>
           <div className="space-y-1">
             {label(t('people.joinDate'))}
-            <Input type="date" value={form.joinDate} onChange={(e) => setForm((f) => ({ ...f, joinDate: e.target.value }))} />
+            <DateField value={form.joinDate} onChange={(v) => setForm((f) => ({ ...f, joinDate: v ?? '' }))} />
           </div>
         </div>
         <div className="flex justify-end gap-2 pt-1">

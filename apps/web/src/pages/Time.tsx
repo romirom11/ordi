@@ -9,6 +9,7 @@ import {
 import { Dialog, toast } from '../components/overlays';
 import { ChevronLeft, ChevronRight, Plus, Play, Square, Clock, Timer } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
+import { DateField } from '../components/DatePicker';
 
 extendDict({
   en: {
@@ -434,7 +435,7 @@ function MyWeekView() {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">{t('common.date')}</label>
-              <Input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} />
+              <DateField value={form.date} onChange={(v) => setForm((f) => ({ ...f, date: v ?? '' }))} clearable={false} />
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">{t('time.durationMinutes')}</label>

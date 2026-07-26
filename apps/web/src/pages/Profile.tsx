@@ -6,6 +6,7 @@ import { Button, Input, Select, Card, Badge, Switch, Checkbox, Avatar, PageHeade
 import { toast } from '../components/overlays';
 import { Check, Copy, KeyRound, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import { extendDict, useT } from '../lib/i18n';
+import { DATE_FORMATS, formatSample, rememberDateFormat, type DateFormat } from '../lib/dates';
 
 extendDict({
   en: {
@@ -139,11 +140,15 @@ function PreferencesCard() {
   const qc = useQueryClient();
   const [timezone, setTimezone] = useState(me.user.timezone);
   const [locale, setLocale] = useState<string>(me.user.locale);
-  const dirty = timezone.trim() !== me.user.timezone || locale !== me.user.locale;
+  const [dateFormat, setDateFormat] = useState<DateFormat>(me.user.dateFormat ?? 'auto');
+  const dirty = timezone.trim() !== me.user.timezone || locale !== me.user.locale
+    || dateFormat !== (me.user.dateFormat ?? 'auto');
 
   const save = useMutation({
-    mutationFn: () => api.patch('/me', { timezone: timezone.trim(), locale }),
+    mutationFn: () => api.patch('/me', { timezone: timezone.trim(), locale, dateFormat }),
     onSuccess: () => {
+      // Formatting reads the mirror, so it has to move with the saved value.
+      rememberDateFormat(dateFormat);
       qc.invalidateQueries({ queryKey: ['me'] });
       toast(t('common.saved'));
     },
@@ -167,6 +172,20 @@ function PreferencesCard() {
         <label className="space-y-1.5 text-xs text-muted-foreground">
           <span className="block">{t('profile.timezone')}</span>
           <Input value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="Europe/Kyiv" />
+        </label>
+        <label className="space-y-1.5 text-xs text-muted-foreground sm:col-span-2">
+          <span className="block">{t('profile.dateFormat')}</span>
+          <Select
+            value={dateFormat}
+            onChange={(e) => setDateFormat(e.target.value as DateFormat)}
+            className="block w-full"
+          >
+            {DATE_FORMATS.map((f) => (
+              <option key={f} value={f}>
+                {f === 'auto' ? `${t('profile.dateFormatAuto')} – ${formatSample(f)}` : `${f} – ${formatSample(f)}`}
+              </option>
+            ))}
+          </Select>
         </label>
         <div className="sm:col-span-2">
           <SaveRow dirty={dirty} pending={save.isPending} t={t} />

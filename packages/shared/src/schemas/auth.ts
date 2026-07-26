@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { idSchema } from './common';
 import { PERMISSIONS } from '../permissions';
+import { DATE_FORMATS, type DateFormat } from '../constants';
 
 export const loginSchema = z.object({
   email: z.string().email(),
@@ -24,6 +25,7 @@ export const updateProfileSchema = z.object({
   name: z.string().min(1).optional(),
   timezone: z.string().optional(),
   locale: z.enum(['uk', 'en']).optional(),
+  dateFormat: z.enum(DATE_FORMATS).optional(),
   avatar: z.string().nullable().optional(),
   emailNotificationPrefs: z.record(z.string(), z.boolean()).optional(),
 });
@@ -53,6 +55,7 @@ export interface MeResponse {
     avatar: string | null;
     timezone: string;
     locale: 'uk' | 'en';
+    dateFormat: DateFormat;
     roleId: string;
     roleName: string;
     isActive: boolean;

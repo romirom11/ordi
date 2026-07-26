@@ -21,7 +21,8 @@ export function meRoutes() {
       user: {
         id: actor.userId, email: actor.email, name: actor.name,
         avatar: user?.avatar ?? null, timezone: user?.timezone ?? 'UTC',
-        locale: actor.locale, roleId: actor.roleId, roleName: actor.roleName,
+        locale: actor.locale, dateFormat: user?.dateFormat ?? 'auto',
+        roleId: actor.roleId, roleName: actor.roleName,
         isActive: user?.isActive ?? true,
       },
       permissions: [...actor.access.permissions],
@@ -39,6 +40,7 @@ export function meRoutes() {
       ...(body.name !== undefined ? { name: body.name } : {}),
       ...(body.timezone !== undefined ? { timezone: body.timezone } : {}),
       ...(body.locale !== undefined ? { locale: body.locale } : {}),
+      ...(body.dateFormat !== undefined ? { dateFormat: body.dateFormat } : {}),
       ...(body.avatar !== undefined ? { avatar: body.avatar } : {}),
       ...(body.emailNotificationPrefs !== undefined ? { emailNotificationPrefs: body.emailNotificationPrefs } : {}),
     }).where(eq(schema.users.id, actor.userId));

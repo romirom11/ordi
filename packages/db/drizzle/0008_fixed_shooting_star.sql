@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "date_format" text DEFAULT 'auto' NOT NULL;

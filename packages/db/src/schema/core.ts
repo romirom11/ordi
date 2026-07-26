@@ -26,6 +26,8 @@ export const users = pgTable('users', {
   avatar: text('avatar'),
   timezone: text('timezone').notNull().default('UTC'),
   locale: text('locale').notNull().default('en'),
+  /** How dates are written for this person: 'auto' follows the language. */
+  dateFormat: text('date_format').notNull().default('auto'),
   isActive: boolean('is_active').notNull().default(true),
   actorType: text('actor_type').notNull().default('user'), // user | agent
   totpSecret: text('totp_secret'),

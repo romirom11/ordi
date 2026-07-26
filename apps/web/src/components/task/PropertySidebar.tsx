@@ -14,6 +14,7 @@ import { GitBlock } from './GitBlock';
 import { useT, extendDict } from '../../lib/i18n';
 import { TaskTimer } from './TaskTimer';
 import type { TaskDetail, TaskLabel, TaskPatch, TaskStatus, UserLite } from './types';
+import { Calendar } from '../DatePicker';
 
 extendDict({
   en: {
@@ -115,20 +116,12 @@ function isoDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/** Native date input inside a menu – picking a date applies it and closes the menu. */
-function DatePickInput({ value, onSet, ariaLabel }: {
-  value: string | null; onSet: (v: string) => void; ariaLabel: string;
+/** The shared calendar inside a menu – picking a day applies it and closes. */
+function DatePickInput({ value, onSet }: {
+  value: string | null; onSet: (v: string) => void; ariaLabel?: string;
 }) {
   const close = useMenuClose();
-  return (
-    <input
-      type="date"
-      aria-label={ariaLabel}
-      defaultValue={value ? value.slice(0, 10) : ''}
-      onChange={(e) => { if (e.target.value) { onSet(e.target.value); close(); } }}
-      className="h-7 w-full rounded-md border border-input bg-transparent px-2 text-[13px] outline-none transition-colors duration-150 hover:border-border-strong focus:border-primary/60"
-    />
-  );
+  return <Calendar value={value} onSelect={(day) => { onSet(day); close(); }} />;
 }
 
 /** Numeric estimate input inside the menu – Enter applies and closes. */
@@ -163,7 +156,7 @@ function DateMenu({ label, emptyLabel, icon, value, overdue, onSet, t }: {
     <Row label={label}>
       <DropdownMenu
         className="w-full"
-        width={210}
+        width={264}
         trigger={
           <Chip empty={!value}>
             {icon}
@@ -172,9 +165,7 @@ function DateMenu({ label, emptyLabel, icon, value, overdue, onSet, t }: {
         }
       >
         <MenuLabel>{label}</MenuLabel>
-        <div className="px-2 pb-1.5">
-          <DatePickInput value={value} onSet={onSet} ariaLabel={t('task.pickDate')} />
-        </div>
+        <DatePickInput value={value} onSet={onSet} />
         <MenuSeparator />
         <MenuItem icon={<CalendarDays size={14} />} onSelect={() => onSet(isoDate(now))}>{t('task.today')}</MenuItem>
         <MenuItem icon={<CalendarDays size={14} />} onSelect={() => onSet(isoDate(tomorrow))}>{t('task.tomorrow')}</MenuItem>

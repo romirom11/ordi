@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../../lib/api';
 import { Select, PriorityIcon, cn } from '../ui';
 import { toast } from '../overlays';
+import { DateField } from '../DatePicker';
 
 interface SheetStatus { id: string; name: string; category?: string }
 interface SheetTask {
@@ -166,13 +167,10 @@ export function SpreadsheetView({ tasks, statuses, projectId, onOpenTask }: {
                   </Select>
                 </td>
                 <td className="px-1 py-1">
-                  <input
-                    key={`${t.id}:${t.dueDate ?? ''}`}
-                    type="date"
-                    defaultValue={t.dueDate ? t.dueDate.slice(0, 10) : ''}
-                    className={cn(cellInput, 'text-xs')}
-                    onBlur={(e) => commitDue(t, e.target.value)}
-                    onKeyDown={blurOnEnter}
+                  <DateField
+                    size="sm"
+                    value={t.dueDate ? t.dueDate.slice(0, 10) : null}
+                    onChange={(v) => commitDue(t, v ?? '')}
                   />
                 </td>
                 <td className="px-1 py-1">

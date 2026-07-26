@@ -8,6 +8,7 @@ import { Dialog, ConfirmDialog, toast } from '../components/overlays';
 import { Send, Download, Ban, Plus, ExternalLink, FilePlus2, Eye, Banknote, Landmark } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
 import { useWorkspaceSettings } from '../components/finance/workspace';
+import { DateField } from '../components/DatePicker';
 
 extendDict({
   en: {
@@ -320,7 +321,7 @@ export function InvoiceDetailPage({ id }: { id: string }) {
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">{t('common.date')}</label>
-              <Input type="date" value={pay.date} onChange={(e) => setPay((p) => ({ ...p, date: e.target.value }))} />
+              <DateField value={pay.date} onChange={(v) => setPay((p) => ({ ...p, date: v ?? '' }))} clearable={false} />
             </div>
             <div className="col-span-2 space-y-1">
               <label className="text-xs font-medium text-muted-foreground">{t('finance.method')}</label>

@@ -4,6 +4,7 @@ import { api, ApiError } from '../../lib/api';
 import { Button, Input, Select, Spinner } from '../ui';
 import { Dialog, toast } from '../overlays';
 import { useT, extendDict } from '../../lib/i18n';
+import { DateField } from '../DatePicker';
 
 extendDict({
   en: {
@@ -85,7 +86,7 @@ export function CompensationDialog({ employeeId, open, onClose }: { employeeId: 
         </div>
         <div className="space-y-1">
           <label className="text-xs font-medium text-muted-foreground">{t('people.effectiveFrom')}</label>
-          <Input type="date" value={form.effectiveFrom} onChange={(e) => setForm((f) => ({ ...f, effectiveFrom: e.target.value }))} />
+          <DateField value={form.effectiveFrom} onChange={(v) => setForm((f) => ({ ...f, effectiveFrom: v ?? '' }))} clearable={false} />
         </div>
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="ghost" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
