@@ -5,17 +5,22 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
 ## v1.5.7
 
-- MCP connectors could still fail behind a proxy chain that sets
-  X-Forwarded-Proto itself (Cloudflare tunnel to a router reached over plain
-  http): the API advertised http:// URLs for an https site. APP_URL now
-  decides the scheme for its own host, ahead of the forwarded headers.
+- The web image is deployable outside our compose file: the nginx config is a
+  template and the API upstream is the API_UPSTREAM env var (default
+  api:3000). Hardcoding the upstream forced every PaaS deployment (Dokploy,
+  Coolify) to replace the whole config with a hand-written mount that then
+  silently missed every route added later - including /.well-known/, which is
+  why MCP clients could not connect to such instances. CI boots the web image
+  against an API container deliberately not named "api".
+- APP_URL decides the scheme for its own host, ahead of X-Forwarded-Proto: a
+  Cloudflare tunnel reaching a router over plain http made the API advertise
+  http:// URLs for an https site.
 - Settings - MCP checks the discovery document from the instance's own root
   and says what is wrong: the proxy answering /.well-known/ with the web app,
   a mismatched scheme or host, or an unreachable document. That failure used
   to be visible only as an opaque message inside the client.
-- docker-compose.prod.yml for PaaS deployments (Dokploy, Coolify), so the
-  nginx config that routes /.well-known/ to the API is version-controlled
-  instead of hand-written per instance.
+- docker-compose.prod.yml for PaaS or compose-behind-a-router deployments: no
+  published ports, required env values enforced.
 
 ## v1.5.6
 

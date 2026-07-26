@@ -73,7 +73,6 @@ describe('OAuth for MCP clients', () => {
     // very host is the operator telling us what the site is.
     const noXfp: Record<string, string>[] = [
       { forwarded: 'for=203.0.113.7;proto=https;host=ordi.example.com' },
-      { 'cf-visitor': '{"scheme":"https"}' },
     ];
     for (const extra of noXfp) {
       const m = await (await app.request('/.well-known/oauth-authorization-server', {

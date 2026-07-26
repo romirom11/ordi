@@ -68,15 +68,6 @@ function publicProto(c: Context, host: string): string {
   const fwd = /proto=("?)([A-Za-z]+)\1/.exec(c.req.header('forwarded') ?? '');
   if (fwd) return fwd[2]!.toLowerCase();
 
-  // Cloudflare: CF-Visitor: {"scheme":"https"}
-  const cf = /"scheme"\s*:\s*"([A-Za-z]+)"/.exec(c.req.header('cf-visitor') ?? '');
-  if (cf) return cf[1]!.toLowerCase();
-
-  try {
-    const configured = new URL(env.appUrl);
-    if (configured.host === host) return configured.protocol.replace(':', '');
-  } catch { /* APP_URL unparseable – fall through */ }
-
   try { return new URL(c.req.url).protocol.replace(':', ''); } catch { return 'http'; }
 }
 

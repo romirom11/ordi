@@ -15,6 +15,12 @@ COPY apps/web apps/web
 RUN pnpm --filter @ordi/web build
 
 FROM nginx:1.27-alpine
-COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+# Where the API lives on the container network. Our compose files call the
+# service `api`; on Dokploy/Coolify set API_UPSTREAM (e.g. ordi-api:3000)
+# instead of replacing the config file - the template in /etc/nginx/templates
+# is rendered on every start by the image's stock envsubst entrypoint, so the
+# routes (incl. /.well-known/ for MCP OAuth discovery) track releases.
+ENV API_UPSTREAM=api:3000
+COPY docker/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
 EXPOSE 80

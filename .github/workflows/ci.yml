@@ -67,7 +67,11 @@ jobs:
             docker exec pg pg_isready -U postgres >/dev/null 2>&1 && break
             sleep 1
           done
-          docker run -d --name api --network ordi-ci -p 3000:3000 \
+          # Deliberately NOT named "api": PaaS platforms (Dokploy, Coolify)
+          # assign their own service names, and the web image must reach the
+          # API through the API_UPSTREAM template variable, not a hardcoded
+          # hostname. Using a different name here proves the override works.
+          docker run -d --name ordi-svc-api --network ordi-ci -p 3000:3000 \
             -e DATABASE_URL=postgres://postgres:postgres@pg:5432/ordi \
             -e AUTH_SECRET=ci-only-secret \
             -e ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000 \
@@ -79,16 +83,17 @@ jobs:
               exit 0
             fi
             # Surface a crash immediately instead of burning the whole timeout.
-            if [ "$(docker inspect -f '{{.State.Running}}' api)" != "true" ]; then
-              echo "API container exited:"; docker logs api; exit 1
+            if [ "$(docker inspect -f '{{.State.Running}}' ordi-svc-api)" != "true" ]; then
+              echo "API container exited:"; docker logs ordi-svc-api; exit 1
             fi
             sleep 2
           done
-          echo "API never became healthy:"; docker logs api; exit 1
+          echo "API never became healthy:"; docker logs ordi-svc-api; exit 1
 
       - name: Boot the web image and check OAuth discovery through nginx
         run: |
-          docker run -d --name web --network ordi-ci -p 8080:80 ordi-web:ci
+          docker run -d --name web --network ordi-ci -p 8080:80 \
+            -e API_UPSTREAM=ordi-svc-api:3000 ordi-web:ci
           for i in $(seq 1 30); do
             curl -fsS -o /dev/null http://localhost:8080/ && break
             if [ "$(docker inspect -f '{{.State.Running}}' web)" != "true" ]; then
