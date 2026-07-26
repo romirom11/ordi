@@ -20,6 +20,7 @@ import { effectivePermissions } from '../../core/rbac';
 import { generateToken, sha256 } from '../../lib/crypto';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
+import { logger } from '../../lib/logger';
 
 const CODE_TTL_MS = 10 * 60_000;
 
@@ -56,8 +57,14 @@ function checkRate(key: string, max: number, windowMs: number): void {
   if (entry.count > max) throw err.domain('Too many requests, slow down');
 }
 
-/** OAuth error responses are a fixed JSON shape, not the ordi error envelope. */
-function oauthError(c: Context, code: string, description: string) {
+/**
+ * OAuth error responses are a fixed JSON shape, not the ordi error envelope.
+ * Always logged: the caller is another machine (an MCP client's backend), so
+ * a silent 400 here is invisible to both the operator and the person staring
+ * at "authorization failed" in the client - the log line is the only witness.
+ */
+function oauthError(c: Context, code: string, description: string, extra?: Record<string, unknown>) {
+  logger.warn({ path: c.req.path, code, description, ...extra }, 'oauth request rejected');
   return c.json({ error: code, error_description: description }, 400);
 }
 
@@ -88,6 +95,7 @@ export function oauthRoutes() {
     await db.insert(schema.oauthClients).values({
       id, name: body.client_name ?? 'MCP client', redirectUris: body.redirect_uris,
     });
+    logger.info({ clientId: id, name: body.client_name, redirectHosts: body.redirect_uris.map((u) => { try { return new URL(u).host; } catch { return u; } }) }, 'oauth client registered');
     return c.json({
       client_id: id,
       client_name: body.client_name ?? 'MCP client',
@@ -110,19 +118,31 @@ export function oauthRoutes() {
   // ── The signed-in user approves; we mint the code and hand back the redirect ──
   app.post('/approve', authMiddleware, requireAuth, async (c) => {
     const actor = currentActor(c);
-    const body = z.object({
+    const raw = await c.req.json();
+    const parsedBody = z.object({
       clientId: z.string(),
       redirectUri: z.string().url(),
-      state: z.string().max(512).optional(),
+      // The state is the client's opaque blob echoed back verbatim; capping it
+      // short rejects legitimate clients whose state is a signed payload.
+      state: z.string().max(4096).optional(),
       codeChallenge: z.string().min(43).max(128),
       codeChallengeMethod: z.literal('S256'),
-    }).parse(await c.req.json());
+    }).safeParse(raw);
+    if (!parsedBody.success) {
+      logger.warn({ issues: parsedBody.error.flatten().fieldErrors, clientId: (raw as { clientId?: string })?.clientId }, 'oauth approve rejected: validation');
+      throw parsedBody.error;
+    }
+    const body = parsedBody.data;
 
     const { db } = getDb();
     const [client] = await db.select().from(schema.oauthClients)
       .where(eq(schema.oauthClients.id, body.clientId));
-    if (!client) throw err.notFound('Unknown client');
+    if (!client) {
+      logger.warn({ clientId: body.clientId }, 'oauth approve rejected: unknown client');
+      throw err.notFound('Unknown client');
+    }
     if (!redirectAllowed(client.redirectUris as string[], body.redirectUri)) {
+      logger.warn({ clientId: body.clientId, redirectUri: body.redirectUri }, 'oauth approve rejected: redirect_uri not registered');
       throw err.validation('redirect_uri is not registered for this client');
     }
 
@@ -163,7 +183,7 @@ export function oauthRoutes() {
       redirect_uri: z.string().optional(),
       client_id: z.string().optional(),
     }).safeParse(raw);
-    if (!parsed.success) return oauthError(c, 'invalid_request', 'Malformed token request');
+    if (!parsed.success) return oauthError(c, 'invalid_request', 'Malformed token request', { contentType });
     const body = parsed.data;
 
     if (body.grant_type !== 'authorization_code') {
@@ -179,10 +199,18 @@ export function oauthRoutes() {
     // Single use: burn the code before validating so a race cannot redeem twice.
     if (row) await db.delete(schema.oauthAuthCodes).where(eq(schema.oauthAuthCodes.id, row.id));
 
-    if (!row || row.expiresAt < new Date()) return oauthError(c, 'invalid_grant', 'Code is invalid or expired');
-    if (body.client_id && body.client_id !== row.clientId) return oauthError(c, 'invalid_grant', 'Code was issued to another client');
-    if (body.redirect_uri && body.redirect_uri !== row.redirectUri) return oauthError(c, 'invalid_grant', 'redirect_uri mismatch');
-    if (s256(body.code_verifier) !== row.codeChallenge) return oauthError(c, 'invalid_grant', 'PKCE verification failed');
+    if (!row || row.expiresAt < new Date()) {
+      return oauthError(c, 'invalid_grant', 'Code is invalid or expired', { codeKnown: !!row, clientId: body.client_id });
+    }
+    if (body.client_id && body.client_id !== row.clientId) {
+      return oauthError(c, 'invalid_grant', 'Code was issued to another client', { presented: body.client_id, expected: row.clientId });
+    }
+    if (body.redirect_uri && body.redirect_uri !== row.redirectUri) {
+      return oauthError(c, 'invalid_grant', 'redirect_uri mismatch', { presented: body.redirect_uri, expected: row.redirectUri });
+    }
+    if (s256(body.code_verifier) !== row.codeChallenge) {
+      return oauthError(c, 'invalid_grant', 'PKCE verification failed', { clientId: row.clientId });
+    }
 
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, row.userId));
     if (!user || !user.isActive) return oauthError(c, 'invalid_grant', 'User is not active');
@@ -197,6 +225,7 @@ export function oauthRoutes() {
       hash: sha256(token), prefix: token.slice(0, 12), scopes: [...perms], readOnly: false,
     });
 
+    logger.info({ clientId: row.clientId, client: client?.name, userId: user.id }, 'oauth token issued');
     return c.json({ access_token: token, token_type: 'bearer' });
   });
 
