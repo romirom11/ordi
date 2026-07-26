@@ -9,6 +9,9 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   Cursor, sign in through the browser and approve – no token copying. Grants
   appear in Settings → MCP and are revocable like any token; the stdio server
   with ORDI_API_TOKEN remains for clients without OAuth.
+
+## v1.4.1
+
 - The server reports its version in /healthz; the app compares it with its own
   build – browser tabs get a reload prompt after a deploy, the desktop app
   warns when its server is behind, and Settings shows the running version plus
