@@ -5,7 +5,7 @@ import {
   Clock, Receipt, Users, Settings, Search, LogOut, LayoutGrid, CalendarRange,
   SquarePen, Sun, Moon, Monitor, ChevronDown, ChevronRight, GripVertical, User as UserIcon,
   SquareArrowOutUpRight, Link as LinkIcon, ArrowUp, ArrowDown,
-  MonitorDown, UserPlus,
+  MonitorDown,
 } from 'lucide-react';
 import { Link, usePathname, useNavigate } from '../lib/router';
 import { useMe, useCan } from '../lib/auth';
@@ -345,56 +345,30 @@ function ShellInner({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <aside className="flex w-56 shrink-0 flex-col">
-        {/* macOS overlay title bar: the native buttons are drawn over this
-            corner and cannot live inside an element, but tauri.conf places
-            them – they are centred on this very row, so the workspace
-            switcher sits beside them rather than below an empty band. The
-            row is the drag handle; without a drag region (and the
-            core:window:allow-start-dragging permission) the window cannot
-            be moved at all. */}
+        {/* macOS overlay title bar: the native buttons are drawn over the
+            window's top-left corner, which is this sidebar. Nothing can live
+            underneath them, so the sidebar opens with an empty strip that is
+            theirs – tauri.conf centres the lights inside it. The strip is
+            also the drag handle; without a drag region (and the
+            core:window:allow-start-dragging permission) the window cannot be
+            moved at all. */}
+        {isMacDesktop && <div className="h-9 shrink-0" data-tauri-drag-region />}
+
+        {/* Workspace identity. A label, not a control: what its dropdown used
+            to hide is now visible somewhere better – settings in the footer,
+            invites inside settings, everything personal in the account menu. */}
         <div
-          className={cn('flex items-center gap-1 px-3 pb-1 pt-3', isMacDesktop && 'pl-[84px]')}
+          className="flex items-center gap-2 px-3 pb-1 pt-3"
           data-tauri-drag-region={isMacDesktop || undefined}
         >
-          {/* The anchor is inline-flex by default, so the trigger's flex-1 had
-              nothing to shrink against and a long workspace name ran out of
-              the sidebar. Constrain the anchor and the name truncates. */}
-          <DropdownMenu
-            width={210}
-            className="min-w-0 flex-1"
-            trigger={
-              <button className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors duration-150 hover:bg-muted">
-                {wsLogo ? (
-                  <img src={wsLogo} alt="" className="h-5 w-5 shrink-0 rounded-md object-cover" />
-                ) : (
-                  <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md bg-primary text-[11px] font-bold text-primary-foreground">
-                    {wsName.slice(0, 1).toUpperCase()}
-                  </span>
-                )}
-                <span className="truncate text-[13px] font-semibold">{wsName}</span>
-                <ChevronDown size={13} className="shrink-0 text-faint" />
-              </button>
-            }
-          >
-            {/* Workspace things only. Anything personal – profile, theme,
-                sign out – belongs to the account button in the footer, which
-                is where people look for it. */}
-            <MenuLabel>{wsName}</MenuLabel>
-            {(can('settings.manage') || can('users.manage') || can('roles.manage')) && (
-              <MenuItem icon={<Settings size={14} />} onSelect={() => navigate('/settings')}>{t('nav.settings')}</MenuItem>
-            )}
-            {can('users.manage') && (
-              <MenuItem icon={<UserPlus size={14} />} onSelect={() => navigate('/settings/users')}>
-                {t('settings.inviteUser')}
-              </MenuItem>
-            )}
-            {/* Pointless inside the desktop app – it is already the desktop app. */}
-            {!isTauri && (
-              <MenuItem icon={<MonitorDown size={14} />} onSelect={() => navigate('/download')}>
-                {t('desktop.download')}
-              </MenuItem>
-            )}
-          </DropdownMenu>
+          {wsLogo ? (
+            <img src={wsLogo} alt="" className="h-5 w-5 shrink-0 rounded-md object-cover" />
+          ) : (
+            <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md bg-primary text-[11px] font-bold text-primary-foreground">
+              {wsName.slice(0, 1).toUpperCase()}
+            </span>
+          )}
+          <span className="truncate text-[13px] font-semibold">{wsName}</span>
         </div>
 
         {/* Quick actions: new task + search */}
@@ -468,6 +442,31 @@ function ShellInner({ children }: { children: ReactNode }) {
             click (the old row only had a right-click menu, which nobody
             finds), and the bell sits beside it instead of owning a row. */}
         <div className="space-y-1 p-2.5">
+          {/* Settings is a destination, so it reads as one: a nav row at the
+              foot of the nav rather than an item inside a dropdown. */}
+          {(can('settings.manage') || can('users.manage') || can('roles.manage')) && (
+            <ContextMenu
+              items={[
+                { key: 'newtab', label: t('ctx.openInNewTab'), icon: <SquareArrowOutUpRight size={13} />, onSelect: () => tabs?.openInNewTab('/settings') },
+                { key: 'copy', label: t('ctx.copyLink'), icon: <LinkIcon size={13} />, onSelect: () => copyLink('/settings') },
+              ]}
+            >
+              <Link
+                to="/settings"
+                className={cn(
+                  'group/nav flex items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] transition-colors duration-150',
+                  path.startsWith('/settings')
+                    ? 'bg-muted font-medium text-foreground'
+                    : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                )}
+              >
+                <span className={cn('transition-colors', path.startsWith('/settings') ? 'text-foreground' : 'text-faint group-hover/nav:text-muted-foreground')}>
+                  <Settings size={16} />
+                </span>
+                <span className="flex-1 truncate">{t('nav.settings')}</span>
+              </Link>
+            </ContextMenu>
+          )}
           <TimerIndicator />
           <div className="flex items-center gap-1">
             <ContextMenu
@@ -499,6 +498,12 @@ function ShellInner({ children }: { children: ReactNode }) {
               >
                 <MenuLabel>{me.user.email}</MenuLabel>
                 <MenuItem icon={<UserIcon size={14} />} onSelect={() => navigate('/profile')}>{t('nav.profile')}</MenuItem>
+                {/* Pointless inside the desktop app – it is already the desktop app. */}
+                {!isTauri && (
+                  <MenuItem icon={<MonitorDown size={14} />} onSelect={() => navigate('/download')}>
+                    {t('desktop.download')}
+                  </MenuItem>
+                )}
                 <MenuSeparator />
                 <MenuLabel>{t('theme.title')}</MenuLabel>
                 {themeItems.map((it) => (

@@ -3,6 +3,17 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.5.5
+
+- The workspace name moved below the macOS window buttons instead of being
+  indented beside them: the sidebar opens with a short strip that belongs to
+  the traffic lights, and the name is flush with the sidebar's left edge on
+  every platform. The strip still drags the window.
+- The workspace dropdown is gone. Settings is a nav row at the foot of the
+  nav (gear icon, active state, permission-gated), inviting users lives in
+  Settings – Users, and the desktop download moved into the account menu.
+- The unread badge no longer covers the notification bell at two digits.
+
 ## v1.5.4
 
 - macOS: fixed the v1.5.3 title bar. The window is draggable again (the

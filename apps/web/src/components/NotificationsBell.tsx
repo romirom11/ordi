@@ -134,12 +134,14 @@ export function NotificationsBell() {
           )}
         >
           <Bell size={16} />
+          {/* Pulled clear of the glyph: a two-digit badge sitting on the
+              button's corner used to cover most of the bell. */}
           {unread > 0 && (
             <span className={cn(
-              'anim-pop-in absolute -right-0.5 -top-0.5 grid h-[15px] place-items-center rounded-full',
-              'bg-primary px-1 text-[9px] font-semibold leading-none tabular-nums text-primary-foreground',
+              'anim-pop-in absolute -right-1.5 -top-1.5 grid h-[14px] place-items-center rounded-full',
+              'bg-primary px-[3px] text-[9px] font-semibold leading-none tabular-nums text-primary-foreground',
               'ring-2 ring-background',
-              unread > 9 ? 'min-w-[19px]' : 'min-w-[15px]',
+              unread > 9 ? 'min-w-[18px]' : 'min-w-[14px]',
             )}>
               {unread > 99 ? '99+' : unread}
             </span>
