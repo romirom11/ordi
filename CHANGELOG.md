@@ -7,8 +7,9 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
 - macOS: fixed the v1.5.3 title bar. The window is draggable again (the
   capability was missing core:window:allow-start-dragging) and the traffic
-  lights no longer cover the workspace switcher - the clearance moved to the
-  sidebar, where they actually are.
+  lights no longer cover the workspace switcher: they are positioned via
+  trafficLightPosition onto the sidebar's first row, with the switcher beside
+  them, so window buttons, switcher, nav arrows and tabs share one row.
 
 ## v1.5.3
 

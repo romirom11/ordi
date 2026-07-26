@@ -345,12 +345,17 @@ function ShellInner({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <aside className="flex w-56 shrink-0 flex-col">
-        {/* macOS overlay title bar: the traffic lights float over THIS corner,
-            so the sidebar owes them a strip. It doubles as the drag handle –
-            without a drag region the window cannot be moved at all. */}
-        {isMacDesktop && <div className="h-7 shrink-0" data-tauri-drag-region />}
-        {/* Workspace header */}
-        <div className="flex items-center gap-1 px-3 pb-1 pt-3">
+        {/* macOS overlay title bar: the native buttons are drawn over this
+            corner and cannot live inside an element, but tauri.conf places
+            them – they are centred on this very row, so the workspace
+            switcher sits beside them rather than below an empty band. The
+            row is the drag handle; without a drag region (and the
+            core:window:allow-start-dragging permission) the window cannot
+            be moved at all. */}
+        <div
+          className={cn('flex items-center gap-1 px-3 pb-1 pt-3', isMacDesktop && 'pl-[84px]')}
+          data-tauri-drag-region={isMacDesktop || undefined}
+        >
           <DropdownMenu
             width={210}
             trigger={
