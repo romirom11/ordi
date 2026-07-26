@@ -32,6 +32,16 @@ export function searchRoutes() {
 
     if (projectIds.length) {
       const rows = await db.execute(sql`
+        select id, name, key, 'project' as kind from projects
+        where deleted_at is null and id in ${sql.raw('(' + projectIds.map((id) => `'${id}'`).join(',') + ')')}
+        and (name ilike ${'%' + q + '%'} or key ilike ${'%' + q + '%'})
+        order by case when key ilike ${'%' + q + '%'} then 0 else 1 end, name
+        limit 6`);
+      results.push(...(rows as any[]).map((r) => ({ id: r.id, title: `${r.key} ${r.name}`, kind: 'project', url: `/projects/${r.id}` })));
+    }
+
+    if (projectIds.length) {
+      const rows = await db.execute(sql`
         select t.id, (p.key || '-' || t.number) as ref, t.title, 'task' as kind, t.project_id
         from tasks t join projects p on p.id = t.project_id
         where t.deleted_at is null and t.project_id in ${sql.raw('(' + projectIds.map((id) => `'${id}'`).join(',') + ')')}
