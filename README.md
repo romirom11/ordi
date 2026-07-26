@@ -11,7 +11,7 @@ Projects, CRM, knowledge base, time, finance and people – one app, one databas
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/romirom11/ordi)](https://github.com/romirom11/ordi/releases/latest)
 
-[Quick start](#quick-start) · [Why ordi](#why-ordi) · [Features](#features) · [Deploy](#deploy-it-for-real) · [Desktop app](https://github.com/romirom11/ordi/releases/latest)
+[Quick start](#quick-start) · [Why ordi](#why-ordi) · [Features](#features) · [Deploy](#deploy-it-for-real) · [Desktop app](https://github.com/romirom11/ordi/releases/latest) · [Donate](#support-the-project)
 
 ![Project overview](docs/images/project-overview.png)
 
@@ -210,6 +210,23 @@ deploy step.
 Issues and pull requests are welcome – see [CONTRIBUTING.md](CONTRIBUTING.md) for
 the setup, the conventions and what makes a change easy to merge. Security reports
 go through [SECURITY.md](SECURITY.md), not public issues.
+
+## Support the project
+
+ordi is free and AGPL-licensed, built and maintained in the open. If it saves
+your team a subscription or two and you want to say thanks, donations are
+welcome:
+
+```
+0x3416baba090f1fb87998f73fe1ae625f38865a64
+```
+
+Ethereum and any EVM-compatible chain (Arbitrum, Base, Optimism, Polygon, BNB
+Chain). USDT and USDC on those networks work too – just double-check you are
+sending on a network this address is used on.
+
+Nothing here is paywalled and nothing will be: donations fund the time, not a
+tier.
 
 ## License
 
