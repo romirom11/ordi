@@ -3,6 +3,15 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.5.6
+
+- MCP connectors (Claude, Cursor) could not register: OAuth discovery built
+  every endpoint from APP_URL, so a stale or default APP_URL advertised a
+  registration endpoint on localhost. Discovery now reports the host the
+  request actually arrived on, and the bundled nginx passes Host and
+  X-Forwarded-Proto through on the discovery routes (it did not, so it
+  advertised the internal api:3000).
+
 ## v1.5.5
 
 - The sidebar has one identity row instead of two. The row at the foot that
