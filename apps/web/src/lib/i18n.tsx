@@ -558,7 +558,9 @@ const en: Dict = {
   'desktop.restart': 'Restart',
   'desktop.signInWithBrowser': 'Sign in with browser',
   'desktop.browserLoginWaiting': 'Approve the sign-in in your browser, then come back here.',
-  'desktop.browserLoginFailed': 'Browser sign-in did not complete. Try again.',
+  'desktop.browserLoginFailed': 'Browser sign-in did not complete. Try again, or paste the code the browser showed you.',
+  'desktop.pasteCodePlaceholder': 'Paste the code from the browser',
+  'desktop.pasteCodeSubmit': 'Sign in',
   'desktop.download': 'Download desktop app',
   'auth.or': 'or',
 };
@@ -1104,7 +1106,9 @@ const uk: Dict = {
   'desktop.restart': 'Перезапустити',
   'desktop.signInWithBrowser': 'Увійти через браузер',
   'desktop.browserLoginWaiting': 'Підтвердьте вхід у браузері й поверніться сюди.',
-  'desktop.browserLoginFailed': 'Вхід через браузер не завершився. Спробуйте ще раз.',
+  'desktop.browserLoginFailed': 'Вхід через браузер не завершився. Спробуйте ще раз або вставте код, який показав браузер.',
+  'desktop.pasteCodePlaceholder': 'Вставте код із браузера',
+  'desktop.pasteCodeSubmit': 'Увійти',
   'desktop.download': 'Завантажити застосунок',
   'auth.or': 'або',
 };

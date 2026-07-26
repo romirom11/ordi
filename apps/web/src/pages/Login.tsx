@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { KeyRound, Globe } from 'lucide-react';
 import { api, ApiError, setSessionToken } from '../lib/api';
-import { isTauri, beginBrowserLogin, listenForAuthDeepLink } from '../lib/desktop';
+import { isTauri, beginBrowserLogin, completeBrowserLogin, hasPendingBrowserLogin, listenForAuthDeepLink } from '../lib/desktop';
 import { Button, Input, Card, Spinner } from '../components/ui';
 import { BrandMark } from '../components/BrandMark';
 import { useT } from '../lib/i18n';
@@ -27,7 +27,10 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [errorKey, setErrorKey] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [browserLogin, setBrowserLogin] = useState(false);
+  // A pending sign-in survives a relaunch, so the paste box has to come back
+  // with it – a deep link that relaunched the app is exactly when it is needed.
+  const [browserLogin, setBrowserLogin] = useState(() => isTauri && hasPendingBrowserLogin());
+  const [pastedCode, setPastedCode] = useState('');
 
   function fail(message: string) {
     setError(message);
@@ -167,7 +170,30 @@ export function LoginPage() {
               {browserLogin ? <Spinner /> : <><Globe size={14} /> {t('desktop.signInWithBrowser')}</>}
             </Button>
             {browserLogin && (
-              <p className="mt-2.5 text-center text-xs text-muted-foreground">{t('desktop.browserLoginWaiting')}</p>
+              <div className="mt-3 space-y-2">
+                <p className="text-center text-xs text-muted-foreground">{t('desktop.browserLoginWaiting')}</p>
+                {/* Deep links do not fire reliably everywhere (Linux above all),
+                    so the code the browser shows can always be pasted instead. */}
+                <div className="flex gap-2">
+                  <Input
+                    value={pastedCode}
+                    onChange={(e) => setPastedCode(e.target.value)}
+                    placeholder={t('desktop.pasteCodePlaceholder')}
+                    className="font-mono text-xs"
+                  />
+                  <Button
+                    variant="outline"
+                    disabled={!pastedCode.trim()}
+                    onClick={() => {
+                      setError(null);
+                      completeBrowserLogin(pastedCode.trim())
+                        .catch(() => fail(t('desktop.browserLoginFailed')));
+                    }}
+                  >
+                    {t('desktop.pasteCodeSubmit')}
+                  </Button>
+                </div>
+              </div>
             )}
           </>
         )}
