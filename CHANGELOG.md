@@ -3,6 +3,13 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.5.3
+
+- The desktop version banner's update button actually updates: it runs the
+  updater on demand, offers a restart only once a build is staged, says when
+  the build is not published yet, and reports failures instead of silently
+  doing nothing.
+
 ## v1.5.2
 
 - The API Docker image includes packages/mcp, fixing a crash on boot

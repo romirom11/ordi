@@ -18,7 +18,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowUpCircle, RefreshCw, TriangleAlert, X } from 'lucide-react';
 import { api } from '../lib/api';
-import { isTauri, restartDesktop } from '../lib/desktop';
+import { checkDesktopUpdate, isTauri, restartDesktop } from '../lib/desktop';
 import { APP_VERSION, compareVersions, isVersion } from '../lib/version';
 import { useT, extendDict } from '../lib/i18n';
 import { cn } from './ui';
@@ -29,7 +29,13 @@ extendDict({
     'version.updateGuide': 'How to update',
     'version.newVersion': 'ordi {server} is available.',
     'version.reload': 'Reload',
-    'version.restartToUpdate': 'Restart the app to update',
+    'version.updateNow': 'Update now',
+    'version.checking': 'Checking for the update...',
+    'version.staged': 'Update downloaded.',
+    'version.restartNow': 'Restart now',
+    'version.notPublished': 'The app build is not published yet – it usually follows the server within the hour. The app will pick it up by itself.',
+    'version.updateFailed': 'Could not fetch the update. Check your connection and try again.',
+    'version.restartFailed': 'Could not restart automatically – close and reopen the app to finish updating.',
     'version.dismiss': 'Dismiss',
   },
   uk: {
@@ -37,7 +43,13 @@ extendDict({
     'version.updateGuide': 'Як оновити',
     'version.newVersion': 'Доступна версія ordi {server}.',
     'version.reload': 'Перезавантажити',
-    'version.restartToUpdate': 'Перезапустіть застосунок, щоб оновитись',
+    'version.updateNow': 'Оновити зараз',
+    'version.checking': 'Перевіряю оновлення...',
+    'version.staged': 'Оновлення завантажено.',
+    'version.restartNow': 'Перезапустити',
+    'version.notPublished': 'Збірку застосунку ще не опубліковано – зазвичай вона виходить протягом години після сервера. Застосунок підхопить її сам.',
+    'version.updateFailed': 'Не вдалося отримати оновлення. Перевірте зʼєднання і спробуйте ще раз.',
+    'version.restartFailed': 'Не вдалося перезапустити автоматично – закрийте і відкрийте застосунок, щоб завершити оновлення.',
     'version.dismiss': 'Приховати',
   },
 });
@@ -96,20 +108,67 @@ export function VersionGuard() {
     );
   }
 
-  // Server ahead of the app: reload (web) or restart (desktop) gets the new build.
+  // Server ahead of the app: reload (web) or actually run the updater (desktop).
   return (
     <Banner tone="info" icon={<ArrowUpCircle size={14} />}>
       <span>{t('version.newVersion').replace('{server}', `v${server}`)}</span>
       {isTauri ? (
-        <button onClick={() => restartDesktop()} className="shrink-0 font-medium underline underline-offset-2 hover:opacity-80">
-          {t('version.restartToUpdate')}
-        </button>
+        <DesktopUpdateAction />
       ) : (
         <button onClick={() => window.location.reload()} className="inline-flex shrink-0 items-center gap-1 font-medium underline underline-offset-2 hover:opacity-80">
           <RefreshCw size={12} /> {t('version.reload')}
         </button>
       )}
     </Banner>
+  );
+}
+
+/**
+ * "Update now" that tells the truth. Restarting blindly did nothing when the
+ * desktop build was not published yet (routine right after a server deploy),
+ * and the old restart call could fail silently. This runs the updater on
+ * demand and reports each outcome: staged -> restart applies it; none -> the
+ * build is not out yet; error -> retry.
+ */
+function DesktopUpdateAction() {
+  const t = useT();
+  const [phase, setPhase] = useState<'idle' | 'checking' | 'staged' | 'notyet' | 'failed' | 'norestart'>('idle');
+
+  const linkCls = 'shrink-0 font-medium underline underline-offset-2 hover:opacity-80 disabled:opacity-60';
+
+  if (phase === 'checking') return <span className="shrink-0">{t('version.checking')}</span>;
+  if (phase === 'notyet') return <span className="min-w-0">{t('version.notPublished')}</span>;
+  if (phase === 'norestart') return <span className="min-w-0">{t('version.restartFailed')}</span>;
+
+  if (phase === 'staged') {
+    return (
+      <>
+        <span className="shrink-0">{t('version.staged')}</span>
+        <button
+          className={linkCls}
+          onClick={() => { void restartDesktop().then((ok) => { if (!ok) setPhase('norestart'); }); }}
+        >
+          {t('version.restartNow')}
+        </button>
+      </>
+    );
+  }
+
+  return (
+    <>
+      {phase === 'failed' && <span className="min-w-0">{t('version.updateFailed')}</span>}
+      <button
+        className={linkCls}
+        onClick={() => {
+          setPhase('checking');
+          void checkDesktopUpdate().then((res) => {
+            setPhase(res === 'staged' ? 'staged' : res === 'none' ? 'notyet' : 'failed');
+          });
+        }}
+      >
+        {t('version.updateNow')}
+      </button>
+    </>
   );
 }
 

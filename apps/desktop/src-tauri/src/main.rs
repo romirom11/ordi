@@ -13,16 +13,38 @@ use tauri_plugin_updater::UpdaterExt;
 /// told once the update is installed so it can offer a restart; a failure here
 /// (offline, GitHub unreachable, no release yet) must stay silent.
 async fn stage_update(app: tauri::AppHandle) {
+    let _ = check_and_stage(app).await;
+}
+
+/// Check + stage, reporting what happened: "staged:<version>", "none" (no
+/// newer release published yet) or "error". Shared by the silent launch check
+/// and the on-demand command the web layer calls from the version banner.
+async fn check_and_stage(app: tauri::AppHandle) -> String {
     let updater = match app.updater() {
         Ok(updater) => updater,
-        Err(_) => return,
+        Err(_) => return "error".into(),
     };
-    if let Ok(Some(update)) = updater.check().await {
-        let version = update.version.clone();
-        if update.download_and_install(|_, _| {}, || {}).await.is_ok() {
-            let _ = app.emit("ordi://update-ready", version);
+    match updater.check().await {
+        Ok(Some(update)) => {
+            let version = update.version.clone();
+            if update.download_and_install(|_, _| {}, || {}).await.is_ok() {
+                let _ = app.emit("ordi://update-ready", version.clone());
+                format!("staged:{version}")
+            } else {
+                "error".into()
+            }
         }
+        Ok(None) => "none".into(),
+        Err(_) => "error".into(),
     }
+}
+
+/// On-demand update check for the web layer: the version banner shows
+/// "server is newer" and this answers whether a matching desktop build is
+/// actually published and staged, or not out yet.
+#[tauri::command]
+async fn check_update(app: tauri::AppHandle) -> String {
+    check_and_stage(app).await
 }
 
 fn main() {
@@ -71,6 +93,7 @@ fn main() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .invoke_handler(tauri::generate_handler![check_update])
         .setup(|app| {
             // Best-effort: a failed registration (e.g. shortcut taken) must not
             // prevent the app from starting.
