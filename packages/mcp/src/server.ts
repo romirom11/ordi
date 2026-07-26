@@ -7,19 +7,68 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { OrdiClient } from './client';
 
+/**
+ * Keys stripped from every tool response before it reaches the model.
+ * Optimistic-locking counters and soft-delete markers carry nothing a model
+ * can act on, and portalToken is a capability URL secret that must never end
+ * up in an agent's context window.
+ */
+const NOISE_KEYS = new Set([
+  'version', 'deletedAt', 'deleted_at', 'templateSourceId', 'template_source_id',
+  'portalToken', 'portal_token', 'searchVector', 'search_vector',
+]);
+
+export function scrub(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(scrub);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .filter(([k]) => !NOISE_KEYS.has(k))
+      .map(([k, v]) => [k, scrub(v)]));
+  }
+  return value;
+}
+
 export function buildServer(client: OrdiClient): McpServer {
   const server = new McpServer({ name: 'ordi', version: '1.0.0' });
 
   function text(data: unknown) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+  return { content: [{ type: 'text' as const, text: JSON.stringify(scrub(data), null, 2) }] };
 }
   function wrap<T>(fn: () => Promise<T>) {
   return fn().then(text).catch((e: Error) => ({ isError: true, content: [{ type: 'text' as const, text: e.message }] }));
 }
 
 // ── Read tools ──
-  server.tool('search', 'Search companies, tasks, invoices and KB pages', { query: z.string() },
+  server.tool('search', 'Search companies, projects, tasks, invoices and KB pages by name/title/number. Matches titles and indexed text, not arbitrary fields; use list_projects / list_companies to enumerate instead of guessing names.', { query: z.string() },
   ({ query }) => wrap(() => client.get(`/search?q=${encodeURIComponent(query)}`)));
+
+  server.tool('list_projects', 'List projects the token owner can access – the way to obtain projectId for the other project tools', {
+  status: z.string().optional().describe('Filter by status, e.g. active'), companyId: z.string().optional(),
+}, ({ status, companyId }) => wrap(async () => {
+  const qs = new URLSearchParams();
+  if (status) qs.set('status', status);
+  if (companyId) qs.set('companyId', companyId);
+  const res = await client.get<{ data: Record<string, unknown>[] }>(`/projects${qs.toString() ? `?${qs}` : ''}`);
+  return { data: res.data.map((p) => ({
+    id: p.id, key: p.key, name: p.name, status: p.status, priority: p.priority,
+    companyId: p.companyId, leadId: p.leadId, startDate: p.startDate, targetDate: p.targetDate,
+  })) };
+}));
+
+  server.tool('list_companies', 'List CRM companies – the way to obtain companyId for company/finance tools', {
+  q: z.string().optional().describe('Substring of the company name'),
+  status: z.string().optional().describe('e.g. lead | client'), limit: z.number().optional(),
+}, ({ q, status, limit }) => wrap(async () => {
+  const qs = new URLSearchParams();
+  if (q) qs.set('q', q);
+  if (status) qs.set('status', status);
+  if (limit) qs.set('limit', String(limit));
+  const res = await client.get<{ data: Record<string, unknown>[]; nextCursor: string | null }>(`/companies${qs.toString() ? `?${qs}` : ''}`);
+  return { data: res.data.map((co) => ({
+    id: co.id, name: co.name, domain: co.domain, status: co.status,
+    ownerId: co.ownerId, defaultCurrency: co.defaultCurrency, paymentTermsDays: co.paymentTermsDays,
+  })), nextCursor: res.nextCursor };
+}));
 
   server.tool('get_company_overview', 'Company metrics: projects, tasks, and (if permitted) receivables', { companyId: z.string() },
   ({ companyId }) => wrap(() => client.get(`/companies/${companyId}/overview`)));
