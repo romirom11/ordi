@@ -115,6 +115,12 @@ export function settingsRoutes() {
       smtpSource: cfg.smtpSource,
       github: cfg.github ? { clientId: cfg.github.clientId, hasSecret: !!cfg.github.clientSecret } : null,
       githubSource: cfg.githubSource,
+      githubApp: cfg.githubApp
+        ? {
+          appId: cfg.githubApp.appId, slug: cfg.githubApp.slug, htmlUrl: cfg.githubApp.htmlUrl,
+          hasPrivateKey: !!cfg.githubApp.privateKey, hasWebhookSecret: !!cfg.githubApp.webhookSecret,
+        }
+        : null,
       slack: cfg.slack ? { clientId: cfg.slack.clientId, hasSecret: !!cfg.slack.clientSecret } : null,
       slackSource: cfg.slackSource,
     });
@@ -131,12 +137,12 @@ export function settingsRoutes() {
     // so it cannot send it back.
     const encrypted = encryptIntegrationSecrets(patch);
     const merged: Record<string, unknown> = { ...current };
-    for (const key of ['smtp', 'github', 'slack'] as const) {
+    for (const key of ['smtp', 'github', 'githubApp', 'slack'] as const) {
       const incoming = encrypted[key];
       if (incoming === undefined) continue;
       const prev = (current[key] ?? {}) as Record<string, unknown>;
       const next = { ...prev, ...incoming } as Record<string, unknown>;
-      for (const secretKey of ['pass', 'clientSecret']) {
+      for (const secretKey of ['pass', 'clientSecret', 'privateKey', 'webhookSecret']) {
         if (next[secretKey] === '' || next[secretKey] === undefined) {
           if (prev[secretKey]) next[secretKey] = prev[secretKey];
           else delete next[secretKey];

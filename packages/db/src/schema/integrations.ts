@@ -8,7 +8,11 @@ export const gitConnections = pgTable('git_connections', {
   instanceUrl: text('instance_url'),
   credentials: jsonb('credentials').notNull().default({}), // AES-GCM encrypted blob
   webhookSecret: text('webhook_secret').notNull().default(''),
-  status: text('status').notNull().default('connected'),
+  /** GitHub App installation id – set only for connections created by an app installation. */
+  installationId: text('installation_id'),
+  /** The org/user login the app is installed on, for display. */
+  accountLogin: text('account_login'),
+  status: text('status').notNull().default('connected'), // connected | revoked | suspended
   createdBy: createdBy(),
   ...timestamps,
 });

@@ -60,6 +60,13 @@ export const integrationsConfigSchema = z.object({
     clientId: z.string(),
     clientSecret: z.string().optional(),
   }).optional(),
+  githubApp: z.object({
+    appId: z.string(),
+    slug: z.string(),
+    privateKey: z.string().optional(),
+    webhookSecret: z.string().optional(),
+    htmlUrl: z.string().optional(),
+  }).optional(),
   slack: z.object({
     clientId: z.string(),
     clientSecret: z.string().optional(),

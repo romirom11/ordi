@@ -1,4 +1,4 @@
-import { randomBytes, scryptSync, timingSafeEqual, createHash, createCipheriv, createDecipheriv } from 'node:crypto';
+import { randomBytes, scryptSync, timingSafeEqual, createHash, createHmac, createCipheriv, createDecipheriv } from 'node:crypto';
 import { env } from '../env';
 
 /** Password hashing (scrypt). Better Auth-compatible enough for our needs (PRD §6, §19.1). */
@@ -47,6 +47,13 @@ export function decrypt(payload: string): string {
 }
 
 /** HMAC-SHA256 hex, for webhook signatures (PRD §13.2). */
+/**
+ * Real HMAC-SHA256 (hex). This is what GitHub/Gitea compute for
+ * X-Hub-Signature-256 and what any receiver of our outbound webhooks will
+ * reproduce with a standard library. (The previous sha256(secret+body)
+ * concat-hash matched neither, so signature verification could never pass
+ * against a real provider.)
+ */
 export function hmacSha256(secret: string, body: string): string {
-  return createHash('sha256').update(secret + body).digest('hex');
+  return createHmac('sha256', secret).update(body).digest('hex');
 }

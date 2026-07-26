@@ -7,13 +7,16 @@ import {
 import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { guard } from '../../core/rbac';
-import { err } from '../../lib/errors';
+import { err, ApiException } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { encrypt, decrypt, generateToken } from '../../lib/crypto';
 import {
   githubOAuthConfigured, signOAuthState, buildGithubAuthorizeUrl, listGithubRepos,
   slackOAuthConfigured, buildSlackAuthorizeUrl, listSlackChannels,
 } from './oauth';
+import {
+  githubAppConfigured, buildAppManifest, manifestActionUrl, listInstallationRepos,
+} from './github-app';
 
 /**
  * Integrations domain (PRD §13): git connections/repositories, manual resync,
@@ -46,18 +49,54 @@ export function integrationsRoutes() {
       .where(eq(schema.gitConnections.id, c.req.param('id')));
     if (!conn) throw err.notFound('Connection not found');
     if (conn.provider !== 'github') throw err.domain('Only GitHub repo listing is supported');
-    let token: string;
     try {
-      token = (JSON.parse(decrypt(conn.credentials as string)) as { token: string }).token;
-    } catch {
-      throw err.domain('Stored credentials are invalid');
-    }
-    try {
-      const repos = await listGithubRepos(token, conn.instanceUrl);
-      return c.json({ data: repos });
+      // App installations list through an installation token; legacy
+      // connections through the stored OAuth/PAT token.
+      if (conn.installationId) {
+        const appCfg = await githubAppConfigured();
+        if (!appCfg) throw new Error('GitHub App is no longer configured');
+        return c.json({ data: await listInstallationRepos(appCfg, conn.installationId) });
+      }
+      let token: string;
+      try {
+        token = (JSON.parse(decrypt(conn.credentials as string)) as { token: string }).token;
+      } catch {
+        throw err.domain('Stored credentials are invalid');
+      }
+      return c.json({ data: await listGithubRepos(token, conn.instanceUrl) });
     } catch (e) {
+      if (e instanceof ApiException) throw e;
       return c.json({ error: { code: 'provider_error', message: e instanceof Error ? e.message : 'Provider request failed' } }, 502);
     }
+  });
+
+  // ── GitHub App (manifest flow) ──
+  // Is an app configured, and where does installing it start? (any authed user)
+  app.get('/integrations/github-app/status', async (c) => {
+    const appCfg = await githubAppConfigured();
+    return c.json({
+      configured: Boolean(appCfg),
+      slug: appCfg?.slug ?? null,
+      htmlUrl: appCfg?.htmlUrl ?? null,
+      installUrl: appCfg ? `${appCfg.htmlUrl}/installations/new` : null,
+    });
+  });
+
+  // The manifest the browser form-POSTs to GitHub; GitHub creates the app and
+  // redirects back to the public setup callback with a one-time code.
+  app.post('/integrations/github-app/manifest', guard('integrations.manage'), async (c) => {
+    const body = await c.req.json().catch(() => ({} as Record<string, unknown>));
+    const organization = typeof body.organization === 'string' && body.organization.trim()
+      ? body.organization.trim()
+      : undefined;
+    const { db } = getDb();
+    const [ws] = await db.select({ name: schema.workspaceSettings.name })
+      .from(schema.workspaceSettings).where(eq(schema.workspaceSettings.id, 'workspace'));
+    const state = signOAuthState(currentActor(c).userId!);
+    return c.json({
+      actionUrl: manifestActionUrl(state, organization),
+      manifest: JSON.stringify(buildAppManifest(ws?.name || 'ordi')),
+    });
   });
 
   // ── Slack connection (OAuth v2, Linear-style) ──
@@ -122,9 +161,18 @@ export function integrationsRoutes() {
       provider: schema.gitConnections.provider,
       status: schema.gitConnections.status,
       instanceUrl: schema.gitConnections.instanceUrl,
+      installationId: schema.gitConnections.installationId,
+      accountLogin: schema.gitConnections.accountLogin,
       createdAt: schema.gitConnections.createdAt,
     }).from(schema.gitConnections).orderBy(desc(schema.gitConnections.createdAt));
-    return c.json({ data: rows });
+    return c.json({
+      data: rows.map((r) => ({
+        id: r.id, provider: r.provider, status: r.status, instanceUrl: r.instanceUrl,
+        kind: r.installationId ? 'app' : 'token',
+        accountLogin: r.accountLogin,
+        createdAt: r.createdAt,
+      })),
+    });
   });
 
   app.post('/integrations/git/connections', guard('integrations.manage'), async (c) => {
