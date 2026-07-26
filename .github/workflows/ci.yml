@@ -38,6 +38,8 @@ jobs:
         run: pnpm typecheck
       - name: Query cache shapes
         run: pnpm check:query-shapes
+      - name: Desktop-safe browser idioms
+        run: pnpm check:desktop-safe
       - name: Unit + integration tests
         run: pnpm test
       - name: Build web

@@ -1,12 +1,55 @@
 /**
  * SSE realtime (PRD §3.4): subscribes to /api/v1/stream and invalidates
  * TanStack Query caches per event type. Reconnects with backoff.
+ *
+ * Deliberately NOT EventSource. EventSource cannot send an Authorization
+ * header and only takes a URL relative to the window origin – on the desktop
+ * that origin is tauri://localhost and the credential is a bearer token, so
+ * realtime simply never connected there. A fetch-based reader handles both
+ * worlds with the same code path the rest of the API client uses.
  */
 import { useEffect } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { getInstanceUrl, getSessionToken } from './api';
 import { isTauri, notifyDesktop } from './desktop';
 import { useMe } from './auth';
 import { toast } from '../components/overlays';
+
+/** Read one text/event-stream response, emitting (event, data) pairs. */
+async function readSseStream(
+  url: string,
+  headers: Record<string, string>,
+  onEvent: (event: string, data: string) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  const res = await fetch(url, {
+    headers: { Accept: 'text/event-stream', ...headers },
+    credentials: 'include',
+    signal,
+  });
+  if (!res.ok || !res.body) throw new Error(`stream ${res.status}`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let sep;
+    while ((sep = buf.indexOf('\n\n')) >= 0) {
+      const frame = buf.slice(0, sep);
+      buf = buf.slice(sep + 2);
+      let event = 'message';
+      const data: string[] = [];
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+        // ':' comments and 'id:'/'retry:' fields are irrelevant here.
+      }
+      if (event !== 'message' || data.length) onEvent(event, data.join('\n'));
+    }
+  }
+}
 
 /** Events worth an OS notification on desktop (PRD §18). */
 const OS_NOTIFY: Record<string, string> = {
@@ -31,6 +74,9 @@ function invalidateFor(qc: QueryClient, type: string, data: any): void {
     // comments ride along with the task detail query
     if (data?.taskId) inv(['task', data.taskId]);
     inv(['task-audit']);
+  } else if (type.startsWith('project.')) {
+    inv(['projects']);
+    inv(['project']); // prefix-matches every ['project', id] detail
   } else if (type.startsWith('deal.')) {
     inv(['deals']);
   } else if (type.startsWith('invoice.') || type.startsWith('payment.') || type.startsWith('quote.')) {
@@ -100,24 +146,11 @@ export function useRealtime(): void {
   const meId = me.user.id;
   const meLocale = me.user.locale;
   useEffect(() => {
-    let es: EventSource | null = null;
+    const controller = new AbortController();
     let stopped = false;
     let retryMs = 2000;
 
-    const connect = () => {
-      if (stopped) return;
-      es = new EventSource('/api/v1/stream', { withCredentials: true });
-      es.onopen = () => { retryMs = 2000; };
-      es.onerror = () => {
-        es?.close();
-        if (!stopped) {
-          setTimeout(connect, retryMs);
-          retryMs = Math.min(retryMs * 2, 30_000);
-        }
-      };
-      // Listen to every catalog event type generically via onmessage won't fire
-      // for named events, so attach a shared handler per known family prefix.
-      const types = [
+    const handled = new Set([
         'deal.stage_changed', 'deal.won', 'deal.lost', 'project.created', 'project.completed',
         'task.created', 'task.status_changed', 'task.assigned', 'comment.mentioned',
         'cycle.completed', 'page.published', 'page.mentioned', 'time.entry_created',
@@ -126,21 +159,38 @@ export function useRealtime(): void {
         'git.branch_created', 'git.pr_opened', 'git.pr_merged', 'git.pr_closed',
         'employee.onboarded', 'employee.exited', 'leave.requested', 'leave.decided',
         'applicant.hired', 'role.updated',
-      ];
-      for (const t of types) {
-        es.addEventListener(t, (ev) => {
-          let data: any = {};
-          try { data = JSON.parse((ev as MessageEvent).data); } catch { /* ignore */ }
-          invalidateFor(qc, t, data);
-          if (!isTauri) personalPing(t, data, meId, meLocale);
-          if (isTauri && OS_NOTIFY[t]) {
-            notifyDesktop('ordi', data?.ref ? `${OS_NOTIFY[t]}: ${data.ref}` : OS_NOTIFY[t]!);
-          }
-        });
+    ]);
+
+    const onEvent = (type: string, raw: string) => {
+      retryMs = 2000; // any frame proves the connection is healthy
+      if (!handled.has(type)) return;
+      let data: any = {};
+      try { data = JSON.parse(raw); } catch { /* ignore */ }
+      invalidateFor(qc, type, data);
+      if (!isTauri) personalPing(type, data, meId, meLocale);
+      if (isTauri && OS_NOTIFY[type]) {
+        notifyDesktop('ordi', data?.ref ? `${OS_NOTIFY[type]}: ${data.ref}` : OS_NOTIFY[type]!);
       }
     };
 
-    connect();
-    return () => { stopped = true; es?.close(); };
+    const connect = async (): Promise<void> => {
+      while (!stopped) {
+        try {
+          const token = getSessionToken();
+          await readSseStream(
+            `${getInstanceUrl()}/api/v1/stream`,
+            token ? { Authorization: `Bearer ${token}` } : {},
+            onEvent,
+            controller.signal,
+          );
+        } catch { /* dropped or refused – retry below */ }
+        if (stopped) return;
+        await new Promise((r) => setTimeout(r, retryMs));
+        retryMs = Math.min(retryMs * 2, 30_000);
+      }
+    };
+
+    void connect();
+    return () => { stopped = true; controller.abort(); };
   }, [qc, meId, meLocale]);
 }

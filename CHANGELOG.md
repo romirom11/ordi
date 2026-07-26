@@ -12,6 +12,12 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 - Links shown or copied inside the desktop app (MCP connect URL, copy-link
   everywhere, OAuth redirect URLs) use the instance address instead of
   tauri://localhost.
+- Realtime works on the desktop: the stream is read over fetch with bearer
+  auth against the instance URL, instead of EventSource, which could send
+  neither. Project events now refresh the projects list on every platform,
+  and the invoice PDF button opens in the real browser on desktop.
+- CI checks for browser idioms that break inside the desktop shell
+  (check:desktop-safe), so this class of bug fails the build.
 
 ## v1.5.2
 

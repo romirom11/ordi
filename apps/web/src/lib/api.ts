@@ -37,6 +37,11 @@ function sessionToken(): string | null {
   try { return localStorage.getItem('ordi:sessionToken'); } catch { return null; }
 }
 
+/** The desktop bearer credential, for callers that build their own requests (SSE). */
+export function getSessionToken(): string | null {
+  return sessionToken();
+}
+
 const BASE = `${storedInstanceUrl()}/api/v1`;
 
 export interface ApiErrorShape {

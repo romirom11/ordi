@@ -2,11 +2,25 @@ import { useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from '../lib/router';
 import { useCan } from '../lib/auth';
-import { api, ApiError } from '../lib/api';
+import { api, appOrigin, ApiError } from '../lib/api';
 import { Button, Input, Select, Card, Breadcrumbs, Skeleton, fmtMoney, fmtDate, cn } from '../components/ui';
 import { Dialog, ConfirmDialog, toast } from '../components/overlays';
 import { Send, Download, Ban, Plus, ExternalLink, FilePlus2, Eye, Banknote, Landmark } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
+import { isTauri, openInBrowser } from '../lib/desktop';
+
+/**
+ * The PDF endpoint authenticates with the browser cookie. Inside the desktop
+ * shell a relative window.open points at tauri://localhost and carries no
+ * credential at all, so hand the link to the real browser instead – its
+ * session exists whenever browser sign-in was used, and the login page is an
+ * honest fallback when it was not.
+ */
+function openPdf(id: string): void {
+  const path = `/api/v1/invoices/${id}/pdf`;
+  if (isTauri) void openInBrowser(appOrigin() + path);
+  else window.open(path, '_blank');
+}
 import { useWorkspaceSettings } from '../components/finance/workspace';
 import { DateField } from '../components/DatePicker';
 
@@ -203,7 +217,7 @@ export function InvoiceDetailPage({ id }: { id: string }) {
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {can('finance.send') && <Button size="sm" variant="outline" onClick={() => send.mutate()} disabled={send.isPending}><Send size={14} /> {t('common.send')}</Button>}
-          <Button size="sm" variant="outline" onClick={() => window.open(`/api/v1/invoices/${id}/pdf`, '_blank')}><Download size={14} /> PDF</Button>
+          <Button size="sm" variant="outline" onClick={() => openPdf(id)}><Download size={14} /> PDF</Button>
           {can('finance.payments') && outstanding > 0 && (
             <Button
               size="sm"
