@@ -118,6 +118,52 @@ jobs:
             *) echo "API 404s stay API-shaped" ;;
           esac
 
+      - name: Walk the full MCP OAuth flow against the booted image
+        run: |
+          # The exact sequence an MCP client (Claude) performs, end to end:
+          # register -> approve (as a signed-in user) -> exchange code with
+          # PKCE -> initialize -> tools/list over Streamable HTTP. This is the
+          # release gate for "connecting a client actually works".
+          docker exec -e SEED_OWNER_EMAIL=owner@ci.local -e SEED_OWNER_PASSWORD=ci-password-1 \
+            ordi-svc-api pnpm --filter @ordi/api seed
+          B=http://localhost:3000
+
+          session=$(curl -fsS -X POST $B/api/v1/auth/login -H 'Content-Type: application/json' \
+            -d '{"email":"owner@ci.local","password":"ci-password-1"}' | jq -r .sessionToken)
+          [ -n "$session" ] && [ "$session" != null ] || { echo "login failed"; exit 1; }
+
+          client=$(curl -fsS -X POST $B/api/v1/oauth/register -H 'Content-Type: application/json' -d '{
+            "client_name":"Claude","token_endpoint_auth_method":"none","response_types":["code"],
+            "grant_types":["authorization_code","refresh_token"],"scope":"user",
+            "redirect_uris":["https://claude.ai/api/mcp/auth_callback","https://claude.com/api/mcp/auth_callback"]}' \
+            | jq -r .client_id)
+          [ -n "$client" ] || { echo "registration failed"; exit 1; }
+
+          verifier=$(openssl rand -base64 48 | tr '+/' '-_' | tr -d '=')
+          challenge=$(printf '%s' "$verifier" | openssl dgst -sha256 -binary | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+          redirect=$(curl -fsS -X POST $B/api/v1/oauth/approve -H "Authorization: Bearer $session" \
+            -H 'Content-Type: application/json' \
+            -d "{\"clientId\":\"$client\",\"redirectUri\":\"https://claude.ai/api/mcp/auth_callback\",\"state\":\"s-1\",\"codeChallenge\":\"$challenge\",\"codeChallengeMethod\":\"S256\"}" \
+            | jq -r .redirectTo)
+          code=$(echo "$redirect" | sed -n 's/.*[?&]code=\([^&]*\).*/\1/p')
+          [ -n "$code" ] || { echo "approve did not yield a code: $redirect"; exit 1; }
+
+          token=$(curl -fsS -X POST $B/api/v1/oauth/token \
+            -H 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode grant_type=authorization_code --data-urlencode "code=$code" \
+            --data-urlencode "code_verifier=$verifier" --data-urlencode "client_id=$client" \
+            --data-urlencode redirect_uri=https://claude.ai/api/mcp/auth_callback \
+            | jq -r .access_token)
+          [ -n "$token" ] && [ "$token" != null ] || { echo "token exchange failed"; exit 1; }
+
+          mcp() { curl -fsS -X POST $B/api/v1/mcp -H "Authorization: Bearer $token" \
+            -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d "$1"; }
+          init=$(mcp '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}')
+          echo "$init" | jq -e '.result.serverInfo.name == "ordi"' >/dev/null || { echo "initialize failed: $init"; exit 1; }
+          tools=$(mcp '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq '.result.tools | length')
+          [ "$tools" -ge 20 ] || { echo "tools/list returned $tools tools"; exit 1; }
+          echo "MCP OAuth flow: register -> approve -> token -> initialize -> $tools tools listed"
+
       # The nginx web image is deprecated but still shipped for deployments
       # that pin it - keep it booting and routing until it is removed.
       - name: Boot the deprecated web image and check OAuth discovery through nginx

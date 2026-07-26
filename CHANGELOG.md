@@ -3,6 +3,22 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.6.1
+
+- Every OAuth step logs its outcome: registrations, issued tokens, and every
+  rejection with the exact failing check (unknown client, redirect_uri not
+  registered, expired code, PKCE mismatch, malformed exchange). "Authorization
+  failed" in an MCP client is now diagnosable from the API logs instead of
+  being a silent 400.
+- The OAuth state parameter accepts up to 4096 characters. It is the client's
+  opaque blob echoed back verbatim; the old 512 cap could reject legitimate
+  clients whose state is a signed payload.
+- CI walks the full MCP OAuth flow against the booted image on every build:
+  register with Claude's exact registration body, approve as a signed-in
+  user, exchange the code with PKCE, then initialize and tools/list over
+  Streamable HTTP. A release cannot ship if connecting a client is broken
+  anywhere along that path.
+
 ## v1.6.0
 
 - One container is the whole application: the API serves the built web app
