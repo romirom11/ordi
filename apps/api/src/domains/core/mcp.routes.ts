@@ -9,7 +9,7 @@
  * The tools call the REST API back over localhost with the caller's own
  * token, so permissions resolve exactly like any other API request.
  */
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { RESPONSE_ALREADY_SENT } from '@hono/node-server/utils/response';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -20,11 +20,33 @@ import { sha256 } from '../../lib/crypto';
 import type { AppEnv } from '../../context';
 import { env } from '../../env';
 
-function resourceMetadataUrl(): string {
-  return `${env.appUrl}/api/v1/.well-known/oauth-protected-resource`;
+/**
+ * The origin this request actually arrived on.
+ *
+ * Discovery documents must advertise URLs the *client* can reach, and RFC 8414
+ * additionally requires the issuer to match where the metadata was fetched
+ * from. Deriving them from APP_URL breaks both the moment APP_URL is stale or
+ * left at its default: discovery still answers (the client reached the real
+ * host), but it hands back a registration_endpoint on localhost, and the
+ * client reports that it could not register. So: forwarded headers first, then
+ * Host, and APP_URL only as a last resort.
+ */
+export function publicOrigin(c: Context): string {
+  const first = (v: string | undefined) => v?.split(',')[0]?.trim() || undefined;
+  const host = first(c.req.header('x-forwarded-host')) ?? first(c.req.header('host'));
+  if (!host) return env.appUrl;
+  let proto = first(c.req.header('x-forwarded-proto'));
+  if (!proto) {
+    try { proto = new URL(c.req.url).protocol.replace(':', ''); } catch { proto = 'http'; }
+  }
+  return `${proto}://${host}`;
 }
 
-function unauthorized() {
+function resourceMetadataUrl(c: Context): string {
+  return `${publicOrigin(c)}/api/v1/.well-known/oauth-protected-resource`;
+}
+
+function unauthorized(c: Context) {
   return new Response(
     JSON.stringify({ error: 'unauthorized', error_description: 'Bearer token required' }),
     {
@@ -32,7 +54,7 @@ function unauthorized() {
       headers: {
         'Content-Type': 'application/json',
         // RFC 9728: tells the client where to discover the OAuth server.
-        'WWW-Authenticate': `Bearer resource_metadata="${resourceMetadataUrl()}"`,
+        'WWW-Authenticate': `Bearer resource_metadata="${resourceMetadataUrl(c)}"`,
       },
     },
   );
@@ -54,9 +76,9 @@ export function mcpRoutes() {
 
   app.post('/', async (c) => {
     const auth = c.req.header('authorization') ?? '';
-    if (!auth.startsWith('Bearer ')) return unauthorized();
+    if (!auth.startsWith('Bearer ')) return unauthorized(c);
     const raw = auth.slice(7);
-    if (!(await tokenIsValid(raw))) return unauthorized();
+    if (!(await tokenIsValid(raw))) return unauthorized(c);
 
     // Node's req/res, provided by @hono/node-server. Absent under app.request()
     // (tests) – the OAuth flow is tested there, the transport is not.
@@ -91,21 +113,23 @@ export function mcpRoutes() {
 /* ─────────────────────────── OAuth discovery ─────────────────────────── */
 
 /** RFC 9728 – who protects /mcp and where its authorization server lives. */
-export function protectedResourceMetadata() {
+export function protectedResourceMetadata(c: Context) {
+  const origin = publicOrigin(c);
   return {
-    resource: `${env.appUrl}/api/v1/mcp`,
-    authorization_servers: [env.appUrl],
+    resource: `${origin}/api/v1/mcp`,
+    authorization_servers: [origin],
     bearer_methods_supported: ['header'],
   };
 }
 
 /** RFC 8414 – the authorization server description MCP clients discover. */
-export function authorizationServerMetadata() {
+export function authorizationServerMetadata(c: Context) {
+  const origin = publicOrigin(c);
   return {
-    issuer: env.appUrl,
-    authorization_endpoint: `${env.appUrl}/oauth/authorize`,
-    token_endpoint: `${env.appUrl}/api/v1/oauth/token`,
-    registration_endpoint: `${env.appUrl}/api/v1/oauth/register`,
+    issuer: origin,
+    authorization_endpoint: `${origin}/oauth/authorize`,
+    token_endpoint: `${origin}/api/v1/oauth/token`,
+    registration_endpoint: `${origin}/api/v1/oauth/register`,
     response_types_supported: ['code'],
     grant_types_supported: ['authorization_code'],
     code_challenge_methods_supported: ['S256'],

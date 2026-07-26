@@ -85,8 +85,8 @@ export function createApp() {
   // OAuth discovery for MCP clients (RFC 8414 / RFC 9728). Served on every
   // path variant clients try: at the root, with the issuer path inserted, and
   // under /api/v1 for proxies that forward only /api/*.
-  const asMeta = (c: Context) => c.json(authorizationServerMetadata());
-  const prMeta = (c: Context) => c.json(protectedResourceMetadata());
+  const asMeta = (c: Context) => c.json(authorizationServerMetadata(c));
+  const prMeta = (c: Context) => c.json(protectedResourceMetadata(c));
   for (const base of ['', '/api/v1']) {
     app.get(`${base}/.well-known/oauth-authorization-server`, asMeta);
     app.get(`${base}/.well-known/oauth-authorization-server/*`, asMeta);

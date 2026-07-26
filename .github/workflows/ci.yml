@@ -85,3 +85,30 @@ jobs:
             sleep 2
           done
           echo "API never became healthy:"; docker logs api; exit 1
+
+      - name: Boot the web image and check OAuth discovery through nginx
+        run: |
+          docker run -d --name web --network ordi-ci -p 8080:80 ordi-web:ci
+          for i in $(seq 1 30); do
+            curl -fsS -o /dev/null http://localhost:8080/ && break
+            if [ "$(docker inspect -f '{{.State.Running}}' web)" != "true" ]; then
+              echo "web container exited (nginx config?):"; docker logs web; exit 1
+            fi
+            sleep 1
+          done
+          # An MCP client registers against whatever discovery advertises. If
+          # nginx drops the Host header, it advertises http://api:3000 and the
+          # client cannot register - the failure this guards against.
+          meta=$(curl -fsS -H 'Host: ordi.example.com' -H 'X-Forwarded-Proto: https' \
+            http://localhost:8080/.well-known/oauth-authorization-server)
+          echo "$meta"
+          for want in \
+            '"issuer":"https://ordi.example.com"' \
+            '"registration_endpoint":"https://ordi.example.com/api/v1/oauth/register"' \
+            '"token_endpoint":"https://ordi.example.com/api/v1/oauth/token"'; do
+            case "$meta" in
+              *"$want"*) ;;
+              *) echo "discovery is missing $want"; docker logs web; exit 1 ;;
+            esac
+          done
+          echo "OAuth discovery advertises the public host through nginx"

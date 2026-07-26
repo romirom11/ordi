@@ -46,6 +46,52 @@ describe('OAuth for MCP clients', () => {
     expect(pr.resource).toContain('/api/v1/mcp');
   });
 
+  it('advertises the host the request came in on, not APP_URL', async () => {
+    // The failure this guards: APP_URL left at its default while the server is
+    // reachable at some public https host. Discovery answers (the client got
+    // there), but every endpoint in it points at localhost, so the client
+    // cannot register and reports the sign-in service as broken.
+    const headers = { host: 'ordi.example.com', 'x-forwarded-proto': 'https' };
+    const meta = await (await app.request('/.well-known/oauth-authorization-server', { headers })).json() as any;
+    expect(meta.issuer).toBe('https://ordi.example.com');
+    expect(meta.registration_endpoint).toBe('https://ordi.example.com/api/v1/oauth/register');
+    expect(meta.authorization_endpoint).toBe('https://ordi.example.com/oauth/authorize');
+    expect(meta.token_endpoint).toBe('https://ordi.example.com/api/v1/oauth/token');
+
+    const pr = await (await app.request('/.well-known/oauth-protected-resource', { headers })).json() as any;
+    expect(pr.resource).toBe('https://ordi.example.com/api/v1/mcp');
+    expect(pr.authorization_servers).toEqual(['https://ordi.example.com']);
+
+    // A proxy that rewrites the Host header sends x-forwarded-host instead.
+    const fwd = await (await app.request('/.well-known/oauth-authorization-server', {
+      headers: { host: 'api-internal:3000', 'x-forwarded-host': 'ordi.example.com', 'x-forwarded-proto': 'https' },
+    })).json() as any;
+    expect(fwd.issuer).toBe('https://ordi.example.com');
+
+    // The 401 that starts the whole dance points at the same host.
+    const res = await app.request('/api/v1/mcp', { method: 'POST', body: '{}', headers });
+    expect(res.headers.get('WWW-Authenticate')).toContain('https://ordi.example.com/api/v1/.well-known/oauth-protected-resource');
+  });
+
+  it('registers the client Claude actually sends', async () => {
+    const res = await app.request('/api/v1/oauth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_name: 'Claude',
+        redirect_uris: ['https://claude.ai/api/mcp/auth_callback', 'https://claude.com/api/mcp/auth_callback'],
+        grant_types: ['authorization_code', 'refresh_token'],
+        response_types: ['code'],
+        token_endpoint_auth_method: 'none',
+        scope: 'user',
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json() as any;
+    expect(body.client_id).toMatch(/^mcp_/);
+    expect(body.redirect_uris).toHaveLength(2);
+  });
+
   it('an unauthenticated /mcp request points at the resource metadata', async () => {
     const res = await app.request('/api/v1/mcp', { method: 'POST', body: '{}' });
     expect(res.status).toBe(401);
