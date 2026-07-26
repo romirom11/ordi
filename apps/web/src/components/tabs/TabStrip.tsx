@@ -11,6 +11,7 @@ import {
   Users, X,
 } from 'lucide-react';
 import { extendDict, useT } from '../../lib/i18n';
+import { isMacDesktop } from '../../lib/desktop';
 import { tabFallbackTitle, useTabs, type TabItem } from '../../lib/tabs';
 import { cn, Tooltip } from '../ui';
 import { ContextMenu, toast, type ContextMenuEntry } from '../overlays';
@@ -220,8 +221,12 @@ export function TabStrip() {
   };
 
   return (
-    <div className="shrink-0">
-      <div className="flex items-center gap-1 pb-1 pl-2.5 pr-1 pt-1.5" role="tablist">
+    <div className="shrink-0" data-tauri-drag-region={isMacDesktop || undefined}>
+      <div
+        className={cn('flex items-center gap-1 pb-1 pr-1 pt-1.5', isMacDesktop ? 'pl-[84px]' : 'pl-2.5')}
+        role="tablist"
+        data-tauri-drag-region={isMacDesktop || undefined}
+      >
         <div className="mr-0.5 flex shrink-0 items-center">
           <NavArrow label={t('tabs.back')} shortcut="Alt+←" disabled={!tabs.canGoBack} onClick={() => tabs.go(-1)}>
             <ArrowLeft size={14} />
@@ -246,6 +251,8 @@ export function TabStrip() {
             <Plus size={14} />
           </button>
         </Tooltip>
+        {/* Leftover width doubles as the window drag handle on macOS. */}
+        <div className="min-w-2 flex-1 self-stretch" data-tauri-drag-region={isMacDesktop || undefined} />
       </div>
       {/* Floating tip (bottom-left card) – appears once a second tab is opened. */}
       {tabs.tabs.length > 1 && (

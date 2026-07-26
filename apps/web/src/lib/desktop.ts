@@ -12,6 +12,14 @@ export const isTauri: boolean =
   typeof window !== 'undefined' &&
   (('__TAURI__' in window) || ('__TAURI_INTERNALS__' in window));
 
+/**
+ * macOS desktop runs with an overlay titlebar (tauri.conf titleBarStyle) –
+ * the traffic lights float over the webview, so the tab strip must leave room
+ * for them and act as the drag region. Other platforms keep native bars.
+ */
+export const isMacDesktop: boolean =
+  isTauri && typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent);
+
 function t(): any {
   return (window as any).__TAURI__;
 }

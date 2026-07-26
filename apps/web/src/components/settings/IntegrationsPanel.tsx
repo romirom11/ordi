@@ -10,7 +10,7 @@ import {
   Button, IconButton, Input, Select, Card, Badge, Skeleton, Spinner, fmtDate, cn,
 } from '../ui';
 import { Dialog, ConfirmDialog, toast } from '../overlays';
-import { SectionHead, Field, RowList } from './primitives';
+import { SectionHead, Field, RowList, Disclosure, StatusChip } from './primitives';
 import { EmailCard, OAuthCredentials } from './integrationsConfig';
 import { Hint } from '../Hint';
 import { useT, extendDict } from '../../lib/i18n';
@@ -19,6 +19,10 @@ extendDict({
   en: {
     'settings.integrationsDesc': 'Connect GitHub and Slack, and send outgoing webhooks.',
     // GitHub
+    'settings.stateConnected': 'Connected',
+    'settings.stateReady': 'OAuth app ready',
+    'settings.stateNone': 'Not configured',
+    'settings.setupOauth': 'Set up the OAuth app',
     'settings.githubTitle': 'GitHub',
     'settings.githubDesc': 'Link repositories to projects – branches and PRs show up on tasks.',
     'settings.connectGithub': 'Connect GitHub',
@@ -63,6 +67,10 @@ extendDict({
   uk: {
     'settings.integrationsDesc': 'Підключіть GitHub і Slack та надсилайте вихідні вебхуки.',
     // GitHub
+    'settings.stateConnected': 'Підключено',
+    'settings.stateReady': 'OAuth-застосунок готовий',
+    'settings.stateNone': 'Не налаштовано',
+    'settings.setupOauth': 'Налаштувати OAuth-застосунок',
     'settings.githubTitle': 'GitHub',
     'settings.githubDesc': 'Звʼяжіть репозиторії з проєктами – гілки та PR-и зʼявляться в задачах.',
     'settings.connectGithub': 'Підключити GitHub',
@@ -173,6 +181,11 @@ function GitHubCard() {
           <div className="text-[13px] font-semibold">{t('settings.githubTitle')}</div>
           <p className="mt-0.5 text-xs text-muted-foreground">{t('settings.githubDesc')}</p>
         </div>
+        {oauth.isSuccess && (
+          <StatusChip tone={githubConnected ? 'ok' : configured ? 'muted' : 'off'}>
+            {githubConnected ? t('settings.stateConnected') : configured ? t('settings.stateReady') : t('settings.stateNone')}
+          </StatusChip>
+        )}
         {configured && !githubConnected && (
           <Button size="sm" onClick={connect} disabled={connecting}>
             {connecting ? <Spinner /> : <Github size={14} />} {t('settings.connectGithub')}
@@ -181,9 +194,12 @@ function GitHubCard() {
       </div>
 
       {/* Credentials live here rather than in the server .env, so a workspace
-          owner can set up the OAuth app without shell access. */}
+          owner can set up the OAuth app without shell access. The form only
+          appears on demand – it is a one-time task, not daily reading. */}
       {oauth.isSuccess && !configured && (
-        <OAuthCredentials provider="github" callbackPath="/api/v1/integrations/git/oauth/callback" />
+        <Disclosure label={t('settings.setupOauth')} className="mt-3 border-t border-border pt-3">
+          <OAuthCredentials provider="github" callbackPath="/api/v1/integrations/git/oauth/callback" />
+        </Disclosure>
       )}
 
       {/* Existing connections */}
@@ -332,6 +348,11 @@ function SlackCard() {
           <div className="text-[13px] font-semibold">{t('settings.slackTitle')}</div>
           <p className="mt-0.5 text-xs text-muted-foreground">{t('settings.slackDesc')}</p>
         </div>
+        {status.isSuccess && (
+          <StatusChip tone={connected ? 'ok' : configured ? 'muted' : 'off'}>
+            {connected ? t('settings.stateConnected') : configured ? t('settings.stateReady') : t('settings.stateNone')}
+          </StatusChip>
+        )}
         {canManage && configured && !connected && (
           <Button size="sm" onClick={connect} disabled={connecting}>
             {connecting ? <Spinner /> : <Slack size={14} />} {t('settings.connectSlack')}
@@ -340,7 +361,9 @@ function SlackCard() {
       </div>
 
       {status.isSuccess && !configured && (
-        <OAuthCredentials provider="slack" callbackPath="/api/v1/integrations/slack/oauth/callback" />
+        <Disclosure label={t('settings.setupOauth')} className="mt-3 border-t border-border pt-3">
+          <OAuthCredentials provider="slack" callbackPath="/api/v1/integrations/slack/oauth/callback" />
+        </Disclosure>
       )}
 
       {/* Connected state */}

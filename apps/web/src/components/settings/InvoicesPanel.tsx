@@ -67,6 +67,8 @@ export function InvoicesPanel() {
   const [accent, setAccent] = useState(DEFAULT_ACCENT);
   const [footer, setFooter] = useState('');
   const [payment, setPayment] = useState('');
+  /** The preview highlights whichever region is being edited. */
+  const [focus, setFocus] = useState<'accent' | 'footer' | 'payment' | 'logo' | null>(null);
 
   useEffect(() => {
     if (ws.data) {
@@ -119,73 +121,83 @@ export function InvoicesPanel() {
     <div>
       <SectionHead title={t('settings.invoices')} desc={t('settings.invoicesDesc')} />
 
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr,280px]">
-        {/* Form */}
-        <div>
-          <SettingRow label={t('settings.invoiceShowLogo')} hint={t('settings.invoiceShowLogoHint')}>
-            <Switch checked={showLogo} onChange={setShowLogo} />
-          </SettingRow>
-
-          <SettingRow label={t('settings.invoiceAccent')} hint={t('settings.invoiceAccentHint')} className="items-start">
-            <div className="flex flex-col items-end gap-2.5">
-              <div className="flex flex-wrap justify-end gap-1.5">
-                {PRESETS.map((c) => {
-                  const active = accent.toLowerCase() === c.toLowerCase();
-                  return (
-                    <button
-                      key={c}
-                      type="button"
-                      onClick={() => setAccent(c)}
-                      title={c}
-                      aria-label={c}
-                      className={cn(
-                        'grid h-6 w-6 place-items-center rounded-full ring-offset-2 ring-offset-card transition-transform duration-150 hover:scale-110',
-                        active && 'ring-2 ring-foreground',
-                      )}
-                      style={{ backgroundColor: c }}
-                    >
-                      {active && <Check size={13} className="text-white" strokeWidth={3} />}
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span
-                  className="h-6 w-6 shrink-0 rounded-md border border-border"
-                  style={{ backgroundColor: safeAccent }}
-                />
-                <Input
-                  value={accent}
-                  onChange={(e) => setAccent(e.target.value)}
-                  placeholder={DEFAULT_ACCENT}
-                  aria-label={t('settings.invoiceCustomHex')}
-                  className={cn('w-28 font-mono text-xs', !validHex && 'border-destructive')}
-                />
-              </div>
+      <div className="grid grid-cols-1 items-start gap-10 lg:grid-cols-[minmax(0,380px),minmax(0,1fr)]">
+        {/* Form: stacked, full-width – the page has the room, use it. */}
+        <div className="space-y-6">
+          <div
+            className="flex items-center justify-between gap-4"
+            onMouseEnter={() => setFocus('logo')}
+            onMouseLeave={() => setFocus(null)}
+          >
+            <div>
+              <div className="text-[13px] font-medium">{t('settings.invoiceShowLogo')}</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">{t('settings.invoiceShowLogoHint')}</div>
             </div>
-          </SettingRow>
+            <Switch checked={showLogo} onChange={setShowLogo} />
+          </div>
 
-          <SettingRow label={t('settings.invoiceFooter')} className="items-start">
+          <div onMouseEnter={() => setFocus('accent')} onMouseLeave={() => setFocus(null)}>
+            <div className="text-[13px] font-medium">{t('settings.invoiceAccent')}</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">{t('settings.invoiceAccentHint')}</div>
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+              {PRESETS.map((c) => {
+                const active = accent.toLowerCase() === c.toLowerCase();
+                return (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setAccent(c)}
+                    title={c}
+                    aria-label={c}
+                    className={cn(
+                      'grid h-7 w-7 place-items-center rounded-full ring-offset-2 ring-offset-card transition-transform duration-150 hover:scale-110',
+                      active && 'ring-2 ring-foreground',
+                    )}
+                    style={{ backgroundColor: c }}
+                  >
+                    {active && <Check size={13} className="text-white" strokeWidth={3} />}
+                  </button>
+                );
+              })}
+              <span className="mx-1 h-5 w-px bg-border" />
+              <span className="h-7 w-7 shrink-0 rounded-md border border-border" style={{ backgroundColor: safeAccent }} />
+              <Input
+                value={accent}
+                onChange={(e) => setAccent(e.target.value)}
+                placeholder={DEFAULT_ACCENT}
+                aria-label={t('settings.invoiceCustomHex')}
+                className={cn('w-28 font-mono text-xs', !validHex && 'border-destructive')}
+              />
+            </div>
+          </div>
+
+          <div>
+            <div className="text-[13px] font-medium">{t('settings.invoiceFooter')}</div>
             <Textarea
               value={footer}
               onChange={(e) => setFooter(e.target.value)}
+              onFocus={() => setFocus('footer')}
+              onBlur={() => setFocus(null)}
               placeholder={t('settings.invoiceFooterPlaceholder')}
               rows={2}
-              className="w-64"
+              className="mt-1.5 w-full"
             />
-          </SettingRow>
+          </div>
 
-          <SettingRow label={t('settings.invoicePayment')} className="items-start">
+          <div>
+            <div className="text-[13px] font-medium">{t('settings.invoicePayment')}</div>
             <Textarea
               value={payment}
               onChange={(e) => setPayment(e.target.value)}
+              onFocus={() => setFocus('payment')}
+              onBlur={() => setFocus(null)}
               placeholder={t('settings.invoicePaymentPlaceholder')}
-              rows={3}
-              className="w-64"
+              rows={4}
+              className="mt-1.5 w-full font-mono text-xs"
             />
-          </SettingRow>
+          </div>
 
-          <div className="mt-5 flex h-8 items-center gap-3">
+          <div className="flex h-8 items-center gap-3">
             {dirty && (
               <Button size="sm" onClick={save} disabled={patch.isPending || !validHex}>
                 {patch.isPending ? <Spinner /> : null} {t('common.save')}
@@ -194,78 +206,83 @@ export function InvoicesPanel() {
           </div>
         </div>
 
-        {/* Live preview */}
-        <div>
+        {/* Live preview: big enough to read, sticky while the form scrolls,
+            and it highlights the region you are editing. */}
+        <div className="lg:sticky lg:top-6">
           <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('settings.invoicePreview')}</div>
-          <InvoicePreview
-            accent={safeAccent}
-            showLogo={showLogo}
-            logo={logo}
-            name={name}
-            footer={footer}
-            payment={payment}
-          />
+          <div className="mx-auto w-full max-w-md">
+            <InvoicePreview
+              accent={safeAccent}
+              showLogo={showLogo}
+              logo={logo}
+              name={name}
+              footer={footer}
+              payment={payment}
+              focus={focus}
+            />
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function InvoicePreview({ accent, showLogo, logo, name, footer, payment }: {
+function InvoicePreview({ accent, showLogo, logo, name, footer, payment, focus }: {
   accent: string; showLogo: boolean; logo: string | null; name: string; footer: string; payment: string;
+  focus?: 'accent' | 'footer' | 'payment' | 'logo' | null;
 }) {
   const t = useT();
+  const hi = (key: string) =>
+    cn('rounded-md transition-shadow duration-200', focus === key && 'shadow-[0_0_0_2px_hsl(var(--primary)/0.5)]');
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card shadow-pop">
-      <div className="h-1.5 w-full" style={{ backgroundColor: accent }} />
-      <div className="p-4">
+      <div className={cn('h-2 w-full transition-shadow duration-200', focus === 'accent' && 'shadow-[0_0_0_2px_hsl(var(--primary)/0.5)]')} style={{ backgroundColor: accent }} />
+      <div className="p-6">
         {/* header */}
         <div className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-2">
+          <div className={cn('flex min-w-0 items-center gap-2.5 p-1', hi('logo'))}>
             {showLogo && (
               logo ? (
-                <img src={logo} alt="" className="h-8 w-8 shrink-0 rounded object-cover" />
+                <img src={logo} alt="" className="h-10 w-10 shrink-0 rounded object-cover" />
               ) : (
-                <div className="grid h-8 w-8 shrink-0 place-items-center rounded text-xs font-bold text-white" style={{ backgroundColor: accent }}>
+                <div className="grid h-10 w-10 shrink-0 place-items-center rounded text-sm font-bold text-white" style={{ backgroundColor: accent }}>
                   {name.slice(0, 1).toUpperCase()}
                 </div>
               )
             )}
             <div className="min-w-0">
-              <div className="truncate text-[13px] font-semibold">{name}</div>
-              <div className="text-[10px] text-faint">{t('settings.invoicePreviewFrom')}</div>
+              <div className="truncate text-sm font-semibold">{name}</div>
+              <div className="text-[11px] text-faint">{t('settings.invoicePreviewFrom')}</div>
             </div>
           </div>
           <div className="text-right">
-            <div className="text-[15px] font-bold tabular-nums" style={{ color: accent }}>{t('settings.invoicePreviewNumber')}</div>
-            <div className="text-[10px] text-faint">2026</div>
+            <div className="text-[17px] font-bold tabular-nums" style={{ color: accent }}>{t('settings.invoicePreviewNumber')}</div>
+            <div className="text-[11px] text-faint">2026</div>
           </div>
         </div>
 
         {/* fake line rows */}
-        <div className="mt-4 space-y-2">
-          {[0.9, 0.7, 0.55].map((w, i) => (
+        <div className="mt-6 space-y-2.5">
+          {[0.9, 0.7, 0.55, 0.65].map((w, i) => (
             <div key={i} className="flex items-center justify-between gap-3">
               <div className="h-2 rounded-full bg-muted" style={{ width: `${w * 100}%` }} />
-              <div className="h-2 w-8 shrink-0 rounded-full bg-muted" />
+              <div className="h-2 w-10 shrink-0 rounded-full bg-muted" />
             </div>
           ))}
         </div>
 
-        <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
-          <span className="text-[11px] text-muted-foreground">{t('settings.invoicePreviewTotal')}</span>
-          <span className="text-[13px] font-bold tabular-nums" style={{ color: accent }}>$1,240.00</span>
+        <div className="mt-4 flex items-center justify-between border-t border-border pt-3.5">
+          <span className="text-xs text-muted-foreground">{t('settings.invoicePreviewTotal')}</span>
+          <span className="text-[15px] font-bold tabular-nums" style={{ color: accent }}>$1,240.00</span>
         </div>
 
         {/* payment details */}
-        {payment.trim() && (
-          <div className="mt-3 whitespace-pre-wrap break-words rounded-md bg-muted/50 p-2 text-[10px] leading-relaxed text-muted-foreground">
-            {payment}
-          </div>
-        )}
+        <div className={cn('mt-4 whitespace-pre-wrap break-words rounded-md bg-muted/50 p-3 text-[11px] leading-relaxed text-muted-foreground', hi('payment'), !payment.trim() && 'text-faint')}>
+          {payment.trim() || t('settings.invoicePaymentPlaceholder')}
+        </div>
 
         {/* footer */}
-        <div className="mt-3 border-t border-border pt-2 text-center text-[11px] italic text-muted-foreground">
+        <div className={cn('mt-4 border-t border-border p-2 pt-3 text-center text-xs italic text-muted-foreground', hi('footer'))}>
           {footer.trim() || t('settings.invoiceFooterPlaceholder')}
         </div>
       </div>

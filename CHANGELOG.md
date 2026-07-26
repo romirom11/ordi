@@ -18,6 +18,10 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   and the invoice PDF button opens in the real browser on desktop.
 - CI checks for browser idioms that break inside the desktop shell
   (check:desktop-safe), so this class of bug fails the build.
+- Settings follow progressive disclosure: MCP leads with per-client connect
+  snippets (incl. Codex CLI), integrations show status chips with forms on
+  demand, invoice branding gets a large interactive preview. On macOS the tab
+  strip moves into the title bar.
 
 ## v1.5.2
 
