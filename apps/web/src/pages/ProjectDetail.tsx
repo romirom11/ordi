@@ -969,6 +969,7 @@ function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageM
             project={project}
             users={users}
             canWrite={canWrite}
+            canManageMembers={isAdmin}
             onPatch={onPatch}
             onManageMembers={onManageMembers}
           />

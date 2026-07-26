@@ -19,6 +19,10 @@ export interface TabItem {
   url: string;
   /** Registered by the page via usePageTitle. '' → fallback derived from url. */
   title: string;
+  /** Per-tab navigation stack, oldest first. Always contains `url` at `pos`. */
+  history: string[];
+  /** Index of `url` inside `history`; entries after it are the forward stack. */
+  pos: number;
 }
 
 interface TabsState { tabs: TabItem[]; activeId: string }
@@ -35,9 +39,15 @@ export interface TabsApi {
   /** Switch to the next (+1) / previous (-1) tab, cycling. */
   activateDelta: (delta: number) => void;
   setActiveTitle: (title: string) => void;
+  /** Step the ACTIVE tab through its own history: -1 back, +1 forward. */
+  go: (delta: number) => void;
+  canGoBack: boolean;
+  canGoForward: boolean;
 }
 
 const STORAGE_KEY = 'ordi:tabs';
+/** Cap the per-tab stack so long sessions cannot grow localStorage without bound. */
+const MAX_HISTORY = 50;
 const TabsContext = createContext<TabsApi | null>(null);
 
 let seq = 0;
@@ -49,6 +59,23 @@ function currentUrl(): string {
   return window.location.pathname + window.location.search;
 }
 
+function makeTab(url: string): TabItem {
+  return { id: newId(), url, title: '', history: [url], pos: 0 };
+}
+
+/**
+ * Record a navigation on a tab. Landing on the entry either side of the current
+ * one is treated as a move within the stack rather than a new entry, so the
+ * browser's own back/forward buttons stay in step with the in-tab arrows.
+ */
+function advance(tab: TabItem, url: string): TabItem {
+  const { history, pos } = tab;
+  if (history[pos - 1] === url) return { ...tab, url, title: '', pos: pos - 1 };
+  if (history[pos + 1] === url) return { ...tab, url, title: '', pos: pos + 1 };
+  const next = [...history.slice(0, pos + 1), url].slice(-MAX_HISTORY);
+  return { ...tab, url, title: '', history: next, pos: next.length - 1 };
+}
+
 function loadInitial(): TabsState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -57,7 +84,17 @@ function loadInitial(): TabsState {
       const tabs = (Array.isArray(parsed.tabs) ? parsed.tabs : [])
         .filter((t): t is TabItem => !!t && typeof (t as TabItem).id === 'string'
           && typeof (t as TabItem).url === 'string' && (t as TabItem).url.startsWith('/'))
-        .map((t) => ({ id: t.id, url: t.url, title: typeof t.title === 'string' ? t.title : '' }));
+        .map((t) => {
+          // Tabs persisted before per-tab history existed start a fresh stack.
+          const stack = Array.isArray(t.history) && t.history.every((u) => typeof u === 'string' && u.startsWith('/'))
+            ? t.history.slice(-MAX_HISTORY) : [t.url];
+          const at = typeof t.pos === 'number' && stack[t.pos] === t.url ? t.pos : stack.indexOf(t.url);
+          const pos = at >= 0 ? at : stack.length - 1;
+          return {
+            id: t.id, url: t.url, title: typeof t.title === 'string' ? t.title : '',
+            history: stack[pos] === t.url ? stack : [t.url], pos: stack[pos] === t.url ? pos : 0,
+          };
+        });
       if (tabs.length) {
         // Browser URL wins on restore: prefer the tab matching the current URL.
         const url = currentUrl();
@@ -68,7 +105,7 @@ function loadInitial(): TabsState {
       }
     }
   } catch { /* private mode / corrupt state */ }
-  const tab: TabItem = { id: newId(), url: currentUrl(), title: '' };
+  const tab = makeTab(currentUrl());
   return { tabs: [tab], activeId: tab.id };
 }
 
@@ -87,7 +124,7 @@ export function TabsProvider({ children }: { children: ReactNode }) {
   if (active && active.url !== path) {
     setState((s) => ({
       ...s,
-      tabs: s.tabs.map((t) => (t.id === s.activeId && t.url !== path ? { ...t, url: path, title: '' } : t)),
+      tabs: s.tabs.map((t) => (t.id === s.activeId && t.url !== path ? advance(t, path) : t)),
     }));
   }
 
@@ -104,7 +141,7 @@ export function TabsProvider({ children }: { children: ReactNode }) {
   }, [navigate]);
 
   const openInNewTab = useCallback((url: string) => {
-    const tab: TabItem = { id: newId(), url, title: '' };
+    const tab = makeTab(url);
     setState((s) => {
       const idx = s.tabs.findIndex((t) => t.id === s.activeId);
       const tabs = [...s.tabs];
@@ -123,7 +160,7 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     const rest = s.tabs.filter((t) => t.id !== id);
     if (rest.length === 0) {
       // Closing the last tab leaves a single tab at '/'.
-      const tab: TabItem = { id: newId(), url: '/', title: '' };
+      const tab = makeTab('/');
       setState({ tabs: [tab], activeId: tab.id });
       if (currentUrl() !== '/') navigate('/');
       return;
@@ -145,6 +182,20 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     if (next) activateTab(next.id);
   }, [activateTab]);
 
+  const go = useCallback((delta: number) => {
+    const s = stateRef.current;
+    const tab = s.tabs.find((t) => t.id === s.activeId);
+    if (!tab) return;
+    const pos = tab.pos + delta;
+    const url = tab.history[pos];
+    if (url === undefined || url === tab.url) return;
+    setState((st) => ({
+      ...st,
+      tabs: st.tabs.map((t) => (t.id === st.activeId ? { ...t, url, title: '', pos } : t)),
+    }));
+    navigate(url);
+  }, [navigate]);
+
   const setActiveTitle = useCallback((title: string) => {
     setState((s) => {
       const tab = s.tabs.find((t) => t.id === s.activeId);
@@ -153,11 +204,15 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const activeTab = state.tabs.find((t) => t.id === state.activeId);
   const api = useMemo<TabsApi>(() => ({
     tabs: state.tabs,
     activeId: state.activeId,
-    openInNewTab, newTab, closeTab, activateTab, activateDelta, setActiveTitle,
-  }), [state.tabs, state.activeId, openInNewTab, newTab, closeTab, activateTab, activateDelta, setActiveTitle]);
+    openInNewTab, newTab, closeTab, activateTab, activateDelta, setActiveTitle, go,
+    canGoBack: !!activeTab && activeTab.pos > 0,
+    canGoForward: !!activeTab && activeTab.pos < activeTab.history.length - 1,
+  }), [state.tabs, state.activeId, openInNewTab, newTab, closeTab, activateTab, activateDelta,
+    setActiveTitle, go, activeTab]);
 
   return (
     <TabsContext.Provider value={api}>
