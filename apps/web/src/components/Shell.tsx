@@ -15,7 +15,7 @@ import { useT, extendDict } from '../lib/i18n';
 import { useTheme, type ThemePref } from '../lib/theme';
 import { initDesktop, restartDesktop, isTauri, isMacDesktop } from '../lib/desktop';
 import { TabsProvider, useTabs } from '../lib/tabs';
-import { cn, Avatar, Kbd, Tooltip, IconButton } from './ui';
+import { cn, Kbd, Tooltip, IconButton } from './ui';
 import { ContextMenu, DropdownMenu, MenuItem, MenuSeparator, MenuLabel, Toaster, toast, type ContextMenuEntry } from './overlays';
 import { CommandPalette } from './CommandPalette';
 import { TimerIndicator } from './TimerIndicator';
@@ -345,78 +345,91 @@ function ShellInner({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <aside className="flex w-56 shrink-0 flex-col">
-        {/* macOS overlay title bar: the native buttons are drawn over this
-            corner and cannot live inside an element, but tauri.conf places
-            them – they are centred on this very row, so the workspace
-            switcher sits beside them rather than below an empty band. The
-            row is the drag handle; without a drag region (and the
-            core:window:allow-start-dragging permission) the window cannot
-            be moved at all. */}
+        {/* macOS overlay title bar: the native buttons are drawn over the
+            window's top-left corner, which is this sidebar. Nothing can live
+            underneath them, so the sidebar opens with an empty strip that is
+            theirs – tauri.conf centres the lights inside it. The strip is
+            also the drag handle; without a drag region (and the
+            core:window:allow-start-dragging permission) the window cannot be
+            moved at all. */}
+        {isMacDesktop && <div className="h-9 shrink-0" data-tauri-drag-region />}
+
+        {/* One identity row, the way Linear does it: the workspace names the
+            place, and who you are only matters when you open the menu – so
+            the email lives inside it and there is no profile row at the foot
+            of the sidebar telling you your own name. Search and new-task
+            share the row as icons rather than owning one of their own. */}
         <div
-          className={cn('flex items-center gap-1 px-3 pb-1 pt-3', isMacDesktop && 'pl-[84px]')}
+          className="flex items-center gap-0.5 px-2.5 pb-1 pt-3"
           data-tauri-drag-region={isMacDesktop || undefined}
         >
-          {/* The anchor is inline-flex by default, so the trigger's flex-1 had
-              nothing to shrink against and a long workspace name ran out of
-              the sidebar. Constrain the anchor and the name truncates. */}
-          <DropdownMenu
-            width={210}
-            className="min-w-0 flex-1"
-            trigger={
-              <button className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors duration-150 hover:bg-muted">
-                {wsLogo ? (
-                  <img src={wsLogo} alt="" className="h-5 w-5 shrink-0 rounded-md object-cover" />
-                ) : (
-                  <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md bg-primary text-[11px] font-bold text-primary-foreground">
-                    {wsName.slice(0, 1).toUpperCase()}
-                  </span>
-                )}
-                <span className="truncate text-[13px] font-semibold">{wsName}</span>
-                <ChevronDown size={13} className="shrink-0 text-faint" />
-              </button>
-            }
+          <ContextMenu
+            items={[
+              { key: 'profile', label: t('nav.profile'), icon: <UserIcon size={13} />, onSelect: () => navigate('/profile') },
+              { key: 'newtab', label: t('ctx.openInNewTab'), icon: <SquareArrowOutUpRight size={13} />, onSelect: () => tabs?.openInNewTab('/profile') },
+              { type: 'separator' },
+              { key: 'signout', label: t('nav.signOut'), icon: <LogOut size={13} />, danger: true, onSelect: logout },
+            ]}
           >
-            {/* Workspace things only. Anything personal – profile, theme,
-                sign out – belongs to the account button in the footer, which
-                is where people look for it. */}
-            <MenuLabel>{wsName}</MenuLabel>
-            {(can('settings.manage') || can('users.manage') || can('roles.manage')) && (
-              <MenuItem icon={<Settings size={14} />} onSelect={() => navigate('/settings')}>{t('nav.settings')}</MenuItem>
-            )}
-            {can('users.manage') && (
-              <MenuItem icon={<UserPlus size={14} />} onSelect={() => navigate('/settings/users')}>
-                {t('settings.inviteUser')}
-              </MenuItem>
-            )}
-            {/* Pointless inside the desktop app – it is already the desktop app. */}
-            {!isTauri && (
-              <MenuItem icon={<MonitorDown size={14} />} onSelect={() => navigate('/download')}>
-                {t('desktop.download')}
-              </MenuItem>
-            )}
-          </DropdownMenu>
-        </div>
-
-        {/* Quick actions: new task + search */}
-        <div className="flex items-center gap-1.5 px-3 py-2">
-          <button
-            onClick={() => setQuickOpen(true)}
-            className={cn(
-              'flex h-7 flex-1 items-center gap-2 rounded-md border border-border bg-card px-2 text-[13px] font-medium shadow-sm',
-              'transition-all duration-150 ease-smooth-out hover:border-border-strong hover:bg-muted active:scale-[0.98]',
-            )}
-          >
-            <SquarePen size={14} className="text-muted-foreground" /> {t('tasks.newTask')}
-          </button>
+            <DropdownMenu
+              width={216}
+              className="min-w-0 flex-1"
+              trigger={
+                <button className="flex min-w-0 w-full items-center gap-1.5 rounded-md px-1 py-1 text-left transition-colors duration-150 hover:bg-muted">
+                  {wsLogo ? (
+                    <img src={wsLogo} alt="" className="h-5 w-5 shrink-0 rounded-md object-cover" />
+                  ) : (
+                    <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md bg-primary text-[11px] font-bold text-primary-foreground">
+                      {wsName.slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{wsName}</span>
+                  <ChevronDown size={13} className="shrink-0 text-faint" />
+                </button>
+              }
+            >
+              <MenuLabel>{me.user.email}</MenuLabel>
+              <MenuItem icon={<UserIcon size={14} />} onSelect={() => navigate('/profile')}>{t('nav.profile')}</MenuItem>
+              {can('users.manage') && (
+                <MenuItem icon={<UserPlus size={14} />} onSelect={() => navigate('/settings/users')}>
+                  {t('settings.inviteUser')}
+                </MenuItem>
+              )}
+              {/* Pointless inside the desktop app – it is already the desktop app. */}
+              {!isTauri && (
+                <MenuItem icon={<MonitorDown size={14} />} onSelect={() => navigate('/download')}>
+                  {t('desktop.download')}
+                </MenuItem>
+              )}
+              <MenuSeparator />
+              <MenuLabel>{t('theme.title')}</MenuLabel>
+              {themeItems.map((it) => (
+                <MenuItem key={it.key} icon={it.icon} checked={themePref === it.key} onSelect={() => setThemePref(it.key)}>
+                  {it.label}
+                </MenuItem>
+              ))}
+              <MenuSeparator />
+              <MenuItem icon={<LogOut size={14} />} danger onSelect={logout}>{t('nav.signOut')}</MenuItem>
+            </DropdownMenu>
+          </ContextMenu>
           <Tooltip label={<span className="flex items-center gap-1.5">{t('nav.search')} <Kbd>⌘K</Kbd></span>}>
-            <IconButton onClick={() => setPaletteOpen(true)} aria-label={t('nav.search')} className="border border-border bg-card shadow-sm hover:border-border-strong">
-              <Search size={14} />
+            <IconButton onClick={() => setPaletteOpen(true)} aria-label={t('nav.search')}>
+              <Search size={15} />
+            </IconButton>
+          </Tooltip>
+          <Tooltip label={<span className="flex items-center gap-1.5">{t('tasks.newTask')} <Kbd>C</Kbd></span>}>
+            <IconButton onClick={() => setQuickOpen(true)} aria-label={t('tasks.newTask')} className="border border-border bg-card shadow-sm hover:border-border-strong">
+              <SquarePen size={15} />
             </IconButton>
           </Tooltip>
         </div>
 
         {/* Nav – grouped sections, drag to reorder within a section */}
         <nav className="flex-1 overflow-y-auto px-2 pt-1">
+          {/* Notifications reads as a destination with a count, not a badged
+              icon: a two-digit count over a 16px glyph covers the glyph. */}
+          <NotificationsBell />
+
           {SECTIONS.map((sec) => {
             const items = grouped.get(sec.key) ?? [];
             if (items.length === 0) return null;
@@ -468,50 +481,32 @@ function ShellInner({ children }: { children: ReactNode }) {
             click (the old row only had a right-click menu, which nobody
             finds), and the bell sits beside it instead of owning a row. */}
         <div className="space-y-1 p-2.5">
-          <TimerIndicator />
-          <div className="flex items-center gap-1">
+          {/* Settings is a destination, so it reads as one: a nav row at the
+              foot of the nav rather than an item inside a dropdown. */}
+          {(can('settings.manage') || can('users.manage') || can('roles.manage')) && (
             <ContextMenu
               items={[
-                { key: 'profile', label: t('nav.profile'), icon: <UserIcon size={13} />, onSelect: () => navigate('/profile') },
-                { key: 'newtab', label: t('ctx.openInNewTab'), icon: <SquareArrowOutUpRight size={13} />, onSelect: () => tabs?.openInNewTab('/profile') },
-                { type: 'separator' },
-                { key: 'signout', label: t('nav.signOut'), icon: <LogOut size={13} />, danger: true, onSelect: logout },
+                { key: 'newtab', label: t('ctx.openInNewTab'), icon: <SquareArrowOutUpRight size={13} />, onSelect: () => tabs?.openInNewTab('/settings') },
+                { key: 'copy', label: t('ctx.copyLink'), icon: <LinkIcon size={13} />, onSelect: () => copyLink('/settings') },
               ]}
             >
-              <DropdownMenu
-                width={210}
-                side="top"
-                className="min-w-0 flex-1"
-                trigger={
-                  <button
-                    className={cn(
-                      'flex min-w-0 w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150',
-                      path.startsWith('/profile')
-                        ? 'bg-muted font-medium text-foreground'
-                        : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-                    )}
-                  >
-                    <Avatar name={me.user.name} src={me.user.avatar} size={20} />
-                    <span className="min-w-0 flex-1 truncate">{me.user.name}</span>
-                    <ChevronDown size={13} className="shrink-0 text-faint" />
-                  </button>
-                }
+              <Link
+                to="/settings"
+                className={cn(
+                  'group/nav flex items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] transition-colors duration-150',
+                  path.startsWith('/settings')
+                    ? 'bg-muted font-medium text-foreground'
+                    : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                )}
               >
-                <MenuLabel>{me.user.email}</MenuLabel>
-                <MenuItem icon={<UserIcon size={14} />} onSelect={() => navigate('/profile')}>{t('nav.profile')}</MenuItem>
-                <MenuSeparator />
-                <MenuLabel>{t('theme.title')}</MenuLabel>
-                {themeItems.map((it) => (
-                  <MenuItem key={it.key} icon={it.icon} checked={themePref === it.key} onSelect={() => setThemePref(it.key)}>
-                    {it.label}
-                  </MenuItem>
-                ))}
-                <MenuSeparator />
-                <MenuItem icon={<LogOut size={14} />} danger onSelect={logout}>{t('nav.signOut')}</MenuItem>
-              </DropdownMenu>
+                <span className={cn('transition-colors', path.startsWith('/settings') ? 'text-foreground' : 'text-faint group-hover/nav:text-muted-foreground')}>
+                  <Settings size={16} />
+                </span>
+                <span className="flex-1 truncate">{t('nav.settings')}</span>
+              </Link>
             </ContextMenu>
-            <NotificationsBell />
-          </div>
+          )}
+          <TimerIndicator />
         </div>
       </aside>
 
