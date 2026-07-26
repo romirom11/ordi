@@ -57,6 +57,28 @@ export async function openInBrowser(url: string): Promise<void> {
 }
 
 const VERIFIER_KEY = 'ordi:desktopAuthVerifier';
+/** A pending sign-in is worthless after the server-side request expires. */
+const VERIFIER_TTL_MS = 10 * 60_000;
+
+interface PendingLogin { verifier: string; state: string; at: number }
+
+/**
+ * localStorage, not sessionStorage: a deep link can relaunch the app (Windows
+ * and Linux always did before single-instance), and a fresh webview would
+ * otherwise have no verifier to redeem the code with.
+ */
+function readPending(): PendingLogin | null {
+  try {
+    const raw = localStorage.getItem(VERIFIER_KEY);
+    if (!raw) return null;
+    const pending = JSON.parse(raw) as PendingLogin;
+    if (!pending?.verifier || Date.now() - pending.at > VERIFIER_TTL_MS) {
+      localStorage.removeItem(VERIFIER_KEY);
+      return null;
+    }
+    return pending;
+  } catch { return null; }
+}
 
 function randomToken(bytes = 32): string {
   const buf = new Uint8Array(bytes);
@@ -85,31 +107,48 @@ export async function beginBrowserLogin(): Promise<void> {
   const verifier = randomToken();
   const state = randomToken(16);
   const codeChallenge = await sha256Hex(verifier);
-  sessionStorage.setItem(VERIFIER_KEY, JSON.stringify({ verifier, state }));
+  localStorage.setItem(VERIFIER_KEY, JSON.stringify({ verifier, state, at: Date.now() }));
 
   await api.post('/auth/desktop/start', { state, codeChallenge, deviceLabel: deviceLabel() });
   await openInBrowser(`${getInstanceUrl()}/desktop-auth?state=${encodeURIComponent(state)}`);
 }
 
+/** True while a browser sign-in is waiting for its code. */
+export function hasPendingBrowserLogin(): boolean {
+  return readPending() !== null;
+}
+
 /**
  * Listen for the ordi://auth deep link from the login screen, where the app
  * shell (and its deep-link listener) is not mounted yet.
+ *
+ * The app may have been RELAUNCHED by the deep link, in which case the URL
+ * arrived as a launch argument rather than an event – ask for it once too.
  */
 export function listenForAuthDeepLink(onError: (message: string) => void): () => void {
   if (!isTauri) return () => {};
   let unlisten: (() => void) | null = null;
+
+  const redeem = (url: string): void => {
+    if (!url.startsWith('ordi://auth')) return;
+    const params = new URLSearchParams(url.slice(url.indexOf('?') + 1));
+    const code = params.get('code');
+    if (!code) return;
+    completeBrowserLogin(code, params.get('state') ?? undefined)
+      .catch(() => onError('desktop.browserLoginFailed'));
+  };
+
+  // Cold start: the launch URL is not replayed as an event.
+  try {
+    void (t()?.core?.invoke?.('plugin:deep-link|get_current') as Promise<string[] | null> | undefined)
+      ?.then((urls) => (urls ?? []).forEach(redeem))
+      .catch(() => {});
+  } catch { /* plugin absent */ }
+
   try {
     void t()?.event?.listen?.('deep-link://new-url', (e: { payload: unknown }) => {
       const urls = Array.isArray(e?.payload) ? (e.payload as string[]) : [String(e?.payload ?? '')];
-      for (const url of urls) {
-        if (!url.startsWith('ordi://auth')) continue;
-        const params = new URLSearchParams(url.slice(url.indexOf('?') + 1));
-        const code = params.get('code');
-        if (code) {
-          completeBrowserLogin(code, params.get('state') ?? undefined)
-            .catch(() => onError('desktop.browserLoginFailed'));
-        }
-      }
+      urls.forEach(redeem);
     }).then((un: () => void) => { unlisten = un; });
   } catch { /* plugin absent */ }
   return () => { unlisten?.(); };
@@ -117,15 +156,14 @@ export function listenForAuthDeepLink(onError: (message: string) => void): () =>
 
 /** Redeem a code from the deep link (or pasted by hand) for a session token. */
 export async function completeBrowserLogin(code: string, state?: string): Promise<void> {
-  const raw = sessionStorage.getItem(VERIFIER_KEY);
-  if (!raw) throw new Error('no pending sign-in');
-  const pending = JSON.parse(raw) as { verifier: string; state: string };
+  const pending = readPending();
+  if (!pending) throw new Error('no pending sign-in');
   if (state && state !== pending.state) throw new Error('sign-in state mismatch');
 
   const res = await api.post<{ sessionToken: string }>('/auth/desktop/exchange', {
-    code, verifier: pending.verifier,
+    code: code.trim(), verifier: pending.verifier,
   });
-  sessionStorage.removeItem(VERIFIER_KEY);
+  localStorage.removeItem(VERIFIER_KEY);
   setSessionToken(res.sessionToken);
   window.location.href = '/';
 }
