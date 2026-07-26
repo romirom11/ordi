@@ -5,14 +5,18 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
 ## v1.5.5
 
+- The sidebar has one identity row instead of two. The row at the foot that
+  showed your own name and avatar is gone; the workspace row at the top now
+  carries the account menu (email, profile, invite, theme, sign out) and
+  shares its row with the search and new-task icons.
 - The workspace name moved below the macOS window buttons instead of being
   indented beside them: the sidebar opens with a short strip that belongs to
   the traffic lights, and the name is flush with the sidebar's left edge on
   every platform. The strip still drags the window.
-- The workspace dropdown is gone. Settings is a nav row at the foot of the
-  nav (gear icon, active state, permission-gated), inviting users lives in
-  Settings – Users, and the desktop download moved into the account menu.
-- The unread badge no longer covers the notification bell at two digits.
+- Notifications is a navigation row with the unread count right-aligned,
+  instead of a badged icon – at two digits the badge covered the bell.
+- Settings is a navigation row at the foot of the nav (gear icon, active
+  state, permission-gated) instead of an item inside a dropdown.
 
 ## v1.5.4
 

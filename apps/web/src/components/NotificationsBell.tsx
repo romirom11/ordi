@@ -80,17 +80,20 @@ export function NotificationsBell() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  // The bell sits at the right edge of a narrow sidebar, so a panel anchored to
-  // it would hang off the left of the screen. Line the panel up with the
-  // sidebar's own left edge instead and let it grow rightwards over the page.
-  const [panelPos, setPanelPos] = useState<{ left: number; bottom: number }>({ left: 10, bottom: 10 });
+  const panelRef = useRef<HTMLDivElement>(null);
+  // The row lives inside a narrow sidebar, so the panel is wider than its
+  // trigger: line it up with the sidebar's left edge and let it grow
+  // rightwards over the page. Vertically it starts at the row and is clamped
+  // into the viewport, so the same code works wherever the row ends up.
+  const [panelPos, setPanelPos] = useState<{ left: number; top: number }>({ left: 10, top: 10 });
   useLayoutEffect(() => {
     if (!open || !rootRef.current) return;
-    const bell = rootRef.current.getBoundingClientRect();
+    const row = rootRef.current.getBoundingClientRect();
     const rail = rootRef.current.closest('aside')?.getBoundingClientRect();
+    const h = panelRef.current?.offsetHeight ?? 300;
     setPanelPos({
-      left: Math.max(8, (rail?.left ?? bell.left) + 10),
-      bottom: Math.max(8, window.innerHeight - bell.top + 6),
+      left: Math.max(8, (rail?.left ?? row.left) + 10),
+      top: Math.min(Math.max(8, row.top), Math.max(8, window.innerHeight - h - 8)),
     });
   }, [open]);
   const { data } = useQuery({
@@ -123,40 +126,37 @@ export function NotificationsBell() {
           { key: 'read', label: t('notifications.markAllRead'), icon: <CheckCheck size={13} />, disabled: unread === 0, onSelect: () => readAll.mutate() },
         ]}
       >
-      <Tooltip label={t('notifications.title')} side="top">
-        <button
-          onClick={() => setOpen((o) => !o)}
-          aria-label={unread > 0 ? `${t('notifications.title')} (${unread})` : t('notifications.title')}
-          aria-expanded={open}
-          className={cn(
-            'relative grid h-7 w-7 shrink-0 place-items-center rounded-md transition-colors duration-150',
-            open ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-          )}
-        >
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-label={unread > 0 ? `${t('notifications.title')} (${unread})` : t('notifications.title')}
+        aria-expanded={open}
+        className={cn(
+          'group/nav flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150',
+          open ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+        )}
+      >
+        <span className={cn('transition-colors', open ? 'text-foreground' : 'text-faint group-hover/nav:text-muted-foreground')}>
           <Bell size={16} />
-          {/* Pulled clear of the glyph: a two-digit badge sitting on the
-              button's corner used to cover most of the bell. */}
-          {unread > 0 && (
-            <span className={cn(
-              'anim-pop-in absolute -right-1.5 -top-1.5 grid h-[14px] place-items-center rounded-full',
-              'bg-primary px-[3px] text-[9px] font-semibold leading-none tabular-nums text-primary-foreground',
-              'ring-2 ring-background',
-              unread > 9 ? 'min-w-[18px]' : 'min-w-[14px]',
-            )}>
-              {unread > 99 ? '99+' : unread}
-            </span>
-          )}
-        </button>
-      </Tooltip>
+        </span>
+        <span className="min-w-0 flex-1 truncate">{t('notifications.title')}</span>
+        {/* The count reads at a glance here – as a badge over the glyph, two
+            digits covered the bell. */}
+        {unread > 0 && (
+          <span className="shrink-0 text-[11px] font-medium tabular-nums text-muted-foreground">
+            {unread > 99 ? '99+' : unread}
+          </span>
+        )}
+      </button>
       </ContextMenu>
       {open && (
         <div
+          ref={panelRef}
           className="fixed z-50 w-80 overflow-hidden rounded-lg border border-border bg-elevated shadow-pop"
           style={{
             left: panelPos.left,
-            bottom: panelPos.bottom,
+            top: panelPos.top,
             animation: 'dropdown-in 250ms var(--ease-smooth-out) both',
-            transformOrigin: 'bottom left',
+            transformOrigin: 'top left',
           }}
         >
           <div className="flex items-center justify-between border-b border-border px-3 py-2">
