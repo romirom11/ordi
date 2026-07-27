@@ -31,6 +31,7 @@ import { ProjectContextMenu, TaskContextMenu } from '../components/project/conte
 import { PROJECT_STATUSES, STATUS_META, type UserLite } from '../components/project/pickers';
 import { TasksToolbar } from '../components/project/TasksToolbar';
 import type { LabelLite } from '../components/project/FilterPopover';
+import { useLabels } from '../lib/queries';
 import {
   EMPTY_FILTERS, PRIORITIES, PRIORITY_LABEL_KEY, applyFilters, loadPrefs, orderTasks, savePrefs,
   type Grouping, type TaskFilters, type TaskViewPrefs,
@@ -436,13 +437,9 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, onOpen }: 
 
   const tasksQ = useQuery<Task[]>({ queryKey: ['tasks', id], queryFn: () => api.get<{ data: Task[] }>(`/tasks${qs({ projectId: id })}`).then((r) => r.data) });
   const allTasks = useMemo(() => tasksQ.data ?? [], [tasksQ.data]);
-  // Same key + shape as the task page, so the cache is shared.
-  const labelsQ = useQuery<LabelLite[]>({
-    queryKey: ['labels'],
-    queryFn: () => api.get<{ data: LabelLite[] }>('/labels').then((r) => r.data),
-    staleTime: 5 * 60_000,
-  });
-  const labels = useMemo(() => labelsQ.data ?? [], [labelsQ.data]);
+  // Task labels only: the project vocabulary never applies to a task list.
+  const labelsQ = useLabels('task');
+  const labels = useMemo(() => (labelsQ.data ?? []) as LabelLite[], [labelsQ.data]);
 
   const statusById = useMemo(() => new Map(statuses.map((s) => [s.id, s])), [statuses]);
   const labelById = useMemo(() => new Map(labels.map((l) => [l.id, l])), [labels]);

@@ -5,7 +5,8 @@ import {
   taskInputSchema, taskUpdateSchema, taskMoveSchema, taskRelationSchema, taskLinkSchema,
   bulkTaskUpdateSchema, commentInputSchema, labelInputSchema, cycleInputSchema, cycleCompleteSchema,
   taskTemplateInputSchema, recurringTaskInputSchema, intakeAcceptSchema, intakeDeclineSchema, intakeSettingsSchema,
-  type CustomFieldFilter,
+  LABEL_SCOPES,
+  type CustomFieldFilter, type LabelScope,
 } from '@ordi/shared';
 import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
@@ -121,17 +122,25 @@ export function tasksRoutes() {
   app.delete('/comments/:id', async (c) => c.json(await svc.deleteComment(currentActor(c), c.req.param('id'))));
 
   // ── Labels (workspace-level, PRD §8.3) ──
+  // Two vocabularies in one table: `?scope=task|project` picks one, no scope
+  // returns the whole catalog. Pickers always ask for their own scope – a task
+  // has no business offering "retainer", nor a project "Bug".
   app.get('/labels', async (c) => {
     const { db } = getDb();
-    return c.json({ data: await db.select().from(schema.labels) });
+    const scope = c.req.query('scope');
+    if (scope && !LABEL_SCOPES.includes(scope as LabelScope)) throw err.domain(`Unknown label scope ${scope}`);
+    return c.json({
+      data: await db.select().from(schema.labels)
+        .where(scope ? eq(schema.labels.scope, scope) : undefined),
+    });
   });
 
   app.post('/labels', guard('settings.manage'), async (c) => {
     const body = labelInputSchema.parse(await c.req.json());
     const { db } = getDb();
     const id = ulid();
-    await db.insert(schema.labels).values({ id, name: body.name, color: body.color });
-    return c.json({ id }, 201);
+    await db.insert(schema.labels).values({ id, name: body.name, color: body.color, scope: body.scope });
+    return c.json({ id, scope: body.scope }, 201);
   });
 
   app.delete('/labels/:id', guard('settings.manage'), async (c) => {

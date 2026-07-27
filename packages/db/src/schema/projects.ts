@@ -116,14 +116,23 @@ export const taskTypes = pgTable('task_types', {
   ...timestamps,
 });
 
+/**
+ * Labels for tasks and for projects live in one table but in two separate
+ * vocabularies: `scope` says which. Tasks are labelled "Bug"/"Frontend",
+ * projects "retainer"/"internal" – one shared pool put "Bug" on projects, which
+ * is what this column exists to prevent.
+ */
 export const labels = pgTable('labels', {
   id: pk(),
   name: text('name').notNull(),
   color: text('color').notNull().default('#6b7280'),
+  scope: text('scope').notNull().default('task'),
   ...timestamps,
-});
+}, (t) => ({
+  scopeIdx: index('labels_scope_idx').on(t.scope),
+}));
 
-/** Labels attached to a project (same labels table as tasks). */
+/** Labels attached to a project (scope `project` – tasks use `task_labels`). */
 export const projectLabels = pgTable('project_labels', {
   projectId: text('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
   labelId: text('label_id').notNull().references(() => labels.id, { onDelete: 'cascade' }),

@@ -131,7 +131,7 @@ describe('progress endpoint', () => {
 describe('project PATCH: summary / priority / links / labels', () => {
   it('persists the new overview fields and label joins', async () => {
     const owner = reqAs(users.owner!.cookie);
-    const label = await json(owner.post('/labels', { name: 'Overview label', color: '#5e6ad2' }));
+    const label = await json(owner.post('/labels', { name: 'Overview label', color: '#5e6ad2', scope: 'project' }));
     const before = await json(owner.get(`/projects/${projectId}`));
     const patched = await json(owner.patch(`/projects/${projectId}`, {
       summary: 'Short summary',
@@ -152,5 +152,53 @@ describe('project PATCH: summary / priority / links / labels', () => {
     const fresh = await json(owner.get(`/projects/${projectId}`));
     expect([400, 422]).toContain((await owner.patch(`/projects/${projectId}`, { priority: 'asap', version: fresh.version })).status);
     expect([400, 422]).toContain((await owner.patch(`/projects/${projectId}`, { links: [{ label: 'x', url: 'not-a-url' }], version: fresh.version })).status);
+  });
+});
+
+/**
+ * Tasks and projects hold separate label vocabularies: "Bug" describes a task,
+ * "Retainer" a project, and one shared pool used to offer both everywhere.
+ */
+describe('label scopes', () => {
+  it('lists each vocabulary on its own, and the whole catalog with no scope', async () => {
+    const owner = reqAs(users.owner!.cookie);
+    const bug = await json(owner.post('/labels', { name: 'Bug', color: '#ef4444' })); // default scope
+    const retainer = await json(owner.post('/labels', { name: 'Retainer', color: '#10b981', scope: 'project' }));
+    expect(bug.scope).toBe('task');
+
+    const taskLabels = (await json(owner.get('/labels?scope=task'))).data as any[];
+    const projectLabels = (await json(owner.get('/labels?scope=project'))).data as any[];
+    expect(taskLabels.map((l) => l.id)).toContain(bug.id);
+    expect(taskLabels.map((l) => l.id)).not.toContain(retainer.id);
+    expect(projectLabels.map((l) => l.id)).toContain(retainer.id);
+    expect(projectLabels.map((l) => l.id)).not.toContain(bug.id);
+
+    const all = (await json(owner.get('/labels'))).data as any[];
+    expect(all.map((l) => l.id)).toEqual(expect.arrayContaining([bug.id, retainer.id]));
+    expect([400, 422]).toContain((await owner.get('/labels?scope=nonsense')).status);
+  });
+
+  it('refuses a project label on a task and a task label on a project', async () => {
+    const owner = reqAs(users.owner!.cookie);
+    const taskLabel = await json(owner.post('/labels', { name: 'Frontend', color: '#3b82f6' }));
+    const projectLabel = await json(owner.post('/labels', { name: 'Internal', color: '#6366f1', scope: 'project' }));
+
+    const created = await owner.post('/tasks', {
+      projectId, title: 'Scoped labels', priority: 'none', assigneeIds: [], labelIds: [projectLabel.id],
+    });
+    expect([400, 422]).toContain(created.status);
+    // …and the rejected task was never written.
+    const list = (await json(owner.get(`/tasks?projectId=${projectId}`))).data as any[];
+    expect(list.some((t) => t.title === 'Scoped labels')).toBe(false);
+
+    const fresh = await json(owner.get(`/projects/${projectId}`));
+    const patched = await owner.patch(`/projects/${projectId}`, { labelIds: [taskLabel.id], version: fresh.version });
+    expect([400, 422]).toContain(patched.status);
+
+    // The right scope on each side still goes through.
+    const ok = await json(owner.post('/tasks', {
+      projectId, title: 'Scoped labels', priority: 'none', assigneeIds: [], labelIds: [taskLabel.id],
+    }));
+    expect(ok.id).toBeTruthy();
   });
 });

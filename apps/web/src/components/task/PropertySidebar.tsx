@@ -10,10 +10,11 @@ import {
   Avatar, AvatarGroup, Badge, PriorityIcon, StatusIcon, cn, fmtDate,
 } from '../ui';
 import { DropdownMenu, MenuItem, MenuLabel, MenuSeparator, useMenuClose } from '../overlays';
+import { LabelsMenu } from '../LabelsMenu';
 import { GitBlock } from './GitBlock';
 import { useT, extendDict } from '../../lib/i18n';
 import { TaskTimer } from './TaskTimer';
-import type { TaskDetail, TaskLabel, TaskPatch, TaskStatus, UserLite } from './types';
+import type { TaskDetail, TaskPatch, TaskStatus, UserLite } from './types';
 import { Calendar } from '../DatePicker';
 
 extendDict({
@@ -35,7 +36,6 @@ extendDict({
     'task.today': 'Today',
     'task.tomorrow': 'Tomorrow',
     'task.nextWeek': 'Next week',
-    'task.noLabelsYet': 'No labels in this workspace yet',
     'task.priority.urgent': 'Urgent',
     'task.priority.high': 'High',
     'task.priority.medium': 'Medium',
@@ -60,7 +60,6 @@ extendDict({
     'task.today': 'Сьогодні',
     'task.tomorrow': 'Завтра',
     'task.nextWeek': 'Наступного тижня',
-    'task.noLabelsYet': 'У воркспейсі поки немає міток',
     'task.priority.urgent': 'Терміновий',
     'task.priority.high': 'Високий',
     'task.priority.medium': 'Середній',
@@ -181,11 +180,10 @@ function DateMenu({ label, emptyLabel, icon, value, overdue, onSet, t }: {
   );
 }
 
-export function PropertySidebar({ task, statuses, users, labels, onPatch, hasRepos }: {
+export function PropertySidebar({ task, statuses, users, onPatch, hasRepos }: {
   task: TaskDetail;
   statuses: TaskStatus[];
   users: UserLite[];
-  labels: TaskLabel[];
   onPatch: (patch: TaskPatch) => void;
   hasRepos?: boolean;
 }) {
@@ -200,9 +198,6 @@ export function PropertySidebar({ task, statuses, users, labels, onPatch, hasRep
 
   const toggleAssignee = (id: string) => {
     onPatch({ assigneeIds: assigneeIds.includes(id) ? assigneeIds.filter((a) => a !== id) : [...assigneeIds, id] });
-  };
-  const toggleLabel = (id: string) => {
-    onPatch({ labelIds: labelIds.includes(id) ? labelIds.filter((l) => l !== id) : [...labelIds, id] });
   };
 
   return (
@@ -301,7 +296,7 @@ export function PropertySidebar({ task, statuses, users, labels, onPatch, hasRep
       <Row label={t('task.labels')}>
         <DropdownMenu
           className="w-full"
-          width={220}
+          width={240}
           trigger={
             <Chip empty={task.labels.length === 0}>
               {task.labels.length === 0 ? (
@@ -322,20 +317,7 @@ export function PropertySidebar({ task, statuses, users, labels, onPatch, hasRep
             </Chip>
           }
         >
-          <MenuLabel>{t('task.labels')}</MenuLabel>
-          {labels.length === 0 && (
-            <p className="px-2 pb-2 pt-0.5 text-xs text-faint">{t('task.noLabelsYet')}</p>
-          )}
-          {labels.map((l) => (
-            <ToggleItem
-              key={l.id}
-              icon={<span className="block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: l.color }} />}
-              checked={labelIds.includes(l.id)}
-              onToggle={() => toggleLabel(l.id)}
-            >
-              {l.name}
-            </ToggleItem>
-          ))}
+          <LabelsMenu scope="task" value={labelIds} onChange={(ids) => onPatch({ labelIds: ids })} />
         </DropdownMenu>
       </Row>
 

@@ -8,7 +8,7 @@ import {
   getDb, schema, eq, and, or, isNull, isNotNull, inArray, notInArray, desc, asc, sql, type SQL,
 } from '@ordi/db';
 import { ulid } from 'ulid';
-import { MAX_SUBTASK_DEPTH, appendPosition, buildBranchName, type CustomFieldFilter } from '@ordi/shared';
+import { MAX_SUBTASK_DEPTH, appendPosition, buildBranchName, type CustomFieldFilter, type LabelScope } from '@ordi/shared';
 import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
@@ -36,6 +36,20 @@ const DEFAULT_STATUSES: { name: string; category: string; color: string; isDefau
 
 function refOf(key: string, number: number): string {
   return `${key}-${number}`;
+}
+
+/**
+ * Labels come in two vocabularies (`labels.scope`): a task takes task labels,
+ * a project project ones. Refuse the mismatch instead of dropping the ids –
+ * a save that silently ignores half its input is the worse failure.
+ */
+async function assertLabelScope(ids: string[], scope: LabelScope): Promise<void> {
+  if (!ids.length) return;
+  const { db } = getDb();
+  const rows = await db.select({ id: schema.labels.id, scope: schema.labels.scope })
+    .from(schema.labels).where(inArray(schema.labels.id, ids));
+  const wrong = ids.filter((id) => rows.find((r) => r.id === id)?.scope !== scope);
+  if (wrong.length) throw err.domain(`Not ${scope} labels: ${wrong.join(', ')}`);
 }
 
 async function projectKey(projectId: string): Promise<string> {
@@ -204,6 +218,7 @@ export async function updateProject(actor: Actor, id: string, input: any) {
   // Project labels: replace the join set when labelIds is provided.
   if (input.labelIds !== undefined) {
     const next: string[] = input.labelIds;
+    await assertLabelScope(next, 'project');
     await db.delete(schema.projectLabels).where(eq(schema.projectLabels.projectId, id));
     if (next.length) await db.insert(schema.projectLabels).values(next.map((labelId) => ({ projectId: id, labelId })));
   }
@@ -411,6 +426,10 @@ export async function listTasks(actor: Actor, params: {
 export async function createTask(actor: Actor, input: any) {
   await assertProject(actor, input.projectId, 'member');
   await assertSubtaskDepth(input.parentId);
+  const assigneeIds: string[] = input.assigneeIds ?? [];
+  const labelIds: string[] = input.labelIds ?? [];
+  // Before the row exists: a rejected label must not leave a half-created task.
+  await assertLabelScope(labelIds, 'task');
   const { db } = getDb();
   const id = ulid();
   const statusId = input.statusId ?? (await defaultStatusId(input.projectId));
@@ -424,8 +443,6 @@ export async function createTask(actor: Actor, input: any) {
     cycleId: input.cycleId ?? null, position, customFields: input.customFields ?? {},
     createdBy: actor.userId,
   });
-  const assigneeIds: string[] = input.assigneeIds ?? [];
-  const labelIds: string[] = input.labelIds ?? [];
   if (assigneeIds.length) await db.insert(taskAssignees).values(assigneeIds.map((userId) => ({ taskId: id, userId })));
   if (labelIds.length) await db.insert(taskLabels).values(labelIds.map((labelId) => ({ taskId: id, labelId })));
 
@@ -515,6 +532,7 @@ export async function updateTask(actor: Actor, id: string, input: any) {
   }
   if (input.labelIds !== undefined) {
     const next: string[] = input.labelIds;
+    await assertLabelScope(next, 'task');
     await db.delete(taskLabels).where(eq(taskLabels.taskId, id));
     if (next.length) await db.insert(taskLabels).values(next.map((labelId) => ({ taskId: id, labelId })));
   }
@@ -686,6 +704,7 @@ export async function deleteComment(actor: Actor, commentId: string) {
 // ── Bulk (PRD §8.3) ──
 export async function bulkUpdateTasks(actor: Actor, input: any) {
   const { db } = getDb();
+  if (input.labelIds !== undefined) await assertLabelScope(input.labelIds as string[], 'task');
   const rows = await db.select().from(tasks).where(and(inArray(tasks.id, input.taskIds), isNull(tasks.deletedAt)));
   let updated = 0;
   for (const t of rows) {
