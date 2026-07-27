@@ -8,7 +8,8 @@ import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { generateKeyPairSync, createVerify, createHmac } from 'node:crypto';
 import { getDb, schema, eq } from '@ordi/db';
 import { app, resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
-import { buildAppJwt } from '../domains/integrations/github-app';
+import { buildAppJwt, githubAppSetupUrl, githubAppWebhookUrl } from '../domains/integrations/github-app';
+import { normalizeApiUrl } from '../env';
 import { storeGithubAppConfig, invalidateRuntimeConfig } from '../lib/runtime-config';
 
 let users: Awaited<ReturnType<typeof seedRolesAndUsers>>;
@@ -68,6 +69,25 @@ describe('app JWT', () => {
       .update(`${header}.${payload}`)
       .verify(PUB, Buffer.from(signature!, 'base64url'));
     expect(ok).toBe(true);
+  });
+});
+
+describe('callback URLs', () => {
+  // Deployments naturally write API_URL as "<origin>/api" (that is the path the
+  // router forwards), and the builders append "/api/v1/..." – the two together
+  // used to produce ".../api/api/v1/..." and 404 every GitHub redirect.
+  it('normalises an API_URL that already points at the /api path', () => {
+    expect(normalizeApiUrl('https://ordi.example.com/api')).toBe('https://ordi.example.com');
+    expect(normalizeApiUrl('https://ordi.example.com/api/')).toBe('https://ordi.example.com');
+    expect(normalizeApiUrl('https://ordi.example.com/')).toBe('https://ordi.example.com');
+    expect(normalizeApiUrl('http://localhost:3000')).toBe('http://localhost:3000');
+  });
+
+  it('never doubles the /api segment', () => {
+    for (const url of [githubAppSetupUrl(), githubAppWebhookUrl()]) {
+      expect(url).not.toContain('/api/api/');
+      expect(url.match(/\/api\//g)).toHaveLength(1);
+    }
   });
 });
 
