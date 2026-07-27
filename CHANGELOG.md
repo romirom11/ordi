@@ -3,6 +3,30 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.11.0
+
+- CRM record pages became fully workable: company properties (domain,
+  billing email, currency, payment terms) edit inline; contacts get
+  edit/delete and a click-to-toggle primary star; notes edit in place
+  Notion-style (click the text, click away to save) and delete with
+  confirm.
+- Files on companies and deals: upload, download and delete through the
+  standard presigned-S3 path, with per-entity permissions and activity
+  records.
+- Custom fields on the deal page are editable, each type with its own
+  control (select/multiselect menus, checkbox toggle, DateField dates,
+  user picker, click-to-edit text/number/url).
+- A company's Projects card can create a project in place (client
+  preselected) or link an existing one; modal state never lives in the
+  URL, so the back button no longer resurrects dialogs.
+- Detail tabs show the record they hold (client name, deal title,
+  invoice number) instead of a generic module name.
+- Tooltips render through a portal clamped to the viewport; property
+  values wrap instead of truncating; the deal page uses the app's
+  DateField (the last raw date input is gone).
+- MCP write tools decode HTML entities, so agent-scraped text like
+  "Co-founder &amp; CEO" stores clean.
+
 ## v1.10.0
 
 - GitHub App integration: create the app with one click via a manifest
