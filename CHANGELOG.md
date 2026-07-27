@@ -3,6 +3,33 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.12.0
+
+- CRM record pages took the shape of the project and task records: a
+  one-line identity header, content at full width, and a properties rail
+  pinned to the right edge that carries every field plus files. The
+  toolbars and property chips left the header, since each duplicated a
+  section's action or repeated the rail.
+- Empty sections collapse to one line instead of a full-height empty
+  state, so a fresh client is no longer three screens of nothing.
+- The client card gets an activity trail, sharing one component with the
+  project feed instead of a second implementation.
+- The project overview lists the leads sold into it, with the open
+  pipeline total. Aimed at product projects, which collect leads from
+  many companies at once. Gated independently on deals.read (the section)
+  and crm.read (naming the client), so project membership alone never
+  exposes another client's deals.
+- Task and project labels became two vocabularies; the write paths reject
+  a label from the wrong side instead of dropping it silently, and one
+  picker with search and inline creation replaced the two that existed.
+- Repository bindings store the repository rather than GitHub's own id,
+  which also fixes webhook delivery failing to link branches and pull
+  requests to tasks.
+- GitHub App and OAuth callbacks stopped doubling /api, so creating the
+  app from the manifest now exchanges its one-time code.
+- A project's client and type edits persist; PATCH used to drop both keys
+  and return 200.
+
 ## v1.11.0
 
 - CRM record pages became fully workable: company properties (domain,
