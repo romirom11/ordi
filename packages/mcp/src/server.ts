@@ -29,6 +29,23 @@ export function scrub(value: unknown): unknown {
   return value;
 }
 
+/**
+ * Plain text → tiptap doc. Agents send multi-line text; cramming it into a
+ * single paragraph node loses every line break in the web renderer. Blank
+ * lines separate paragraphs, single newlines become hard breaks.
+ */
+export function textToDoc(text: string): Record<string, unknown> {
+  const paragraphs = text.replace(/\r\n/g, '\n').split(/\n{2,}/).map((para) => {
+    const content: Record<string, unknown>[] = [];
+    para.split('\n').forEach((line, i) => {
+      if (i > 0) content.push({ type: 'hardBreak' });
+      if (line) content.push({ type: 'text', text: line });
+    });
+    return { type: 'paragraph', content };
+  });
+  return { type: 'doc', content: paragraphs };
+}
+
 export function buildServer(client: OrdiClient): McpServer {
   const server = new McpServer({ name: 'ordi', version: '1.0.0' });
 
@@ -162,8 +179,8 @@ export function buildServer(client: OrdiClient): McpServer {
   server.tool('assign_task', 'Assign users to a task', { taskId: z.string(), assigneeIds: z.array(z.string()) },
   ({ taskId, assigneeIds }) => wrap(() => client.patch(`/tasks/${taskId}`, { assigneeIds })));
 
-  server.tool('comment_on_task', 'Comment on a task', { taskId: z.string(), text: z.string() },
-  ({ taskId, text: body }) => wrap(() => client.post(`/tasks/${taskId}/comments`, { body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: body }] }] }, mentions: [] })));
+  server.tool('comment_on_task', 'Comment on a task (line breaks are preserved)', { taskId: z.string(), text: z.string() },
+  ({ taskId, text: body }) => wrap(() => client.post(`/tasks/${taskId}/comments`, { body: textToDoc(body), mentions: [] })));
 
   server.tool('log_time', 'Log time on a task', { taskId: z.string(), durationSeconds: z.number(), note: z.string().optional(), startedAt: z.string().optional() },
   ({ taskId, durationSeconds, note, startedAt }) => wrap(() => client.post('/time/entries', { taskId, durationSeconds, note: note ?? '', startedAt: startedAt ?? new Date().toISOString() })));
@@ -195,8 +212,12 @@ export function buildServer(client: OrdiClient): McpServer {
   companyId: z.string(), issueDate: z.string(), items: z.array(z.object({ description: z.string(), quantity: z.number(), unitPrice: z.number() })),
 }, ({ companyId, issueDate, items }) => wrap(() => client.post('/quotes', { companyId, issueDate, items })));
 
-  server.tool('create_note', 'Create a CRM note', { companyId: z.string(), text: z.string() },
-  ({ companyId, text: body }) => wrap(() => client.post('/notes', { companyId, body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: body }] }] } })));
+  server.tool('create_note', 'Create a CRM note on a company, contact or deal (line breaks are preserved; blank line = new paragraph)', {
+  companyId: z.string().optional(), contactId: z.string().optional(), dealId: z.string().optional(), text: z.string(),
+}, ({ companyId, contactId, dealId, text: body }) => wrap(async () => {
+  if (!companyId && !contactId && !dealId) throw new Error('One of companyId, contactId or dealId is required');
+  return client.post('/notes', { companyId, contactId, dealId, body: textToDoc(body) });
+}));
 
   server.tool('create_company', 'Create a CRM company', {
   name: z.string(), domain: z.string().optional(), status: z.enum(COMPANY_STATUSES).optional().describe('Defaults to lead'),
@@ -228,8 +249,8 @@ export function buildServer(client: OrdiClient): McpServer {
   server.tool('move_deal', 'Move a deal to a stage (use list_deal_stages for stageId)', { dealId: z.string(), stageId: z.string(), lostReason: z.string().optional() },
   ({ dealId, stageId, lostReason }) => wrap(() => client.post(`/deals/${dealId}/move`, { stageId, lostReason })));
 
-  server.tool('create_kb_page', 'Create a knowledge base page', { spaceId: z.string(), title: z.string(), text: z.string().optional() },
-  ({ spaceId, title, text: body }) => wrap(() => client.post('/pages', { spaceId, title, body: { type: 'doc', content: [{ type: 'paragraph', content: body ? [{ type: 'text', text: body }] : [] }] } })));
+  server.tool('create_kb_page', 'Create a knowledge base page (line breaks are preserved; blank line = new paragraph)', { spaceId: z.string(), title: z.string(), text: z.string().optional() },
+  ({ spaceId, title, text: body }) => wrap(() => client.post('/pages', { spaceId, title, body: textToDoc(body ?? '') })));
 
   server.tool('request_leave', 'Request leave for an employee', {
   employeeId: z.string(), leaveTypeId: z.string(), fromDate: z.string(), toDate: z.string(), reason: z.string().optional(),

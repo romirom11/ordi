@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { buildServer, scrub } from './server';
+import { buildServer, scrub, textToDoc } from './server';
 import { OrdiClient } from './client';
 
 function fakeApi(routes: Record<string, unknown>, posts: Array<{ path: string; body: unknown }> = []): OrdiClient {
@@ -208,5 +208,45 @@ describe('custom field tools', () => {
     await client.callTool({ name: 'create_task', arguments: { projectId: 'p1', title: 'T', customFields: { sprint: 'q3' } } });
     expect(posts[0]!.body).toMatchObject({ name: 'Acme', customFields: { nps: 9 } });
     expect(posts[1]!.body).toMatchObject({ projectId: 'p1', title: 'T', customFields: { sprint: 'q3' } });
+  });
+});
+
+describe('textToDoc', () => {
+  it('splits blank-line-separated text into paragraphs, single newlines into hard breaks', () => {
+    expect(textToDoc('Fit: 85/100\nStage: warm\n\nRisks: none')).toEqual({
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [
+          { type: 'text', text: 'Fit: 85/100' }, { type: 'hardBreak' }, { type: 'text', text: 'Stage: warm' },
+        ] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'Risks: none' }] },
+      ],
+    });
+  });
+
+  it('handles CRLF and empty text', () => {
+    expect(textToDoc('a\r\nb')).toEqual({
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'a' }, { type: 'hardBreak' }, { type: 'text', text: 'b' }] }],
+    });
+    expect(textToDoc('')).toEqual({ type: 'doc', content: [{ type: 'paragraph', content: [] }] });
+  });
+});
+
+describe('create_note', () => {
+  it('preserves line structure and can target a deal', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({}, posts));
+    await client.callTool({ name: 'create_note', arguments: { dealId: 'd1', text: 'Line 1\nLine 2\n\nPara 2' } });
+    expect(posts[0]!.path).toBe('/notes');
+    expect(posts[0]!.body).toMatchObject({ dealId: 'd1', body: textToDoc('Line 1\nLine 2\n\nPara 2') });
+  });
+
+  it('requires a target (company, contact or deal)', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({}, posts));
+    const res = await client.callTool({ name: 'create_note', arguments: { text: 'orphan' } });
+    expect(res.isError).toBe(true);
+    expect(posts).toEqual([]);
   });
 });
