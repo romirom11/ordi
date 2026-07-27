@@ -1,6 +1,6 @@
 [package]
 name = "ordi-desktop"
-version = "1.7.0"
+version = "1.8.0"
 description = "ordi desktop"
 edition = "2021"
 
