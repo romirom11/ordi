@@ -12,6 +12,11 @@ import { emit } from '../../core/events';
 import { hmacSha256, encrypt, generateToken } from '../../lib/crypto';
 import { writeActivity } from '../../core/activity';
 import { verifyOAuthState, exchangeGithubCode, exchangeSlackCode } from '../integrations/oauth';
+import {
+  convertManifestCode, githubAppConfigured, getInstallation, listInstallationRepos,
+  upsertInstallationConnection, syncInstallationRepos,
+} from '../integrations/github-app';
+import { storeGithubAppConfig } from '../../lib/runtime-config';
 
 /**
  * Public (unauthenticated) surface (PRD §11.2/11.3/11.8, §8.6, §12.3, §13.1).
@@ -315,6 +320,61 @@ export function publicRoutes() {
     }
   });
 
+  // ── GitHub App setup callback (PRD §13.1) – public; GitHub redirects here
+  // twice: once after creating the app from our manifest (?code=..., state
+  // verified), and once after each installation (?installation_id=...,
+  // authenticated by looking the id up under the app's own JWT – only real
+  // installations of OUR app resolve). ──
+  app.get('/integrations/github-app/setup', async (c) => {
+    const appUrl = env.appUrl.replace(/\/$/, '');
+    const { db } = getDb();
+
+    // Manifest conversion: the one-time code becomes the app's credentials.
+    const code = c.req.query('code');
+    if (code) {
+      try {
+        const state = verifyOAuthState(c.req.query('state'));
+        if (!state) return c.redirect(`${appUrl}/settings/integrations?githubApp=error`);
+        const converted = await convertManifestCode(code);
+        await storeGithubAppConfig(converted);
+        await writeActivity(db, {
+          entityType: 'workspace', entityId: 'workspace', action: 'github_app_created',
+          after: { slug: converted.slug, appId: converted.appId },
+          actorId: state.userId, actorType: 'user',
+        });
+        return c.redirect(`${appUrl}/settings/integrations?githubApp=created`);
+      } catch {
+        return c.redirect(`${appUrl}/settings/integrations?githubApp=error`);
+      }
+    }
+
+    // Installation redirect: create/revive the connection and sync its repos.
+    const installationId = c.req.query('installation_id');
+    if (installationId) {
+      try {
+        const appCfg = await githubAppConfigured();
+        if (!appCfg) return c.redirect(`${appUrl}/settings/integrations?githubApp=error`);
+        const installation = await getInstallation(appCfg, installationId);
+        if (!installation) return c.redirect(`${appUrl}/settings/integrations?githubApp=error`);
+        const connectionId = await upsertInstallationConnection({
+          installationId: installation.id, accountLogin: installation.accountLogin,
+        });
+        const repos = await listInstallationRepos(appCfg, installation.id);
+        await syncInstallationRepos(connectionId, repos);
+        await writeActivity(db, {
+          entityType: 'git_connection', entityId: connectionId, action: 'created',
+          after: { provider: 'github', kind: 'app', accountLogin: installation.accountLogin, repos: repos.length },
+          actorId: null, actorType: 'integration',
+        });
+        return c.redirect(`${appUrl}/settings/integrations?githubApp=installed`);
+      } catch {
+        return c.redirect(`${appUrl}/settings/integrations?githubApp=error`);
+      }
+    }
+
+    return c.redirect(`${appUrl}/settings/integrations`);
+  });
+
   // ── Slack OAuth callback – public; Slack redirects the browser here. ──
   app.get('/integrations/slack/oauth/callback', async (c) => {
     const appUrl = env.appUrl.replace(/\/$/, '');
@@ -378,12 +438,70 @@ export function publicRoutes() {
       for (const conn of connections) {
         if (sig && hmacSha256(conn.webhookSecret, raw) === sig) { matched = conn; break; }
       }
+
+      // GitHub App deliveries sign with the app-level secret; the connection
+      // is identified by the installation id inside the payload instead.
+      let viaApp = false;
+      if (!matched && provider === 'github' && sig) {
+        const appCfg = await githubAppConfigured();
+        if (appCfg?.webhookSecret && hmacSha256(appCfg.webhookSecret, raw) === sig) viaApp = true;
+      }
+
       // No signature header: fall back to a single configured connection (best-effort).
-      if (!matched && !sig && connections.length === 1) matched = connections[0];
-      if (!matched) return c.json({ ok: true });
+      if (!matched && !viaApp && !sig && connections.length === 1) matched = connections[0];
+      if (!matched && !viaApp) return c.json({ ok: true });
 
       let payload: any;
       try { payload = JSON.parse(raw); } catch { return c.json({ ok: true }); }
+
+      if (viaApp) {
+        const ghEvent = c.req.header('x-github-event') ?? '';
+        const instId = payload?.installation?.id != null ? String(payload.installation.id) : null;
+
+        // Installation lifecycle: connections and their repo lists stay in
+        // sync without anyone touching ordi. Uninstall only flips the status –
+        // repositories, project bindings and task links survive a reinstall.
+        if (ghEvent === 'installation' && instId) {
+          const action: string = payload?.action ?? '';
+          if (action === 'created' || action === 'unsuspend' || action === 'new_permissions_accepted') {
+            const connectionId = await upsertInstallationConnection({
+              installationId: instId,
+              accountLogin: payload?.installation?.account?.login ?? '',
+            });
+            const repos = Array.isArray(payload?.repositories) ? payload.repositories : [];
+            await syncInstallationRepos(connectionId, repos.map((r: any) => ({
+              externalId: String(r?.id ?? ''),
+              fullName: String(r?.full_name ?? ''),
+              defaultBranch: 'main',
+            })).filter((r: { externalId: string; fullName: string }) => r.externalId && r.fullName));
+          } else if (action === 'deleted' || action === 'suspend') {
+            await db.update(schema.gitConnections)
+              .set({ status: action === 'deleted' ? 'revoked' : 'suspended' })
+              .where(eq(schema.gitConnections.installationId, instId));
+          }
+          return c.json({ ok: true });
+        }
+        if (ghEvent === 'installation_repositories' && instId) {
+          const connectionId = await upsertInstallationConnection({
+            installationId: instId,
+            accountLogin: payload?.installation?.account?.login ?? '',
+          });
+          const added = Array.isArray(payload?.repositories_added) ? payload.repositories_added : [];
+          await syncInstallationRepos(connectionId, added.map((r: any) => ({
+            externalId: String(r?.id ?? ''),
+            fullName: String(r?.full_name ?? ''),
+            defaultBranch: 'main',
+          })).filter((r: { externalId: string; fullName: string }) => r.externalId && r.fullName));
+          // Removed repos keep their rows (and task links); events for them
+          // simply stop arriving.
+          return c.json({ ok: true });
+        }
+
+        matched = instId
+          ? connections.find((conn) => conn.installationId === instId)
+          : undefined;
+      }
+      if (!matched) return c.json({ ok: true });
 
       // Resolve the repositories of this connection and the projects they are bound to.
       const repos = await db.select().from(schema.gitRepositories)
@@ -488,7 +606,7 @@ export function publicRoutes() {
 
       // Resolve each task reference to a bound task and record the link + event.
       for (const cand of candidates) {
-        for (const r of parseTaskRefs(cand.text)) {
+        for (const r of parseTaskRefs(cand.text, { anyCase: cand.type === 'branch' })) {
           const [project] = await db.select({ id: schema.projects.id })
             .from(schema.projects)
             .where(and(

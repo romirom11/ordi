@@ -78,6 +78,13 @@
       "when": 1785151035708,
       "tag": "0010_dazzling_toad_men",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785152457459,
+      "tag": "0011_blushing_demogoblin",
+      "breakpoints": true
     }
   ]
 }
