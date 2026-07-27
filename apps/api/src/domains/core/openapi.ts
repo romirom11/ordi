@@ -165,7 +165,7 @@ const ROWS: Row[] = [
   ['/cycles', 'get', 'List cycles for a project', 'projects.read', undefined, 'projects'],
   ['/cycles', 'post', 'Create cycle', 'projects.write', 'CycleInput', 'projects'],
   ['/cycles/{id}/complete', 'post', 'Complete a cycle (roll open tasks over)', 'projects.write', 'free', 'projects'],
-  ['/labels', 'get', 'List labels', 'projects.read', undefined, 'projects'],
+  ['/labels', 'get', 'List labels (?scope=task|project)', 'projects.read', undefined, 'projects'],
   ['/intake', 'get', 'List intake items', 'projects.read', undefined, 'projects'],
   ['/intake/{id}/accept', 'post', 'Accept intake item into a task', 'projects.write', 'free', 'projects'],
   ['/intake/{id}/decline', 'post', 'Decline intake item', 'projects.write', 'free', 'projects'],

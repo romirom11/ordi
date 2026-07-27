@@ -6,9 +6,10 @@
  */
 import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { generateKeyPairSync, createVerify, createHmac } from 'node:crypto';
-import { getDb, schema, eq } from '@ordi/db';
+import { getDb, schema, eq, and } from '@ordi/db';
 import { app, resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
-import { buildAppJwt } from '../domains/integrations/github-app';
+import { buildAppJwt, githubAppSetupUrl, githubAppWebhookUrl } from '../domains/integrations/github-app';
+import { normalizeApiUrl } from '../env';
 import { storeGithubAppConfig, invalidateRuntimeConfig } from '../lib/runtime-config';
 
 let users: Awaited<ReturnType<typeof seedRolesAndUsers>>;
@@ -68,6 +69,25 @@ describe('app JWT', () => {
       .update(`${header}.${payload}`)
       .verify(PUB, Buffer.from(signature!, 'base64url'));
     expect(ok).toBe(true);
+  });
+});
+
+describe('callback URLs', () => {
+  // Deployments naturally write API_URL as "<origin>/api" (that is the path the
+  // router forwards), and the builders append "/api/v1/..." – the two together
+  // used to produce ".../api/api/v1/..." and 404 every GitHub redirect.
+  it('normalises an API_URL that already points at the /api path', () => {
+    expect(normalizeApiUrl('https://ordi.example.com/api')).toBe('https://ordi.example.com');
+    expect(normalizeApiUrl('https://ordi.example.com/api/')).toBe('https://ordi.example.com');
+    expect(normalizeApiUrl('https://ordi.example.com/')).toBe('https://ordi.example.com');
+    expect(normalizeApiUrl('http://localhost:3000')).toBe('http://localhost:3000');
+  });
+
+  it('never doubles the /api segment', () => {
+    for (const url of [githubAppSetupUrl(), githubAppWebhookUrl()]) {
+      expect(url).not.toContain('/api/api/');
+      expect(url.match(/\/api\//g)).toHaveLength(1);
+    }
   });
 });
 
@@ -219,6 +239,62 @@ describe('installation webhooks', () => {
     const rows = await db.select().from(schema.gitConnections)
       .where(eq(schema.gitConnections.installationId, '90002'));
     expect(rows).toHaveLength(0);
+  });
+
+  // The picker lists repositories live from GitHub, where the only handle is
+  // GitHub's own id – binding one must still resolve to the registered row, or
+  // nothing links and the project page has nothing but a number to render.
+  it('binding a repo picked from the provider resolves it to the registered row', async () => {
+    const owner = reqAs(users.owner!.cookie);
+    const type = await json(owner.post('/project-types', { name: 'Repo bind', revenueSource: 'none' }));
+    const project = await json(owner.post('/projects', { name: 'Repo Bind', key: 'RBD', projectTypeId: type.id }));
+
+    const { db } = getDb();
+    const [conn] = await db.select().from(schema.gitConnections)
+      .where(eq(schema.gitConnections.installationId, '90001'));
+    const [repo] = await db.select().from(schema.gitRepositories)
+      .where(and(
+        eq(schema.gitRepositories.connectionId, conn!.id),
+        eq(schema.gitRepositories.externalId, '1'),
+      ));
+
+    const res = await owner.post(`/projects/${project.id}/repositories`, {
+      repositoryId: repo!.externalId, // what the provider listing offers
+      connectionId: conn!.id,
+      externalId: repo!.externalId,
+      fullName: repo!.fullName,
+      defaultBranch: 'main',
+    });
+    expect(res.status).toBe(201);
+
+    const bound = (await json(owner.get(`/projects/${project.id}/repositories`))).data as any[];
+    expect(bound).toHaveLength(1);
+    expect(bound[0].repositoryId).toBe(repo!.id);
+    expect(bound[0]).toMatchObject({ fullName: 'kdnx/site', externalId: '1', provider: 'github' });
+  });
+
+  it('binding a repo the connection has not synced yet registers it first', async () => {
+    const owner = reqAs(users.owner!.cookie);
+    const type = await json(owner.post('/project-types', { name: 'Repo bind 2', revenueSource: 'none' }));
+    const project = await json(owner.post('/projects', { name: 'Repo Bind 2', key: 'RBE', projectTypeId: type.id }));
+
+    const { db } = getDb();
+    const [conn] = await db.select().from(schema.gitConnections)
+      .where(eq(schema.gitConnections.installationId, '90001'));
+
+    const res = await owner.post(`/projects/${project.id}/repositories`, {
+      connectionId: conn!.id, externalId: '99', fullName: 'kdnx/unsynced', defaultBranch: 'trunk',
+    });
+    expect(res.status).toBe(201);
+
+    const [registered] = await db.select().from(schema.gitRepositories)
+      .where(and(
+        eq(schema.gitRepositories.connectionId, conn!.id),
+        eq(schema.gitRepositories.externalId, '99'),
+      ));
+    expect(registered).toMatchObject({ fullName: 'kdnx/unsynced', defaultBranch: 'trunk' });
+    const bound = (await json(owner.get(`/projects/${project.id}/repositories`))).data as any[];
+    expect(bound[0]).toMatchObject({ repositoryId: registered!.id, fullName: 'kdnx/unsynced' });
   });
 
   it('installation deleted -> connection revoked, repos and links survive', async () => {

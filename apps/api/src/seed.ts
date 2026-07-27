@@ -115,15 +115,21 @@ async function main() {
     const done = statusRows.find((s) => s.name === 'Done')!;
 
     // Labels, so the board shows the same colour coding a real workspace has.
+    // Task labels describe work; project labels describe the engagement – two
+    // vocabularies, hence two scopes.
     const labelRows = [
-      { id: ulid(), name: 'Design', color: '#a855f7' },
-      { id: ulid(), name: 'Frontend', color: '#3b82f6' },
-      { id: ulid(), name: 'Backend', color: '#14b8a6' },
-      { id: ulid(), name: 'Bug', color: '#ef4444' },
-      { id: ulid(), name: 'Content', color: '#eab308' },
+      { id: ulid(), name: 'Design', color: '#a855f7', scope: 'task' },
+      { id: ulid(), name: 'Frontend', color: '#3b82f6', scope: 'task' },
+      { id: ulid(), name: 'Backend', color: '#14b8a6', scope: 'task' },
+      { id: ulid(), name: 'Bug', color: '#ef4444', scope: 'task' },
+      { id: ulid(), name: 'Content', color: '#eab308', scope: 'task' },
     ];
-    await db.insert(schema.labels).values(labelRows);
-    await db.insert(schema.projectLabels).values(labelRows.map((l) => ({ projectId: id, labelId: l.id })));
+    const projectLabelRows = [
+      { id: ulid(), name: 'Client work', color: '#6366f1', scope: 'project' },
+      { id: ulid(), name: 'Retainer', color: '#10b981', scope: 'project' },
+    ];
+    await db.insert(schema.labels).values([...labelRows, ...projectLabelRows]);
+    await db.insert(schema.projectLabels).values(projectLabelRows.map((l) => ({ projectId: id, labelId: l.id })));
     const label = (name: string) => labelRows.find((l) => l.name === name)!.id;
 
     // A cycle in flight, so Cycles and the burndown are not empty.

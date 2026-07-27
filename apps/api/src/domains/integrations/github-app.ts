@@ -35,12 +35,12 @@ export function githubApiBase(htmlUrl: string): string {
 
 /** Where GitHub sends both the manifest conversion code and install redirects. */
 export function githubAppSetupUrl(): string {
-  return `${env.apiUrl.replace(/\/$/, '')}/api/v1/integrations/github-app/setup`;
+  return `${env.apiUrl}/api/v1/integrations/github-app/setup`;
 }
 
 /** The centrally-registered webhook endpoint the manifest declares. */
 export function githubAppWebhookUrl(): string {
-  return `${env.apiUrl.replace(/\/$/, '')}/api/v1/integrations/git/github/webhook`;
+  return `${env.apiUrl}/api/v1/integrations/git/github/webhook`;
 }
 
 /**

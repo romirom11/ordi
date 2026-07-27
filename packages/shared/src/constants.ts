@@ -28,6 +28,14 @@ export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 export const TASK_RELATION_TYPES = ['blocks', 'relates', 'duplicates'] as const;
 export type TaskRelationType = (typeof TASK_RELATION_TYPES)[number];
 
+/**
+ * Which vocabulary a label belongs to. Tasks and projects hold separate ones:
+ * "Bug" describes a task, "retainer" a project, and neither belongs in the
+ * other's picker.
+ */
+export const LABEL_SCOPES = ['task', 'project'] as const;
+export type LabelScope = (typeof LABEL_SCOPES)[number];
+
 export const CYCLE_STATUSES = ['upcoming', 'active', 'completed'] as const;
 export type CycleStatus = (typeof CYCLE_STATUSES)[number];
 

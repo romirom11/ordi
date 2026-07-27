@@ -7,7 +7,7 @@
  * type at runtime. Anything shared lives here, unwrapped to a plain array.
  */
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
-import { api } from './api';
+import { api, qs } from './api';
 
 export interface UserLookup {
   id: string;
@@ -33,6 +33,24 @@ export interface ProjectMember {
   userId: string;
   role: ProjectMemberRole;
   canWriteTasks: boolean;
+}
+
+/**
+ * Which vocabulary a label belongs to. Task labels ("Bug", "Frontend") and
+ * project labels ("Retainer", "Internal") are separate sets – a picker only
+ * ever shows its own.
+ */
+export type LabelScope = 'task' | 'project';
+
+export interface LabelLookup { id: string; name: string; color?: string | null; scope?: LabelScope }
+
+/** The label vocabulary of one scope – read by every picker and the filters. */
+export function useLabels(scope: LabelScope): UseQueryResult<LabelLookup[]> {
+  return useQuery({
+    queryKey: ['labels', scope],
+    queryFn: () => api.get<{ data: LabelLookup[] }>(`/labels${qs({ scope })}`).then((r) => r.data),
+    staleTime: 5 * 60_000,
+  });
 }
 
 /** Members of one project – read by both the properties rail and the access panel. */
