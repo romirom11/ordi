@@ -3,6 +3,23 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.10.0
+
+- GitHub App integration: create the app with one click via a manifest
+  (webhook URL, permissions and events pre-registered, credentials
+  delivered through the one-time conversion code), pick repositories on
+  GitHub's own install screen, and the installation webhooks create the
+  git connection and keep its repo list in sync. RS256 app JWT with
+  cached installation tokens, GHE supported. Uninstall revokes but keeps
+  bindings, so a reinstall revives the connection.
+- Webhook signature verification is a real HMAC now. It used to be
+  sha256(secret+body), so GitHub's X-Hub-Signature-256 could never
+  verify and standard receivers could not verify ordi's outbound
+  webhooks.
+- Branch names link to tasks case-insensitively: ordi's own "Copy branch
+  name" lowercases the task key, and such branches never linked before.
+  Free-form text stays uppercase-only, so "utf-8" is not a task ref.
+
 ## v1.9.0
 
 - Deals link to the project they sell into: `deals.project_id` is a real
