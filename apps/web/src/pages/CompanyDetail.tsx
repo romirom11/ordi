@@ -72,7 +72,6 @@ export function CompanyDetailPage({ id }: { id: string }) {
           items={[
             { label: t('crm.title'), to: '/crm' },
             { label: t('crm.tabClients'), to: '/crm/clients' },
-            ...(c ? [{ label: c.name }] : []),
           ]}
         />
         <div className="flex items-start gap-4">
