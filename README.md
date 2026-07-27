@@ -198,7 +198,8 @@ packages/mcp     MCP server over the REST API
 
 Design notes and the reasoning behind the bigger decisions live in
 [`docs/architecture-decisions.md`](docs/architecture-decisions.md); the original
-product spec is [`docs/prd.md`](docs/prd.md).
+product spec is [`docs/prd.md`](docs/prd.md). The living feature registry –
+what's planned, in flight and shipped – is [`docs/features.md`](docs/features.md).
 
 A few principles the codebase holds to: permissions are enforced on every request
 and the UI only hides things; writes use optimistic locking with a `version` column;
