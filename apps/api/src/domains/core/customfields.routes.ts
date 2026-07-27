@@ -3,9 +3,10 @@ import { getDb, schema, eq, and, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import { customFieldDefinitionSchema, CUSTOM_FIELD_ENTITIES } from '@ordi/shared';
 import type { AppEnv } from '../../context';
-import { requireAuth } from '../../core/auth';
+import { requireAuth, currentActor } from '../../core/auth';
 import { guard } from '../../core/rbac';
 import { invalidateRegistry } from '../../core/customfields';
+import { writeActivity } from '../../core/activity';
 import { err } from '../../lib/errors';
 
 export function customFieldsRoutes() {
@@ -37,6 +38,12 @@ export function customFieldsRoutes() {
     });
     invalidateRegistry(body.entityType);
     if (body.indexed) await ensureExpressionIndex(body.entityType, body.key, body.type);
+    const actor = currentActor(c);
+    await writeActivity(db, {
+      entityType: 'custom_field', entityId: id, action: 'created',
+      after: { entityType: body.entityType, key: body.key, label: body.label, type: body.type },
+      actorId: actor.userId, actorType: actor.actorType,
+    });
     return c.json({ id }, 201);
   });
 
@@ -59,12 +66,22 @@ export function customFieldsRoutes() {
     }).where(eq(schema.customFieldDefinitions.id, id));
     invalidateRegistry(def.entityType);
     if (patch.indexed === true) await ensureExpressionIndex(def.entityType, def.key, def.type as any);
+    const actor = currentActor(c);
+    await writeActivity(db, {
+      entityType: 'custom_field', entityId: id, action: 'updated',
+      actorId: actor.userId, actorType: actor.actorType,
+    });
     return c.json({ ok: true });
   });
 
   app.delete('/:id', guard('settings.manage'), async (c) => {
     const { db } = getDb();
+    const actor = currentActor(c);
     await db.delete(schema.customFieldDefinitions).where(eq(schema.customFieldDefinitions.id, c.req.param('id')));
+    await writeActivity(db, {
+      entityType: 'custom_field', entityId: c.req.param('id'), action: 'deleted',
+      actorId: actor.userId, actorType: actor.actorType,
+    });
     return c.json({ ok: true });
   });
 

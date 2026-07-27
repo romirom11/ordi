@@ -149,7 +149,7 @@ interface ApiToken {
 /** Tool names mirrored from packages/mcp/src/server.ts (read-only summary). */
 const READ_TOOLS = [
   'search', 'list_projects', 'list_companies', 'list_contacts', 'list_deals', 'list_deal_stages',
-  'get_company_overview', 'list_my_tasks', 'get_project_status', 'get_cycle_progress',
+  'list_custom_fields', 'get_company_overview', 'list_my_tasks', 'get_project_status', 'get_cycle_progress',
   'list_overdue_invoices', 'get_receivables_aging', 'list_unbilled_time', 'find_kb_page',
   'get_project_profitability', 'get_labor_cost', 'get_team_availability', 'list_pending_leave',
   'get_recruitment_pipeline',
@@ -158,7 +158,7 @@ const ACTION_TOOLS = [
   'create_task', 'update_task_status', 'assign_task', 'comment_on_task', 'log_time',
   'create_invoice_from_time', 'create_invoice_from_project', 'send_invoice', 'record_payment',
   'send_payment_reminder', 'create_quote', 'create_note', 'create_company', 'create_contact',
-  'create_deal', 'move_deal', 'create_kb_page',
+  'create_deal', 'move_deal', 'create_custom_field', 'create_kb_page',
   'request_leave', 'approve_leave', 'create_job_opening', 'move_applicant',
 ];
 

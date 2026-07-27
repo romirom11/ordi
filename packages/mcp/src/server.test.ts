@@ -153,3 +153,60 @@ describe('CRM create/list tools', () => {
     expect(posts).toEqual([]);
   });
 });
+
+describe('custom field tools', () => {
+  it('exposes list_custom_fields and create_custom_field', async () => {
+    const client = await connect(fakeApi({}));
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    expect(names).toContain('list_custom_fields');
+    expect(names).toContain('create_custom_field');
+  });
+
+  it('list_custom_fields compacts definitions and filters by entity', async () => {
+    let requested = '';
+    const api = fakeApi({ '/custom-fields': { data: [{
+      id: 'f1', entityType: 'companies', key: 'nps', label: 'NPS', type: 'number',
+      options: [], required: false, position: 0, showInList: true, isSortable: false,
+      indexed: false, deprecated: false, createdAt: 'x', updatedAt: 'x',
+    }] } });
+    const inner = api.get.bind(api);
+    api.get = async <T>(path: string): Promise<T> => { requested = path; return inner<T>(path); };
+
+    const client = await connect(api);
+    const res = await client.callTool({ name: 'list_custom_fields', arguments: { entityType: 'companies' } });
+    expect(requested).toBe('/custom-fields?entityType=companies');
+    const body = JSON.parse((res.content as any)[0].text);
+    expect(body.data).toEqual([{
+      id: 'f1', entityType: 'companies', key: 'nps', label: 'NPS', type: 'number',
+      options: [], required: false, deprecated: false,
+    }]);
+  });
+
+  it('create_custom_field POSTs the definition; unknown entity/type is rejected client-side', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({}, posts));
+
+    await client.callTool({ name: 'create_custom_field', arguments: {
+      entityType: 'deals', key: 'source', label: 'Source', type: 'select',
+      options: [{ value: 'ads', label: 'Ads' }],
+    } });
+    const bad = await client.callTool({ name: 'create_custom_field', arguments: {
+      entityType: 'weird', key: 'x', label: 'X', type: 'text',
+    } });
+
+    expect(bad.isError).toBe(true);
+    expect(posts).toEqual([{
+      path: '/custom-fields',
+      body: { entityType: 'deals', key: 'source', label: 'Source', type: 'select', options: [{ value: 'ads', label: 'Ads' }] },
+    }]);
+  });
+
+  it('create tools pass customFields values through', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({}, posts));
+    await client.callTool({ name: 'create_company', arguments: { name: 'Acme', customFields: { nps: 9 } } });
+    await client.callTool({ name: 'create_task', arguments: { projectId: 'p1', title: 'T', customFields: { sprint: 'q3' } } });
+    expect(posts[0]!.body).toMatchObject({ name: 'Acme', customFields: { nps: 9 } });
+    expect(posts[1]!.body).toMatchObject({ projectId: 'p1', title: 'T', customFields: { sprint: 'q3' } });
+  });
+});

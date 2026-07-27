@@ -45,6 +45,7 @@ const FEED_VISIBILITY: Record<string, Permission> = {
   compensation: 'people.read_compensation',
   user: 'users.manage',
   workspace: 'settings.manage',
+  custom_field: 'settings.manage',
   slack_connection: 'integrations.manage',
   git_connection: 'integrations.manage',
   dead_letter_event: 'audit.read',
