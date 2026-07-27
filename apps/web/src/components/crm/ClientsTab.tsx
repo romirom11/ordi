@@ -10,8 +10,9 @@ import { useTabs } from '../../lib/tabs';
 import { useCan } from '../../lib/auth';
 import { appOrigin, api, ApiError } from '../../lib/api';
 import { useT } from '../../lib/i18n';
-import { Avatar, Button, Input, EmptyState, Skeleton, Tooltip, cn, fmtMoney } from '../ui';
-import { ContextMenu, ConfirmDialog, toast, type ContextMenuEntry } from '../overlays';
+import { Avatar, Button, Checkbox, Input, EmptyState, Skeleton, Tooltip, cn, fmtMoney } from '../ui';
+import { ContextMenu, ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, toast, type ContextMenuEntry } from '../overlays';
+import { BulkBar, RowCheckbox, bulkMessage, runBulk, useSelection } from '../bulk';
 import {
   COMPANY_STATUSES, StatusPill, useAllDeals, useCompanies, useDealStages, useUsersLookup,
   type Company, type Deal, type Stage,
@@ -76,6 +77,30 @@ export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
 
   const canDelete = can('crm.delete');
   const canWrite = can('crm.write');
+
+  const sel = useSelection(companies);
+  const [bulkDelete, setBulkDelete] = useState(false);
+  const [bulkPending, setBulkPending] = useState(false);
+
+  const finishBulk = (r: { ok: number; failed: number }) => {
+    const m = bulkMessage(t, r);
+    (m.error ? toast.error : toast)(m.text);
+    qc.invalidateQueries({ queryKey: ['companies'] });
+    sel.clear();
+    setBulkPending(false);
+  };
+
+  const bulkStatus = async (next: string) => {
+    setBulkPending(true);
+    const targets = sel.items.filter((c) => c.status !== next);
+    finishBulk(await runBulk(targets, (c) => api.patch(`/companies/${c.id}`, { status: next, version: c.version })));
+  };
+
+  const bulkRemove = async () => {
+    setBulkPending(true);
+    setBulkDelete(false);
+    finishBulk(await runBulk(sel.items, (c) => api.del(`/companies/${c.id}`)));
+  };
 
   const buildMenu = (c: Company): ContextMenuEntry[] => {
     const url = `/companies/${c.id}`;
@@ -152,7 +177,10 @@ export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
         ) : (
           <div className="px-3 py-2">
             {/* Header row */}
-            <div className="grid grid-cols-[minmax(0,1fr)_130px_170px_40px] items-center gap-3 px-3 pb-1.5 text-[11px] font-medium uppercase tracking-wide text-faint">
+            <div className="grid grid-cols-[20px_minmax(0,1fr)_130px_170px_40px] items-center gap-3 px-3 pb-1.5 text-[11px] font-medium uppercase tracking-wide text-faint">
+              <span className="flex items-center" title={t('bulk.selectAll')}>
+                <Checkbox checked={sel.allSelected} onChange={sel.toggleAll} />
+              </span>
               <span>{t('common.name')}</span>
               <span>{t('common.status')}</span>
               <span className="text-right">{t('crm.colDeals')}</span>
@@ -167,8 +195,16 @@ export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
                   <div
                     onClick={() => navigate(`/companies/${c.id}`)}
                     style={{ ['--i' as string]: Math.min(i, 10) }}
-                    className="row-enter group grid cursor-pointer grid-cols-[minmax(0,1fr)_130px_170px_40px] items-center gap-3 rounded-md px-3 py-2 transition-colors duration-150 hover:bg-muted"
+                    className={cn(
+                      'row-enter group grid cursor-pointer grid-cols-[20px_minmax(0,1fr)_130px_170px_40px] items-center gap-3 rounded-md px-3 py-2 transition-colors duration-150 hover:bg-muted',
+                      sel.has(c.id) && 'bg-primary/[0.06] hover:bg-primary/10',
+                    )}
                   >
+                    <RowCheckbox
+                      checked={sel.has(c.id)}
+                      onToggle={(shift) => sel.toggle(c.id, shift)}
+                      className={cn('transition-opacity duration-150', !sel.has(c.id) && sel.size === 0 && 'opacity-0 group-hover:opacity-100')}
+                    />
                     <div className="flex min-w-0 items-center gap-2.5">
                       <Avatar name={c.name} size={26} />
                       <div className="min-w-0">
@@ -207,6 +243,29 @@ export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
         )}
       </div>
 
+      <BulkBar count={sel.size} onClear={sel.clear}>
+        {canWrite && (
+          <DropdownMenu
+            align="start"
+            trigger={
+              <Button size="xs" variant="outline" disabled={bulkPending}>
+                <CircleDot size={13} /> {t('crm.changeStatus')}
+              </Button>
+            }
+          >
+            <MenuLabel>{t('crm.changeStatus')}</MenuLabel>
+            {COMPANY_STATUSES.map((s) => (
+              <MenuItem key={s} onSelect={() => bulkStatus(s)}><StatusPill status={s} /></MenuItem>
+            ))}
+          </DropdownMenu>
+        )}
+        {canDelete && (
+          <Button size="xs" variant="outline" disabled={bulkPending} onClick={() => setBulkDelete(true)}>
+            <Trash2 size={13} /> {t('common.delete')}
+          </Button>
+        )}
+      </BulkBar>
+
       <ConfirmDialog
         open={!!toDelete}
         onClose={() => setToDelete(null)}
@@ -216,6 +275,17 @@ export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
         confirmLabel={t('common.delete')}
         danger
         pending={del.isPending}
+      />
+
+      <ConfirmDialog
+        open={bulkDelete}
+        onClose={() => setBulkDelete(false)}
+        onConfirm={bulkRemove}
+        title={t('crm.deleteClientTitle')}
+        body={t('crm.deleteClientsBody').replace('{n}', String(sel.size))}
+        confirmLabel={t('common.delete')}
+        danger
+        pending={bulkPending}
       />
     </div>
   );

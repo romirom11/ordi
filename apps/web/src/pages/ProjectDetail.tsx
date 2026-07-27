@@ -13,7 +13,8 @@ import {
   StatusIcon, PriorityIcon, ProgressBar, ProgressRing, PageBody,
   fmtDate, cn,
 } from '../components/ui';
-import { Dialog, toast } from '../components/overlays';
+import { Dialog, ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, toast } from '../components/overlays';
+import { BulkBar, RowCheckbox, bulkMessage, runBulk, useSelection } from '../components/bulk';
 import { CalendarView } from '../components/views/CalendarView';
 import { TimelineView } from '../components/views/TimelineView';
 import { SpreadsheetView } from '../components/views/SpreadsheetView';
@@ -39,6 +40,10 @@ import { DateField } from '../components/DatePicker';
 
 extendDict({
   en: {
+    'bulkTasks.status': 'Status',
+    'bulkTasks.priority': 'Priority',
+    'bulkTasks.deleteTitle': 'Delete tasks',
+    'bulkTasks.deleteBody': 'Permanently delete {n} tasks? This cannot be undone.',
     'projects.noLead': 'No lead',
     'projects.lead': 'Lead',
     'projects.clearDate': 'Clear date',
@@ -75,6 +80,10 @@ extendDict({
     'projects.description': 'Description',
   },
   uk: {
+    'bulkTasks.status': 'Статус',
+    'bulkTasks.priority': 'Пріоритет',
+    'bulkTasks.deleteTitle': 'Видалити задачі',
+    'bulkTasks.deleteBody': 'Видалити задачі ({n}) назавжди? Дію не можна скасувати.',
     'projects.noLead': 'Без керівника',
     'projects.lead': 'Керівник',
     'projects.clearDate': 'Очистити дату',
@@ -626,6 +635,7 @@ function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, re
   onAdd: (title: string, seed?: Record<string, unknown>) => void;
 }) {
   const t = useT();
+  const qc = useQueryClient();
   const inputs = useRef(new Map<string, HTMLInputElement | null>());
   // Linear keeps rows quiet: non-empty groups show the add-row only after "+".
   const [adding, setAdding] = useState<string[]>([]);
@@ -634,6 +644,35 @@ function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, re
   const openQuickAdd = (key: string) => {
     setAdding((a) => (a.includes(key) ? a : [...a, key]));
     setTimeout(() => inputs.current.get(key)?.focus(), 30);
+  };
+
+  // Selection spans groups: the rows the user currently sees, in render order.
+  const visible = useMemo(
+    () => groups.flatMap((g) => (prefs.collapsed.includes(g.key) && g.key !== 'all' ? [] : g.items)),
+    [groups, prefs.collapsed],
+  );
+  const sel = useSelection(visible);
+  const [bulkDelete, setBulkDelete] = useState(false);
+  const [bulkPending, setBulkPending] = useState(false);
+
+  const finishBulk = (r: { ok: number; failed: number }) => {
+    const m = bulkMessage(t, r);
+    (m.error ? toast.error : toast)(m.text);
+    qc.invalidateQueries({ queryKey: ['tasks', projectId] });
+    sel.clear();
+    setBulkPending(false);
+  };
+
+  const bulkPatch = async (body: Record<string, unknown>, skip?: (task: Task) => boolean) => {
+    setBulkPending(true);
+    const targets = skip ? sel.items.filter((x) => !skip(x)) : sel.items;
+    finishBulk(await runBulk(targets, (x) => api.patch(`/tasks/${x.id}`, { ...body, version: x.version })));
+  };
+
+  const bulkRemove = async () => {
+    setBulkPending(true);
+    setBulkDelete(false);
+    finishBulk(await runBulk(sel.items, (x) => api.del(`/tasks/${x.id}`)));
   };
 
   return (
@@ -700,11 +739,19 @@ function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, re
                       <button
                         onClick={() => onOpen(task.id)}
                         className={cn(
-                          'row-enter flex h-9 w-full items-center gap-2.5 px-4 text-left transition-colors duration-150 hover:bg-muted/50',
+                          'row-enter group/row flex h-9 w-full items-center gap-2.5 px-4 text-left transition-colors duration-150 hover:bg-muted/50',
                           (i > 0 || flat) && 'border-t border-border/60',
+                          sel.has(task.id) && 'bg-primary/[0.06] hover:bg-primary/10',
                         )}
                         style={{ ['--i' as string]: Math.min(i, 10) }}
                       >
+                        {canWrite && (
+                          <RowCheckbox
+                            checked={sel.has(task.id)}
+                            onToggle={(shift) => sel.toggle(task.id, shift)}
+                            className={cn('transition-opacity duration-150', !sel.has(task.id) && sel.size === 0 && 'opacity-0 group-hover/row:opacity-100')}
+                          />
+                        )}
                         {props.priority && <PriorityIcon priority={task.priority} size={15} />}
                         {props.id && ref && (
                           <span className="hidden w-16 shrink-0 truncate font-mono text-[11px] text-faint sm:block">{ref}</span>
@@ -746,6 +793,49 @@ function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, re
           </section>
         );
       })}
+
+      <BulkBar count={sel.size} onClear={sel.clear}>
+        <DropdownMenu
+          align="start"
+          trigger={<Button size="xs" variant="outline" disabled={bulkPending}>{t('bulkTasks.status')}</Button>}
+        >
+          <MenuLabel>{t('bulkTasks.status')}</MenuLabel>
+          {statuses.map((s) => (
+            <MenuItem key={s.id} onSelect={() => bulkPatch({ statusId: s.id }, (x) => x.statusId === s.id)}>
+              <span className="flex items-center gap-2">
+                <StatusIcon category={s.category} color={s.color} size={14} /> {s.name}
+              </span>
+            </MenuItem>
+          ))}
+        </DropdownMenu>
+        <DropdownMenu
+          align="start"
+          trigger={<Button size="xs" variant="outline" disabled={bulkPending}>{t('bulkTasks.priority')}</Button>}
+        >
+          <MenuLabel>{t('bulkTasks.priority')}</MenuLabel>
+          {PRIORITIES.map((p) => (
+            <MenuItem key={p} onSelect={() => bulkPatch({ priority: p }, (x) => x.priority === p)}>
+              <span className="flex items-center gap-2">
+                <PriorityIcon priority={p} size={14} /> {t(PRIORITY_LABEL_KEY[p]!)}
+              </span>
+            </MenuItem>
+          ))}
+        </DropdownMenu>
+        <Button size="xs" variant="outline" disabled={bulkPending} onClick={() => setBulkDelete(true)}>
+          {t('common.delete')}
+        </Button>
+      </BulkBar>
+
+      <ConfirmDialog
+        open={bulkDelete}
+        onClose={() => setBulkDelete(false)}
+        onConfirm={bulkRemove}
+        title={t('bulkTasks.deleteTitle')}
+        body={t('bulkTasks.deleteBody').replace('{n}', String(sel.size))}
+        confirmLabel={t('common.delete')}
+        danger
+        pending={bulkPending}
+      />
     </div>
   );
 }
