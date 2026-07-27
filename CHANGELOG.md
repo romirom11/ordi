@@ -3,6 +3,26 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.9.0
+
+- Deals link to the project they sell into: `deals.project_id` is a real
+  FK (not a custom-field string), so a SaaS lead and a services lead are
+  separable. Pipeline board grows project filter chips, kanban cards show
+  the linked project, the deal page and new-deal dialog get a project
+  picker, and MCP `create_deal` / `list_deals` carry the link.
+- Multi-select in lists: the CRM client table and project task lists get
+  row checkboxes (shift-click for ranges), with bulk status/priority
+  changes and deletes. Partial failures are reported honestly.
+- Tabs reorder by dragging; the order persists.
+- Drag & drop works in the desktop app again: Tauri's default file-drop
+  interception (`dragDropEnabled`) was swallowing HTML5 drag events,
+  which had silently broken the pipeline board, the task board, sidebar
+  nav reordering - everything draggable.
+- CRM breadcrumbs follow the app-wide pattern (parent trail only, no
+  title echo) and long deal titles truncate instead of wrapping.
+- New living feature registry in `docs/features.md`: backlog, in flight,
+  shipped.
+
 ## v1.8.0
 
 - Deals get a detail page (`/deals/:id`): editable title, stage dropdown,
