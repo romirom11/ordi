@@ -3,6 +3,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { DashboardPage } from './pages/Dashboard';
 import { MyTasksPage } from './pages/MyTasks';
 import { CompanyDetailPage } from './pages/CompanyDetail';
+import { DealDetailPage } from './pages/DealDetail';
 import { CrmPage } from './pages/Crm';
 import { ProjectsPage } from './pages/Projects';
 import { ProjectDetailPage } from './pages/ProjectDetail';
@@ -28,6 +29,7 @@ const routes: RouteDef[] = [
   { pattern: '/companies', render: () => <ModuleGate module="crm"><CrmPage tab="clients" /></ModuleGate> },
   { pattern: '/companies/:id', render: (p) => <ModuleGate module="crm"><CompanyDetailPage id={p.id!} /></ModuleGate> },
   { pattern: '/deals', render: () => <ModuleGate module="crm"><CrmPage tab="deals" /></ModuleGate> },
+  { pattern: '/deals/:id', render: (p) => <ModuleGate module="crm"><DealDetailPage id={p.id!} /></ModuleGate> },
   { pattern: '/projects', render: () => <ProjectsPage /> },
   { pattern: '/projects/:id', render: (p) => <ProjectDetailPage id={p.id!} /> },
   { pattern: '/projects/:id/tasks/:taskId', render: (p) => <TaskPage projectId={p.id!} taskId={p.taskId!} /> },
