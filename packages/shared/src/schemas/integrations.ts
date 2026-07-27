@@ -16,8 +16,20 @@ export const gitRepositoryInputSchema = z.object({
   defaultBranch: z.string().default('main'),
 });
 
+/**
+ * Binding a repository to a project. The picker lists repositories straight
+ * from the provider, where the only stable handle is the provider's own id –
+ * so the provider fields come along and the server resolves (or registers) the
+ * `git_repositories` row whose id the binding actually stores.
+ */
 export const projectRepositoryInputSchema = z.object({
-  repositoryId: idSchema,
+  repositoryId: idSchema.optional(),
+  connectionId: idSchema.optional(),
+  externalId: z.string().optional(),
+  fullName: z.string().optional(),
+  defaultBranch: z.string().optional(),
+}).refine((v) => Boolean(v.repositoryId || v.externalId), {
+  message: 'repositoryId or externalId is required',
 });
 
 export const gitAutomationRuleInputSchema = z.object({
