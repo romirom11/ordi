@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
+import { getDb, schema, eq } from '@ordi/db';
+import { ulid } from 'ulid';
 import { resetDb, seedRolesAndUsers, reqAs, anon, json } from './helpers';
 
 let users: Awaited<ReturnType<typeof seedRolesAndUsers>>;
@@ -67,6 +69,57 @@ describe('compensation requires people.read_compensation', () => {
     // HR lacks people.read_compensation in the seed
     const meBody = await json(reqAs(users.hr!.cookie).get('/me'));
     expect(meBody.permissions).not.toContain('people.read_compensation');
+  });
+});
+
+describe('dashboard feed hides activity outside the actor’s domains', () => {
+  beforeAll(async () => {
+    const { db } = getDb();
+    await db.insert(schema.activityLog).values([
+      { id: ulid(), entityType: 'invoice', entityId: ulid(), actorId: users.owner!.userId, action: 'created', diff: {}, sensitivity: 'normal' },
+      { id: ulid(), entityType: 'task', entityId: ulid(), actorId: users.owner!.userId, action: 'created', diff: {}, sensitivity: 'normal' },
+      { id: ulid(), entityType: 'invoice', entityId: ulid(), actorId: users.member!.userId, action: 'viewed', diff: {}, sensitivity: 'normal' },
+    ]);
+  });
+
+  const types = async (role: string) => {
+    const body = await json(reqAs(users[role]!.cookie).get('/dashboard'));
+    return (body.recentActivity as Array<{ entityType: string; actorId: string }>);
+  };
+
+  it('owner sees finance activity', async () => {
+    expect((await types('owner')).some((a) => a.entityType === 'invoice')).toBe(true);
+  });
+
+  it('member does not see others’ finance activity but keeps projects + own actions', async () => {
+    const rows = await types('member');
+    expect(rows.some((a) => a.entityType === 'invoice' && a.actorId !== users.member!.userId)).toBe(false);
+    expect(rows.some((a) => a.entityType === 'task')).toBe(true);
+    expect(rows.some((a) => a.entityType === 'invoice' && a.actorId === users.member!.userId)).toBe(true);
+  });
+
+  it('member response carries no finance widgets at all', async () => {
+    const body = await json(reqAs(users.member!.cookie).get('/dashboard'));
+    expect(body.receivables).toBeUndefined();
+    expect(body.overdue).toBeUndefined();
+  });
+});
+
+describe('CRM notes leave an audit trail', () => {
+  it('creating a note writes a fact-only activity record (body stays out of the diff)', async () => {
+    const company = await json(reqAs(users.owner!.cookie).post('/companies', { name: 'NoteCo' }));
+    const res = await reqAs(users.owner!.cookie).post('/notes', {
+      companyId: company.id,
+      body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'secret plans' }] }] },
+    });
+    expect(res.status).toBe(201);
+
+    const { db } = getDb();
+    const rows = await db.select().from(schema.activityLog).where(eq(schema.activityLog.entityType, 'note'));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.action).toBe('created');
+    expect(rows[0]!.actorId).toBe(users.owner!.userId);
+    expect(JSON.stringify(rows[0]!.diff)).not.toContain('secret plans');
   });
 });
 

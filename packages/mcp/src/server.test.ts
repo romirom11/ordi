@@ -9,12 +9,16 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { buildServer, scrub } from './server';
 import { OrdiClient } from './client';
 
-function fakeApi(routes: Record<string, unknown>): OrdiClient {
+function fakeApi(routes: Record<string, unknown>, posts: Array<{ path: string; body: unknown }> = []): OrdiClient {
   const client = new OrdiClient({ baseUrl: 'http://test', token: 't' });
   client.get = async <T>(path: string): Promise<T> => {
     const key = Object.keys(routes).find((r) => path.startsWith(r));
     if (!key) throw new Error(`unexpected GET ${path}`);
     return routes[key] as T;
+  };
+  client.post = async <T>(path: string, body?: unknown): Promise<T> => {
+    posts.push({ path, body });
+    return { id: 'new-id' } as T;
   };
   return client;
 }
@@ -85,5 +89,67 @@ describe('tool catalog', () => {
     expect(raw).not.toContain('portalToken');
     const body = JSON.parse(raw);
     expect(body.data[0]).toMatchObject({ id: 'c1', name: 'Kdnx', status: 'client' });
+  });
+});
+
+describe('CRM create/list tools', () => {
+  it('exposes the full CRM surface: list and create for companies, contacts, deals', async () => {
+    const client = await connect(fakeApi({}));
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    for (const n of ['list_contacts', 'list_deals', 'list_deal_stages', 'create_company', 'create_contact', 'create_deal']) {
+      expect(names).toContain(n);
+    }
+  });
+
+  it('list_deals compacts rows and filters by company', async () => {
+    const api = fakeApi({ '/deals': { data: [{
+      id: 'd1', title: 'Retainer', companyId: 'c1', stageId: 's1', amount: '5000', currency: 'USD',
+      expectedCloseDate: null, ownerId: null, customFields: { secretish: 1 }, version: 2, deletedAt: null,
+      createdBy: 'u1', createdAt: 'x', updatedAt: 'x',
+    }] } });
+    let requested = '';
+    const inner = api.get.bind(api);
+    api.get = async <T>(path: string): Promise<T> => { requested = path; return inner<T>(path); };
+
+    const client = await connect(api);
+    const res = await client.callTool({ name: 'list_deals', arguments: { companyId: 'c1' } });
+    expect(requested).toBe('/deals?companyId=c1');
+    const body = JSON.parse((res.content as any)[0].text);
+    expect(body.data).toEqual([{
+      id: 'd1', title: 'Retainer', companyId: 'c1', stageId: 's1', amount: '5000', currency: 'USD',
+      expectedCloseDate: null, ownerId: null,
+    }]);
+  });
+
+  it('list_deal_stages returns id + won/lost flags for stage discovery', async () => {
+    const client = await connect(fakeApi({ '/deal-stages': { data: [
+      { id: 's1', name: 'Lead', position: 0, probability: 10, isWon: false, isLost: false, createdAt: 'x' },
+    ] } }));
+    const res = await client.callTool({ name: 'list_deal_stages', arguments: {} });
+    const body = JSON.parse((res.content as any)[0].text);
+    expect(body.data).toEqual([{ id: 's1', name: 'Lead', position: 0, probability: 10, isWon: false, isLost: false }]);
+  });
+
+  it('create_company / create_contact / create_deal POST to the CRM endpoints', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({}, posts));
+
+    await client.callTool({ name: 'create_company', arguments: { name: 'Acme', status: 'lead' } });
+    await client.callTool({ name: 'create_contact', arguments: { companyId: 'c1', firstName: 'Ada', email: 'ada@acme.io' } });
+    await client.callTool({ name: 'create_deal', arguments: { companyId: 'c1', title: 'Website', stageId: 's1', amount: 5000 } });
+
+    expect(posts).toEqual([
+      { path: '/companies', body: { name: 'Acme', status: 'lead' } },
+      { path: '/contacts', body: { companyId: 'c1', firstName: 'Ada', email: 'ada@acme.io' } },
+      { path: '/deals', body: { companyId: 'c1', title: 'Website', stageId: 's1', amount: 5000 } },
+    ]);
+  });
+
+  it('create_company rejects an unknown status before it reaches the API', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({}, posts));
+    const res = await client.callTool({ name: 'create_company', arguments: { name: 'Acme', status: 'vip' } });
+    expect(res.isError).toBe(true);
+    expect(posts).toEqual([]);
   });
 });
