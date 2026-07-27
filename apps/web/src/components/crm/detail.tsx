@@ -32,7 +32,9 @@ export function EditableName({ value, editable, onSave }: { value: string; edita
     else setDraft(value);
   };
 
-  if (!editable) return <h1 className="text-xl font-semibold leading-tight">{value}</h1>;
+  // Titles can be long (an agent-written deal title is a whole sentence) – clamp
+  // to one line with the full text on hover, the way KB and task headers do.
+  if (!editable) return <h1 className="truncate text-xl font-semibold leading-tight" title={value}>{value}</h1>;
   if (editing) {
     return (
       <input
@@ -49,7 +51,7 @@ export function EditableName({ value, editable, onSave }: { value: string; edita
   return (
     <button
       onClick={() => setEditing(true)}
-      className="-mx-1.5 rounded-md px-1.5 text-left text-xl font-semibold leading-tight transition-colors hover:bg-muted"
+      className="-mx-1.5 block max-w-full truncate rounded-md px-1.5 text-left text-xl font-semibold leading-tight transition-colors hover:bg-muted"
       title={value}
     >
       {value}
