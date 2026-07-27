@@ -1,40 +1,62 @@
 /**
- * Company (client) detail – rebuilt for the unified CRM.
- * Header: big avatar, inline-editable name, status pill dropdown, domain link,
- * owner picker. Two columns: main sections (Deals · Contacts · Notes) + a side
- * properties card with linked projects.
+ * Company (client) detail. Laid out like the project overview it sits next to:
+ * a header with the record's identity and its actions, a summary strip that
+ * answers "what shape is this client in" without scrolling, one content column
+ * (deals · invoices · contacts · notes · files · activity) and a 280px
+ * properties rail. Sections that are empty collapse to a single line – a fresh
+ * client should not read as three screens of nothing.
  */
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Building2, ChevronDown, Plus, Mail, Phone, Star, Globe,
-  FolderKanban, Handshake, Pencil, Receipt, Trash2,
+  Building2, ChevronDown, Plus, Mail, Phone, Star, Globe, MoreHorizontal, StickyNote,
+  FolderKanban, Handshake, Pencil, Receipt, Trash2, Link2, ExternalLink,
 } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
 import { Link, useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import {
-  Avatar, Badge, Breadcrumbs, Button, Card, EmptyState, IconButton, Select, Skeleton, Spinner, Tooltip,
-  cn, fmtMoney, fmtDate,
+  Avatar, Badge, Breadcrumbs, Button, EmptySection, IconButton, PageBody, RailChip, RailField,
+  Select, Skeleton, Spinner, Tooltip, cn, fmtMoney, fmtDate, fmtRelative,
 } from '../components/ui';
-import { ConfirmDialog, Dialog, DropdownMenu, MenuItem, MenuLabel, toast } from '../components/overlays';
+import { ConfirmDialog, Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator, toast } from '../components/overlays';
+import { EntityActivity } from '../components/EntityActivity';
 import { useT } from '../lib/i18n';
 import {
   COMPANY_STATUSES, CURRENCIES, StatusPill, useDealStages, useUsersLookup,
   type Company, type Contact, type Deal, type Stage,
 } from '../components/crm/shared';
-import { EditableName, FilesSection, NotesSection, OwnerPicker, PropRow, SectionHeader } from '../components/crm/detail';
+import { EditableName, FilesSection, NotesSection, OwnerPicker, SectionHeader } from '../components/crm/detail';
 import { ContactDialog, NewDealDialog } from '../components/crm/dialogs';
 import { NewProjectModal } from './Projects';
 import { useWorkspaceSettings, financeEnabled } from '../components/finance/workspace';
 
 interface Project { id: string; name: string; key?: string | null; status?: string | null }
 
+interface InvoiceRow {
+  id: string;
+  number?: string | null;
+  status?: string | null;
+  issueDate?: string | null;
+  total?: number | string | null;
+  amountPaid?: number | string | null;
+  currency?: string | null;
+  isOverdue?: boolean;
+}
+
+interface AuditRow { id: string; createdAt: string }
+
 function domainHref(domain?: string | null): string | null {
   if (!domain) return null;
   return `https://${domain.replace(/^https?:\/\//, '').replace(/\/+$/, '')}`;
 }
+
+/* Query keys are shared with the sections below so the header strip reuses the
+ * cached responses instead of firing its own round trips. */
+const dealsKey = (companyId: string) => ['deals', 'company', companyId];
+const invoicesKey = (companyId: string) => ['invoices', 'company', companyId];
+const auditKey = (companyId: string) => ['audit', 'company', companyId];
 
 export function CompanyDetailPage({ id }: { id: string }) {
   const t = useT();
@@ -48,11 +70,15 @@ export function CompanyDetailPage({ id }: { id: string }) {
   // Tab and window title carry the client's name, not a generic "CRM".
   usePageTitle(c?.name);
 
+  const [addingDeal, setAddingDeal] = useState(false);
+  const [noteFocus, setNoteFocus] = useState(0);
+
   const patch = useMutation({
     mutationFn: (body: Record<string, unknown>) => api.patch<Company>(`/companies/${id}`, { ...body, version: c?.version }),
     onSuccess: (updated, vars) => {
       qc.setQueryData(['company', id], updated);
       qc.invalidateQueries({ queryKey: ['companies'] });
+      qc.invalidateQueries({ queryKey: auditKey(id) });
       if ('name' in vars) toast(t('crm.nameUpdated'));
       else if ('ownerId' in vars) toast(t('crm.ownerUpdated'));
       else if ('status' in vars) toast(t('crm.statusUpdated'));
@@ -67,6 +93,7 @@ export function CompanyDetailPage({ id }: { id: string }) {
 
   const owner = c?.ownerId ? (usersQ.data ?? []).find((u) => u.id === c.ownerId) : undefined;
   const href = domainHref(c?.domain);
+  const canAddDeal = can('deals.write');
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -129,40 +156,161 @@ export function CompanyDetailPage({ id }: { id: string }) {
               </div>
             )}
           </div>
+
+          {/* Actions – previously buried inside each section header. */}
+          {c && (
+            <div className="flex shrink-0 items-center gap-2">
+              {canWrite && (
+                <Button variant="outline" size="sm" onClick={() => setNoteFocus((n) => n + 1)}>
+                  <StickyNote size={14} /> {t('crm.addNote')}
+                </Button>
+              )}
+              {canAddDeal && (
+                <Button variant="primary" size="sm" onClick={() => setAddingDeal(true)}>
+                  <Plus size={14} /> {t('crm.addDealForClient')}
+                </Button>
+              )}
+              <DropdownMenu
+                align="end"
+                trigger={<IconButton size="sm" aria-label={t('common.more', 'More')}><MoreHorizontal size={15} /></IconButton>}
+              >
+                {href && (
+                  <MenuItem icon={<ExternalLink size={13} />} onSelect={() => window.open(href, '_blank', 'noopener')}>
+                    {t('crm.openWebsite')}
+                  </MenuItem>
+                )}
+                <MenuItem
+                  icon={<Link2 size={13} />}
+                  onSelect={() => { void navigator.clipboard?.writeText(window.location.href); toast(t('crm.linkCopied')); }}
+                >
+                  {t('crm.copyLink')}
+                </MenuItem>
+              </DropdownMenu>
+            </div>
+          )}
         </div>
+
+        {c && <SummaryStrip companyId={id} currency={c.defaultCurrency || 'USD'} />}
       </div>
 
-      {/* Body: main + side */}
+      {/* Body: main + rail */}
       <div className="min-h-0 flex-1 overflow-auto">
-        <div className="mx-auto grid max-w-6xl gap-6 p-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="space-y-8">
-            {can('deals.read') && <DealsSection companyId={id} canWrite={can('deals.write')} />}
+        <PageBody width="wide" className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_280px]">
+          <div className="order-2 min-w-0 space-y-7 lg:order-1">
+            {can('deals.read') && <DealsSection companyId={id} canWrite={canAddDeal} onAdd={() => setAddingDeal(true)} />}
             <InvoicesSection companyId={id} />
             <ContactsSection companyId={id} canWrite={canWrite} />
-            <NotesSection companyId={id} canWrite={canWrite} />
+            <NotesSection companyId={id} canWrite={canWrite} focusToken={noteFocus} />
             <FilesSection entityType="company" entityId={id} canWrite={canWrite} />
+            <CompanyActivity companyId={id} users={usersQ.data ?? []} />
           </div>
-          <aside className="space-y-4">
-            <PropertiesCard company={c} loading={companyQ.isLoading} editable={canWrite} onPatch={(body) => patch.mutate(body)} />
-            <ProjectsCard companyId={id} />
-          </aside>
-        </div>
+          <div className="order-1 space-y-6 lg:order-2">
+            <CompanyRail company={c} loading={companyQ.isLoading} editable={canWrite} onPatch={(body) => patch.mutate(body)} />
+            <ProjectsRail companyId={id} />
+          </div>
+        </PageBody>
       </div>
+
+      <NewDealDialog
+        open={addingDeal}
+        onClose={() => setAddingDeal(false)}
+        lockedCompanyId={id}
+        onCreated={() => qc.invalidateQueries({ queryKey: dealsKey(id) })}
+      />
+    </div>
+  );
+}
+
+/* ─────────────── Summary strip ─────────────── */
+
+function Metric({ label, value, tone }: { label: string; value: string; tone?: 'destructive' | 'success' }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[11px] uppercase tracking-wide text-faint">{label}</div>
+      <div className={cn(
+        'truncate text-[15px] font-semibold tabular-nums',
+        tone === 'destructive' && 'text-destructive',
+        tone === 'success' && 'text-success',
+      )}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The numbers a client is judged by, above the fold. Every query here is keyed
+ * identically to the section that owns it, so this costs no extra requests.
+ */
+function SummaryStrip({ companyId, currency }: { companyId: string; currency: string }) {
+  const t = useT();
+  const can = useCan();
+  const wsQ = useWorkspaceSettings();
+  const stagesQ = useDealStages();
+
+  const dealsQ = useQuery<Deal[]>({
+    queryKey: dealsKey(companyId),
+    queryFn: () => api.get<{ data: Deal[] }>(`/deals${qs({ companyId })}`).then((r) => r.data),
+    enabled: can('deals.read'),
+  });
+
+  const financeOn = financeEnabled(wsQ.data) && can('finance.read');
+  const invoicesQ = useQuery<InvoiceRow[]>({
+    queryKey: invoicesKey(companyId),
+    queryFn: () => api.get<{ data: InvoiceRow[] }>(`/invoices${qs({ companyId })}`).then((r) => r.data),
+    enabled: financeOn,
+  });
+
+  const auditQ = useQuery<AuditRow[]>({
+    queryKey: auditKey(companyId),
+    queryFn: () => api.get<{ data: AuditRow[] }>(`/audit/entity/company/${companyId}`).then((r) => r.data),
+  });
+
+  const stageMap = new Map((stagesQ.data ?? []).map((s: Stage) => [s.id, s]));
+  const deals = dealsQ.data ?? [];
+  let open = 0;
+  let won = 0;
+  let openCount = 0;
+  for (const d of deals) {
+    const stage = d.stageId ? stageMap.get(d.stageId) : undefined;
+    const amount = Number(d.amount ?? 0);
+    if (stage?.isWon) won += amount;
+    else if (!stage?.isLost) { open += amount; openCount += 1; }
+  }
+
+  const outstanding = (invoicesQ.data ?? []).reduce((sum, iv) => {
+    if (iv.status === 'canceled') return sum;
+    return sum + (Number(iv.total ?? 0) - Number(iv.amountPaid ?? 0));
+  }, 0);
+
+  const lastAt = auditQ.data?.[0]?.createdAt;
+
+  return (
+    <div className="mt-4 flex flex-wrap items-start gap-x-8 gap-y-3 pl-[64px]">
+      {can('deals.read') && (
+        <Metric label={`${t('crm.openDealsValue')} · ${openCount}`} value={fmtMoney(open, currency)} />
+      )}
+      {can('deals.read') && won > 0 && <Metric label={t('crm.wonValue')} value={fmtMoney(won, currency)} tone="success" />}
+      {financeOn && (
+        <Metric label={t('crm.outstanding')} value={fmtMoney(outstanding, currency)} tone={outstanding > 0 ? 'destructive' : undefined} />
+      )}
+      <Metric label={t('crm.lastActivity')} value={lastAt ? fmtRelative(lastAt) : t('crm.never')} />
     </div>
   );
 }
 
 /* ─────────────── Deals ─────────────── */
 
-function DealsSection({ companyId, canWrite }: { companyId: string; canWrite: boolean }) {
+function DealsSection({ companyId, canWrite, onAdd }: { companyId: string; canWrite: boolean; onAdd: () => void }) {
   const t = useT();
-  const [adding, setAdding] = useState(false);
   const stagesQ = useDealStages();
+  const usersQ = useUsersLookup();
   const dealsQ = useQuery<Deal[]>({
-    queryKey: ['deals', 'company', companyId],
+    queryKey: dealsKey(companyId),
     queryFn: () => api.get<{ data: Deal[] }>(`/deals${qs({ companyId })}`).then((r) => r.data),
   });
   const stageMap = new Map((stagesQ.data ?? []).map((s: Stage) => [s.id, s]));
+  const userMap = new Map((usersQ.data ?? []).map((u) => [u.id, u]));
   const deals = dealsQ.data ?? [];
 
   return (
@@ -171,46 +319,48 @@ function DealsSection({ companyId, canWrite }: { companyId: string; canWrite: bo
         icon={<Handshake size={15} />}
         title={t('crm.deals')}
         count={deals.length}
-        action={canWrite && <Button variant="outline" size="xs" onClick={() => setAdding(true)}><Plus size={13} /> {t('crm.addDealForClient')}</Button>}
+        action={canWrite && <Button variant="outline" size="xs" onClick={onAdd}><Plus size={13} /> {t('crm.addDealForClient')}</Button>}
       />
       {dealsQ.isLoading ? (
         <div className="space-y-1">{[0, 1].map((i) => <Skeleton key={i} className="h-11 rounded-md" />)}</div>
       ) : deals.length === 0 ? (
-        <EmptyState icon={<Handshake size={18} />} title={t('deals.empty')} hint={t('crm.noDealsHint')} />
+        <EmptySection
+          icon={<Handshake size={14} />}
+          title={t('deals.empty')}
+          action={canWrite && <Button variant="ghost" size="xs" onClick={onAdd}><Plus size={13} /> {t('crm.addDealForClient')}</Button>}
+        />
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">
           {deals.map((d, i) => {
             const stage = d.stageId ? stageMap.get(d.stageId) : undefined;
             const color = stage?.isWon ? '#22c55e' : stage?.isLost ? '#ef4444' : undefined;
+            const dealOwner = d.ownerId ? userMap.get(d.ownerId) : undefined;
             return (
               <Link key={d.id} to={`/deals/${d.id}`} className={cn('flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/50', i > 0 && 'border-t border-border')}>
                 <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{d.title}</span>
                 {stage && <Badge color={color}>{stage.name}</Badge>}
-                <span className="w-24 text-right text-[13px] font-semibold tabular-nums">
+                {/* Close date and owner: without them you cannot tell which deal has gone stale. */}
+                <span className="hidden w-24 shrink-0 text-right text-xs text-muted-foreground tabular-nums sm:block">
+                  {d.expectedCloseDate ? fmtDate(d.expectedCloseDate) : '–'}
+                </span>
+                <span className="w-24 shrink-0 text-right text-[13px] font-semibold tabular-nums">
                   {d.amount != null ? fmtMoney(d.amount, d.currency ?? 'USD') : '–'}
+                </span>
+                <span className="w-5 shrink-0">
+                  {dealOwner
+                    ? <Tooltip label={dealOwner.name}><Avatar name={dealOwner.name} src={dealOwner.avatar} size={20} /></Tooltip>
+                    : <span className="grid h-5 w-5 place-items-center rounded-full border border-dashed border-border-strong text-[9px] text-faint">?</span>}
                 </span>
               </Link>
             );
           })}
         </div>
       )}
-      <NewDealDialog open={adding} onClose={() => setAdding(false)} lockedCompanyId={companyId} onCreated={() => dealsQ.refetch()} />
     </section>
   );
 }
 
 /* ─────────────── Invoices (finance-gated) ─────────────── */
-
-interface InvoiceRow {
-  id: string;
-  number?: string | null;
-  status?: string | null;
-  issueDate?: string | null;
-  total?: number | string | null;
-  amountPaid?: number | string | null;
-  currency?: string | null;
-  isOverdue?: boolean;
-}
 
 const INV_TONE: Record<string, string> = {
   draft: 'bg-muted text-muted-foreground',
@@ -241,7 +391,7 @@ function InvoicesSection({ companyId }: { companyId: string }) {
   const enabled = financeEnabled(wsQ.data) && can('finance.read');
 
   const invoicesQ = useQuery<InvoiceRow[]>({
-    queryKey: ['invoices', 'company', companyId],
+    queryKey: invoicesKey(companyId),
     queryFn: () => api.get<{ data: InvoiceRow[] }>(`/invoices${qs({ companyId })}`).then((r) => r.data),
     enabled,
   });
@@ -271,7 +421,7 @@ function InvoicesSection({ companyId }: { companyId: string }) {
       {invoicesQ.isLoading ? (
         <div className="space-y-1">{[0, 1].map((i) => <Skeleton key={i} className="h-11 rounded-md" />)}</div>
       ) : invoices.length === 0 ? (
-        <EmptyState icon={<Receipt size={18} />} title={t('crm.noInvoices')} hint={t('crm.noInvoicesHint')} />
+        <EmptySection icon={<Receipt size={14} />} title={t('crm.noInvoices')} />
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">
           {invoices.map((iv, i) => {
@@ -338,7 +488,11 @@ function ContactsSection({ companyId, canWrite }: { companyId: string; canWrite:
       {isLoading ? (
         <div className="space-y-1">{[0, 1].map((i) => <Skeleton key={i} className="h-12 rounded-md" />)}</div>
       ) : contacts.length === 0 ? (
-        <EmptyState icon={<Building2 size={18} />} title={t('crm.noContacts')} hint={t('crm.noContactsHint')} />
+        <EmptySection
+          icon={<Building2 size={14} />}
+          title={t('crm.noContacts')}
+          action={canWrite && <Button variant="ghost" size="xs" onClick={() => setAdding(true)}><Plus size={13} /> {t('crm.addContact')}</Button>}
+        />
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">
           {contacts.map((ct, i) => {
@@ -364,7 +518,12 @@ function ContactsSection({ companyId, canWrite }: { companyId: string; canWrite:
                       ct.isPrimary && <Tooltip label={t('crm.primary')}><Star size={12} className="fill-warning text-warning" /></Tooltip>
                     )}
                   </div>
-                  {ct.position && <div className="truncate text-xs text-faint">{ct.position}</div>}
+                  {/* Position and email on one line – the row was showing a title and hiding the address. */}
+                  <div className="flex min-w-0 items-center gap-1.5 text-xs text-faint">
+                    {ct.position && <span className="truncate">{ct.position}</span>}
+                    {ct.position && ct.email && <span aria-hidden>·</span>}
+                    {ct.email && <span className="truncate">{ct.email}</span>}
+                  </div>
                 </div>
                 <div className="flex items-center gap-1">
                   {ct.email && (
@@ -419,49 +578,38 @@ function ContactsSection({ companyId, canWrite }: { companyId: string; canWrite:
   );
 }
 
-/* ─────────────── Side: properties ─────────────── */
+/* ─────────────── Activity ─────────────── */
 
-/** Payment terms keep their "N days" wording while staying click-to-edit. */
-function EditablePaymentTerms({ days, onSave }: { days?: number | null; onSave: (n: number) => void }) {
+function CompanyActivity({ companyId, users }: { companyId: string; users: { id: string; name: string; avatar?: string | null }[] }) {
   const t = useT();
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState('');
-  if (editing) {
-    const commit = () => {
-      setEditing(false);
-      const n = Number(draft);
-      if (draft !== '' && Number.isInteger(n) && n >= 0 && n !== days) onSave(n);
-    };
-    return (
-      <input
-        autoFocus type="number" min={0} value={draft}
-        onFocus={(e) => e.target.select()}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false); }}
-        className="w-20 rounded-md border border-primary/40 bg-transparent px-1 text-right text-[13px] tabular-nums outline-none focus:ring-2 focus:ring-ring/25"
-      />
-    );
-  }
   return (
-    <button
-      onClick={() => { setDraft(days != null ? String(days) : ''); setEditing(true); }}
-      className="-mx-1 rounded-md px-1 tabular-nums transition-colors hover:bg-muted"
-    >
-      {days != null ? t('crm.paymentTermsValue').replace('{n}', String(days)) : <span className="text-faint">–</span>}
-    </button>
+    <EntityActivity
+      entityType="company"
+      entityId={companyId}
+      users={users}
+      title={t('crm.activity')}
+      emptyLabel={t('crm.activity.empty')}
+      labelFor={(action) => t(`crm.activity.${action}`, action.replace(/_/g, ' '))}
+      queryKey={auditKey(companyId)}
+    />
   );
 }
 
-/** Small click-to-edit text value for the properties card. */
-function EditableProp({ value, editable, placeholder, type = 'text', align = 'right', onSave }: {
-  value?: string | null; editable: boolean; placeholder?: string;
-  type?: 'text' | 'email' | 'number'; align?: 'left' | 'right';
+/* ─────────────── Rail: properties ─────────────── */
+
+/**
+ * Click-to-edit rail value. Renders as the same chip the project rail uses.
+ * `display` lets a field read as prose ("14 days") while editing the raw value.
+ */
+function RailInput({ value, editable, placeholder, type = 'text', display, onSave }: {
+  value?: string | null; editable: boolean; placeholder: string;
+  type?: 'text' | 'email' | 'number';
+  display?: string;
   onSave: (v: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
-  if (!editable && !value) return <span className="text-faint">–</span>;
+
   if (editing) {
     const commit = () => {
       setEditing(false);
@@ -478,83 +626,98 @@ function EditableProp({ value, editable, placeholder, type = 'text', align = 'ri
         onBlur={commit}
         onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false); }}
         className={cn(
-          'w-full min-w-[140px] rounded-md border border-primary/40 bg-transparent px-1 text-[13px] outline-none focus:ring-2 focus:ring-ring/25',
-          align === 'right' && 'text-right',
+          'min-h-7 w-full rounded-md border border-primary/40 bg-transparent px-1.5 py-1 text-[13px] outline-none focus:ring-2 focus:ring-ring/25',
           type === 'number' && 'tabular-nums',
         )}
       />
     );
   }
-  const display = value || <span className="text-faint">{placeholder ?? '–'}</span>;
-  if (!editable) return <span>{display}</span>;
+
+  const chip = (
+    <RailChip empty={!value} disabled={!editable}>
+      <span className={cn('truncate', type === 'number' && 'tabular-nums')}>{(value && (display ?? value)) || placeholder}</span>
+    </RailChip>
+  );
+  if (!editable) return chip;
   return (
-    <button
-      onClick={() => { setDraft(value ?? ''); setEditing(true); }}
-      className={cn('-mx-1 max-w-full break-words rounded-md px-1 transition-colors hover:bg-muted', align === 'right' && 'text-right')}
-    >
-      {display}
+    <button type="button" className="block w-full text-left" onClick={() => { setDraft(value ?? ''); setEditing(true); }}>
+      {chip}
     </button>
   );
 }
 
-function PropertiesCard({ company, loading, editable, onPatch }: {
+function CompanyRail({ company, loading, editable, onPatch }: {
   company?: Company; loading: boolean; editable: boolean; onPatch: (body: Record<string, unknown>) => void;
 }) {
   const t = useT();
+
+  if (loading || !company) {
+    return <div className="space-y-3">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-7" />)}</div>;
+  }
+
   return (
-    <Card className="p-4">
-      <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-faint">{t('crm.properties')}</h3>
-      {loading || !company ? (
-        <div className="space-y-2 pt-2">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-4" />)}</div>
-      ) : (
-        <div className="divide-y divide-border/60">
-          {/* Status lives in the header pill – repeating it here was pure noise. */}
-          <PropRow label={t('crm.colDomain')}>
-            <EditableProp value={company.domain} editable={editable} placeholder={t('crm.noDomain')}
-              onSave={(v) => onPatch({ domain: v || null })} />
-          </PropRow>
-          <PropRow label={t('crm.billingEmail')}>
-            {editable ? (
-              <EditableProp value={company.billingEmail} editable type="email" onSave={(v) => onPatch({ billingEmail: v || null })} />
-            ) : company.billingEmail ? (
-              <a href={`mailto:${company.billingEmail}`} className="text-primary hover:underline">{company.billingEmail}</a>
-            ) : (
-              <span className="text-faint">–</span>
-            )}
-          </PropRow>
-          <PropRow label={t('common.currency')}>
-            {editable ? (
-              <DropdownMenu
-                align="end"
-                trigger={<button className="-mx-1 rounded-md px-1 tabular-nums transition-colors hover:bg-muted">{company.defaultCurrency || 'USD'} <ChevronDown size={11} className="inline text-faint" /></button>}
-              >
-                {CURRENCIES.map((cur) => (
-                  <MenuItem key={cur} checked={cur === company.defaultCurrency} onSelect={() => cur !== company.defaultCurrency && onPatch({ defaultCurrency: cur })}>{cur}</MenuItem>
-                ))}
-              </DropdownMenu>
-            ) : (
-              <span className="tabular-nums">{company.defaultCurrency || '–'}</span>
-            )}
-          </PropRow>
-          <PropRow label={t('crm.paymentTerms')}>
-            {editable ? (
-              <EditablePaymentTerms days={company.paymentTermsDays} onSave={(n) => onPatch({ paymentTermsDays: n })} />
-            ) : company.paymentTermsDays != null ? (
-              <span className="tabular-nums">{t('crm.paymentTermsValue').replace('{n}', String(company.paymentTermsDays))}</span>
-            ) : (
-              <span className="text-faint">–</span>
-            )}
-          </PropRow>
-          <PropRow label={t('crm.created')}>{fmtDate(company.createdAt)}</PropRow>
-        </div>
-      )}
-    </Card>
+    <div>
+      <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('crm.details')}</h2>
+      <div className="space-y-0.5">
+        {/* Status lives in the header pill – repeating it here was pure noise. */}
+        <RailField label={t('crm.colDomain')}>
+          <RailInput
+            value={company.domain}
+            editable={editable}
+            placeholder={t('crm.noDomain')}
+            onSave={(v) => onPatch({ domain: v || null })}
+          />
+        </RailField>
+        <RailField label={t('crm.billingEmail')}>
+          <RailInput
+            value={company.billingEmail}
+            editable={editable}
+            type="email"
+            placeholder="–"
+            onSave={(v) => onPatch({ billingEmail: v || null })}
+          />
+        </RailField>
+        <RailField label={t('common.currency')}>
+          {editable ? (
+            <DropdownMenu
+              align="start"
+              className="w-full"
+              trigger={<RailChip caret><span className="tabular-nums">{company.defaultCurrency || 'USD'}</span></RailChip>}
+            >
+              {CURRENCIES.map((cur) => (
+                <MenuItem key={cur} checked={cur === company.defaultCurrency} onSelect={() => cur !== company.defaultCurrency && onPatch({ defaultCurrency: cur })}>{cur}</MenuItem>
+              ))}
+            </DropdownMenu>
+          ) : (
+            <RailChip disabled><span className="tabular-nums">{company.defaultCurrency || '–'}</span></RailChip>
+          )}
+        </RailField>
+        <RailField label={t('crm.paymentTerms')}>
+          <RailInput
+            value={company.paymentTermsDays != null ? String(company.paymentTermsDays) : ''}
+            display={company.paymentTermsDays != null ? t('crm.paymentTermsValue').replace('{n}', String(company.paymentTermsDays)) : undefined}
+            editable={editable}
+            type="number"
+            placeholder="–"
+            onSave={(v) => {
+              const n = Number(v);
+              if (v !== '' && Number.isInteger(n) && n >= 0) onPatch({ paymentTermsDays: n });
+            }}
+          />
+        </RailField>
+        <RailField label={t('crm.created')}>
+          <RailChip disabled><span className="tabular-nums">{fmtDate(company.createdAt)}</span></RailChip>
+        </RailField>
+      </div>
+    </div>
   );
 }
 
+/* ─────────────── Rail: linked projects ─────────────── */
+
 interface LinkableProject extends Project { companyId?: string | null; version?: number }
 
-function ProjectsCard({ companyId }: { companyId: string }) {
+function ProjectsRail({ companyId }: { companyId: string }) {
   const t = useT();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -586,34 +749,35 @@ function ProjectsCard({ companyId }: { companyId: string }) {
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
   });
 
-  if (isLoading) return <Card className="p-4"><Skeleton className="h-4 w-24" /></Card>;
+  if (isLoading) return <Skeleton className="h-7 w-24" />;
 
   const canCreate = can('projects.create');
   const canLink = can('projects.write') || canCreate;
 
   return (
-    <Card className="p-4">
+    <div>
       <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-faint">{t('crm.linkedProjects')}</h3>
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-faint">{t('crm.linkedProjects')}</h2>
         {(canCreate || canLink) && (
           <DropdownMenu
             align="end"
             trigger={<IconButton size="sm" aria-label={t('crm.newProjectForClient')}><Plus size={13} /></IconButton>}
           >
             {canCreate && <MenuItem icon={<Plus size={13} />} onSelect={() => setCreating(true)}>{t('crm.newProjectForClient')}</MenuItem>}
+            {canCreate && canLink && <MenuSeparator />}
             {canLink && <MenuItem icon={<FolderKanban size={13} />} onSelect={() => setLinking(true)}>{t('crm.linkExistingProject')}</MenuItem>}
           </DropdownMenu>
         )}
       </div>
       {projects.length === 0 ? (
-        <p className="py-1 text-[13px] text-faint">{t('crm.noProjects')}</p>
+        <p className="px-1.5 py-1 text-[13px] text-faint">{t('crm.noProjects')}</p>
       ) : (
         <div className="space-y-0.5">
           {projects.map((p) => (
             <Link
               key={p.id}
               to={`/projects/${p.id}`}
-              className="-mx-1.5 flex items-center gap-2 rounded-md px-1.5 py-1.5 text-[13px] transition-colors hover:bg-muted"
+              className="flex min-h-7 items-center gap-2 rounded-md px-1.5 py-1 text-[13px] transition-colors hover:bg-muted"
             >
               <FolderKanban size={14} className="shrink-0 text-muted-foreground" />
               <span className="min-w-0 flex-1 truncate">{p.name}</span>
@@ -655,6 +819,6 @@ function ProjectsCard({ companyId }: { companyId: string }) {
           </div>
         </div>
       </Dialog>
-    </Card>
+    </div>
   );
 }

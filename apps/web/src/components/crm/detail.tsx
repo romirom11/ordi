@@ -124,7 +124,11 @@ export function PropRow({ label, children }: { label: string; children: React.Re
 
 /* ─────────────── Notes (company or deal) ─────────────── */
 
-export function NotesSection({ companyId, dealId, canWrite }: { companyId?: string; dealId?: string; canWrite: boolean }) {
+export function NotesSection({ companyId, dealId, canWrite, focusToken }: {
+  companyId?: string; dealId?: string; canWrite: boolean;
+  /** Bump to scroll the composer into view and put the caret in it. */
+  focusToken?: number;
+}) {
   const t = useT();
   const qc = useQueryClient();
   const target = companyId ? { companyId } : { dealId };
@@ -194,11 +198,22 @@ export function NotesSection({ companyId, dealId, canWrite }: { companyId?: stri
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId]);
 
+  // The header's "Add note" button lives outside this section, so focusing the
+  // composer travels as a token rather than a ref handed up the tree.
+  const composerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!focusToken || !canWrite) return;
+    const box = composerRef.current;
+    if (!box) return;
+    box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    requestAnimationFrame(() => box.querySelector<HTMLElement>('[contenteditable="true"]')?.focus());
+  }, [focusToken, canWrite]);
+
   return (
     <section>
       <SectionHeader icon={<Pin size={15} />} title={t('crm.notes')} count={notes.length} />
       {canWrite && (
-        <div className="mb-4 rounded-lg border border-border/70 px-3 py-2 transition-colors focus-within:border-border-strong">
+        <div ref={composerRef} className="mb-4 rounded-lg border border-border/70 px-3 py-2 transition-colors focus-within:border-border-strong">
           <RichEditor key={editorKey} value={doc} onChange={setDoc} compact bare placeholder={t('crm.notePlaceholder')} onSubmit={submit} />
           {!docIsEmpty(doc) && (
             <div className="mt-2 flex justify-end gap-2">

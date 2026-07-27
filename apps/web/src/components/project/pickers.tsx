@@ -1,8 +1,8 @@
 import { type ReactNode } from 'react';
 import {
-  Building2, CalendarDays, ChevronDown, Circle, Globe, Lock, UserCircle2, X,
+  Building2, CalendarDays, Circle, Globe, Lock, UserCircle2, X,
 } from 'lucide-react';
-import { Avatar, cn, fmtDate } from '../ui';
+import { Avatar, RailChip, RailField, fmtDate } from '../ui';
 import { DropdownMenu, MenuItem, MenuLabel, MenuSeparator, useMenuClose } from '../overlays';
 import { Calendar } from '../DatePicker';
 import { useT, extendDict } from '../../lib/i18n';
@@ -33,38 +33,9 @@ export const STATUS_META: Record<string, { color: string; key: string }> = {
   archived: { color: '#8a8f98', key: 'projects.statusArchived' },
 };
 
-/* ───────────── Rail primitives (Linear-style property rows) ───────────── */
-
-/** Labeled row: faint label on the left, control filling the rest. */
-export function RailField({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex items-start gap-2 py-0.5">
-      <span className="w-[76px] shrink-0 pt-[7px] text-xs text-faint">{label}</span>
-      <div className="min-w-0 flex-1">{children}</div>
-    </div>
-  );
-}
-
-/** Full-width trigger chip that hovers, matching the task sidebar. */
-function RailChip({ children, empty, disabled, caret }: {
-  children: ReactNode; empty?: boolean; disabled?: boolean; caret?: boolean;
-}) {
-  return (
-    <span
-      className={cn(
-        'group flex min-h-7 w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-[13px]',
-        'transition-colors duration-150',
-        disabled ? 'cursor-default' : 'cursor-pointer hover:bg-muted',
-        empty && 'text-faint',
-      )}
-    >
-      {children}
-      {caret && !disabled && (
-        <ChevronDown size={13} className="ml-auto shrink-0 text-faint opacity-0 transition-opacity group-hover:opacity-100" />
-      )}
-    </span>
-  );
-}
+/* Rail primitives live in ui.tsx – re-exported so the project pickers stay the
+ * one import site for everything the properties rail needs. */
+export { RailField };
 
 /* ───────────────────────────── Lead ───────────────────────────── */
 
