@@ -6,13 +6,24 @@ function required(name: string, fallback?: string): string {
   return v;
 }
 
+/**
+ * Public origin the API is reachable at, without a trailing slash and without a
+ * trailing `/api` segment. Every absolute URL we hand to GitHub/Slack already
+ * carries the `/api/v1/...` prefix, so an `API_URL=https://host/api` – the
+ * natural thing to write when the router forwards `/api/*` – would otherwise
+ * produce `https://host/api/api/v1/...` and 404 every OAuth redirect.
+ */
+export function normalizeApiUrl(raw: string): string {
+  return raw.trim().replace(/\/+$/, '').replace(/\/api$/i, '');
+}
+
 export const env = {
   nodeEnv: process.env.NODE_ENV ?? 'development',
   isProd: process.env.NODE_ENV === 'production',
   port: Number(process.env.PORT ?? 3000),
   databaseUrl: required('DATABASE_URL', 'postgres://postgres:postgres@localhost:5432/ordi'),
   appUrl: process.env.APP_URL ?? 'http://localhost:5173',
-  apiUrl: process.env.API_URL ?? 'http://localhost:3000',
+  apiUrl: normalizeApiUrl(process.env.API_URL ?? 'http://localhost:3000'),
   authSecret: process.env.AUTH_SECRET ?? 'dev-insecure-secret-change-me',
   /** GitHub OAuth app credentials for connecting git accounts (PRD §13.1). */
   githubOAuthClientId: process.env.GITHUB_OAUTH_CLIENT_ID ?? '',

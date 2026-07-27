@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ChevronDown, GitBranch, Github, Gitlab, Hash, Link2, Plus, Search, Slack, X,
@@ -90,7 +90,7 @@ interface Connection { id: string; provider: string; status?: string; instanceUr
 interface Repo { id?: string; connectionId?: string; externalId: string; fullName?: string; defaultBranch?: string }
 interface BoundRepo {
   id?: string; repositoryId?: string; connectionId?: string;
-  externalId?: string; fullName?: string; defaultBranch?: string;
+  externalId?: string; fullName?: string; defaultBranch?: string; provider?: string | null;
 }
 
 function ProviderIcon({ provider, className }: { provider?: string; className?: string }) {
@@ -122,35 +122,28 @@ function GitSection({ projectId, canManage }: { projectId: string; canManage: bo
   const qc = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
 
+  // The endpoint joins the repository in, so names come with the binding – no
+  // second, `integrations.manage`-gated lookup a project admin may not pass.
   const boundQ = useQuery<BoundRepo[]>({
     queryKey: ['project-repos', projectId],
     queryFn: () => api.get<{ data: BoundRepo[] }>(`/projects/${projectId}/repositories`).then((r) => r.data),
   });
-  // Registry used to enrich bare join rows ({projectId, repositoryId}) with names.
-  const registryQ = useQuery<Repo[]>({
-    queryKey: ['git-repos-registry'],
-    queryFn: () => api.get<{ data: Repo[] }>('/integrations/git/repositories').then((r) => r.data),
-    enabled: canManage,
-    staleTime: 60_000,
-  });
-  const registry = useMemo(() => {
-    const m = new Map<string, Repo>();
-    for (const r of registryQ.data ?? []) if (r.id) m.set(r.id, r);
-    return m;
-  }, [registryQ.data]);
 
   const bound = boundQ.data ?? [];
   const view = bound.map((r) => {
     const rid = r.repositoryId ?? r.id ?? r.externalId ?? '';
-    const meta = registry.get(rid);
     return {
       key: rid,
-      deleteId: r.repositoryId ?? r.id ?? r.externalId ?? '',
-      fullName: r.fullName ?? meta?.fullName ?? rid,
-      defaultBranch: r.defaultBranch ?? meta?.defaultBranch,
+      deleteId: rid,
+      externalId: r.externalId,
+      provider: r.provider,
+      fullName: r.fullName ?? r.externalId ?? rid,
+      defaultBranch: r.defaultBranch,
     };
   });
-  const boundIds = new Set(view.map((v) => v.key));
+  // The picker lists provider repos (keyed by external id), bindings store the
+  // registered row id – keep both so already-linked repos stay out of the list.
+  const boundIds = new Set(view.flatMap((v) => [v.key, v.externalId].filter(Boolean) as string[]));
 
   const unbind = useMutation({
     mutationFn: (deleteId: string) => api.del(`/projects/${projectId}/repositories/${deleteId}`),
@@ -190,7 +183,7 @@ function GitSection({ projectId, canManage }: { projectId: string; canManage: bo
         <div className="overflow-hidden rounded-lg border border-border bg-card">
           {view.map((r, i) => (
             <div key={r.key} className={cn('group flex items-center gap-2.5 px-3 py-2', i > 0 && 'border-t border-border')}>
-              <GitBranch size={15} className="shrink-0 text-muted-foreground" />
+              <ProviderIcon provider={r.provider ?? undefined} className="shrink-0 text-muted-foreground" />
               <span className="flex-1 truncate font-mono text-[12px]">{r.fullName}</span>
               {r.defaultBranch && (
                 <Badge className="bg-muted font-mono text-[10px] text-muted-foreground">{r.defaultBranch}</Badge>

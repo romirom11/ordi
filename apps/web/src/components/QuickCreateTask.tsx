@@ -14,9 +14,10 @@ import { Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator, toast, useMen
 import { ProjectIcon } from './project/ProjectIcon';
 import { RichEditor, EMPTY_DOC } from './richtext/RichEditor';
 import { docIsEmpty } from './richtext/RichText';
-import { useUsersLookup } from '../lib/queries';
+import { useUsersLookup, useLabels } from '../lib/queries';
 import { useT, extendDict } from '../lib/i18n';
 import { Calendar } from './DatePicker';
+import { LabelsMenu } from './LabelsMenu';
 
 extendDict({
   en: {
@@ -30,7 +31,6 @@ extendDict({
     'qc.status': 'Status',
     'qc.assignee': 'Assignee',
     'qc.labels': 'Labels',
-    'qc.noLabels': 'No labels in this workspace yet',
     'qc.dueDate': 'Due date',
     'qc.pickDate': 'Pick a date',
     'qc.clearDate': 'Clear date',
@@ -49,7 +49,6 @@ extendDict({
     'qc.status': 'Статус',
     'qc.assignee': 'Виконавець',
     'qc.labels': 'Мітки',
-    'qc.noLabels': 'У воркспейсі поки немає міток',
     'qc.dueDate': 'Термін',
     'qc.pickDate': 'Оберіть дату',
     'qc.clearDate': 'Прибрати дату',
@@ -61,7 +60,6 @@ extendDict({
 
 interface ProjectLite { id: string; name: string; key: string }
 interface StatusLite { id: string; name: string; category: string; color: string; position: number; isDefault?: boolean }
-interface LabelLite { id: string; name: string; color: string }
 interface UserLite { id: string; name?: string | null; email?: string | null; avatar?: string | null }
 interface CreatedTask { id: string; ref?: string; title: string }
 
@@ -161,12 +159,7 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
 
   const usersQ = useUsersLookup();
   const users = (usersQ.data ?? []) as UserLite[];
-  const labelsQ = useQuery<LabelLite[]>({
-    queryKey: ['labels'],
-    queryFn: () => api.get<{ data: LabelLite[] }>('/labels').then((r) => r.data),
-    enabled: open,
-  });
-  const labels = labelsQ.data ?? [];
+  const labels = useLabels('task').data ?? [];
 
   // Initial project: last used (localStorage) if still available, else first.
   useEffect(() => {
@@ -429,7 +422,7 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
 
             {/* Labels (multi) */}
             <DropdownMenu
-              width={220}
+              width={240}
               trigger={
                 <ChipButton muted={selectedLabels.length === 0}>
                   {selectedLabels.length === 0 ? (
@@ -440,7 +433,7 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
                         <span
                           key={l.id}
                           className="h-2.5 w-2.5 rounded-full ring-1 ring-elevated"
-                          style={{ backgroundColor: l.color }}
+                          style={{ backgroundColor: l.color ?? '#8a8f98' }}
                         />
                       ))}
                     </span>
@@ -456,20 +449,7 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
                 </ChipButton>
               }
             >
-              <MenuLabel>{t('qc.labels')}</MenuLabel>
-              {labels.length === 0 && <div className="px-2 py-1.5 text-xs text-faint">{t('qc.noLabels')}</div>}
-              {labels.map((l) => (
-                <ToggleItem
-                  key={l.id}
-                  icon={<span className="block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: l.color }} />}
-                  checked={labelIds.includes(l.id)}
-                  onToggle={() =>
-                    setLabelIds((cur) => (cur.includes(l.id) ? cur.filter((id) => id !== l.id) : [...cur, l.id]))
-                  }
-                >
-                  {l.name}
-                </ToggleItem>
-              ))}
+              <LabelsMenu scope="task" value={labelIds} onChange={setLabelIds} />
             </DropdownMenu>
 
             {/* Due date */}

@@ -14,6 +14,52 @@ import { assertProject } from '../../core/access';
 import * as svc from './service';
 import { projectOverviewRoutes } from './overview.routes';
 
+type Db = ReturnType<typeof getDb>['db'];
+
+/**
+ * A binding always stores a `git_repositories.id` – webhook delivery resolves
+ * projects through that id, and the UI reads names from that row. The repo
+ * picker, however, lists repositories straight from the provider, where the
+ * only handle is the provider's own id; binding one of those used to store the
+ * provider id verbatim, which linked nothing and rendered as a bare number.
+ * So: resolve provider coordinates to the registered row, registering it when
+ * the connection has not synced that repository yet.
+ */
+async function resolveRepositoryId(db: Db, body: {
+  repositoryId?: string; connectionId?: string; externalId?: string;
+  fullName?: string; defaultBranch?: string;
+}): Promise<string> {
+  const byId = body.repositoryId
+    ? await db.select({ id: schema.gitRepositories.id }).from(schema.gitRepositories)
+      .where(eq(schema.gitRepositories.id, body.repositoryId))
+    : [];
+  if (byId[0]) return byId[0].id;
+
+  // Fall back to provider coordinates (`repositoryId` may itself be one, from
+  // clients that predate this endpoint accepting them explicitly).
+  const externalId = body.externalId ?? body.repositoryId;
+  if (!externalId) throw err.notFound('Repository not found');
+  const byExternal = await db.select({ id: schema.gitRepositories.id }).from(schema.gitRepositories)
+    .where(body.connectionId
+      ? and(eq(schema.gitRepositories.externalId, externalId), eq(schema.gitRepositories.connectionId, body.connectionId))
+      : eq(schema.gitRepositories.externalId, externalId));
+  if (byExternal[0]) return byExternal[0].id;
+
+  if (!body.connectionId || !body.fullName) throw err.notFound('Repository not found');
+  const [conn] = await db.select({ id: schema.gitConnections.id }).from(schema.gitConnections)
+    .where(eq(schema.gitConnections.id, body.connectionId));
+  if (!conn) throw err.notFound('Connection not found');
+  const id = ulid();
+  await db.insert(schema.gitRepositories).values({
+    id,
+    connectionId: body.connectionId,
+    externalId,
+    fullName: body.fullName,
+    defaultBranch: body.defaultBranch ?? 'main',
+  });
+  return id;
+}
+
 /** Assert settings.manage for workspace-level config changes. */
 function requireSettingsManage(c: any) {
   const actor = currentActor(c);
@@ -69,12 +115,28 @@ export function projectsRoutes() {
   });
 
   // ── Repositories (git binding, project admin) ──
+  // The join row only stores an id, so the repository is joined in: a project
+  // admin without `integrations.manage` still gets names to render, and nobody
+  // has to fall back to showing a raw id.
   app.get('/projects/:id/repositories', async (c) => {
     const actor = currentActor(c);
     const projectId = c.req.param('id');
     await assertProject(actor, projectId, 'admin');
     const { db } = getDb();
-    return c.json({ data: await db.select().from(schema.projectRepositories).where(eq(schema.projectRepositories.projectId, projectId)) });
+    const rows = await db.select({
+      projectId: schema.projectRepositories.projectId,
+      repositoryId: schema.projectRepositories.repositoryId,
+      connectionId: schema.gitRepositories.connectionId,
+      externalId: schema.gitRepositories.externalId,
+      fullName: schema.gitRepositories.fullName,
+      defaultBranch: schema.gitRepositories.defaultBranch,
+      provider: schema.gitConnections.provider,
+    })
+      .from(schema.projectRepositories)
+      .leftJoin(schema.gitRepositories, eq(schema.gitRepositories.id, schema.projectRepositories.repositoryId))
+      .leftJoin(schema.gitConnections, eq(schema.gitConnections.id, schema.gitRepositories.connectionId))
+      .where(eq(schema.projectRepositories.projectId, projectId));
+    return c.json({ data: rows });
   });
 
   app.post('/projects/:id/repositories', async (c) => {
@@ -83,8 +145,9 @@ export function projectsRoutes() {
     await assertProject(actor, projectId, 'admin');
     const body = projectRepositoryInputSchema.parse(await c.req.json());
     const { db } = getDb();
-    await db.insert(schema.projectRepositories).values({ projectId, repositoryId: body.repositoryId }).onConflictDoNothing();
-    return c.json({ ok: true }, 201);
+    const repositoryId = await resolveRepositoryId(db, body);
+    await db.insert(schema.projectRepositories).values({ projectId, repositoryId }).onConflictDoNothing();
+    return c.json({ ok: true, repositoryId }, 201);
   });
 
   app.delete('/projects/:id/repositories/:repoId', async (c) => {

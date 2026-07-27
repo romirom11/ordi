@@ -42,7 +42,9 @@ services:
       # upgraded image both end up at the right schema without extra steps.
       DATABASE_URL: postgres://${POSTGRES_USER:-ordi}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ordi}
       APP_URL: ${APP_URL:?set APP_URL to the public https address}
-      API_URL: ${APP_URL}/api
+      # Same origin as the SPA: the API lives under /api/v1 on it, and every
+      # callback URL is built by appending that path – so no /api suffix here.
+      API_URL: ${API_URL:-${APP_URL}}
       CORS_ORIGINS: ${CORS_ORIGINS:-${APP_URL}}
       AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY (32-byte hex)}

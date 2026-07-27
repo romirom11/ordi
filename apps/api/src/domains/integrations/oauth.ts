@@ -42,7 +42,7 @@ export function verifyOAuthState(state: string | undefined | null): { userId: st
 
 /** The callback URL registered with the GitHub OAuth app. */
 export function githubCallbackUrl(): string {
-  return `${env.apiUrl.replace(/\/$/, '')}/api/v1/integrations/git/oauth/callback`;
+  return `${env.apiUrl}/api/v1/integrations/git/oauth/callback`;
 }
 
 export async function buildGithubAuthorizeUrl(state: string): Promise<string> {
@@ -89,7 +89,7 @@ export async function slackOAuthConfigured(): Promise<boolean> {
 
 /** The redirect URL registered with the Slack app. */
 export function slackCallbackUrl(): string {
-  return `${env.apiUrl.replace(/\/$/, '')}/api/v1/integrations/slack/oauth/callback`;
+  return `${env.apiUrl}/api/v1/integrations/slack/oauth/callback`;
 }
 
 export async function buildSlackAuthorizeUrl(state: string): Promise<string> {

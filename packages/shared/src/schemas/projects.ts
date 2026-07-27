@@ -3,6 +3,7 @@ import { idSchema, customFieldsSchema, richTextSchema } from './common';
 import {
   PROJECT_STATUSES, VISIBILITY, PROJECT_MEMBER_ROLES, REVENUE_SOURCES,
   TASK_STATUS_CATEGORIES, TASK_PRIORITIES, TASK_RELATION_TYPES, CYCLE_STATUSES, ESTIMATE_UNITS,
+  LABEL_SCOPES,
 } from '../constants';
 
 export const projectInputSchema = z.object({
@@ -185,6 +186,7 @@ export const commentInputSchema = z.object({
 export const labelInputSchema = z.object({
   name: z.string().min(1),
   color: z.string().default('#6b7280'),
+  scope: z.enum(LABEL_SCOPES).default('task'),
 });
 
 export const cycleInputSchema = z.object({

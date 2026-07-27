@@ -17,7 +17,7 @@ import { RichEditor, EMPTY_DOC } from '../components/richtext/RichEditor';
 import { PropertySidebar } from '../components/task/PropertySidebar';
 import { SubtaskList } from '../components/task/SubtaskList';
 import { ActivityFeed } from '../components/task/CommentThread';
-import type { TaskDetail, TaskLabel, TaskPatch, TaskStatus, UserLite } from '../components/task/types';
+import type { TaskDetail, TaskPatch, TaskStatus, UserLite } from '../components/task/types';
 import { useT, extendDict } from '../lib/i18n';
 import '../components/task/task.css';
 
@@ -91,10 +91,6 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
     queryFn: () => api.get<{ data: TaskStatus[] }>(`/projects/${projectId}/task-statuses`).then((r) => r.data),
   });
   const usersQ = useUsersLookup();
-  const labelsQ = useQuery({
-    queryKey: ['labels'],
-    queryFn: () => api.get<{ data: TaskLabel[] }>('/labels').then((r) => r.data),
-  });
 
   const task = taskQ.data;
   const project = projectQ.data;
@@ -283,7 +279,6 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
             task={task}
             statuses={statuses}
             users={usersQ.data ?? []}
-            labels={labelsQ.data ?? []}
             onPatch={patch}
             hasRepos={hasRepos}
           />
