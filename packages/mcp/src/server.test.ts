@@ -101,9 +101,9 @@ describe('CRM create/list tools', () => {
     }
   });
 
-  it('list_deals compacts rows and filters by company', async () => {
+  it('list_deals compacts rows and filters by company and project', async () => {
     const api = fakeApi({ '/deals': { data: [{
-      id: 'd1', title: 'Retainer', companyId: 'c1', stageId: 's1', amount: '5000', currency: 'USD',
+      id: 'd1', title: 'Retainer', companyId: 'c1', projectId: 'p1', stageId: 's1', amount: '5000', currency: 'USD',
       expectedCloseDate: null, ownerId: null, customFields: { secretish: 1 }, version: 2, deletedAt: null,
       createdBy: 'u1', createdAt: 'x', updatedAt: 'x',
     }] } });
@@ -112,13 +112,20 @@ describe('CRM create/list tools', () => {
     api.get = async <T>(path: string): Promise<T> => { requested = path; return inner<T>(path); };
 
     const client = await connect(api);
-    const res = await client.callTool({ name: 'list_deals', arguments: { companyId: 'c1' } });
-    expect(requested).toBe('/deals?companyId=c1');
+    const res = await client.callTool({ name: 'list_deals', arguments: { companyId: 'c1', projectId: 'p1' } });
+    expect(requested).toBe('/deals?companyId=c1&projectId=p1');
     const body = JSON.parse((res.content as any)[0].text);
     expect(body.data).toEqual([{
-      id: 'd1', title: 'Retainer', companyId: 'c1', stageId: 's1', amount: '5000', currency: 'USD',
+      id: 'd1', title: 'Retainer', companyId: 'c1', projectId: 'p1', stageId: 's1', amount: '5000', currency: 'USD',
       expectedCloseDate: null, ownerId: null,
     }]);
+  });
+
+  it('create_deal passes projectId through to the API', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({}, posts));
+    await client.callTool({ name: 'create_deal', arguments: { companyId: 'c1', title: 'SaaS lead', stageId: 's1', projectId: 'p1' } });
+    expect(posts).toEqual([{ path: '/deals', body: { companyId: 'c1', title: 'SaaS lead', stageId: 's1', projectId: 'p1' } }]);
   });
 
   it('list_deal_stages returns id + won/lost flags for stage discovery', async () => {

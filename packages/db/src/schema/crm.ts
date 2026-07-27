@@ -55,6 +55,13 @@ export const dealStages = pgTable('deal_stages', {
 export const deals = pgTable('deals', {
   id: pk(),
   companyId: text('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+  /**
+   * Optional link to the product/delivery project this deal sells into
+   * (e.g. a SaaS lead vs. a services lead). The FK to projects(id) lives in
+   * the SQL migration – projects.ts imports this module, so a drizzle-level
+   * reference here would create a schema-module cycle.
+   */
+  projectId: text('project_id'),
   title: text('title').notNull(),
   stageId: text('stage_id').notNull().references(() => dealStages.id),
   amount: money('amount').notNull().default('0'),
@@ -70,6 +77,7 @@ export const deals = pgTable('deals', {
 }, (t) => ({
   companyIdx: index('deals_company_idx').on(t.companyId),
   stageIdx: index('deals_stage_idx').on(t.stageId),
+  projectIdx: index('deals_project_idx').on(t.projectId),
 }));
 
 export const notes = pgTable('notes', {
