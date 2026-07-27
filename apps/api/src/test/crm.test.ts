@@ -82,3 +82,37 @@ describe('deal ↔ project link', () => {
     expect(res.status).toBe(201);
   });
 });
+
+describe('entity attachments', () => {
+  let fileId: string;
+
+  it('registers and lists files on a company', async () => {
+    const reg = await reqAs(users.owner!.cookie).post('/attachments/register', {
+      entityType: 'company', entityId: companyId, fileKey: 'uploads/x/brief.pdf',
+      filename: 'brief.pdf', size: 1234, mime: 'application/pdf',
+    });
+    expect(reg.status).toBe(201);
+    fileId = (await json(reg)).id;
+
+    const list = await json(reqAs(users.owner!.cookie).get(`/attachments?entityType=company&entityId=${companyId}`));
+    expect(list.data).toHaveLength(1);
+    expect(list.data[0].filename).toBe('brief.pdf');
+  });
+
+  it('guest (no crm.read) cannot list company files', async () => {
+    const res = await reqAs(users.guest!.cookie).get(`/attachments?entityType=company&entityId=${companyId}`);
+    expect(res.status).toBe(403);
+  });
+
+  it('member (no crm.write) cannot delete a company file; owner can', async () => {
+    expect((await reqAs(users.member!.cookie).del(`/attachments/${fileId}`)).status).toBe(403);
+    expect((await reqAs(users.owner!.cookie).del(`/attachments/${fileId}`)).status).toBe(200);
+    const list = await json(reqAs(users.owner!.cookie).get(`/attachments?entityType=company&entityId=${companyId}`));
+    expect(list.data).toHaveLength(0);
+  });
+
+  it('rejects unknown entity types', async () => {
+    const res = await reqAs(users.owner!.cookie).get('/attachments?entityType=weird&entityId=x');
+    expect(res.status).toBe(400);
+  });
+});

@@ -15,17 +15,18 @@ import { Link, useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import {
-  Avatar, Badge, Breadcrumbs, Button, Card, EmptyState, IconButton, Skeleton, Tooltip,
+  Avatar, Badge, Breadcrumbs, Button, Card, EmptyState, IconButton, Select, Skeleton, Spinner, Tooltip,
   cn, fmtMoney, fmtDate,
 } from '../components/ui';
-import { ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, toast } from '../components/overlays';
+import { ConfirmDialog, Dialog, DropdownMenu, MenuItem, MenuLabel, toast } from '../components/overlays';
 import { useT } from '../lib/i18n';
 import {
   COMPANY_STATUSES, CURRENCIES, StatusPill, useDealStages, useUsersLookup,
   type Company, type Contact, type Deal, type Stage,
 } from '../components/crm/shared';
-import { EditableName, NotesSection, OwnerPicker, PropRow, SectionHeader } from '../components/crm/detail';
+import { EditableName, FilesSection, NotesSection, OwnerPicker, PropRow, SectionHeader } from '../components/crm/detail';
 import { ContactDialog, NewDealDialog } from '../components/crm/dialogs';
+import { NewProjectModal } from './Projects';
 import { useWorkspaceSettings, financeEnabled } from '../components/finance/workspace';
 
 interface Project { id: string; name: string; key?: string | null; status?: string | null }
@@ -133,12 +134,13 @@ export function CompanyDetailPage({ id }: { id: string }) {
 
       {/* Body: main + side */}
       <div className="min-h-0 flex-1 overflow-auto">
-        <div className="mx-auto grid max-w-6xl gap-6 p-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="mx-auto grid max-w-6xl gap-6 p-6 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-8">
             {can('deals.read') && <DealsSection companyId={id} canWrite={can('deals.write')} />}
             <InvoicesSection companyId={id} />
             <ContactsSection companyId={id} canWrite={canWrite} />
             <NotesSection companyId={id} canWrite={canWrite} />
+            <FilesSection entityType="company" entityId={id} canWrite={canWrite} />
           </div>
           <aside className="space-y-4">
             <PropertiesCard company={c} loading={companyQ.isLoading} editable={canWrite} onPatch={(body) => patch.mutate(body)} />
@@ -419,6 +421,38 @@ function ContactsSection({ companyId, canWrite }: { companyId: string; canWrite:
 
 /* ─────────────── Side: properties ─────────────── */
 
+/** Payment terms keep their "N days" wording while staying click-to-edit. */
+function EditablePaymentTerms({ days, onSave }: { days?: number | null; onSave: (n: number) => void }) {
+  const t = useT();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  if (editing) {
+    const commit = () => {
+      setEditing(false);
+      const n = Number(draft);
+      if (draft !== '' && Number.isInteger(n) && n >= 0 && n !== days) onSave(n);
+    };
+    return (
+      <input
+        autoFocus type="number" min={0} value={draft}
+        onFocus={(e) => e.target.select()}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false); }}
+        className="w-20 rounded-md border border-primary/40 bg-transparent px-1 text-right text-[13px] tabular-nums outline-none focus:ring-2 focus:ring-ring/25"
+      />
+    );
+  }
+  return (
+    <button
+      onClick={() => { setDraft(days != null ? String(days) : ''); setEditing(true); }}
+      className="-mx-1 rounded-md px-1 tabular-nums transition-colors hover:bg-muted"
+    >
+      {days != null ? t('crm.paymentTermsValue').replace('{n}', String(days)) : <span className="text-faint">–</span>}
+    </button>
+  );
+}
+
 /** Small click-to-edit text value for the properties card. */
 function EditableProp({ value, editable, placeholder, type = 'text', align = 'right', onSave }: {
   value?: string | null; editable: boolean; placeholder?: string;
@@ -444,7 +478,7 @@ function EditableProp({ value, editable, placeholder, type = 'text', align = 'ri
         onBlur={commit}
         onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false); }}
         className={cn(
-          'w-full max-w-[170px] rounded-md border border-primary/40 bg-transparent px-1 text-[13px] outline-none focus:ring-2 focus:ring-ring/25',
+          'w-full min-w-[140px] rounded-md border border-primary/40 bg-transparent px-1 text-[13px] outline-none focus:ring-2 focus:ring-ring/25',
           align === 'right' && 'text-right',
           type === 'number' && 'tabular-nums',
         )}
@@ -456,8 +490,7 @@ function EditableProp({ value, editable, placeholder, type = 'text', align = 'ri
   return (
     <button
       onClick={() => { setDraft(value ?? ''); setEditing(true); }}
-      className={cn('-mx-1 max-w-full truncate rounded-md px-1 transition-colors hover:bg-muted', align === 'right' && 'text-right')}
-      title={value ?? undefined}
+      className={cn('-mx-1 max-w-full break-words rounded-md px-1 transition-colors hover:bg-muted', align === 'right' && 'text-right')}
     >
       {display}
     </button>
@@ -505,11 +538,7 @@ function PropertiesCard({ company, loading, editable, onPatch }: {
           </PropRow>
           <PropRow label={t('crm.paymentTerms')}>
             {editable ? (
-              <EditableProp
-                value={company.paymentTermsDays != null ? String(company.paymentTermsDays) : ''}
-                editable type="number"
-                onSave={(v) => { const n = Number(v); if (v !== '' && Number.isInteger(n) && n >= 0) onPatch({ paymentTermsDays: n }); }}
-              />
+              <EditablePaymentTerms days={company.paymentTermsDays} onSave={(n) => onPatch({ paymentTermsDays: n })} />
             ) : company.paymentTermsDays != null ? (
               <span className="tabular-nums">{t('crm.paymentTermsValue').replace('{n}', String(company.paymentTermsDays))}</span>
             ) : (
@@ -523,27 +552,57 @@ function PropertiesCard({ company, loading, editable, onPatch }: {
   );
 }
 
+interface LinkableProject extends Project { companyId?: string | null; version?: number }
+
 function ProjectsCard({ companyId }: { companyId: string }) {
   const t = useT();
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const can = useCan();
-  const { data, isLoading } = useQuery<Project[]>({
+  const [creating, setCreating] = useState(false);
+  const [linking, setLinking] = useState(false);
+  const [linkId, setLinkId] = useState('');
+
+  const { data, isLoading } = useQuery<LinkableProject[]>({
     queryKey: ['projects', 'company', companyId],
-    queryFn: () => api.get<{ data: Project[] }>(`/projects${qs({ companyId })}`).then((r) => r.data).catch(() => []),
+    queryFn: () => api.get<{ data: LinkableProject[] }>(`/projects${qs({ companyId })}`).then((r) => r.data).catch(() => []),
+  });
+  // Candidates for linking: projects with no client yet.
+  const allQ = useQuery<LinkableProject[]>({
+    queryKey: ['projects'],
+    queryFn: () => api.get<{ data: LinkableProject[] }>('/projects').then((r) => r.data),
+    enabled: linking,
   });
   const projects = data ?? [];
+  const candidates = (allQ.data ?? []).filter((p) => !p.companyId);
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['projects', 'company', companyId] });
+    qc.invalidateQueries({ queryKey: ['projects'] });
+  };
+  const link = useMutation({
+    mutationFn: (p: LinkableProject) => api.patch(`/projects/${p.id}`, { companyId, version: p.version }),
+    onSuccess: () => { setLinking(false); setLinkId(''); invalidate(); toast(t('common.saved')); },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
+  });
+
   if (isLoading) return <Card className="p-4"><Skeleton className="h-4 w-24" /></Card>;
+
+  const canCreate = can('projects.create');
+  const canLink = can('projects.write') || canCreate;
 
   return (
     <Card className="p-4">
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-faint">{t('crm.linkedProjects')}</h3>
-        {can('projects.create') && (
-          <Tooltip label={t('crm.newProjectForClient')}>
-            <IconButton size="sm" aria-label={t('crm.newProjectForClient')} onClick={() => navigate(`/projects?new=1&companyId=${companyId}`)}>
-              <Plus size={13} />
-            </IconButton>
-          </Tooltip>
+        {(canCreate || canLink) && (
+          <DropdownMenu
+            align="end"
+            trigger={<IconButton size="sm" aria-label={t('crm.newProjectForClient')}><Plus size={13} /></IconButton>}
+          >
+            {canCreate && <MenuItem icon={<Plus size={13} />} onSelect={() => setCreating(true)}>{t('crm.newProjectForClient')}</MenuItem>}
+            {canLink && <MenuItem icon={<FolderKanban size={13} />} onSelect={() => setLinking(true)}>{t('crm.linkExistingProject')}</MenuItem>}
+          </DropdownMenu>
         )}
       </div>
       {projects.length === 0 ? (
@@ -563,6 +622,39 @@ function ProjectsCard({ companyId }: { companyId: string }) {
           ))}
         </div>
       )}
+
+      {/* Create in place – no navigation, so Back never resurrects a dialog. */}
+      <NewProjectModal
+        open={creating}
+        onClose={() => setCreating(false)}
+        defaultCompanyId={companyId}
+        onCreated={(pid) => { setCreating(false); invalidate(); navigate(`/projects/${pid}`); }}
+      />
+
+      <Dialog open={linking} onClose={() => { setLinking(false); setLinkId(''); }} title={t('crm.linkExistingProject')} width={420}>
+        <div className="space-y-3 px-4 pb-4 pt-1">
+          {allQ.isLoading ? (
+            <Skeleton className="h-8" />
+          ) : candidates.length === 0 ? (
+            <p className="text-[13px] text-muted-foreground">{t('crm.noUnlinkedProjects')}</p>
+          ) : (
+            <Select value={linkId} onChange={(e) => setLinkId(e.target.value)} className="w-full">
+              <option value="">{t('common.select')}</option>
+              {candidates.map((p) => <option key={p.id} value={p.id}>{p.name}{p.key ? ` (${p.key})` : ''}</option>)}
+            </Select>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => { setLinking(false); setLinkId(''); }}>{t('common.cancel')}</Button>
+            <Button
+              size="sm"
+              disabled={!linkId || link.isPending}
+              onClick={() => { const p = candidates.find((x) => x.id === linkId); if (p) link.mutate(p); }}
+            >
+              {link.isPending ? <Spinner /> : t('crm.linkProject')}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
     </Card>
   );
 }

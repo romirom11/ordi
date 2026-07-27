@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, FolderKanban, Lock, Target, ChevronDown } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
-import { Link, useNavigate, useSearchParams } from '../lib/router';
+import { Link, useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import {
   Button, Input, Select, Badge, PageHeader, Breadcrumbs, Skeleton, EmptyState, Spinner,
@@ -124,14 +124,6 @@ export function ProjectsPage() {
   const [creating, setCreating] = useState(false);
   const [filter, setFilter] = useState<Filter>('all');
 
-  // /projects?new=1&companyId=… (the + on a client's Projects card) opens the
-  // dialog with that client preselected; the params are stripped on close so
-  // reload does not reopen it.
-  const params = useSearchParams();
-  const presetCompanyId = params.get('companyId') ?? undefined;
-  useEffect(() => {
-    if (params.get('new') && canCreate) setCreating(true);
-  }, [params, canCreate]);
 
   const { data, isLoading } = useQuery<Project[]>({
     queryKey: ['projects'],
@@ -278,8 +270,7 @@ export function ProjectsPage() {
 
       <NewProjectModal
         open={creating}
-        defaultCompanyId={presetCompanyId}
-        onClose={() => { setCreating(false); if (params.get('new')) navigate('/projects'); }}
+        onClose={() => setCreating(false)}
         onCreated={(id) => { setCreating(false); qc.invalidateQueries({ queryKey: ['projects'] }); navigate(`/projects/${id}`); }}
       />
     </div>
@@ -311,7 +302,7 @@ function deriveProjectKey(name: string): string {
   return k.length >= 2 ? k : '';
 }
 
-function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: {
+export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: {
   open: boolean; onClose: () => void; onCreated: (id: string) => void; defaultCompanyId?: string;
 }) {
   const t = useT();
