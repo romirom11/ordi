@@ -32,6 +32,8 @@ export const projectUpdateSchema = z.object({
   status: z.enum(PROJECT_STATUSES).optional(),
   visibility: z.enum(VISIBILITY).optional(),
   projectTypeId: idSchema.optional(),
+  /** Client link; null unlinks. Validated against the type's requiresClient rule server-side. */
+  companyId: idSchema.nullable().optional(),
   leadId: idSchema.nullable().optional(),
   startDate: z.string().nullable().optional(),
   targetDate: z.string().nullable().optional(),
