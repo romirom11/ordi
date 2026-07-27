@@ -5,6 +5,7 @@
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { COMPANY_STATUSES } from '@ordi/shared';
 import { OrdiClient } from './client';
 
 /**
@@ -72,6 +73,33 @@ export function buildServer(client: OrdiClient): McpServer {
 
   server.tool('get_company_overview', 'Company metrics: projects, tasks, and (if permitted) receivables', { companyId: z.string() },
   ({ companyId }) => wrap(() => client.get(`/companies/${companyId}/overview`)));
+
+  server.tool('list_contacts', 'List contacts of a CRM company – the way to obtain contactId', { companyId: z.string() },
+  ({ companyId }) => wrap(async () => {
+  const res = await client.get<{ data: Record<string, unknown>[] }>(`/contacts?companyId=${encodeURIComponent(companyId)}`);
+  return { data: res.data.map((ct) => ({
+    id: ct.id, companyId: ct.companyId, firstName: ct.firstName, lastName: ct.lastName,
+    email: ct.email, phone: ct.phone, position: ct.position, isPrimary: ct.isPrimary,
+  })) };
+}));
+
+  server.tool('list_deals', 'List deals, optionally for one company – the way to obtain dealId for move_deal', {
+  companyId: z.string().optional(),
+}, ({ companyId }) => wrap(async () => {
+  const res = await client.get<{ data: Record<string, unknown>[] }>(`/deals${companyId ? `?companyId=${encodeURIComponent(companyId)}` : ''}`);
+  return { data: res.data.map((d) => ({
+    id: d.id, title: d.title, companyId: d.companyId, stageId: d.stageId,
+    amount: d.amount, currency: d.currency, expectedCloseDate: d.expectedCloseDate, ownerId: d.ownerId,
+  })) };
+}));
+
+  server.tool('list_deal_stages', 'List pipeline stages – the way to obtain stageId for create_deal / move_deal', {},
+  () => wrap(async () => {
+  const res = await client.get<{ data: Record<string, unknown>[] }>('/deal-stages');
+  return { data: res.data.map((s) => ({
+    id: s.id, name: s.name, position: s.position, probability: s.probability, isWon: s.isWon, isLost: s.isLost,
+  })) };
+}));
 
   server.tool('list_my_tasks', 'The token owner’s assigned/created tasks grouped by due date', {},
   () => wrap(() => client.get('/me/tasks')));
@@ -156,7 +184,24 @@ export function buildServer(client: OrdiClient): McpServer {
   server.tool('create_note', 'Create a CRM note', { companyId: z.string(), text: z.string() },
   ({ companyId, text: body }) => wrap(() => client.post('/notes', { companyId, body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: body }] }] } })));
 
-  server.tool('move_deal', 'Move a deal to a stage', { dealId: z.string(), stageId: z.string(), lostReason: z.string().optional() },
+  server.tool('create_company', 'Create a CRM company', {
+  name: z.string(), domain: z.string().optional(), status: z.enum(COMPANY_STATUSES).optional().describe('Defaults to lead'),
+  billingEmail: z.string().optional(), defaultCurrency: z.string().length(3).optional(), paymentTermsDays: z.number().int().optional(),
+}, (args) => wrap(() => client.post('/companies', args)));
+
+  server.tool('create_contact', 'Create a contact in a CRM company', {
+  companyId: z.string(), firstName: z.string(), lastName: z.string().optional(),
+  email: z.string().optional(), phone: z.string().optional(), position: z.string().optional(),
+  isPrimary: z.boolean().optional().describe('Make this the company’s primary contact'),
+}, (args) => wrap(() => client.post('/contacts', args)));
+
+  server.tool('create_deal', 'Create a deal in a pipeline stage (use list_deal_stages for stageId)', {
+  companyId: z.string(), title: z.string(), stageId: z.string(),
+  amount: z.number().min(0).optional(), currency: z.string().length(3).optional().describe('Defaults to USD'),
+  expectedCloseDate: z.string().optional().describe('YYYY-MM-DD'),
+}, (args) => wrap(() => client.post('/deals', args)));
+
+  server.tool('move_deal', 'Move a deal to a stage (use list_deal_stages for stageId)', { dealId: z.string(), stageId: z.string(), lostReason: z.string().optional() },
   ({ dealId, stageId, lostReason }) => wrap(() => client.post(`/deals/${dealId}/move`, { stageId, lostReason })));
 
   server.tool('create_kb_page', 'Create a knowledge base page', { spaceId: z.string(), title: z.string(), text: z.string().optional() },
