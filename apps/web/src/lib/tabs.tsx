@@ -38,6 +38,8 @@ export interface TabsApi {
   activateTab: (id: string) => void;
   /** Switch to the next (+1) / previous (-1) tab, cycling. */
   activateDelta: (delta: number) => void;
+  /** Drag-reorder: move `id` to the slot currently held by `targetId`. */
+  reorderTabs: (id: string, targetId: string) => void;
   setActiveTitle: (title: string) => void;
   /** Step the ACTIVE tab through its own history: -1 back, +1 forward. */
   go: (delta: number) => void;
@@ -182,6 +184,19 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     if (next) activateTab(next.id);
   }, [activateTab]);
 
+  const reorderTabs = useCallback((id: string, targetId: string) => {
+    if (id === targetId) return;
+    setState((s) => {
+      const from = s.tabs.findIndex((t) => t.id === id);
+      const to = s.tabs.findIndex((t) => t.id === targetId);
+      if (from === -1 || to === -1) return s;
+      const tabs = s.tabs.slice();
+      const [moved] = tabs.splice(from, 1);
+      tabs.splice(to, 0, moved!);
+      return { ...s, tabs };
+    });
+  }, []);
+
   const go = useCallback((delta: number) => {
     const s = stateRef.current;
     const tab = s.tabs.find((t) => t.id === s.activeId);
@@ -208,11 +223,11 @@ export function TabsProvider({ children }: { children: ReactNode }) {
   const api = useMemo<TabsApi>(() => ({
     tabs: state.tabs,
     activeId: state.activeId,
-    openInNewTab, newTab, closeTab, activateTab, activateDelta, setActiveTitle, go,
+    openInNewTab, newTab, closeTab, activateTab, activateDelta, reorderTabs, setActiveTitle, go,
     canGoBack: !!activeTab && activeTab.pos > 0,
     canGoForward: !!activeTab && activeTab.pos < activeTab.history.length - 1,
   }), [state.tabs, state.activeId, openInNewTab, newTab, closeTab, activateTab, activateDelta,
-    setActiveTitle, go, activeTab]);
+    reorderTabs, setActiveTitle, go, activeTab]);
 
   return (
     <TabsContext.Provider value={api}>

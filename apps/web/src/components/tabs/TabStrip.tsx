@@ -91,6 +91,8 @@ export function TabStrip() {
   const tabs = useTabs();
   const t = useT();
   const [closingIds, setClosingIds] = useState<ReadonlySet<string>>(new Set());
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
   const stripRef = useRef<HTMLDivElement>(null);
 
   // Keep imperative handlers fresh without re-binding listeners.
@@ -191,6 +193,11 @@ export function TabStrip() {
         aria-selected={isActive}
         tabIndex={0}
         title={label}
+        draggable
+        onDragStart={(e) => { setDragId(tab.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', tab.id); }}
+        onDragOver={(e) => { if (!dragId) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (overId !== tab.id) setOverId(tab.id); }}
+        onDrop={(e) => { e.preventDefault(); if (dragId) tabs.reorderTabs(dragId, tab.id); setDragId(null); setOverId(null); }}
+        onDragEnd={() => { setDragId(null); setOverId(null); }}
         onClick={() => tabs.activateTab(tab.id)}
         onKeyDown={(e) => { if (e.key === 'Enter') tabs.activateTab(tab.id); }}
         onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); closeAnimated(tab.id); } }}
@@ -200,6 +207,8 @@ export function TabStrip() {
           isActive
             ? 'border-border bg-surface font-medium text-foreground shadow-sm'
             : 'border-transparent text-muted-foreground hover:bg-muted/70 hover:text-foreground',
+          dragId === tab.id && 'opacity-40',
+          overId === tab.id && dragId && dragId !== tab.id && 'ring-2 ring-ring/40',
           isClosing && 'pointer-events-none max-w-0 scale-95 border-transparent px-0 opacity-0',
         )}
       >
