@@ -1,24 +1,24 @@
 /**
- * Company (client) detail. Laid out like the project overview it sits next to:
- * a header with the record's identity and its actions, a summary strip that
- * answers "what shape is this client in" without scrolling, one content column
- * (deals · invoices · contacts · notes · files · activity) and a 280px
- * properties rail. Sections that are empty collapse to a single line – a fresh
- * client should not read as three screens of nothing.
+ * Company (client) detail, built on the same shape as the project and task
+ * records: one thin identity row (breadcrumb · avatar · name), the content at
+ * full width, and a properties rail pinned to the right edge. Everything that
+ * describes the client – status, owner, domain, billing – lives in the rail,
+ * not the header, and every action lives in the section it acts on rather
+ * than being repeated in a toolbar. Empty sections collapse to a single line.
  */
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Building2, ChevronDown, Plus, Mail, Phone, Star, Globe, MoreHorizontal, StickyNote,
-  FolderKanban, Handshake, Pencil, Receipt, Trash2, Link2, ExternalLink,
+  Building2, ChevronRight, Plus, Mail, Phone, Star, UserCircle2,
+  FolderKanban, Handshake, Pencil, Receipt, Trash2, ExternalLink,
 } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
 import { Link, useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import {
-  Avatar, Badge, Breadcrumbs, Button, EmptySection, IconButton, PageBody, RailChip, RailField,
-  Select, Skeleton, Spinner, Tooltip, cn, fmtMoney, fmtDate, fmtRelative,
+  Avatar, Badge, Button, EmptySection, IconButton, RailChip, RailField,
+  Select, Skeleton, Spinner, Tooltip, cn, fmtMoney, fmtDate,
 } from '../components/ui';
 import { ConfirmDialog, Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator, toast } from '../components/overlays';
 import { EntityActivity } from '../components/EntityActivity';
@@ -27,7 +27,7 @@ import {
   COMPANY_STATUSES, CURRENCIES, StatusPill, useDealStages, useUsersLookup,
   type Company, type Contact, type Deal, type Stage,
 } from '../components/crm/shared';
-import { EditableName, FilesSection, NotesSection, OwnerPicker, SectionHeader } from '../components/crm/detail';
+import { EditableName, FilesSection, NotesSection, SectionHeader } from '../components/crm/detail';
 import { ContactDialog, NewDealDialog } from '../components/crm/dialogs';
 import { NewProjectModal } from './Projects';
 import { useWorkspaceSettings, financeEnabled } from '../components/finance/workspace';
@@ -45,15 +45,12 @@ interface InvoiceRow {
   isOverdue?: boolean;
 }
 
-interface AuditRow { id: string; createdAt: string }
-
 function domainHref(domain?: string | null): string | null {
   if (!domain) return null;
   return `https://${domain.replace(/^https?:\/\//, '').replace(/\/+$/, '')}`;
 }
 
-/* Query keys are shared with the sections below so the header strip reuses the
- * cached responses instead of firing its own round trips. */
+/* Shared so sections and the activity feed hit one cache entry each. */
 const dealsKey = (companyId: string) => ['deals', 'company', companyId];
 const invoicesKey = (companyId: string) => ['invoices', 'company', companyId];
 const auditKey = (companyId: string) => ['audit', 'company', companyId];
@@ -71,7 +68,6 @@ export function CompanyDetailPage({ id }: { id: string }) {
   usePageTitle(c?.name);
 
   const [addingDeal, setAddingDeal] = useState(false);
-  const [noteFocus, setNoteFocus] = useState(0);
 
   const patch = useMutation({
     mutationFn: (body: Record<string, unknown>) => api.patch<Company>(`/companies/${id}`, { ...body, version: c?.version }),
@@ -91,124 +87,57 @@ export function CompanyDetailPage({ id }: { id: string }) {
     },
   });
 
-  const owner = c?.ownerId ? (usersQ.data ?? []).find((u) => u.id === c.ownerId) : undefined;
-  const href = domainHref(c?.domain);
   const canAddDeal = can('deals.write');
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* Breadcrumb + header */}
-      <div className="border-b border-border px-6 pb-4 pt-3">
-        <Breadcrumbs
-          className="mb-3"
-          items={[
-            { label: t('crm.title'), to: '/crm' },
-            { label: t('crm.tabClients'), to: '/crm/clients' },
-          ]}
-        />
-        <div className="flex items-start gap-4">
-          {c ? <Avatar name={c.name} size={48} className="text-base" /> : <Skeleton className="h-12 w-12 rounded-full" />}
-          <div className="min-w-0 flex-1">
-            {companyQ.isLoading ? (
-              <Skeleton className="h-6 w-52" />
-            ) : c ? (
-              <EditableName value={c.name} editable={canWrite} onSave={(name) => patch.mutate({ name })} />
-            ) : (
-              <div className="flex items-center gap-2 text-muted-foreground"><Building2 size={18} /> {t('common.error')}</div>
-            )}
-            {c && (
-              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                {/* Status dropdown */}
-                {canWrite ? (
-                  <DropdownMenu
-                    align="start"
-                    trigger={
-                      <button className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-muted">
-                        <StatusPill status={c.status} />
-                        <ChevronDown size={12} className="text-faint" />
-                      </button>
-                    }
-                  >
-                    <MenuLabel>{t('crm.changeStatus')}</MenuLabel>
-                    {COMPANY_STATUSES.map((s) => (
-                      <MenuItem key={s} checked={c.status === s} onSelect={() => c.status !== s && patch.mutate({ status: s })}>
-                        <StatusPill status={s} />
-                      </MenuItem>
-                    ))}
-                  </DropdownMenu>
-                ) : (
-                  <StatusPill status={c.status} />
-                )}
+      {/* Identity row only – one line, like the project and task headers. */}
+      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
+        <Link to="/crm" className="hidden shrink-0 text-[13px] text-muted-foreground transition-colors duration-150 hover:text-foreground sm:block">
+          {t('crm.title')}
+        </Link>
+        <ChevronRight size={12} className="hidden shrink-0 text-faint sm:block" aria-hidden />
+        <Link to="/crm/clients" className="hidden shrink-0 text-[13px] text-muted-foreground transition-colors duration-150 hover:text-foreground sm:block">
+          {t('crm.tabClients')}
+        </Link>
+        <ChevronRight size={12} className="hidden shrink-0 text-faint sm:block" aria-hidden />
 
-                {href && (
-                  <a href={href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground hover:underline">
-                    <Globe size={12} /> {c.domain}
-                  </a>
-                )}
-
-                {/* Owner picker */}
-                <OwnerPicker
-                  owner={owner}
-                  users={usersQ.data ?? []}
-                  editable={canWrite}
-                  onPick={(uid) => patch.mutate({ ownerId: uid })}
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Actions – previously buried inside each section header. */}
-          {c && (
-            <div className="flex shrink-0 items-center gap-2">
-              {canWrite && (
-                <Button variant="outline" size="sm" onClick={() => setNoteFocus((n) => n + 1)}>
-                  <StickyNote size={14} /> {t('crm.addNote')}
-                </Button>
-              )}
-              {canAddDeal && (
-                <Button variant="primary" size="sm" onClick={() => setAddingDeal(true)}>
-                  <Plus size={14} /> {t('crm.addDealForClient')}
-                </Button>
-              )}
-              <DropdownMenu
-                align="end"
-                trigger={<IconButton size="sm" aria-label={t('common.more', 'More')}><MoreHorizontal size={15} /></IconButton>}
-              >
-                {href && (
-                  <MenuItem icon={<ExternalLink size={13} />} onSelect={() => window.open(href, '_blank', 'noopener')}>
-                    {t('crm.openWebsite')}
-                  </MenuItem>
-                )}
-                <MenuItem
-                  icon={<Link2 size={13} />}
-                  onSelect={() => { void navigator.clipboard?.writeText(window.location.href); toast(t('crm.linkCopied')); }}
-                >
-                  {t('crm.copyLink')}
-                </MenuItem>
-              </DropdownMenu>
-            </div>
-          )}
-        </div>
-
-        {c && <SummaryStrip companyId={id} currency={c.defaultCurrency || 'USD'} />}
+        {companyQ.isLoading ? (
+          <Skeleton className="h-4 w-40" />
+        ) : c ? (
+          <>
+            <Avatar name={c.name} size={20} className="shrink-0 text-[9px]" />
+            <EditableName value={c.name} editable={canWrite} size="sm" onSave={(name) => patch.mutate({ name })} />
+          </>
+        ) : (
+          <span className="flex items-center gap-2 text-[13px] text-muted-foreground"><Building2 size={15} /> {t('common.error')}</span>
+        )}
       </div>
 
-      {/* Body: main + rail */}
-      <div className="min-h-0 flex-1 overflow-auto">
-        <PageBody width="wide" className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_280px]">
-          <div className="order-2 min-w-0 space-y-7 lg:order-1">
+      {/* Body: content at full width, rail pinned to the edge. Below 1100px the
+        * rail moves above the content instead of disappearing – status and
+        * owner live only there now, so hiding them would strand them. */}
+      <div className="flex min-h-0 flex-1 flex-col min-[1100px]:flex-row">
+        <div className="order-2 min-w-0 flex-1 overflow-auto min-[1100px]:order-1">
+          <div className="space-y-7 px-6 py-6">
             {can('deals.read') && <DealsSection companyId={id} canWrite={canAddDeal} onAdd={() => setAddingDeal(true)} />}
             <InvoicesSection companyId={id} />
             <ContactsSection companyId={id} canWrite={canWrite} />
-            <NotesSection companyId={id} canWrite={canWrite} focusToken={noteFocus} />
+            <NotesSection companyId={id} canWrite={canWrite} />
             <FilesSection entityType="company" entityId={id} canWrite={canWrite} />
             <CompanyActivity companyId={id} users={usersQ.data ?? []} />
           </div>
-          <div className="order-1 space-y-6 lg:order-2">
-            <CompanyRail company={c} loading={companyQ.isLoading} editable={canWrite} onPatch={(body) => patch.mutate(body)} />
-            <ProjectsRail companyId={id} />
-          </div>
-        </PageBody>
+        </div>
+        <aside className="order-1 shrink-0 space-y-6 overflow-auto border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-72 min-[1100px]:border-b-0 min-[1100px]:border-l">
+          <CompanyRail
+            company={c}
+            loading={companyQ.isLoading}
+            editable={canWrite}
+            users={usersQ.data ?? []}
+            onPatch={(body) => patch.mutate(body)}
+          />
+          <ProjectsRail companyId={id} />
+        </aside>
       </div>
 
       <NewDealDialog
@@ -217,84 +146,6 @@ export function CompanyDetailPage({ id }: { id: string }) {
         lockedCompanyId={id}
         onCreated={() => qc.invalidateQueries({ queryKey: dealsKey(id) })}
       />
-    </div>
-  );
-}
-
-/* ─────────────── Summary strip ─────────────── */
-
-function Metric({ label, value, tone }: { label: string; value: string; tone?: 'destructive' | 'success' }) {
-  return (
-    <div className="min-w-0">
-      <div className="text-[11px] uppercase tracking-wide text-faint">{label}</div>
-      <div className={cn(
-        'truncate text-[15px] font-semibold tabular-nums',
-        tone === 'destructive' && 'text-destructive',
-        tone === 'success' && 'text-success',
-      )}>
-        {value}
-      </div>
-    </div>
-  );
-}
-
-/**
- * The numbers a client is judged by, above the fold. Every query here is keyed
- * identically to the section that owns it, so this costs no extra requests.
- */
-function SummaryStrip({ companyId, currency }: { companyId: string; currency: string }) {
-  const t = useT();
-  const can = useCan();
-  const wsQ = useWorkspaceSettings();
-  const stagesQ = useDealStages();
-
-  const dealsQ = useQuery<Deal[]>({
-    queryKey: dealsKey(companyId),
-    queryFn: () => api.get<{ data: Deal[] }>(`/deals${qs({ companyId })}`).then((r) => r.data),
-    enabled: can('deals.read'),
-  });
-
-  const financeOn = financeEnabled(wsQ.data) && can('finance.read');
-  const invoicesQ = useQuery<InvoiceRow[]>({
-    queryKey: invoicesKey(companyId),
-    queryFn: () => api.get<{ data: InvoiceRow[] }>(`/invoices${qs({ companyId })}`).then((r) => r.data),
-    enabled: financeOn,
-  });
-
-  const auditQ = useQuery<AuditRow[]>({
-    queryKey: auditKey(companyId),
-    queryFn: () => api.get<{ data: AuditRow[] }>(`/audit/entity/company/${companyId}`).then((r) => r.data),
-  });
-
-  const stageMap = new Map((stagesQ.data ?? []).map((s: Stage) => [s.id, s]));
-  const deals = dealsQ.data ?? [];
-  let open = 0;
-  let won = 0;
-  let openCount = 0;
-  for (const d of deals) {
-    const stage = d.stageId ? stageMap.get(d.stageId) : undefined;
-    const amount = Number(d.amount ?? 0);
-    if (stage?.isWon) won += amount;
-    else if (!stage?.isLost) { open += amount; openCount += 1; }
-  }
-
-  const outstanding = (invoicesQ.data ?? []).reduce((sum, iv) => {
-    if (iv.status === 'canceled') return sum;
-    return sum + (Number(iv.total ?? 0) - Number(iv.amountPaid ?? 0));
-  }, 0);
-
-  const lastAt = auditQ.data?.[0]?.createdAt;
-
-  return (
-    <div className="mt-4 flex flex-wrap items-start gap-x-8 gap-y-3 pl-[64px]">
-      {can('deals.read') && (
-        <Metric label={`${t('crm.openDealsValue')} · ${openCount}`} value={fmtMoney(open, currency)} />
-      )}
-      {can('deals.read') && won > 0 && <Metric label={t('crm.wonValue')} value={fmtMoney(won, currency)} tone="success" />}
-      {financeOn && (
-        <Metric label={t('crm.outstanding')} value={fmtMoney(outstanding, currency)} tone={outstanding > 0 ? 'destructive' : undefined} />
-      )}
-      <Metric label={t('crm.lastActivity')} value={lastAt ? fmtRelative(lastAt) : t('crm.never')} />
     </div>
   );
 }
@@ -313,13 +164,33 @@ function DealsSection({ companyId, canWrite, onAdd }: { companyId: string; canWr
   const userMap = new Map((usersQ.data ?? []).map((u) => [u.id, u]));
   const deals = dealsQ.data ?? [];
 
+  // Open pipeline sits next to the count rather than in a banner of its own –
+  // the number belongs to this list, not to the whole page.
+  let open = 0;
+  let openCurrency = 'USD';
+  for (const d of deals) {
+    const stage = d.stageId ? stageMap.get(d.stageId) : undefined;
+    if (stage?.isWon || stage?.isLost) continue;
+    open += Number(d.amount ?? 0);
+    openCurrency = d.currency ?? openCurrency;
+  }
+
   return (
     <section>
       <SectionHeader
         icon={<Handshake size={15} />}
         title={t('crm.deals')}
         count={deals.length}
-        action={canWrite && <Button variant="outline" size="xs" onClick={onAdd}><Plus size={13} /> {t('crm.addDealForClient')}</Button>}
+        action={
+          <div className="flex items-center gap-3">
+            {open > 0 && (
+              <span className="text-[13px] text-muted-foreground tabular-nums">
+                {fmtMoney(open, openCurrency)} <span className="text-faint">{t('crm.openDealsValue')}</span>
+              </span>
+            )}
+            {canWrite && <Button variant="outline" size="xs" onClick={onAdd}><Plus size={13} /> {t('crm.addDealForClient')}</Button>}
+          </div>
+        }
       />
       {dealsQ.isLoading ? (
         <div className="space-y-1">{[0, 1].map((i) => <Skeleton key={i} className="h-11 rounded-md" />)}</div>
@@ -646,8 +517,10 @@ function RailInput({ value, editable, placeholder, type = 'text', display, onSav
   );
 }
 
-function CompanyRail({ company, loading, editable, onPatch }: {
-  company?: Company; loading: boolean; editable: boolean; onPatch: (body: Record<string, unknown>) => void;
+function CompanyRail({ company, loading, editable, users, onPatch }: {
+  company?: Company; loading: boolean; editable: boolean;
+  users: { id: string; name: string; avatar?: string | null }[];
+  onPatch: (body: Record<string, unknown>) => void;
 }) {
   const t = useT();
 
@@ -655,18 +528,87 @@ function CompanyRail({ company, loading, editable, onPatch }: {
     return <div className="space-y-3">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-7" />)}</div>;
   }
 
+  const owner = company.ownerId ? users.find((u) => u.id === company.ownerId) : undefined;
+  const href = domainHref(company.domain);
+
   return (
     <div>
-      <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('crm.details')}</h2>
+      <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('crm.properties')}</h2>
       <div className="space-y-0.5">
-        {/* Status lives in the header pill – repeating it here was pure noise. */}
+        <RailField label={t('common.status')}>
+          {editable ? (
+            <DropdownMenu
+              align="start"
+              className="w-full"
+              trigger={<RailChip caret><StatusPill status={company.status} /></RailChip>}
+            >
+              <MenuLabel>{t('crm.changeStatus')}</MenuLabel>
+              {COMPANY_STATUSES.map((s) => (
+                <MenuItem key={s} checked={company.status === s} onSelect={() => company.status !== s && onPatch({ status: s })}>
+                  <StatusPill status={s} />
+                </MenuItem>
+              ))}
+            </DropdownMenu>
+          ) : (
+            <RailChip disabled><StatusPill status={company.status} /></RailChip>
+          )}
+        </RailField>
+        <RailField label={t('crm.owner')}>
+          {editable ? (
+            <DropdownMenu
+              align="start"
+              className="w-full"
+              width={220}
+              trigger={
+                <RailChip empty={!owner} caret>
+                  {owner
+                    ? <><Avatar name={owner.name} src={owner.avatar} size={18} /><span className="truncate">{owner.name}</span></>
+                    : <><UserCircle2 size={16} className="text-faint" /><span className="truncate">{t('crm.noOwner')}</span></>}
+                </RailChip>
+              }
+            >
+              <MenuLabel>{t('crm.changeOwner')}</MenuLabel>
+              {users.map((u) => (
+                <MenuItem key={u.id} checked={u.id === company.ownerId} onSelect={() => u.id !== company.ownerId && onPatch({ ownerId: u.id })}>
+                  <span className="flex items-center gap-2">
+                    <Avatar name={u.name} src={u.avatar} size={18} />
+                    <span className="flex-1 truncate">{u.name}</span>
+                  </span>
+                </MenuItem>
+              ))}
+            </DropdownMenu>
+          ) : (
+            <RailChip empty={!owner} disabled>
+              {owner ? <><Avatar name={owner.name} src={owner.avatar} size={18} /><span className="truncate">{owner.name}</span></> : t('crm.noOwner')}
+            </RailChip>
+          )}
+        </RailField>
         <RailField label={t('crm.colDomain')}>
-          <RailInput
-            value={company.domain}
-            editable={editable}
-            placeholder={t('crm.noDomain')}
-            onSave={(v) => onPatch({ domain: v || null })}
-          />
+          {/* Editing is the primary act; opening the site is a hover affordance,
+            * which is why the header no longer carries a separate link. */}
+          <div className="group/domain flex items-center gap-1">
+            <div className="min-w-0 flex-1">
+              <RailInput
+                value={company.domain}
+                editable={editable}
+                placeholder={t('crm.noDomain')}
+                onSave={(v) => onPatch({ domain: v || null })}
+              />
+            </div>
+            {href && (
+              <Tooltip label={t('crm.openWebsite')}>
+                <a
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={t('crm.openWebsite')}
+                  className="shrink-0 rounded p-1 text-faint opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-hover/domain:opacity-100"
+                >
+                  <ExternalLink size={12} />
+                </a>
+              </Tooltip>
+            )}
+          </div>
         </RailField>
         <RailField label={t('crm.billingEmail')}>
           <RailInput
@@ -692,7 +634,8 @@ function CompanyRail({ company, loading, editable, onPatch }: {
             <RailChip disabled><span className="tabular-nums">{company.defaultCurrency || '–'}</span></RailChip>
           )}
         </RailField>
-        <RailField label={t('crm.paymentTerms')}>
+        {/* Short label: "Payment terms" wraps to two lines in a 76px column. */}
+        <RailField label={t('crm.paymentTermsShort')}>
           <RailInput
             value={company.paymentTermsDays != null ? String(company.paymentTermsDays) : ''}
             display={company.paymentTermsDays != null ? t('crm.paymentTermsValue').replace('{n}', String(company.paymentTermsDays)) : undefined}

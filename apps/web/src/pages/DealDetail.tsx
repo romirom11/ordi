@@ -14,7 +14,7 @@ import { useCan, useMe } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import { useT } from '../lib/i18n';
 import {
-  Avatar, Badge, Breadcrumbs, Card, EmptyState, Input, Skeleton,
+  Avatar, Badge, Breadcrumbs, Card, EmptySection, Input, Skeleton,
   cn, fmtMoney, fmtDate, fmtRelative,
 } from '../components/ui';
 import { DropdownMenu, MenuItem, MenuLabel, toast } from '../components/overlays';
@@ -527,7 +527,7 @@ function ActivitySection({ dealId }: { dealId: string }) {
       {isLoading ? (
         <div className="space-y-2">{[0, 1].map((i) => <Skeleton key={i} className="h-8 rounded-md" />)}</div>
       ) : rows.length === 0 ? (
-        <EmptyState icon={<ActivityIcon size={18} />} title={t('crm.noActivity')} />
+        <EmptySection icon={<ActivityIcon size={14} />} title={t('crm.noActivity')} />
       ) : (
         <ul className="space-y-0.5">
           {rows.map((a) => {
