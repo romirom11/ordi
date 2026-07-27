@@ -5,11 +5,11 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, Check, Pin } from 'lucide-react';
+import { ChevronDown, Check, Pencil, Pin, Trash2 } from 'lucide-react';
 import { api, qs, ApiError } from '../../lib/api';
 import { useT } from '../../lib/i18n';
 import { Avatar, Button, Card, EmptyState, IconButton, Skeleton, Spinner, Tooltip, cn, fmtDate } from '../ui';
-import { DropdownMenu, MenuItem, MenuLabel, toast } from '../overlays';
+import { ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, toast } from '../overlays';
 import { RichEditor } from '../richtext/RichEditor';
 import { RichText, docIsEmpty } from '../richtext/RichText';
 
@@ -133,6 +133,9 @@ export function NotesSection({ companyId, dealId, canWrite }: { companyId?: stri
   });
   const [doc, setDoc] = useState<any>(null);
   const [editorKey, setEditorKey] = useState(0);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDoc, setEditDoc] = useState<any>(null);
+  const [toDelete, setToDelete] = useState<Note | null>(null);
 
   const create = useMutation({
     mutationFn: (body: any) => api.post('/notes', { ...target, body }),
@@ -140,9 +143,21 @@ export function NotesSection({ companyId, dealId, canWrite }: { companyId?: stri
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('crm.saveNoteFailed')),
   });
 
+  const update = useMutation({
+    mutationFn: (v: { id: string; body: any }) => api.patch(`/notes/${v.id}`, { body: v.body }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey }); setEditingId(null); setEditDoc(null); toast(t('common.saved')); },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('crm.saveNoteFailed')),
+  });
+
   const pin = useMutation({
     mutationFn: (n: Note) => api.patch(`/notes/${n.id}`, { pinned: !n.pinned }),
     onSuccess: () => qc.invalidateQueries({ queryKey }),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
+  });
+
+  const del = useMutation({
+    mutationFn: (id: string) => api.del(`/notes/${id}`),
+    onSuccess: () => { setToDelete(null); qc.invalidateQueries({ queryKey }); toast(t('crm.noteDeleted')); },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
   });
 
@@ -171,20 +186,48 @@ export function NotesSection({ companyId, dealId, canWrite }: { companyId?: stri
         <div className="space-y-2">
           {notes.map((n) => (
             <Card key={n.id} className={cn('group/note p-3', n.pinned && 'border-primary/30 bg-primary/[0.03]')}>
-              <div className="flex items-start justify-between gap-2">
-                <RichText doc={n.body} className="min-w-0 flex-1 text-[13px]" />
-                {canWrite && (
-                  <Tooltip label={n.pinned ? t('crm.unpinNote') : t('crm.pinNote')}>
-                    <IconButton
-                      size="sm"
-                      onClick={() => pin.mutate(n)}
-                      className={cn(n.pinned ? 'text-primary opacity-100' : 'opacity-0 group-hover/note:opacity-100')}
-                    >
-                      <Pin size={13} className={cn(n.pinned && 'fill-current')} />
-                    </IconButton>
-                  </Tooltip>
-                )}
-              </div>
+              {editingId === n.id ? (
+                <div className="space-y-2">
+                  <RichEditor value={editDoc} onChange={setEditDoc} compact onSubmit={() => !docIsEmpty(editDoc) && update.mutate({ id: n.id, body: editDoc })} />
+                  <div className="flex justify-end gap-2">
+                    <Button variant="ghost" size="xs" onClick={() => { setEditingId(null); setEditDoc(null); }}>{t('common.cancel')}</Button>
+                    <Button size="xs" disabled={update.isPending || docIsEmpty(editDoc)} onClick={() => update.mutate({ id: n.id, body: editDoc })}>
+                      {update.isPending ? <Spinner /> : t('common.save')}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-start justify-between gap-2">
+                  <RichText doc={n.body} className="min-w-0 flex-1 text-[13px]" />
+                  {canWrite && (
+                    <span className="flex shrink-0 items-center">
+                      <Tooltip label={t('common.edit')}>
+                        <IconButton size="sm" aria-label={t('common.edit')}
+                          onClick={() => { setEditingId(n.id); setEditDoc(n.body); }}
+                          className="opacity-0 group-hover/note:opacity-100">
+                          <Pencil size={13} />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip label={t('common.delete')}>
+                        <IconButton size="sm" aria-label={t('common.delete')} onClick={() => setToDelete(n)}
+                          className="opacity-0 hover:text-destructive group-hover/note:opacity-100">
+                          <Trash2 size={13} />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip label={n.pinned ? t('crm.unpinNote') : t('crm.pinNote')}>
+                        <IconButton
+                          size="sm"
+                          aria-label={n.pinned ? t('crm.unpinNote') : t('crm.pinNote')}
+                          onClick={() => pin.mutate(n)}
+                          className={cn(n.pinned ? 'text-primary opacity-100' : 'opacity-0 group-hover/note:opacity-100')}
+                        >
+                          <Pin size={13} className={cn(n.pinned && 'fill-current')} />
+                        </IconButton>
+                      </Tooltip>
+                    </span>
+                  )}
+                </div>
+              )}
               <p className="mt-2 flex items-center gap-1.5 text-[11px] text-faint">
                 {n.pinned && <span className="font-medium text-primary">{t('crm.pinned')} ·</span>}
                 {n.authorName ? `${n.authorName} · ` : ''}{fmtDate(n.createdAt)}
@@ -193,6 +236,17 @@ export function NotesSection({ companyId, dealId, canWrite }: { companyId?: stri
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!toDelete}
+        onClose={() => setToDelete(null)}
+        onConfirm={() => toDelete && del.mutate(toDelete.id)}
+        title={t('crm.deleteNoteTitle')}
+        body={t('crm.deleteNoteBody')}
+        confirmLabel={t('common.delete')}
+        danger
+        pending={del.isPending}
+      />
     </section>
   );
 }

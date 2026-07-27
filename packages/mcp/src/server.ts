@@ -30,6 +30,27 @@ export function scrub(value: unknown): unknown {
 }
 
 /**
+ * Agents frequently paste HTML-escaped text ("Co-founder &amp; CEO") scraped
+ * from web pages. Stored verbatim it renders escaped in the UI, so every
+ * string argument of the write tools is decoded once at this boundary.
+ * Applied recursively to plain objects/arrays; non-strings pass through.
+ */
+export function decodeEntities<T>(value: T): T {
+  if (typeof value === 'string') {
+    return value
+      .replace(/&(amp|lt|gt|quot|#0?39|apos|nbsp);/g, (m) => (
+        { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&#039;': "'", '&apos;': "'", '&nbsp;': ' ' }[m] ?? m
+      )) as unknown as T;
+  }
+  if (Array.isArray(value)) return value.map(decodeEntities) as unknown as T;
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .map(([k, v]) => [k, decodeEntities(v)])) as unknown as T;
+  }
+  return value;
+}
+
+/**
  * Plain text → tiptap doc. Agents send multi-line text; cramming it into a
  * single paragraph node loses every line break in the web renderer. Blank
  * lines separate paragraphs, single newlines become hard breaks.
@@ -48,6 +69,13 @@ export function textToDoc(text: string): Record<string, unknown> {
 
 export function buildServer(client: OrdiClient): McpServer {
   const server = new McpServer({ name: 'ordi', version: '1.0.0' });
+
+  // Every write goes through one decode pass: whatever tool the text arrives
+  // from, escaped entities never reach the database.
+  const rawPost = client.post.bind(client);
+  const rawPatch = client.patch.bind(client);
+  client.post = (path, body) => rawPost(path, decodeEntities(body));
+  client.patch = (path, body) => rawPatch(path, decodeEntities(body));
 
   function text(data: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(scrub(data), null, 2) }] };

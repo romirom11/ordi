@@ -8,23 +8,24 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Building2, ChevronDown, Plus, Mail, Phone, Star, Globe,
-  FolderKanban, Handshake, Receipt,
+  FolderKanban, Handshake, Pencil, Receipt, Trash2,
 } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
 import { Link, useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
+import { usePageTitle } from '../lib/tabs';
 import {
   Avatar, Badge, Breadcrumbs, Button, Card, EmptyState, IconButton, Skeleton, Tooltip,
   cn, fmtMoney, fmtDate,
 } from '../components/ui';
-import { DropdownMenu, MenuItem, MenuLabel, toast } from '../components/overlays';
+import { ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, toast } from '../components/overlays';
 import { useT } from '../lib/i18n';
 import {
-  COMPANY_STATUSES, StatusPill, useDealStages, useUsersLookup,
+  COMPANY_STATUSES, CURRENCIES, StatusPill, useDealStages, useUsersLookup,
   type Company, type Contact, type Deal, type Stage,
 } from '../components/crm/shared';
 import { EditableName, NotesSection, OwnerPicker, PropRow, SectionHeader } from '../components/crm/detail';
-import { AddContactDialog, NewDealDialog } from '../components/crm/dialogs';
+import { ContactDialog, NewDealDialog } from '../components/crm/dialogs';
 import { useWorkspaceSettings, financeEnabled } from '../components/finance/workspace';
 
 interface Project { id: string; name: string; key?: string | null; status?: string | null }
@@ -43,6 +44,8 @@ export function CompanyDetailPage({ id }: { id: string }) {
   const companyQ = useQuery<Company>({ queryKey: ['company', id], queryFn: () => api.get<Company>(`/companies/${id}`) });
   const usersQ = useUsersLookup();
   const c = companyQ.data;
+  // Tab and window title carry the client's name, not a generic "CRM".
+  usePageTitle(c?.name);
 
   const patch = useMutation({
     mutationFn: (body: Record<string, unknown>) => api.patch<Company>(`/companies/${id}`, { ...body, version: c?.version }),
@@ -52,6 +55,7 @@ export function CompanyDetailPage({ id }: { id: string }) {
       if ('name' in vars) toast(t('crm.nameUpdated'));
       else if ('ownerId' in vars) toast(t('crm.ownerUpdated'));
       else if ('status' in vars) toast(t('crm.statusUpdated'));
+      else toast(t('common.saved'));
     },
     onError: (e) => {
       qc.invalidateQueries({ queryKey: ['company', id] });
@@ -137,7 +141,7 @@ export function CompanyDetailPage({ id }: { id: string }) {
             <NotesSection companyId={id} canWrite={canWrite} />
           </div>
           <aside className="space-y-4">
-            <PropertiesCard company={c} loading={companyQ.isLoading} />
+            <PropertiesCard company={c} loading={companyQ.isLoading} editable={canWrite} onPatch={(body) => patch.mutate(body)} />
             <ProjectsCard companyId={id} />
           </aside>
         </div>
@@ -297,12 +301,29 @@ function InvoicesSection({ companyId }: { companyId: string }) {
 
 function ContactsSection({ companyId, canWrite }: { companyId: string; canWrite: boolean }) {
   const t = useT();
+  const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<Contact | null>(null);
+  const [toDelete, setToDelete] = useState<Contact | null>(null);
   const { data, isLoading } = useQuery<Contact[]>({
     queryKey: ['contacts', companyId],
     queryFn: () => api.get<{ data: Contact[] }>(`/contacts${qs({ companyId })}`).then((r) => r.data),
   });
   const contacts = data ?? [];
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['contacts', companyId] });
+  const setPrimary = useMutation({
+    mutationFn: (ct: Contact) => api.patch(`/contacts/${ct.id}`, { isPrimary: !ct.isPrimary }),
+    onSuccess: () => { invalidate(); toast(t('common.saved')); },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
+  });
+  const del = useMutation({
+    mutationFn: (id: string) => api.del(`/contacts/${id}`),
+    onSuccess: () => { setToDelete(null); invalidate(); toast(t('crm.contactDeleted')); },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
+  });
+
+  const contactName = (ct: Contact) => [ct.firstName, ct.lastName].filter(Boolean).join(' ') || '–';
 
   return (
     <section>
@@ -319,14 +340,27 @@ function ContactsSection({ companyId, canWrite }: { companyId: string; canWrite:
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">
           {contacts.map((ct, i) => {
-            const name = [ct.firstName, ct.lastName].filter(Boolean).join(' ') || '–';
+            const name = contactName(ct);
             return (
-              <div key={ct.id} className={cn('flex items-center gap-3 px-3 py-2.5', i > 0 && 'border-t border-border')}>
+              <div key={ct.id} className={cn('group/contact flex items-center gap-3 px-3 py-2.5', i > 0 && 'border-t border-border')}>
                 <Avatar name={name} size={30} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 text-[13px] font-medium">
                     <span className="truncate">{name}</span>
-                    {ct.isPrimary && <Tooltip label={t('crm.primary')}><Star size={12} className="fill-warning text-warning" /></Tooltip>}
+                    {canWrite ? (
+                      <Tooltip label={ct.isPrimary ? t('crm.unsetPrimary') : t('crm.setPrimary')}>
+                        <button
+                          aria-label={ct.isPrimary ? t('crm.unsetPrimary') : t('crm.setPrimary')}
+                          onClick={() => setPrimary.mutate(ct)}
+                          className={cn('grid h-5 w-5 place-items-center rounded transition-all duration-150 hover:bg-muted',
+                            ct.isPrimary ? 'opacity-100' : 'opacity-0 group-hover/contact:opacity-100')}
+                        >
+                          <Star size={12} className={cn(ct.isPrimary ? 'fill-warning text-warning' : 'text-faint')} />
+                        </button>
+                      </Tooltip>
+                    ) : (
+                      ct.isPrimary && <Tooltip label={t('crm.primary')}><Star size={12} className="fill-warning text-warning" /></Tooltip>
+                    )}
                   </div>
                   {ct.position && <div className="truncate text-xs text-faint">{ct.position}</div>}
                 </div>
@@ -345,20 +379,94 @@ function ContactsSection({ companyId, canWrite }: { companyId: string; canWrite:
                       </a>
                     </Tooltip>
                   )}
+                  {canWrite && (
+                    <>
+                      <Tooltip label={t('common.edit')}>
+                        <IconButton size="sm" aria-label={t('common.edit')} onClick={() => setEditing(ct)}
+                          className="opacity-0 transition-opacity duration-150 group-hover/contact:opacity-100">
+                          <Pencil size={13} />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip label={t('common.delete')}>
+                        <IconButton size="sm" aria-label={t('common.delete')} onClick={() => setToDelete(ct)}
+                          className="opacity-0 transition-opacity duration-150 hover:text-destructive group-hover/contact:opacity-100">
+                          <Trash2 size={13} />
+                        </IconButton>
+                      </Tooltip>
+                    </>
+                  )}
                 </div>
               </div>
             );
           })}
         </div>
       )}
-      <AddContactDialog open={adding} onClose={() => setAdding(false)} companyId={companyId} />
+      <ContactDialog open={adding} onClose={() => setAdding(false)} companyId={companyId} />
+      <ContactDialog open={!!editing} onClose={() => setEditing(null)} companyId={companyId} contact={editing ?? undefined} />
+      <ConfirmDialog
+        open={!!toDelete}
+        onClose={() => setToDelete(null)}
+        onConfirm={() => toDelete && del.mutate(toDelete.id)}
+        title={t('crm.deleteContactTitle')}
+        body={toDelete ? t('crm.deleteContactBody').replace('{name}', contactName(toDelete)) : ''}
+        confirmLabel={t('common.delete')}
+        danger
+        pending={del.isPending}
+      />
     </section>
   );
 }
 
 /* ─────────────── Side: properties ─────────────── */
 
-function PropertiesCard({ company, loading }: { company?: Company; loading: boolean }) {
+/** Small click-to-edit text value for the properties card. */
+function EditableProp({ value, editable, placeholder, type = 'text', align = 'right', onSave }: {
+  value?: string | null; editable: boolean; placeholder?: string;
+  type?: 'text' | 'email' | 'number'; align?: 'left' | 'right';
+  onSave: (v: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  if (!editable && !value) return <span className="text-faint">–</span>;
+  if (editing) {
+    const commit = () => {
+      setEditing(false);
+      const next = draft.trim();
+      if (next !== (value ?? '')) onSave(next);
+    };
+    return (
+      <input
+        autoFocus
+        type={type}
+        value={draft}
+        onFocus={(e) => e.target.select()}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false); }}
+        className={cn(
+          'w-full max-w-[170px] rounded-md border border-primary/40 bg-transparent px-1 text-[13px] outline-none focus:ring-2 focus:ring-ring/25',
+          align === 'right' && 'text-right',
+          type === 'number' && 'tabular-nums',
+        )}
+      />
+    );
+  }
+  const display = value || <span className="text-faint">{placeholder ?? '–'}</span>;
+  if (!editable) return <span>{display}</span>;
+  return (
+    <button
+      onClick={() => { setDraft(value ?? ''); setEditing(true); }}
+      className={cn('-mx-1 max-w-full truncate rounded-md px-1 transition-colors hover:bg-muted', align === 'right' && 'text-right')}
+      title={value ?? undefined}
+    >
+      {display}
+    </button>
+  );
+}
+
+function PropertiesCard({ company, loading, editable, onPatch }: {
+  company?: Company; loading: boolean; editable: boolean; onPatch: (body: Record<string, unknown>) => void;
+}) {
   const t = useT();
   return (
     <Card className="p-4">
@@ -367,17 +475,46 @@ function PropertiesCard({ company, loading }: { company?: Company; loading: bool
         <div className="space-y-2 pt-2">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-4" />)}</div>
       ) : (
         <div className="divide-y divide-border/60">
-          <PropRow label={t('common.status')}><StatusPill status={company.status} /></PropRow>
-          <PropRow label={t('crm.billingEmail')}>
-            {company.billingEmail
-              ? <a href={`mailto:${company.billingEmail}`} className="text-primary hover:underline">{company.billingEmail}</a>
-              : <span className="text-faint">–</span>}
+          {/* Status lives in the header pill – repeating it here was pure noise. */}
+          <PropRow label={t('crm.colDomain')}>
+            <EditableProp value={company.domain} editable={editable} placeholder={t('crm.noDomain')}
+              onSave={(v) => onPatch({ domain: v || null })} />
           </PropRow>
-          <PropRow label={t('common.currency')}><span className="tabular-nums">{company.defaultCurrency || '–'}</span></PropRow>
+          <PropRow label={t('crm.billingEmail')}>
+            {editable ? (
+              <EditableProp value={company.billingEmail} editable type="email" onSave={(v) => onPatch({ billingEmail: v || null })} />
+            ) : company.billingEmail ? (
+              <a href={`mailto:${company.billingEmail}`} className="text-primary hover:underline">{company.billingEmail}</a>
+            ) : (
+              <span className="text-faint">–</span>
+            )}
+          </PropRow>
+          <PropRow label={t('common.currency')}>
+            {editable ? (
+              <DropdownMenu
+                align="end"
+                trigger={<button className="-mx-1 rounded-md px-1 tabular-nums transition-colors hover:bg-muted">{company.defaultCurrency || 'USD'} <ChevronDown size={11} className="inline text-faint" /></button>}
+              >
+                {CURRENCIES.map((cur) => (
+                  <MenuItem key={cur} checked={cur === company.defaultCurrency} onSelect={() => cur !== company.defaultCurrency && onPatch({ defaultCurrency: cur })}>{cur}</MenuItem>
+                ))}
+              </DropdownMenu>
+            ) : (
+              <span className="tabular-nums">{company.defaultCurrency || '–'}</span>
+            )}
+          </PropRow>
           <PropRow label={t('crm.paymentTerms')}>
-            {company.paymentTermsDays != null
-              ? <span className="tabular-nums">{t('crm.paymentTermsValue').replace('{n}', String(company.paymentTermsDays))}</span>
-              : <span className="text-faint">–</span>}
+            {editable ? (
+              <EditableProp
+                value={company.paymentTermsDays != null ? String(company.paymentTermsDays) : ''}
+                editable type="number"
+                onSave={(v) => { const n = Number(v); if (v !== '' && Number.isInteger(n) && n >= 0) onPatch({ paymentTermsDays: n }); }}
+              />
+            ) : company.paymentTermsDays != null ? (
+              <span className="tabular-nums">{t('crm.paymentTermsValue').replace('{n}', String(company.paymentTermsDays))}</span>
+            ) : (
+              <span className="text-faint">–</span>
+            )}
           </PropRow>
           <PropRow label={t('crm.created')}>{fmtDate(company.createdAt)}</PropRow>
         </div>
@@ -388,30 +525,44 @@ function PropertiesCard({ company, loading }: { company?: Company; loading: bool
 
 function ProjectsCard({ companyId }: { companyId: string }) {
   const t = useT();
+  const navigate = useNavigate();
+  const can = useCan();
   const { data, isLoading } = useQuery<Project[]>({
     queryKey: ['projects', 'company', companyId],
     queryFn: () => api.get<{ data: Project[] }>(`/projects${qs({ companyId })}`).then((r) => r.data).catch(() => []),
   });
   const projects = data ?? [];
   if (isLoading) return <Card className="p-4"><Skeleton className="h-4 w-24" /></Card>;
-  if (projects.length === 0) return null;
 
   return (
     <Card className="p-4">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">{t('crm.linkedProjects')}</h3>
-      <div className="space-y-0.5">
-        {projects.map((p) => (
-          <Link
-            key={p.id}
-            to={`/projects/${p.id}`}
-            className="-mx-1.5 flex items-center gap-2 rounded-md px-1.5 py-1.5 text-[13px] transition-colors hover:bg-muted"
-          >
-            <FolderKanban size={14} className="shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate">{p.name}</span>
-            {p.key && <span className="shrink-0 font-mono text-[11px] text-faint">{p.key}</span>}
-          </Link>
-        ))}
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-faint">{t('crm.linkedProjects')}</h3>
+        {can('projects.create') && (
+          <Tooltip label={t('crm.newProjectForClient')}>
+            <IconButton size="sm" aria-label={t('crm.newProjectForClient')} onClick={() => navigate(`/projects?new=1&companyId=${companyId}`)}>
+              <Plus size={13} />
+            </IconButton>
+          </Tooltip>
+        )}
       </div>
+      {projects.length === 0 ? (
+        <p className="py-1 text-[13px] text-faint">{t('crm.noProjects')}</p>
+      ) : (
+        <div className="space-y-0.5">
+          {projects.map((p) => (
+            <Link
+              key={p.id}
+              to={`/projects/${p.id}`}
+              className="-mx-1.5 flex items-center gap-2 rounded-md px-1.5 py-1.5 text-[13px] transition-colors hover:bg-muted"
+            >
+              <FolderKanban size={14} className="shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate">{p.name}</span>
+              {p.key && <span className="shrink-0 font-mono text-[11px] text-faint">{p.key}</span>}
+            </Link>
+          ))}
+        </div>
+      )}
     </Card>
   );
 }
