@@ -19,7 +19,7 @@ import {
 } from '../components/ui';
 import { DropdownMenu, MenuItem, MenuLabel, toast } from '../components/overlays';
 import { useDealStages, useProjectsLookup, useUsersLookup, CURRENCIES, type Company, type Deal, type ProjectLite, type Stage } from '../components/crm/shared';
-import { EditableName, NotesSection, OwnerPicker, PropRow, SectionHeader } from '../components/crm/detail';
+import { EditableName, FilesSection, NotesSection, OwnerPicker, PropRow, SectionHeader } from '../components/crm/detail';
 import { LostReasonDialog } from '../components/crm/dialogs';
 import { DateField } from '../components/DatePicker';
 
@@ -142,14 +142,15 @@ export function DealDetailPage({ id }: { id: string }) {
 
       {/* Body: main + side */}
       <div className="min-h-0 flex-1 overflow-auto">
-        <div className="mx-auto grid max-w-6xl gap-6 p-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="mx-auto grid max-w-6xl gap-6 p-6 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-8">
             {can('crm.read') && <NotesSection dealId={id} canWrite={can('crm.write')} />}
+            <FilesSection entityType="deal" entityId={id} canWrite={canWrite} />
             <ActivitySection dealId={id} />
           </div>
           <aside className="space-y-4">
             <DealPropertiesCard deal={d} stage={stage} loading={dealQ.isLoading} editable={canWrite} onPatch={(body) => patch.mutate(body)} />
-            <CustomFieldsCard deal={d} />
+            <CustomFieldsCard deal={d} editable={canWrite} onPatch={(body) => patch.mutate(body)} />
           </aside>
         </div>
       </div>
@@ -289,7 +290,7 @@ function DealPropertiesCard({ deal, stage, loading, editable, onPatch }: {
                 size="sm"
                 value={deal.expectedCloseDate ?? null}
                 onChange={(v) => onPatch({ expectedCloseDate: v })}
-                className="w-32"
+                className="w-40"
               />
             ) : deal.expectedCloseDate ? (
               <span className="inline-flex items-center gap-1 tabular-nums"><CalendarClock size={12} /> {fmtDate(deal.expectedCloseDate)}</span>
@@ -347,8 +348,11 @@ function EditableAmount({ amount, currency, editable, onSave }: {
 
 /* ─────────────── Custom fields ─────────────── */
 
-function CustomFieldsCard({ deal }: { deal?: DealFull }) {
+function CustomFieldsCard({ deal, editable, onPatch }: {
+  deal?: DealFull; editable: boolean; onPatch: (body: Record<string, unknown>) => void;
+}) {
   const t = useT();
+  const usersQ = useUsersLookup();
   const defsQ = useQuery<FieldDef[]>({
     queryKey: ['custom-fields', 'deals'],
     queryFn: () => api.get<{ data: FieldDef[] }>('/custom-fields?entityType=deals').then((r) => r.data),
@@ -357,27 +361,144 @@ function CustomFieldsCard({ deal }: { deal?: DealFull }) {
   const defs = (defsQ.data ?? []).filter((f) => !f.deprecated);
   if (!deal || defs.length === 0) return null;
   const values = deal.customFields ?? {};
-
-  const render = (f: FieldDef) => {
-    const v = values[f.key];
-    if (v == null || v === '') return <span className="text-faint">–</span>;
-    if (f.type === 'checkbox') return <span>{v ? '✓' : '–'}</span>;
-    if (f.type === 'select') return <span>{f.options?.find((o) => o.value === v)?.label ?? String(v)}</span>;
-    if (f.type === 'multiselect' && Array.isArray(v)) {
-      return <span>{v.map((x) => f.options?.find((o) => o.value === x)?.label ?? String(x)).join(', ')}</span>;
-    }
-    if (f.type === 'url') return <a href={String(v)} target="_blank" rel="noreferrer" className="text-primary hover:underline">{String(v)}</a>;
-    if (f.type === 'date') return <span className="tabular-nums">{fmtDate(String(v))}</span>;
-    return <span>{String(v)}</span>;
-  };
+  const save = (key: string, v: unknown) => onPatch({ customFields: { ...values, [key]: v } });
 
   return (
     <Card className="p-4">
       <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-faint">{t('crm.customFields')}</h3>
       <div className="divide-y divide-border/60">
-        {defs.map((f) => <PropRow key={f.id} label={f.label}>{render(f)}</PropRow>)}
+        {defs.map((f) => (
+          <PropRow key={f.id} label={f.label}>
+            <CustomFieldValue field={f} value={values[f.key]} editable={editable} users={usersQ.data ?? []} onSave={(v) => save(f.key, v)} />
+          </PropRow>
+        ))}
       </div>
     </Card>
+  );
+}
+
+/** One custom field value: read view + per-type editor. */
+function CustomFieldValue({ field: f, value: v, editable, users, onSave }: {
+  field: FieldDef; value: unknown; editable: boolean;
+  users: { id: string; name: string; avatar?: string | null }[];
+  onSave: (v: unknown) => void;
+}) {
+  const t = useT();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const empty = <span className="text-faint">–</span>;
+
+  // ── Always-live controls (no separate edit state needed) ──
+  if (f.type === 'checkbox') {
+    if (!editable) return v ? <span>✓</span> : empty;
+    return (
+      <button
+        role="checkbox"
+        aria-checked={!!v}
+        onClick={() => onSave(!v)}
+        className={cn('grid h-4 w-4 place-items-center rounded border transition-colors',
+          v ? 'border-primary bg-primary text-white' : 'border-border-strong hover:border-primary/60')}
+      >
+        {v ? '✓' : ''}
+      </button>
+    );
+  }
+  if (f.type === 'select') {
+    const label = f.options?.find((o) => o.value === v)?.label ?? (v ? String(v) : null);
+    if (!editable) return label ? <span>{label}</span> : empty;
+    return (
+      <DropdownMenu
+        align="end"
+        trigger={<button className="-mx-1 rounded-md px-1 transition-colors hover:bg-muted">{label ?? empty} <ChevronDown size={11} className="inline text-faint" /></button>}
+      >
+        <MenuItem checked={v == null || v === ''} onSelect={() => onSave(null)}>–</MenuItem>
+        {(f.options ?? []).map((o) => (
+          <MenuItem key={o.value} checked={o.value === v} onSelect={() => o.value !== v && onSave(o.value)}>{o.label}</MenuItem>
+        ))}
+      </DropdownMenu>
+    );
+  }
+  if (f.type === 'multiselect') {
+    const arr = Array.isArray(v) ? (v as string[]) : [];
+    const label = arr.length ? arr.map((x) => f.options?.find((o) => o.value === x)?.label ?? x).join(', ') : null;
+    if (!editable) return label ? <span>{label}</span> : empty;
+    return (
+      <DropdownMenu
+        align="end"
+        trigger={<button className="-mx-1 rounded-md px-1 text-right transition-colors hover:bg-muted">{label ?? empty} <ChevronDown size={11} className="inline text-faint" /></button>}
+      >
+        {(f.options ?? []).map((o) => (
+          <MenuItem
+            key={o.value}
+            checked={arr.includes(o.value)}
+            onSelect={() => onSave(arr.includes(o.value) ? arr.filter((x) => x !== o.value) : [...arr, o.value])}
+          >
+            {o.label}
+          </MenuItem>
+        ))}
+      </DropdownMenu>
+    );
+  }
+  if (f.type === 'date') {
+    if (!editable) return v ? <span className="tabular-nums">{fmtDate(String(v))}</span> : empty;
+    return <DateField size="sm" value={(v as string) ?? null} onChange={(next) => onSave(next)} className="w-40" />;
+  }
+  if (f.type === 'user') {
+    const u = users.find((x) => x.id === v);
+    if (!editable) return u ? <span className="inline-flex items-center gap-1.5"><Avatar name={u.name} src={u.avatar} size={16} /> {u.name}</span> : empty;
+    return (
+      <DropdownMenu
+        align="end"
+        trigger={<button className="-mx-1 rounded-md px-1 transition-colors hover:bg-muted">{u ? <span className="inline-flex items-center gap-1.5"><Avatar name={u.name} src={u.avatar} size={16} /> {u.name}</span> : empty} <ChevronDown size={11} className="inline text-faint" /></button>}
+      >
+        <MenuItem checked={!u} onSelect={() => onSave(null)}>{t('crm.noOwner')}</MenuItem>
+        {users.map((x) => (
+          <MenuItem key={x.id} checked={x.id === v} onSelect={() => x.id !== v && onSave(x.id)}>
+            <span className="flex items-center gap-2"><Avatar name={x.name} src={x.avatar} size={18} /> {x.name}</span>
+          </MenuItem>
+        ))}
+      </DropdownMenu>
+    );
+  }
+
+  // ── text / number / url: click-to-edit ──
+  const display = v == null || v === '' ? null
+    : f.type === 'url'
+      ? <a href={String(v)} target="_blank" rel="noreferrer" className="text-primary hover:underline" onClick={(e) => e.stopPropagation()}>{String(v)}</a>
+      : <span className={cn(f.type === 'number' && 'tabular-nums')}>{String(v)}</span>;
+  if (!editable) return display ?? empty;
+  if (editing) {
+    const commit = () => {
+      setEditing(false);
+      const next = draft.trim();
+      if (f.type === 'number') {
+        const n = Number(next);
+        if (next === '') onSave(null);
+        else if (Number.isFinite(n) && n !== v) onSave(n);
+        return;
+      }
+      if (next !== (v ?? '')) onSave(next || null);
+    };
+    return (
+      <input
+        autoFocus
+        type={f.type === 'number' ? 'number' : 'text'}
+        value={draft}
+        onFocus={(e) => e.target.select()}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false); }}
+        className="w-full min-w-[140px] rounded-md border border-primary/40 bg-transparent px-1 text-right text-[13px] outline-none focus:ring-2 focus:ring-ring/25"
+      />
+    );
+  }
+  return (
+    <button
+      onClick={() => { setDraft(v != null ? String(v) : ''); setEditing(true); }}
+      className="-mx-1 max-w-full break-words rounded-md px-1 text-right transition-colors hover:bg-muted"
+    >
+      {display ?? empty}
+    </button>
   );
 }
 

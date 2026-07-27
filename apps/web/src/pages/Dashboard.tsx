@@ -76,6 +76,7 @@ extendDict({
     'activity.noun.cycle': 'a cycle',
     'activity.noun.user': 'a user',
     'activity.noun.custom_field': 'a custom field',
+    'activity.noun.attachment': 'a file',
   },
   uk: {
     'dashboard.myOpenTasks': 'Мої відкриті задачі',
@@ -157,6 +158,7 @@ extendDict({
     'activity.noun.cycle': 'цикл',
     'activity.noun.user': 'користувача',
     'activity.noun.custom_field': 'кастомне поле',
+    'activity.noun.attachment': 'файл',
   },
 });
 
