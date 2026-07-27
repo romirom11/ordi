@@ -95,8 +95,10 @@ export async function listProjects(actor: Actor, filters: { typeId?: string; sta
 }
 
 /**
- * Load a project type and apply its behaviour to the desired company link:
- * requiresClient → companyId is mandatory; otherwise the link is forced to null.
+ * Load a project type and validate the desired company link. requiresClient
+ * means the client is mandatory – not that other types cannot have one: any
+ * project may be linked to a client (the CRM Projects card and the project
+ * rail both offer it), so a provided companyId is kept as-is.
  */
 async function resolveTypeCompany(projectTypeId: string, companyId: string | null | undefined): Promise<{ typeId: string; companyId: string | null }> {
   const { db } = getDb();
@@ -105,7 +107,7 @@ async function resolveTypeCompany(projectTypeId: string, companyId: string | nul
   if (type.requiresClient && !companyId) {
     throw err.validation(`Project type "${type.name}" requires a client`, { projectTypeId });
   }
-  return { typeId: type.id, companyId: type.requiresClient ? companyId! : null };
+  return { typeId: type.id, companyId: companyId ?? null };
 }
 
 export async function createProject(actor: Actor, input: any): Promise<{ id: string; key: string }> {
@@ -187,6 +189,17 @@ export async function updateProject(actor: Actor, id: string, input: any) {
   const patch: Record<string, unknown> = {};
   for (const k of ['name', 'status', 'visibility', 'leadId', 'startDate', 'targetDate', 'description', 'summary', 'priority', 'links', 'customFields']) {
     if (input[k] !== undefined) patch[k] = input[k];
+  }
+  // Company / type changes go through the same requiresClient rule as create.
+  // These keys were silently dropped before, which made the rail's company and
+  // type pickers (and CRM's "link existing project") 200-OK no-ops.
+  if (input.companyId !== undefined || input.projectTypeId !== undefined) {
+    const resolved = await resolveTypeCompany(
+      input.projectTypeId ?? before.projectTypeId,
+      input.companyId !== undefined ? input.companyId : before.companyId,
+    );
+    patch.projectTypeId = resolved.typeId;
+    patch.companyId = resolved.companyId;
   }
   // Project labels: replace the join set when labelIds is provided.
   if (input.labelIds !== undefined) {

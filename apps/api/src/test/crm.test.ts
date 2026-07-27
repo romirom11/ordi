@@ -30,6 +30,8 @@ beforeAll(async () => {
   await db.insert(schema.projects).values({
     id: projectId, name: 'Solovei', key: 'SOL', projectTypeId: typeId, createdBy: users.owner!.userId,
   });
+  // Project writes require project-admin membership even for the workspace owner.
+  await db.insert(schema.projectMembers).values({ projectId, userId: users.owner!.userId, role: 'admin' });
 });
 
 describe('deal ↔ project link', () => {
@@ -80,6 +82,38 @@ describe('deal ↔ project link', () => {
       companyId, stageId, projectId, title: 'Member-created Solovei lead',
     });
     expect(res.status).toBe(201);
+  });
+});
+
+describe('project ↔ company link via PATCH', () => {
+  it('links and unlinks a company on an existing project', async () => {
+    const before = await json(reqAs(users.owner!.cookie).get(`/projects/${projectId}`));
+    const link = await reqAs(users.owner!.cookie).patch(`/projects/${projectId}`, { companyId, version: before.version });
+    expect(link.status).toBe(200);
+    expect((await json(reqAs(users.owner!.cookie).get(`/projects/${projectId}`))).companyId).toBe(companyId);
+
+    // The company's project list picks it up.
+    const list = await json(reqAs(users.owner!.cookie).get(`/projects?companyId=${companyId}`));
+    expect(list.data.map((p: any) => p.id)).toContain(projectId);
+
+    const mid = await json(reqAs(users.owner!.cookie).get(`/projects/${projectId}`));
+    const unlink = await reqAs(users.owner!.cookie).patch(`/projects/${projectId}`, { companyId: null, version: mid.version });
+    expect(unlink.status).toBe(200);
+    expect((await json(reqAs(users.owner!.cookie).get(`/projects/${projectId}`))).companyId).toBeNull();
+  });
+
+  it('refuses to unlink when the project type requires a client', async () => {
+    const { db } = getDb();
+    const typeId = ulid();
+    await db.insert(schema.projectTypes).values({ id: typeId, name: 'Client work', requiresClient: true });
+    const pid = ulid();
+    await db.insert(schema.projects).values({
+      id: pid, name: 'Client site', key: 'CLI', projectTypeId: typeId, companyId, createdBy: users.owner!.userId,
+    });
+    await db.insert(schema.projectMembers).values({ projectId: pid, userId: users.owner!.userId, role: 'admin' });
+    const before = await json(reqAs(users.owner!.cookie).get(`/projects/${pid}`));
+    const res = await reqAs(users.owner!.cookie).patch(`/projects/${pid}`, { companyId: null, version: before.version });
+    expect(res.status).toBe(400);
   });
 });
 
