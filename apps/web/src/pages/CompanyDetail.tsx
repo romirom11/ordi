@@ -28,6 +28,7 @@ import {
   type Company, type Contact, type Deal, type Stage,
 } from '../components/crm/shared';
 import { EditableName, FilesSection, NotesSection, SectionHeader } from '../components/crm/detail';
+import { DealRows } from '../components/crm/DealRows';
 import { ContactDialog, NewDealDialog } from '../components/crm/dialogs';
 import { NewProjectModal } from './Projects';
 import { useWorkspaceSettings, financeEnabled } from '../components/finance/workspace';
@@ -161,7 +162,6 @@ function DealsSection({ companyId, canWrite, onAdd }: { companyId: string; canWr
     queryFn: () => api.get<{ data: Deal[] }>(`/deals${qs({ companyId })}`).then((r) => r.data),
   });
   const stageMap = new Map((stagesQ.data ?? []).map((s: Stage) => [s.id, s]));
-  const userMap = new Map((usersQ.data ?? []).map((u) => [u.id, u]));
   const deals = dealsQ.data ?? [];
 
   // Open pipeline sits next to the count rather than in a banner of its own –
@@ -201,31 +201,7 @@ function DealsSection({ companyId, canWrite, onAdd }: { companyId: string; canWr
           action={canWrite && <Button variant="ghost" size="xs" onClick={onAdd}><Plus size={13} /> {t('crm.addDealForClient')}</Button>}
         />
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border">
-          {deals.map((d, i) => {
-            const stage = d.stageId ? stageMap.get(d.stageId) : undefined;
-            const color = stage?.isWon ? '#22c55e' : stage?.isLost ? '#ef4444' : undefined;
-            const dealOwner = d.ownerId ? userMap.get(d.ownerId) : undefined;
-            return (
-              <Link key={d.id} to={`/deals/${d.id}`} className={cn('flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/50', i > 0 && 'border-t border-border')}>
-                <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{d.title}</span>
-                {stage && <Badge color={color}>{stage.name}</Badge>}
-                {/* Close date and owner: without them you cannot tell which deal has gone stale. */}
-                <span className="hidden w-24 shrink-0 text-right text-xs text-muted-foreground tabular-nums sm:block">
-                  {d.expectedCloseDate ? fmtDate(d.expectedCloseDate) : '–'}
-                </span>
-                <span className="w-24 shrink-0 text-right text-[13px] font-semibold tabular-nums">
-                  {d.amount != null ? fmtMoney(d.amount, d.currency ?? 'USD') : '–'}
-                </span>
-                <span className="w-5 shrink-0">
-                  {dealOwner
-                    ? <Tooltip label={dealOwner.name}><Avatar name={dealOwner.name} src={dealOwner.avatar} size={20} /></Tooltip>
-                    : <span className="grid h-5 w-5 place-items-center rounded-full border border-dashed border-border-strong text-[9px] text-faint">?</span>}
-                </span>
-              </Link>
-            );
-          })}
-        </div>
+        <DealRows deals={deals} stages={stagesQ.data ?? []} users={usersQ.data ?? []} />
       )}
     </section>
   );

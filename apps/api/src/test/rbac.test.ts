@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { getDb, schema, eq } from '@ordi/db';
 import { ulid } from 'ulid';
 import { resetDb, seedRolesAndUsers, reqAs, anon, json } from './helpers';
+import { hashPassword, generateToken } from '../lib/crypto';
 
 let users: Awaited<ReturnType<typeof seedRolesAndUsers>>;
 
@@ -129,5 +130,55 @@ describe('CRM permission boundary', () => {
   });
   it('finance can read companies but not write deals without deals.write', async () => {
     expect((await reqAs(users.finance!.cookie).get('/companies')).status).toBe(200);
+  });
+
+  /**
+   * The project overview lists the deals sold into a project, which on a
+   * product project means leads from many different clients. Reaching a
+   * project does not imply reading its pipeline: HR, finance and guests all
+   * hold projects.read (or project membership) without deals.read, and a
+   * guest on a shared product project must never see other clients' deals.
+   */
+  describe('deals scoped to a project stay behind deals.read', () => {
+    for (const role of ['hr', 'finance', 'guest']) {
+      it(`${role} cannot list a project's deals`, async () => {
+        const res = await reqAs(users[role]!.cookie).get(`/deals?projectId=${ulid()}`);
+        expect(res.status).toBe(403);
+      });
+    }
+    it('member, who holds deals.read, can', async () => {
+      const res = await reqAs(users.member!.cookie).get(`/deals?projectId=${ulid()}`);
+      expect(res.status).toBe(200);
+    });
+  });
+
+  /**
+   * The client column of that list is a second, independent boundary. No
+   * seeded role separates the two, so this builds the role that does: the
+   * project's lead list must render for it while staying unable to name the
+   * companies the leads came from.
+   */
+  it('deals.read does not carry crm.read', async () => {
+    const { db } = getDb();
+    const roleId = ulid();
+    await db.insert(schema.roles).values({
+      id: roleId, key: `deals-only-${roleId}`, name: 'Deals only',
+      description: 'Reads deals, not companies', isSystem: false,
+    });
+    await db.insert(schema.rolePermissions).values([
+      { roleId, permission: 'deals.read' },
+      { roleId, permission: 'projects.read' },
+    ]);
+    const userId = ulid();
+    await db.insert(schema.users).values({
+      id: userId, email: `deals-only-${userId}@test.local`, name: 'Deals only',
+      passwordHash: hashPassword('password'), roleId,
+    });
+    const token = generateToken();
+    await db.insert(schema.sessions).values({ id: ulid(), userId, token, expiresAt: new Date(Date.now() + 3600_000) });
+    const as = reqAs(`ordi_session=${token}`);
+
+    expect((await as.get(`/deals?projectId=${ulid()}`)).status).toBe(200);
+    expect((await as.get('/companies')).status).toBe(403);
   });
 });
