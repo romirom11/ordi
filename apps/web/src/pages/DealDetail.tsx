@@ -1,27 +1,30 @@
 /**
- * Deal detail – the deal finally has a card of its own (previously it existed
- * only as a kanban tile that linked to the company). Header: editable title,
- * stage dropdown (lost stage prompts for a reason), company link, owner picker.
- * Main column: notes (deal-scoped) + activity trail. Side: properties incl.
- * custom fields.
+ * Deal detail, in the same shape as the company and project records: a one-line
+ * identity header, content at full width (notes + activity trail) and a rail
+ * carrying every property – stage, client, project, owner, money, dates,
+ * custom fields and files. Moving to a lost stage still prompts for a reason.
  */
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Activity as ActivityIcon, CalendarClock, ChevronDown, ExternalLink as ExternalLinkIcon, FolderKanban, Handshake } from 'lucide-react';
+import {
+  Activity as ActivityIcon, CalendarClock, ChevronDown, ChevronRight,
+  ExternalLink as ExternalLinkIcon, FolderKanban, Handshake, UserCircle2,
+} from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { Link } from '../lib/router';
 import { useCan, useMe } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import { useT } from '../lib/i18n';
 import {
-  Avatar, Badge, Breadcrumbs, Card, EmptyState, Input, Skeleton,
+  Avatar, Badge, EmptySection, Input, RailChip, RailField, Skeleton,
   cn, fmtMoney, fmtDate, fmtRelative,
 } from '../components/ui';
 import { DropdownMenu, MenuItem, MenuLabel, toast } from '../components/overlays';
 import { useDealStages, useProjectsLookup, useUsersLookup, CURRENCIES, type Company, type Deal, type ProjectLite, type Stage } from '../components/crm/shared';
-import { EditableName, FilesSection, NotesSection, OwnerPicker, PropRow, SectionHeader } from '../components/crm/detail';
+import { EditableName, FilesSection, NotesSection, SectionHeader } from '../components/crm/detail';
 import { LostReasonDialog } from '../components/crm/dialogs';
 import { DateField } from '../components/DatePicker';
+import { DateRailPicker } from '../components/project/pickers';
 
 interface DealFull extends Deal { customFields?: Record<string, unknown>; createdAt?: string | null }
 interface FieldDef { id: string; key: string; label: string; type: string; options?: { value: string; label: string }[]; deprecated?: boolean }
@@ -89,70 +92,55 @@ export function DealDetailPage({ id }: { id: string }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* Breadcrumb + header */}
-      <div className="border-b border-border px-6 pb-4 pt-3">
-        <Breadcrumbs
-          className="mb-3"
-          items={[
-            { label: t('crm.title'), to: '/crm' },
-            { label: t('crm.tabPipeline'), to: '/crm/deals' },
-          ]}
-        />
-        <div className="flex items-start gap-4">
-          <div className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground">
-            <Handshake size={22} />
-          </div>
-          <div className="min-w-0 flex-1">
-            {dealQ.isLoading ? (
-              <Skeleton className="h-6 w-52" />
-            ) : d ? (
-              <EditableName value={d.title} editable={canWrite} onSave={(title) => patch.mutate({ title })} />
-            ) : (
-              <div className="flex items-center gap-2 text-muted-foreground"><Handshake size={18} /> {t('common.error')}</div>
-            )}
-            {d && (
-              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                <StageDropdown stage={stage} stages={stages} editable={canWrite} onPick={pickStage} />
-                {companyQ.data && (
-                  <Link
-                    to={`/companies/${companyQ.data.id}`}
-                    className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  >
-                    <Avatar name={companyQ.data.name} size={16} />
-                    <span className="truncate">{companyQ.data.name}</span>
-                  </Link>
-                )}
-                <ProjectPicker
-                  project={project}
-                  projects={projectsQ.data ?? []}
-                  editable={canWrite}
-                  onPick={(pid) => patch.mutate({ projectId: pid })}
-                />
-                <OwnerPicker
-                  owner={owner}
-                  users={usersQ.data ?? []}
-                  editable={canWrite}
-                  onPick={(uid) => patch.mutate({ ownerId: uid })}
-                />
-              </div>
-            )}
-          </div>
-        </div>
+      {/* Identity row only – the deal's properties all live in the rail. */}
+      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
+        <Link to="/crm" className="hidden shrink-0 text-[13px] text-muted-foreground transition-colors duration-150 hover:text-foreground sm:block">
+          {t('crm.title')}
+        </Link>
+        <ChevronRight size={12} className="hidden shrink-0 text-faint sm:block" aria-hidden />
+        <Link to="/crm/deals" className="hidden shrink-0 text-[13px] text-muted-foreground transition-colors duration-150 hover:text-foreground sm:block">
+          {t('crm.tabPipeline')}
+        </Link>
+        <ChevronRight size={12} className="hidden shrink-0 text-faint sm:block" aria-hidden />
+
+        {dealQ.isLoading ? (
+          <Skeleton className="h-4 w-52" />
+        ) : d ? (
+          <>
+            <Handshake size={16} className="shrink-0 text-muted-foreground" />
+            <EditableName value={d.title} editable={canWrite} size="sm" onSave={(title) => patch.mutate({ title })} />
+          </>
+        ) : (
+          <span className="flex items-center gap-2 text-[13px] text-muted-foreground"><Handshake size={15} /> {t('common.error')}</span>
+        )}
       </div>
 
-      {/* Body: main + side */}
-      <div className="min-h-0 flex-1 overflow-auto">
-        <div className="mx-auto grid max-w-6xl gap-6 p-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="space-y-8">
+      {/* Body: content at full width, rail pinned to the edge. */}
+      <div className="flex min-h-0 flex-1 flex-col min-[1100px]:flex-row">
+        <div className="order-2 min-w-0 flex-1 overflow-auto min-[1100px]:order-1">
+          <div className="space-y-7 px-6 py-6">
             {can('crm.read') && <NotesSection dealId={id} canWrite={can('crm.write')} />}
-            <FilesSection entityType="deal" entityId={id} canWrite={canWrite} />
             <ActivitySection dealId={id} />
           </div>
-          <aside className="space-y-4">
-            <DealPropertiesCard deal={d} stage={stage} loading={dealQ.isLoading} editable={canWrite} onPatch={(body) => patch.mutate(body)} />
-            <CustomFieldsCard deal={d} editable={canWrite} onPatch={(body) => patch.mutate(body)} />
-          </aside>
         </div>
+        <aside className="order-1 shrink-0 space-y-6 overflow-auto border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-72 min-[1100px]:border-b-0 min-[1100px]:border-l">
+          <DealRail
+            deal={d}
+            stage={stage}
+            stages={stages}
+            loading={dealQ.isLoading}
+            editable={canWrite}
+            company={companyQ.data}
+            project={project}
+            projects={projectsQ.data ?? []}
+            owner={owner}
+            users={usersQ.data ?? []}
+            onPickStage={pickStage}
+            onPatch={(body) => patch.mutate(body)}
+          />
+          <CustomFieldsRail deal={d} editable={canWrite} onPatch={(body) => patch.mutate(body)} />
+          <FilesSection entityType="deal" entityId={id} canWrite={canWrite} variant="rail" />
+        </aside>
       </div>
 
       <LostReasonDialog
@@ -168,59 +156,7 @@ export function DealDetailPage({ id }: { id: string }) {
   );
 }
 
-/* ─────────────── Project picker ─────────────── */
-
-function ProjectPicker({ project, projects, editable, onPick }: {
-  project?: ProjectLite; projects: ProjectLite[]; editable: boolean; onPick: (id: string | null) => void;
-}) {
-  const t = useT();
-  const content = (
-    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-      <FolderKanban size={13} className={project ? undefined : 'text-faint'} />
-      {project ? (
-        <>
-          <span className="truncate">{project.name}</span>
-          {project.key && <span className="shrink-0 font-mono text-[10px] text-faint">{project.key}</span>}
-        </>
-      ) : (
-        <span className="text-faint">{t('crm.noProject')}</span>
-      )}
-    </span>
-  );
-  // Read-only: a linked project is a link; an empty slot is just text.
-  if (!editable) {
-    return project
-      ? <Link to={`/projects/${project.id}`} className="rounded-md px-1.5 py-0.5 transition-colors hover:bg-muted">{content}</Link>
-      : content;
-  }
-  return (
-    <span className="inline-flex items-center">
-      {project && (
-        <Link to={`/projects/${project.id}`} aria-label={t('crm.viewProject')} className="rounded-md p-0.5 text-faint transition-colors hover:bg-muted hover:text-foreground">
-          <ExternalLinkIcon size={12} />
-        </Link>
-      )}
-      <DropdownMenu
-        align="start"
-        trigger={<button className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-muted">{content}<ChevronDown size={12} className="text-faint" /></button>}
-      >
-        <MenuLabel>{t('crm.linkProjectHint')}</MenuLabel>
-        <MenuItem checked={!project} onSelect={() => project && onPick(null)}>{t('crm.noProject')}</MenuItem>
-        {projects.map((p) => (
-          <MenuItem key={p.id} checked={p.id === project?.id} onSelect={() => p.id !== project?.id && onPick(p.id)}>
-            <span className="flex items-center gap-2">
-              <FolderKanban size={13} className="text-muted-foreground" />
-              <span className="flex-1 truncate">{p.name}</span>
-              {p.key && <span className="font-mono text-[10px] text-faint">{p.key}</span>}
-            </span>
-          </MenuItem>
-        ))}
-      </DropdownMenu>
-    </span>
-  );
-}
-
-/* ─────────────── Stage dropdown ─────────────── */
+/* ─────────────── Rail ─────────────── */
 
 function stageColor(stage?: Stage): string | undefined {
   if (stage?.isWon) return '#22c55e';
@@ -228,85 +164,184 @@ function stageColor(stage?: Stage): string | undefined {
   return undefined;
 }
 
-function StageDropdown({ stage, stages, editable, onPick }: {
-  stage?: Stage; stages: Stage[]; editable: boolean; onPick: (s: Stage) => void;
+/**
+ * Every property of the deal, in the rail. The header used to carry stage,
+ * company, project and owner as chips; they read better as labelled rows and
+ * leave the header to identity alone.
+ */
+function DealRail({
+  deal, stage, stages, loading, editable, company, project, projects, owner, users, onPickStage, onPatch,
+}: {
+  deal?: DealFull; stage?: Stage; stages: Stage[]; loading: boolean; editable: boolean;
+  company?: Company; project?: ProjectLite; projects: ProjectLite[];
+  owner?: { id: string; name: string; avatar?: string | null };
+  users: { id: string; name: string; avatar?: string | null }[];
+  onPickStage: (s: Stage) => void;
+  onPatch: (body: Record<string, unknown>) => void;
 }) {
   const t = useT();
-  const pill = <Badge color={stageColor(stage)}>{stage?.name ?? t('deals.stage')}</Badge>;
-  if (!editable) return pill;
-  return (
-    <DropdownMenu
-      align="start"
-      trigger={
-        <button className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-muted">
-          {pill}
-          <ChevronDown size={12} className="text-faint" />
-        </button>
-      }
-    >
-      <MenuLabel>{t('crm.moveToStage')}</MenuLabel>
-      {stages.map((s) => (
-        <MenuItem key={s.id} checked={s.id === stage?.id} onSelect={() => onPick(s)}>
-          <Badge color={stageColor(s)}>{s.name}</Badge>
-        </MenuItem>
-      ))}
-    </DropdownMenu>
-  );
-}
 
-/* ─────────────── Properties ─────────────── */
+  if (loading || !deal) {
+    return <div className="space-y-3">{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-7" />)}</div>;
+  }
 
-function DealPropertiesCard({ deal, stage, loading, editable, onPatch }: {
-  deal?: DealFull; stage?: Stage; loading: boolean; editable: boolean; onPatch: (body: Record<string, unknown>) => void;
-}) {
-  const t = useT();
   return (
-    <Card className="p-4">
-      <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-faint">{t('crm.properties')}</h3>
-      {loading || !deal ? (
-        <div className="space-y-2 pt-2">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-4" />)}</div>
-      ) : (
-        <div className="divide-y divide-border/60">
-          <PropRow label={t('public.amount')}>
-            <EditableAmount amount={deal.amount} currency={deal.currency ?? 'USD'} editable={editable} onSave={(v) => onPatch({ amount: v })} />
-          </PropRow>
-          <PropRow label={t('common.currency')}>
-            {editable ? (
-              <DropdownMenu
-                align="end"
-                trigger={<button className="inline-flex items-center gap-1 rounded-md px-1 tabular-nums transition-colors hover:bg-muted">{deal.currency ?? 'USD'}<ChevronDown size={11} className="text-faint" /></button>}
-              >
-                {CURRENCIES.map((cur) => (
-                  <MenuItem key={cur} checked={cur === (deal.currency ?? 'USD')} onSelect={() => cur !== deal.currency && onPatch({ currency: cur })}>{cur}</MenuItem>
-                ))}
-              </DropdownMenu>
-            ) : (
-              <span className="tabular-nums">{deal.currency ?? 'USD'}</span>
-            )}
-          </PropRow>
-          <PropRow label={t('crm.expectedClose')}>
-            {editable ? (
-              <DateField
-                size="sm"
-                value={deal.expectedCloseDate ?? null}
-                onChange={(v) => onPatch({ expectedCloseDate: v })}
-                className="w-40"
-              />
-            ) : deal.expectedCloseDate ? (
-              <span className="inline-flex items-center gap-1 tabular-nums"><CalendarClock size={12} /> {fmtDate(deal.expectedCloseDate)}</span>
-            ) : (
-              <span className="text-faint">–</span>
-            )}
-          </PropRow>
-          {stage?.isLost && deal.lostReason && (
-            <PropRow label={t('crm.lostReasonLabel')}><span className="text-destructive">{deal.lostReason}</span></PropRow>
+    <div>
+      <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('crm.properties')}</h2>
+      <div className="space-y-0.5">
+        <RailField label={t('deals.stage')}>
+          {editable ? (
+            <DropdownMenu
+              align="start"
+              className="w-full"
+              trigger={<RailChip caret><Badge color={stageColor(stage)}>{stage?.name ?? t('deals.stage')}</Badge></RailChip>}
+            >
+              <MenuLabel>{t('crm.moveToStage')}</MenuLabel>
+              {stages.map((s) => (
+                <MenuItem key={s.id} checked={s.id === stage?.id} onSelect={() => onPickStage(s)}>
+                  <Badge color={stageColor(s)}>{s.name}</Badge>
+                </MenuItem>
+              ))}
+            </DropdownMenu>
+          ) : (
+            <RailChip disabled><Badge color={stageColor(stage)}>{stage?.name ?? '–'}</Badge></RailChip>
           )}
-          <PropRow label={t('crm.created')}>{fmtDate(deal.createdAt)}</PropRow>
-        </div>
-      )}
-    </Card>
+        </RailField>
+
+        <RailField label={t('crm.client', 'Client')}>
+          {company ? (
+            <Link to={`/companies/${company.id}`} className="block">
+              <RailChip>
+                <Avatar name={company.name} size={18} />
+                <span className="truncate">{company.name}</span>
+              </RailChip>
+            </Link>
+          ) : (
+            <RailChip empty disabled>–</RailChip>
+          )}
+        </RailField>
+
+        <RailField label={t('crm.project')}>
+          <div className="group/project flex items-center gap-1">
+            <div className="min-w-0 flex-1">
+              {editable ? (
+                <DropdownMenu
+                  align="start"
+                  className="w-full"
+                  trigger={
+                    <RailChip empty={!project} caret>
+                      <FolderKanban size={14} className={project ? 'shrink-0 text-muted-foreground' : 'shrink-0 text-faint'} />
+                      <span className="truncate">{project ? project.name : t('crm.noProject')}</span>
+                    </RailChip>
+                  }
+                >
+                  <MenuLabel>{t('crm.linkProjectHint')}</MenuLabel>
+                  <MenuItem checked={!project} onSelect={() => project && onPatch({ projectId: null })}>{t('crm.noProject')}</MenuItem>
+                  {projects.map((p) => (
+                    <MenuItem key={p.id} checked={p.id === project?.id} onSelect={() => p.id !== project?.id && onPatch({ projectId: p.id })}>
+                      <span className="flex items-center gap-2">
+                        <FolderKanban size={13} className="text-muted-foreground" />
+                        <span className="flex-1 truncate">{p.name}</span>
+                        {p.key && <span className="font-mono text-[10px] text-faint">{p.key}</span>}
+                      </span>
+                    </MenuItem>
+                  ))}
+                </DropdownMenu>
+              ) : (
+                <RailChip empty={!project} disabled>
+                  <FolderKanban size={14} className="shrink-0 text-faint" />
+                  <span className="truncate">{project ? project.name : t('crm.noProject')}</span>
+                </RailChip>
+              )}
+            </div>
+            {project && (
+              <Link
+                to={`/projects/${project.id}`}
+                aria-label={t('crm.viewProject')}
+                className="shrink-0 rounded p-1 text-faint opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-hover/project:opacity-100"
+              >
+                <ExternalLinkIcon size={12} />
+              </Link>
+            )}
+          </div>
+        </RailField>
+
+        <RailField label={t('crm.owner')}>
+          {editable ? (
+            <DropdownMenu
+              align="start"
+              className="w-full"
+              width={220}
+              trigger={
+                <RailChip empty={!owner} caret>
+                  {owner
+                    ? <><Avatar name={owner.name} src={owner.avatar} size={18} /><span className="truncate">{owner.name}</span></>
+                    : <><UserCircle2 size={16} className="text-faint" /><span className="truncate">{t('crm.noOwner')}</span></>}
+                </RailChip>
+              }
+            >
+              <MenuLabel>{t('crm.changeOwner')}</MenuLabel>
+              {users.map((u) => (
+                <MenuItem key={u.id} checked={u.id === deal.ownerId} onSelect={() => u.id !== deal.ownerId && onPatch({ ownerId: u.id })}>
+                  <span className="flex items-center gap-2">
+                    <Avatar name={u.name} src={u.avatar} size={18} />
+                    <span className="flex-1 truncate">{u.name}</span>
+                  </span>
+                </MenuItem>
+              ))}
+            </DropdownMenu>
+          ) : (
+            <RailChip empty={!owner} disabled>
+              {owner ? <><Avatar name={owner.name} src={owner.avatar} size={18} /><span className="truncate">{owner.name}</span></> : t('crm.noOwner')}
+            </RailChip>
+          )}
+        </RailField>
+
+        <RailField label={t('public.amount')}>
+          <EditableAmount amount={deal.amount} currency={deal.currency ?? 'USD'} editable={editable} onSave={(v) => onPatch({ amount: v })} />
+        </RailField>
+
+        <RailField label={t('common.currency')}>
+          {editable ? (
+            <DropdownMenu
+              align="start"
+              className="w-full"
+              trigger={<RailChip caret><span className="tabular-nums">{deal.currency ?? 'USD'}</span></RailChip>}
+            >
+              {CURRENCIES.map((cur) => (
+                <MenuItem key={cur} checked={cur === (deal.currency ?? 'USD')} onSelect={() => cur !== deal.currency && onPatch({ currency: cur })}>{cur}</MenuItem>
+              ))}
+            </DropdownMenu>
+          ) : (
+            <RailChip disabled><span className="tabular-nums">{deal.currency ?? 'USD'}</span></RailChip>
+          )}
+        </RailField>
+
+        {/* Short label: "Expected close" wraps in the 76px label column. */}
+        <RailField label={t('crm.expectedCloseShort')}>
+          <DateRailPicker
+            value={deal.expectedCloseDate ?? null}
+            onChange={(v) => onPatch({ expectedCloseDate: v })}
+            placeholder={t('crm.noCloseDate')}
+            icon={<CalendarClock size={15} className="text-faint" />}
+            disabled={!editable}
+          />
+        </RailField>
+
+        {stage?.isLost && deal.lostReason && (
+          <RailField label={t('crm.lostReasonLabel')}>
+            <RailChip disabled><span className="truncate text-destructive">{deal.lostReason}</span></RailChip>
+          </RailField>
+        )}
+
+        <RailField label={t('crm.created')}>
+          <RailChip disabled><span className="tabular-nums">{fmtDate(deal.createdAt)}</span></RailChip>
+        </RailField>
+      </div>
+    </div>
   );
 }
+
 
 function EditableAmount({ amount, currency, editable, onSave }: {
   amount?: string | number | null; currency: string; editable: boolean; onSave: (v: number) => void;
@@ -348,7 +383,7 @@ function EditableAmount({ amount, currency, editable, onSave }: {
 
 /* ─────────────── Custom fields ─────────────── */
 
-function CustomFieldsCard({ deal, editable, onPatch }: {
+function CustomFieldsRail({ deal, editable, onPatch }: {
   deal?: DealFull; editable: boolean; onPatch: (body: Record<string, unknown>) => void;
 }) {
   const t = useT();
@@ -364,16 +399,16 @@ function CustomFieldsCard({ deal, editable, onPatch }: {
   const save = (key: string, v: unknown) => onPatch({ customFields: { ...values, [key]: v } });
 
   return (
-    <Card className="p-4">
-      <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-faint">{t('crm.customFields')}</h3>
-      <div className="divide-y divide-border/60">
+    <div>
+      <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('crm.customFields')}</h2>
+      <div className="space-y-0.5">
         {defs.map((f) => (
-          <PropRow key={f.id} label={f.label}>
+          <RailField key={f.id} label={f.label}>
             <CustomFieldValue field={f} value={values[f.key]} editable={editable} users={usersQ.data ?? []} onSave={(v) => save(f.key, v)} />
-          </PropRow>
+          </RailField>
         ))}
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -408,8 +443,8 @@ function CustomFieldValue({ field: f, value: v, editable, users, onSave }: {
     if (!editable) return label ? <span>{label}</span> : empty;
     return (
       <DropdownMenu
-        align="end"
-        trigger={<button className="-mx-1 rounded-md px-1 transition-colors hover:bg-muted">{label ?? empty} <ChevronDown size={11} className="inline text-faint" /></button>}
+        align="start"
+        trigger={<button className="block w-full rounded-md px-1.5 py-1 text-left transition-colors hover:bg-muted">{label ?? empty} <ChevronDown size={11} className="inline text-faint" /></button>}
       >
         <MenuItem checked={v == null || v === ''} onSelect={() => onSave(null)}>–</MenuItem>
         {(f.options ?? []).map((o) => (
@@ -424,8 +459,8 @@ function CustomFieldValue({ field: f, value: v, editable, users, onSave }: {
     if (!editable) return label ? <span>{label}</span> : empty;
     return (
       <DropdownMenu
-        align="end"
-        trigger={<button className="-mx-1 rounded-md px-1 text-right transition-colors hover:bg-muted">{label ?? empty} <ChevronDown size={11} className="inline text-faint" /></button>}
+        align="start"
+        trigger={<button className="block w-full rounded-md px-1.5 py-1 text-left transition-colors hover:bg-muted">{label ?? empty} <ChevronDown size={11} className="inline text-faint" /></button>}
       >
         {(f.options ?? []).map((o) => (
           <MenuItem
@@ -441,15 +476,15 @@ function CustomFieldValue({ field: f, value: v, editable, users, onSave }: {
   }
   if (f.type === 'date') {
     if (!editable) return v ? <span className="tabular-nums">{fmtDate(String(v))}</span> : empty;
-    return <DateField size="sm" value={(v as string) ?? null} onChange={(next) => onSave(next)} className="w-40" />;
+    return <DateField size="sm" value={(v as string) ?? null} onChange={(next) => onSave(next)} className="w-full" />;
   }
   if (f.type === 'user') {
     const u = users.find((x) => x.id === v);
     if (!editable) return u ? <span className="inline-flex items-center gap-1.5"><Avatar name={u.name} src={u.avatar} size={16} /> {u.name}</span> : empty;
     return (
       <DropdownMenu
-        align="end"
-        trigger={<button className="-mx-1 rounded-md px-1 transition-colors hover:bg-muted">{u ? <span className="inline-flex items-center gap-1.5"><Avatar name={u.name} src={u.avatar} size={16} /> {u.name}</span> : empty} <ChevronDown size={11} className="inline text-faint" /></button>}
+        align="start"
+        trigger={<button className="block w-full rounded-md px-1.5 py-1 text-left transition-colors hover:bg-muted">{u ? <span className="inline-flex items-center gap-1.5"><Avatar name={u.name} src={u.avatar} size={16} /> {u.name}</span> : empty} <ChevronDown size={11} className="inline text-faint" /></button>}
       >
         <MenuItem checked={!u} onSelect={() => onSave(null)}>{t('crm.noOwner')}</MenuItem>
         {users.map((x) => (
@@ -488,14 +523,14 @@ function CustomFieldValue({ field: f, value: v, editable, users, onSave }: {
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false); }}
-        className="w-full min-w-[140px] rounded-md border border-primary/40 bg-transparent px-1 text-right text-[13px] outline-none focus:ring-2 focus:ring-ring/25"
+        className="min-h-7 w-full rounded-md border border-primary/40 bg-transparent px-1.5 py-1 text-[13px] outline-none focus:ring-2 focus:ring-ring/25"
       />
     );
   }
   return (
     <button
       onClick={() => { setDraft(v != null ? String(v) : ''); setEditing(true); }}
-      className="-mx-1 max-w-full break-words rounded-md px-1 text-right transition-colors hover:bg-muted"
+      className="block w-full max-w-full break-words rounded-md px-1.5 py-1 text-left transition-colors hover:bg-muted"
     >
       {display ?? empty}
     </button>
@@ -527,7 +562,7 @@ function ActivitySection({ dealId }: { dealId: string }) {
       {isLoading ? (
         <div className="space-y-2">{[0, 1].map((i) => <Skeleton key={i} className="h-8 rounded-md" />)}</div>
       ) : rows.length === 0 ? (
-        <EmptyState icon={<ActivityIcon size={18} />} title={t('crm.noActivity')} />
+        <EmptySection icon={<ActivityIcon size={14} />} title={t('crm.noActivity')} />
       ) : (
         <ul className="space-y-0.5">
           {rows.map((a) => {

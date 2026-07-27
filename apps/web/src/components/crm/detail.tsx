@@ -8,7 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, Check, Download, FileText, Paperclip, Pin, Trash2, Upload } from 'lucide-react';
 import { api, qs, ApiError } from '../../lib/api';
 import { useT } from '../../lib/i18n';
-import { Avatar, Button, Card, EmptyState, IconButton, Skeleton, Spinner, Tooltip, cn, fmtDate } from '../ui';
+import { Avatar, Button, Card, EmptySection, IconButton, Skeleton, Spinner, Tooltip, cn, fmtDate } from '../ui';
 import { ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, toast } from '../overlays';
 import { RichEditor } from '../richtext/RichEditor';
 import { RichText, docIsEmpty } from '../richtext/RichText';
@@ -18,10 +18,16 @@ export interface FileRow { id: string; filename: string; size?: number | null; m
 
 /* ─────────────── Inline editable name ─────────────── */
 
-export function EditableName({ value, editable, onSave }: { value: string; editable: boolean; onSave: (v: string) => void }) {
+export function EditableName({ value, editable, size = 'lg', onSave }: {
+  value: string; editable: boolean;
+  /** `sm` matches the one-line project/task header; `lg` is the CRM page title. */
+  size?: 'sm' | 'lg';
+  onSave: (v: string) => void;
+}) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const ref = useRef<HTMLInputElement>(null);
+  const type = size === 'sm' ? 'text-[15px] font-semibold' : 'text-xl font-semibold';
 
   useEffect(() => { setDraft(value); }, [value]);
   useEffect(() => { if (editing) ref.current?.select(); }, [editing]);
@@ -35,7 +41,7 @@ export function EditableName({ value, editable, onSave }: { value: string; edita
 
   // Titles can be long (an agent-written deal title is a whole sentence) – clamp
   // to one line with the full text on hover, the way KB and task headers do.
-  if (!editable) return <h1 className="truncate text-xl font-semibold leading-tight" title={value}>{value}</h1>;
+  if (!editable) return <h1 className={cn('min-w-0 truncate leading-tight', type)} title={value}>{value}</h1>;
   if (editing) {
     return (
       <input
@@ -45,14 +51,14 @@ export function EditableName({ value, editable, onSave }: { value: string; edita
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setDraft(value); setEditing(false); } }}
-        className="-mx-1.5 w-full max-w-md rounded-md border border-primary/40 bg-transparent px-1.5 text-xl font-semibold leading-tight outline-none focus:ring-2 focus:ring-ring/25"
+        className={cn('-mx-1.5 w-full max-w-md rounded-md border border-primary/40 bg-transparent px-1.5 leading-tight outline-none focus:ring-2 focus:ring-ring/25', type)}
       />
     );
   }
   return (
     <button
       onClick={() => setEditing(true)}
-      className="-mx-1.5 block max-w-full truncate rounded-md px-1.5 text-left text-xl font-semibold leading-tight transition-colors hover:bg-muted"
+      className={cn('-mx-1.5 block min-w-0 max-w-full truncate rounded-md px-1.5 text-left leading-tight transition-colors hover:bg-muted', type)}
       title={value}
     >
       {value}
@@ -214,7 +220,9 @@ export function NotesSection({ companyId, dealId, canWrite }: { companyId?: stri
       {isLoading ? (
         <div className="space-y-2">{[0, 1].map((i) => <Skeleton key={i} className="h-16 rounded-lg" />)}</div>
       ) : notes.length === 0 ? (
-        <EmptyState icon={<Pin size={18} />} title={t('crm.noNotes')} hint={t('crm.noNotesHint')} />
+        // Only shown when there is no composer above it, so the section never
+        // reads as empty twice.
+        !canWrite && <EmptySection icon={<Pin size={14} />} title={t('crm.noNotes')} />
       ) : (
         <div className="space-y-2">
           {notes.map((n) => (
@@ -301,8 +309,10 @@ function fmtSize(bytes?: number | null): string {
  * Attachments for a CRM entity: presigned S3 upload (the app's standard file
  * path, PRD §14.5), list with download links, delete with confirm.
  */
-export function FilesSection({ entityType, entityId, canWrite }: {
+export function FilesSection({ entityType, entityId, canWrite, variant = 'section' }: {
   entityType: 'company' | 'deal'; entityId: string; canWrite: boolean;
+  /** `rail` renders the compact form used in the record's properties rail. */
+  variant?: 'section' | 'rail';
 }) {
   const t = useT();
   const qc = useQueryClient();
@@ -356,6 +366,75 @@ export function FilesSection({ entityType, entityId, canWrite }: {
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
   });
 
+  const picker = canWrite && (
+    <input
+      ref={inputRef}
+      type="file"
+      className="hidden"
+      onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); }}
+    />
+  );
+
+  const confirmDelete = (
+    <ConfirmDialog
+      open={!!toDelete}
+      onClose={() => setToDelete(null)}
+      onConfirm={() => toDelete && del.mutate(toDelete.id)}
+      title={t('crm.deleteFileTitle')}
+      body={toDelete ? t('crm.deleteFileBody').replace('{name}', toDelete.filename) : ''}
+      confirmLabel={t('common.delete')}
+      danger
+      pending={del.isPending}
+    />
+  );
+
+  if (variant === 'rail') {
+    return (
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-faint">{t('crm.files')}</h2>
+          {picker}
+          {canWrite && (
+            <IconButton size="sm" aria-label={t('crm.uploadFile')} disabled={uploading} onClick={() => inputRef.current?.click()}>
+              {uploading ? <Spinner /> : <Upload size={13} />}
+            </IconButton>
+          )}
+        </div>
+        {isLoading ? (
+          <Skeleton className="h-7" />
+        ) : files.length === 0 ? (
+          <p className="px-1.5 py-1 text-[13px] text-faint">{t('crm.noFiles')}</p>
+        ) : (
+          <div className="space-y-0.5">
+            {files.map((f) => (
+              <div key={f.id} className="group/file flex min-h-7 items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-muted">
+                <FileText size={14} className="shrink-0 text-muted-foreground" />
+                <button
+                  onClick={() => download(f)}
+                  className="min-w-0 flex-1 truncate text-left text-[13px]"
+                  title={`${f.filename} · ${fmtSize(f.size)} · ${fmtDate(f.createdAt)}`}
+                >
+                  {f.filename}
+                </button>
+                {canWrite && (
+                  <IconButton
+                    size="sm"
+                    aria-label={t('common.delete')}
+                    onClick={() => setToDelete(f)}
+                    className="shrink-0 opacity-0 transition-opacity duration-150 hover:text-destructive group-hover/file:opacity-100"
+                  >
+                    <Trash2 size={12} />
+                  </IconButton>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {confirmDelete}
+      </div>
+    );
+  }
+
   return (
     <section>
       <SectionHeader
@@ -364,12 +443,7 @@ export function FilesSection({ entityType, entityId, canWrite }: {
         count={files.length}
         action={canWrite && (
           <>
-            <input
-              ref={inputRef}
-              type="file"
-              className="hidden"
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); }}
-            />
+            {picker}
             <Button variant="outline" size="xs" disabled={uploading} onClick={() => inputRef.current?.click()}>
               {uploading ? <Spinner /> : <Upload size={13} />} {t('crm.uploadFile')}
             </Button>
@@ -379,7 +453,7 @@ export function FilesSection({ entityType, entityId, canWrite }: {
       {isLoading ? (
         <div className="space-y-1">{[0, 1].map((i) => <Skeleton key={i} className="h-10 rounded-md" />)}</div>
       ) : files.length === 0 ? (
-        <EmptyState icon={<Paperclip size={18} />} title={t('crm.noFiles')} hint={canWrite ? t('crm.noFilesHint') : undefined} />
+        <EmptySection icon={<Paperclip size={14} />} title={t('crm.noFiles')} />
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">
           {files.map((f, i) => (
@@ -408,16 +482,7 @@ export function FilesSection({ entityType, entityId, canWrite }: {
         </div>
       )}
 
-      <ConfirmDialog
-        open={!!toDelete}
-        onClose={() => setToDelete(null)}
-        onConfirm={() => toDelete && del.mutate(toDelete.id)}
-        title={t('crm.deleteFileTitle')}
-        body={toDelete ? t('crm.deleteFileBody').replace('{name}', toDelete.filename) : ''}
-        confirmLabel={t('common.delete')}
-        danger
-        pending={del.isPending}
-      />
+      {confirmDelete}
     </section>
   );
 }

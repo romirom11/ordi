@@ -1,7 +1,7 @@
 import { clsx } from 'clsx';
 import { forwardRef, Fragment, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { usePageTitle } from '../lib/tabs';
 import { Link } from '../lib/router';
 import { appLocale, formatDay } from '../lib/dates';
@@ -269,6 +269,54 @@ export function EmptyState({ title, hint, action, icon }: { title: string; hint?
       {hint && <p className="max-w-sm text-[13px] text-muted-foreground">{hint}</p>}
       {action && <div className="mt-3">{action}</div>}
     </div>
+  );
+}
+
+/**
+ * Compact empty state for a section that lives inside a populated page. The
+ * full EmptyState burns 16rem of vertical space – on a record page with six
+ * sections that turns a fresh client into three screens of nothing.
+ */
+export function EmptySection({ icon, title, action }: { icon?: ReactNode; title: string; action?: ReactNode }) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2.5 text-[13px] text-faint">
+      {icon && <span className="shrink-0">{icon}</span>}
+      <span className="min-w-0 flex-1 truncate">{title}</span>
+      {action}
+    </div>
+  );
+}
+
+/* ───────────────── Rail primitives (Linear-style property rows) ───────────────── */
+
+/** Labeled row: faint label on the left, control filling the rest. */
+export function RailField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-start gap-2 py-0.5">
+      <span className="w-[76px] shrink-0 pt-[7px] text-xs text-faint">{label}</span>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
+/** Full-width trigger chip that hovers, matching the task sidebar. */
+export function RailChip({ children, empty, disabled, caret }: {
+  children: ReactNode; empty?: boolean; disabled?: boolean; caret?: boolean;
+}) {
+  return (
+    <span
+      className={cn(
+        'group flex min-h-7 w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-[13px]',
+        'transition-colors duration-150',
+        disabled ? 'cursor-default' : 'cursor-pointer hover:bg-muted',
+        empty && 'text-faint',
+      )}
+    >
+      {children}
+      {caret && !disabled && (
+        <ChevronDown size={13} className="ml-auto shrink-0 text-faint opacity-0 transition-opacity group-hover:opacity-100" />
+      )}
+    </span>
   );
 }
 
