@@ -4,6 +4,7 @@ import { ulid } from 'ulid';
 import { dashboardInputSchema, dashboardWidgetInputSchema } from '@ordi/shared';
 import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
+import { visibleActivityTypes } from '../../core/activity';
 import { accessibleProjectIds } from '../../core/access';
 import { err } from '../../lib/errors';
 
@@ -56,10 +57,18 @@ export function dashboardRoutes() {
       out.dealsByStage = deals;
     }
 
-    // Recent activity, filtered by access (normal sensitivity only unless privileged)
+    // Recent activity, filtered by access: sensitivity (normal only unless privileged)
+    // and entity domain (only types the actor's permissions cover; own actions always visible).
     const canSensitive = perms.has('people.read_sensitive') || perms.has('people.read_compensation');
+    const visibleTypes = visibleActivityTypes(perms);
     const activity = await db.select().from(schema.activityLog)
-      .where(canSensitive ? undefined : eq(schema.activityLog.sensitivity, 'normal'))
+      .where(and(
+        canSensitive ? undefined : eq(schema.activityLog.sensitivity, 'normal'),
+        visibleTypes === null ? undefined : or(
+          eq(schema.activityLog.actorId, actor.userId),
+          visibleTypes.length ? inArray(schema.activityLog.entityType, visibleTypes) : undefined,
+        ),
+      ))
       .orderBy(desc(schema.activityLog.createdAt)).limit(15);
     out.recentActivity = activity;
     out.projectCount = projectIds.length;

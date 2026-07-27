@@ -4,9 +4,57 @@
  * values recorded as fact-only, secrets excluded entirely.
  */
 import { getDb, schema } from '@ordi/db';
-import { buildRedactedDiff } from '@ordi/shared';
+import { buildRedactedDiff, type Permission } from '@ordi/shared';
 import { ulid } from 'ulid';
 import type { Actor } from '../context';
+
+/**
+ * Cross-entity feeds (home dashboard): the permission required to see activity
+ * about each entity type. Fail closed — a type missing here is admin-only
+ * (audit.read). A viewer's own actions are always visible regardless of this map.
+ */
+const FEED_VISIBILITY: Record<string, Permission> = {
+  project: 'projects.read',
+  task: 'projects.read',
+  comment: 'projects.read',
+  cycle: 'projects.read',
+  company: 'crm.read',
+  contact: 'crm.read',
+  deal: 'deals.read',
+  invoice: 'finance.read',
+  quote: 'finance.read',
+  recurring_invoice: 'finance.read',
+  recurring_payment: 'finance.read',
+  expense: 'finance.read',
+  credit_note: 'finance.read',
+  ledger_transaction: 'finance.read',
+  account: 'finance.read',
+  overhead_settings: 'finance.read_costs',
+  time_entry: 'time.read_all',
+  project_rate: 'time.manage',
+  kb_space: 'kb.read',
+  kb_page: 'kb.read',
+  kb_page_comment: 'kb.read',
+  employee: 'people.read',
+  leave_request: 'people.read',
+  leave_balance: 'people.read',
+  applicant: 'people.recruit',
+  job_opening: 'people.recruit',
+  allocation: 'people.read',
+  compensation: 'people.read_compensation',
+  user: 'users.manage',
+  workspace: 'settings.manage',
+  slack_connection: 'integrations.manage',
+  git_connection: 'integrations.manage',
+  dead_letter_event: 'audit.read',
+  event: 'audit.read',
+};
+
+/** Entity types the actor may see in cross-entity activity feeds; null = unrestricted (full audit access). */
+export function visibleActivityTypes(perms: ReadonlySet<string>): string[] | null {
+  if (perms.has('audit.read')) return null;
+  return Object.keys(FEED_VISIBILITY).filter((t) => perms.has(FEED_VISIBILITY[t]!));
+}
 
 export interface ActivityInput {
   entityType: string;
