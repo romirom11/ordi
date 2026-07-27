@@ -4,31 +4,29 @@
  * owner picker. Two columns: main sections (Deals · Contacts · Notes) + a side
  * properties card with linked projects.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Building2, ChevronDown, Plus, Mail, Phone, Star, Pin, Globe, Check,
+  Building2, ChevronDown, Plus, Mail, Phone, Star, Globe,
   FolderKanban, Handshake, Receipt,
 } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
 import { Link, useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import {
-  Avatar, Badge, Breadcrumbs, Button, Card, EmptyState, IconButton, Skeleton, Spinner, Tooltip,
+  Avatar, Badge, Breadcrumbs, Button, Card, EmptyState, IconButton, Skeleton, Tooltip,
   cn, fmtMoney, fmtDate,
 } from '../components/ui';
 import { DropdownMenu, MenuItem, MenuLabel, toast } from '../components/overlays';
-import { RichEditor } from '../components/richtext/RichEditor';
-import { RichText, docIsEmpty } from '../components/richtext/RichText';
 import { useT } from '../lib/i18n';
 import {
-  COMPANY_STATUSES, CURRENCIES, StatusPill, useDealStages, useUsersLookup,
+  COMPANY_STATUSES, StatusPill, useDealStages, useUsersLookup,
   type Company, type Contact, type Deal, type Stage,
 } from '../components/crm/shared';
+import { EditableName, NotesSection, OwnerPicker, PropRow, SectionHeader } from '../components/crm/detail';
 import { AddContactDialog, NewDealDialog } from '../components/crm/dialogs';
 import { useWorkspaceSettings, financeEnabled } from '../components/finance/workspace';
 
-interface Note { id: string; body?: unknown; createdAt?: string; authorName?: string; pinned?: boolean }
 interface Project { id: string; name: string; key?: string | null; status?: string | null }
 
 function domainHref(domain?: string | null): string | null {
@@ -71,7 +69,11 @@ export function CompanyDetailPage({ id }: { id: string }) {
       <div className="border-b border-border px-6 pb-4 pt-3">
         <Breadcrumbs
           className="mb-3"
-          items={[{ label: t('crm.title'), to: '/crm/clients' }]}
+          items={[
+            { label: t('crm.title'), to: '/crm' },
+            { label: t('crm.tabClients'), to: '/crm/clients' },
+            ...(c ? [{ label: c.name }] : []),
+          ]}
         />
         <div className="flex items-start gap-4">
           {c ? <Avatar name={c.name} size={48} className="text-base" /> : <Skeleton className="h-12 w-12 rounded-full" />}
@@ -145,98 +147,6 @@ export function CompanyDetailPage({ id }: { id: string }) {
   );
 }
 
-/* ─────────────── Inline editable name ─────────────── */
-
-function EditableName({ value, editable, onSave }: { value: string; editable: boolean; onSave: (v: string) => void }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const ref = useRef<HTMLInputElement>(null);
-
-  useEffect(() => { setDraft(value); }, [value]);
-  useEffect(() => { if (editing) ref.current?.select(); }, [editing]);
-
-  const commit = () => {
-    setEditing(false);
-    const next = draft.trim();
-    if (next && next !== value) onSave(next);
-    else setDraft(value);
-  };
-
-  if (!editable) return <h1 className="text-xl font-semibold leading-tight">{value}</h1>;
-  if (editing) {
-    return (
-      <input
-        ref={ref}
-        value={draft}
-        autoFocus
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setDraft(value); setEditing(false); } }}
-        className="-mx-1.5 w-full max-w-md rounded-md border border-primary/40 bg-transparent px-1.5 text-xl font-semibold leading-tight outline-none focus:ring-2 focus:ring-ring/25"
-      />
-    );
-  }
-  return (
-    <button
-      onClick={() => setEditing(true)}
-      className="-mx-1.5 rounded-md px-1.5 text-left text-xl font-semibold leading-tight transition-colors hover:bg-muted"
-      title={value}
-    >
-      {value}
-    </button>
-  );
-}
-
-/* ─────────────── Owner picker ─────────────── */
-
-function OwnerPicker({ owner, users, editable, onPick }: {
-  owner?: { id: string; name: string; avatar?: string | null };
-  users: { id: string; name: string; avatar?: string | null }[];
-  editable: boolean;
-  onPick: (id: string) => void;
-}) {
-  const t = useT();
-  const content = (
-    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-      {owner ? <Avatar name={owner.name} src={owner.avatar} size={18} /> : <span className="grid h-[18px] w-[18px] place-items-center rounded-full border border-dashed border-border-strong text-[10px] text-faint">?</span>}
-      {owner ? owner.name : t('crm.noOwner')}
-    </span>
-  );
-  if (!editable) return content;
-  return (
-    <DropdownMenu
-      align="start"
-      trigger={<button className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-muted">{content}<ChevronDown size={12} className="text-faint" /></button>}
-    >
-      <MenuLabel>{t('crm.changeOwner')}</MenuLabel>
-      {users.map((u) => (
-        <MenuItem key={u.id} onSelect={() => u.id !== owner?.id && onPick(u.id)}>
-          <span className="flex items-center gap-2">
-            <Avatar name={u.name} src={u.avatar} size={18} />
-            <span className="flex-1">{u.name}</span>
-            {owner?.id === u.id && <Check size={13} className="text-primary" />}
-          </span>
-        </MenuItem>
-      ))}
-    </DropdownMenu>
-  );
-}
-
-/* ─────────────── Section shell ─────────────── */
-
-function SectionHeader({ icon, title, count, action }: { icon: React.ReactNode; title: string; count?: number; action?: React.ReactNode }) {
-  return (
-    <div className="mb-3 flex items-center justify-between">
-      <h2 className="flex items-center gap-2 text-[13px] font-semibold">
-        <span className="text-muted-foreground">{icon}</span>
-        {title}
-        {count !== undefined && count > 0 && <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">{count}</span>}
-      </h2>
-      {action}
-    </div>
-  );
-}
-
 /* ─────────────── Deals ─────────────── */
 
 function DealsSection({ companyId, canWrite }: { companyId: string; canWrite: boolean }) {
@@ -268,13 +178,13 @@ function DealsSection({ companyId, canWrite }: { companyId: string; canWrite: bo
             const stage = d.stageId ? stageMap.get(d.stageId) : undefined;
             const color = stage?.isWon ? '#22c55e' : stage?.isLost ? '#ef4444' : undefined;
             return (
-              <div key={d.id} className={cn('flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/50', i > 0 && 'border-t border-border')}>
+              <Link key={d.id} to={`/deals/${d.id}`} className={cn('flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/50', i > 0 && 'border-t border-border')}>
                 <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{d.title}</span>
                 {stage && <Badge color={color}>{stage.name}</Badge>}
                 <span className="w-24 text-right text-[13px] font-semibold tabular-nums">
                   {d.amount != null ? fmtMoney(d.amount, d.currency ?? 'USD') : '–'}
                 </span>
-              </div>
+              </Link>
             );
           })}
         </div>
@@ -447,91 +357,7 @@ function ContactsSection({ companyId, canWrite }: { companyId: string; canWrite:
   );
 }
 
-/* ─────────────── Notes ─────────────── */
-
-function NotesSection({ companyId, canWrite }: { companyId: string; canWrite: boolean }) {
-  const t = useT();
-  const qc = useQueryClient();
-  const { data, isLoading } = useQuery<Note[]>({
-    queryKey: ['notes', companyId],
-    queryFn: () => api.get<{ data: Note[] }>(`/notes${qs({ companyId })}`).then((r) => r.data),
-  });
-  const [doc, setDoc] = useState<any>(null);
-  const [editorKey, setEditorKey] = useState(0);
-
-  const create = useMutation({
-    mutationFn: (body: any) => api.post('/notes', { companyId, body }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['notes', companyId] }); setDoc(null); setEditorKey((k) => k + 1); toast(t('common.saved')); },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('crm.saveNoteFailed')),
-  });
-
-  const pin = useMutation({
-    mutationFn: (n: Note) => api.patch(`/notes/${n.id}`, { pinned: !n.pinned }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['notes', companyId] }),
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
-  });
-
-  const submit = () => { if (docIsEmpty(doc) || create.isPending) return; create.mutate(doc); };
-  const notes = data ?? [];
-
-  return (
-    <section>
-      <SectionHeader icon={<Pin size={15} />} title={t('crm.notes')} count={notes.length} />
-      {canWrite && (
-        <div className="mb-4 space-y-2">
-          <RichEditor key={editorKey} value={doc} onChange={setDoc} compact placeholder={t('crm.notePlaceholder')} onSubmit={submit} />
-          <div className="flex justify-end">
-            <Button size="sm" onClick={submit} disabled={create.isPending || docIsEmpty(doc)}>
-              {create.isPending ? <Spinner /> : t('crm.saveNote')}
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {isLoading ? (
-        <div className="space-y-2">{[0, 1].map((i) => <Skeleton key={i} className="h-16 rounded-lg" />)}</div>
-      ) : notes.length === 0 ? (
-        <EmptyState icon={<Pin size={18} />} title={t('crm.noNotes')} hint={t('crm.noNotesHint')} />
-      ) : (
-        <div className="space-y-2">
-          {notes.map((n) => (
-            <Card key={n.id} className={cn('group/note p-3', n.pinned && 'border-primary/30 bg-primary/[0.03]')}>
-              <div className="flex items-start justify-between gap-2">
-                <RichText doc={n.body} className="min-w-0 flex-1 text-[13px]" />
-                {canWrite && (
-                  <Tooltip label={n.pinned ? t('crm.unpinNote') : t('crm.pinNote')}>
-                    <IconButton
-                      size="sm"
-                      onClick={() => pin.mutate(n)}
-                      className={cn(n.pinned ? 'text-primary opacity-100' : 'opacity-0 group-hover/note:opacity-100')}
-                    >
-                      <Pin size={13} className={cn(n.pinned && 'fill-current')} />
-                    </IconButton>
-                  </Tooltip>
-                )}
-              </div>
-              <p className="mt-2 flex items-center gap-1.5 text-[11px] text-faint">
-                {n.pinned && <span className="font-medium text-primary">{t('crm.pinned')} ·</span>}
-                {n.authorName ? `${n.authorName} · ` : ''}{fmtDate(n.createdAt)}
-              </p>
-            </Card>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
 /* ─────────────── Side: properties ─────────────── */
-
-function PropRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-baseline justify-between gap-3 py-1.5 text-[13px]">
-      <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
-      <span className="min-w-0 truncate text-right">{children}</span>
-    </div>
-  );
-}
 
 function PropertiesCard({ company, loading }: { company?: Company; loading: boolean }) {
   const t = useT();

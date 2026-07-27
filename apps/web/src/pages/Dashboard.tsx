@@ -75,6 +75,7 @@ extendDict({
     'activity.noun.kb_page_comment': 'a page comment',
     'activity.noun.cycle': 'a cycle',
     'activity.noun.user': 'a user',
+    'activity.noun.custom_field': 'a custom field',
   },
   uk: {
     'dashboard.myOpenTasks': 'Мої відкриті задачі',
@@ -155,6 +156,7 @@ extendDict({
     'activity.noun.kb_page_comment': 'коментар до сторінки',
     'activity.noun.cycle': 'цикл',
     'activity.noun.user': 'користувача',
+    'activity.noun.custom_field': 'кастомне поле',
   },
 });
 

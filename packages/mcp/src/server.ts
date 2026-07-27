@@ -5,7 +5,7 @@
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { COMPANY_STATUSES } from '@ordi/shared';
+import { COMPANY_STATUSES, CUSTOM_FIELD_ENTITIES, CUSTOM_FIELD_TYPES } from '@ordi/shared';
 import { OrdiClient } from './client';
 
 /**
@@ -27,6 +27,23 @@ export function scrub(value: unknown): unknown {
       .map(([k, v]) => [k, scrub(v)]));
   }
   return value;
+}
+
+/**
+ * Plain text → tiptap doc. Agents send multi-line text; cramming it into a
+ * single paragraph node loses every line break in the web renderer. Blank
+ * lines separate paragraphs, single newlines become hard breaks.
+ */
+export function textToDoc(text: string): Record<string, unknown> {
+  const paragraphs = text.replace(/\r\n/g, '\n').split(/\n{2,}/).map((para) => {
+    const content: Record<string, unknown>[] = [];
+    para.split('\n').forEach((line, i) => {
+      if (i > 0) content.push({ type: 'hardBreak' });
+      if (line) content.push({ type: 'text', text: line });
+    });
+    return { type: 'paragraph', content };
+  });
+  return { type: 'doc', content: paragraphs };
 }
 
 export function buildServer(client: OrdiClient): McpServer {
@@ -101,6 +118,16 @@ export function buildServer(client: OrdiClient): McpServer {
   })) };
 }));
 
+  server.tool('list_custom_fields', 'List custom field definitions – the keys usable in the customFields argument of create tools', {
+  entityType: z.enum(CUSTOM_FIELD_ENTITIES).optional().describe('Filter by entity, e.g. companies | deals | tasks'),
+}, ({ entityType }) => wrap(async () => {
+  const res = await client.get<{ data: Record<string, unknown>[] }>(`/custom-fields${entityType ? `?entityType=${entityType}` : ''}`);
+  return { data: res.data.map((f) => ({
+    id: f.id, entityType: f.entityType, key: f.key, label: f.label, type: f.type,
+    options: f.options, required: f.required, deprecated: f.deprecated,
+  })) };
+}));
+
   server.tool('list_my_tasks', 'The token owner’s assigned/created tasks grouped by due date', {},
   () => wrap(() => client.get('/me/tasks')));
 
@@ -140,7 +167,11 @@ export function buildServer(client: OrdiClient): McpServer {
 // ── Action tools (no delete/cancel) ──
   server.tool('create_task', 'Create a task in a project', {
   projectId: z.string(), title: z.string(), priority: z.enum(['none', 'low', 'medium', 'high', 'urgent']).optional(),
-}, ({ projectId, title, priority }) => wrap(() => client.post('/tasks', { projectId, title, priority: priority ?? 'none', assigneeIds: [], labelIds: [] })));
+  customFields: z.record(z.string(), z.unknown()).optional().describe('Keyed by custom field key (see list_custom_fields)'),
+}, ({ projectId, title, priority, customFields }) => wrap(() => client.post('/tasks', {
+  projectId, title, priority: priority ?? 'none', assigneeIds: [], labelIds: [],
+  ...(customFields ? { customFields } : {}),
+})));
 
   server.tool('update_task_status', 'Change a task status', { taskId: z.string(), statusId: z.string() },
   ({ taskId, statusId }) => wrap(() => client.patch(`/tasks/${taskId}`, { statusId })));
@@ -148,8 +179,8 @@ export function buildServer(client: OrdiClient): McpServer {
   server.tool('assign_task', 'Assign users to a task', { taskId: z.string(), assigneeIds: z.array(z.string()) },
   ({ taskId, assigneeIds }) => wrap(() => client.patch(`/tasks/${taskId}`, { assigneeIds })));
 
-  server.tool('comment_on_task', 'Comment on a task', { taskId: z.string(), text: z.string() },
-  ({ taskId, text: body }) => wrap(() => client.post(`/tasks/${taskId}/comments`, { body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: body }] }] }, mentions: [] })));
+  server.tool('comment_on_task', 'Comment on a task (line breaks are preserved)', { taskId: z.string(), text: z.string() },
+  ({ taskId, text: body }) => wrap(() => client.post(`/tasks/${taskId}/comments`, { body: textToDoc(body), mentions: [] })));
 
   server.tool('log_time', 'Log time on a task', { taskId: z.string(), durationSeconds: z.number(), note: z.string().optional(), startedAt: z.string().optional() },
   ({ taskId, durationSeconds, note, startedAt }) => wrap(() => client.post('/time/entries', { taskId, durationSeconds, note: note ?? '', startedAt: startedAt ?? new Date().toISOString() })));
@@ -181,31 +212,45 @@ export function buildServer(client: OrdiClient): McpServer {
   companyId: z.string(), issueDate: z.string(), items: z.array(z.object({ description: z.string(), quantity: z.number(), unitPrice: z.number() })),
 }, ({ companyId, issueDate, items }) => wrap(() => client.post('/quotes', { companyId, issueDate, items })));
 
-  server.tool('create_note', 'Create a CRM note', { companyId: z.string(), text: z.string() },
-  ({ companyId, text: body }) => wrap(() => client.post('/notes', { companyId, body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: body }] }] } })));
+  server.tool('create_note', 'Create a CRM note on a company, contact or deal (line breaks are preserved; blank line = new paragraph)', {
+  companyId: z.string().optional(), contactId: z.string().optional(), dealId: z.string().optional(), text: z.string(),
+}, ({ companyId, contactId, dealId, text: body }) => wrap(async () => {
+  if (!companyId && !contactId && !dealId) throw new Error('One of companyId, contactId or dealId is required');
+  return client.post('/notes', { companyId, contactId, dealId, body: textToDoc(body) });
+}));
 
   server.tool('create_company', 'Create a CRM company', {
   name: z.string(), domain: z.string().optional(), status: z.enum(COMPANY_STATUSES).optional().describe('Defaults to lead'),
   billingEmail: z.string().optional(), defaultCurrency: z.string().length(3).optional(), paymentTermsDays: z.number().int().optional(),
+  customFields: z.record(z.string(), z.unknown()).optional().describe('Keyed by custom field key (see list_custom_fields)'),
 }, (args) => wrap(() => client.post('/companies', args)));
 
   server.tool('create_contact', 'Create a contact in a CRM company', {
   companyId: z.string(), firstName: z.string(), lastName: z.string().optional(),
   email: z.string().optional(), phone: z.string().optional(), position: z.string().optional(),
   isPrimary: z.boolean().optional().describe('Make this the company’s primary contact'),
+  customFields: z.record(z.string(), z.unknown()).optional().describe('Keyed by custom field key (see list_custom_fields)'),
 }, (args) => wrap(() => client.post('/contacts', args)));
 
   server.tool('create_deal', 'Create a deal in a pipeline stage (use list_deal_stages for stageId)', {
   companyId: z.string(), title: z.string(), stageId: z.string(),
   amount: z.number().min(0).optional(), currency: z.string().length(3).optional().describe('Defaults to USD'),
   expectedCloseDate: z.string().optional().describe('YYYY-MM-DD'),
+  customFields: z.record(z.string(), z.unknown()).optional().describe('Keyed by custom field key (see list_custom_fields)'),
 }, (args) => wrap(() => client.post('/deals', args)));
+
+  server.tool('create_custom_field', 'Define a custom field on an entity (requires settings.manage scope)', {
+  entityType: z.enum(CUSTOM_FIELD_ENTITIES), key: z.string().describe('lowercase snake_case, immutable'),
+  label: z.string(), type: z.enum(CUSTOM_FIELD_TYPES),
+  options: z.array(z.object({ value: z.string(), label: z.string() })).optional().describe('For select / multiselect types'),
+  required: z.boolean().optional(), showInList: z.boolean().optional().describe('Show as a column in list views'),
+}, (args) => wrap(() => client.post('/custom-fields', args)));
 
   server.tool('move_deal', 'Move a deal to a stage (use list_deal_stages for stageId)', { dealId: z.string(), stageId: z.string(), lostReason: z.string().optional() },
   ({ dealId, stageId, lostReason }) => wrap(() => client.post(`/deals/${dealId}/move`, { stageId, lostReason })));
 
-  server.tool('create_kb_page', 'Create a knowledge base page', { spaceId: z.string(), title: z.string(), text: z.string().optional() },
-  ({ spaceId, title, text: body }) => wrap(() => client.post('/pages', { spaceId, title, body: { type: 'doc', content: [{ type: 'paragraph', content: body ? [{ type: 'text', text: body }] : [] }] } })));
+  server.tool('create_kb_page', 'Create a knowledge base page (line breaks are preserved; blank line = new paragraph)', { spaceId: z.string(), title: z.string(), text: z.string().optional() },
+  ({ spaceId, title, text: body }) => wrap(() => client.post('/pages', { spaceId, title, body: textToDoc(body ?? '') })));
 
   server.tool('request_leave', 'Request leave for an employee', {
   employeeId: z.string(), leaveTypeId: z.string(), fromDate: z.string(), toDate: z.string(), reason: z.string().optional(),

@@ -3,6 +3,30 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.8.0
+
+- Deals get a detail page (`/deals/:id`): editable title, stage dropdown,
+  company link, owner, amount/currency/expected close, custom field values,
+  deal-scoped notes and an activity trail. Kanban cards and the company's
+  deal list open the deal now; CRM breadcrumbs become full clickable trails.
+- MCP gains the full CRM surface: `create_company`, `create_contact`,
+  `create_deal` plus `list_contacts`, `list_deals`, `list_deal_stages` -
+  agents no longer need ids they cannot discover, and stage ids for
+  `move_deal` are finally obtainable.
+- MCP agents can define custom fields (`create_custom_field`,
+  `list_custom_fields`; requires `settings.manage` in the token scope) and
+  set their values via `customFields` on the create tools.
+- Agent-authored notes, task comments and KB pages keep their line
+  structure: blank lines become paragraphs, single newlines become hard
+  breaks - no more single-paragraph walls of text.
+- The home dashboard's activity feed filters by domain permissions: each
+  entity type maps to the permission required to see it, own actions stay
+  visible. A Member without `finance.read` no longer sees that payments
+  were recorded.
+- Audit gaps closed: CRM notes and custom-field definitions now write
+  activity records (fact-only for note bodies) from every client, web and
+  MCP alike.
+
 ## v1.7.0
 
 - New MCP tools `list_projects` and `list_companies`: the entry point for

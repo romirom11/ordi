@@ -47,7 +47,9 @@ export function PipelineTab() {
   });
 
   const dealMenu = (d: Deal): ContextMenuEntry[] => {
-    const items: ContextMenuEntry[] = [];
+    const items: ContextMenuEntry[] = [
+      { key: 'openDeal', label: t('crm.openDealNewTab'), icon: <ExternalLink size={14} />, onSelect: () => tabs?.openInNewTab(`/deals/${d.id}`) },
+    ];
     if (canWrite) {
       items.push({
         key: 'move', label: t('crm.moveToStage'), icon: <ArrowRightLeft size={14} />,
@@ -167,7 +169,7 @@ export function PipelineTab() {
                       draggable
                       onDragStart={(e) => { setDraggingId(d.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', d.id); }}
                       onDragEnd={() => { setDraggingId(null); setOverStage(null); }}
-                      onClick={() => company && navigate(`/companies/${company.id}`)}
+                      onClick={() => navigate(`/deals/${d.id}`)}
                       className={cn(
                         'anim-fade-in group cursor-grab rounded-lg border border-border bg-card p-2.5 shadow-sm transition-all duration-150',
                         'hover:border-border-strong hover:shadow-pop active:cursor-grabbing',
