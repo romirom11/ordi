@@ -289,11 +289,23 @@ export function EmptySection({ icon, title, action }: { icon?: ReactNode; title:
 
 /* ───────────────── Rail primitives (Linear-style property rows) ───────────────── */
 
-/** Labeled row: faint label on the left, control filling the rest. */
-export function RailField({ label, children }: { label: string; children: ReactNode }) {
+/**
+ * Labeled row: faint label on the left, control filling the rest.
+ *
+ * `wideLabel` widens the label column for blocks whose names the user writes.
+ * 76px suits our own property names (the longest built-in label measures 87px)
+ * but starves a custom field called "Дата наступного кроку", which needs 147px
+ * and otherwise wraps to three lines beside a value column holding a dash.
+ * 150px fits those names on one line and still leaves the control 130px, which
+ * covers a select chip or a date picker; a longer name still wraps rather than
+ * truncating, because a field's name is the one part you cannot guess.
+ */
+export function RailField({ label, children, wideLabel }: {
+  label: string; children: ReactNode; wideLabel?: boolean;
+}) {
   return (
     <div className="flex items-start gap-2 py-0.5">
-      <span className="w-[76px] shrink-0 pt-[7px] text-xs text-faint">{label}</span>
+      <span className={cn('shrink-0 pt-[7px] text-xs text-faint', wideLabel ? 'w-[150px]' : 'w-[76px]')}>{label}</span>
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   );

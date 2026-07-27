@@ -128,7 +128,7 @@ export function CompanyDetailPage({ id }: { id: string }) {
             <CompanyActivity companyId={id} users={usersQ.data ?? []} />
           </div>
         </div>
-        <aside className="order-1 shrink-0 space-y-6 overflow-auto border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-72 min-[1100px]:border-b-0 min-[1100px]:border-l">
+        <aside className="order-1 shrink-0 space-y-6 overflow-auto border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-80 min-[1100px]:border-b-0 min-[1100px]:border-l">
           <CompanyRail
             company={c}
             loading={companyQ.isLoading}
