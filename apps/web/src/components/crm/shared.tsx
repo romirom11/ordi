@@ -78,6 +78,10 @@ extendDict({
     'crm.deleteClientsBody': 'Delete {n} clients and all their data? This cannot be undone.',
     'crm.openCompany': 'Open client',
     'crm.openDealNewTab': 'Open deal in new tab',
+    'crm.project': 'Project',
+    'crm.noProject': 'No project',
+    'crm.projectUpdated': 'Project updated',
+    'crm.linkProjectHint': 'Which product or delivery project is this lead for?',
     'crm.activity': 'Activity',
     'crm.noActivity': 'No activity yet',
     'crm.expectedClose': 'Expected close',
@@ -169,6 +173,10 @@ extendDict({
     'crm.deleteClientsBody': 'Видалити клієнтів ({n}) та всі їхні дані? Дію не можна скасувати.',
     'crm.openCompany': 'Відкрити клієнта',
     'crm.openDealNewTab': 'Відкрити угоду в новій вкладці',
+    'crm.project': 'Проєкт',
+    'crm.noProject': 'Без проєкту',
+    'crm.projectUpdated': 'Проєкт оновлено',
+    'crm.linkProjectHint': 'До якого продукту чи проєкту цей лід?',
     'crm.activity': 'Активність',
     'crm.noActivity': 'Активності поки немає',
     'crm.expectedClose': 'Очікуване закриття',
@@ -226,9 +234,20 @@ export interface Stage {
   id: string; name: string; position: number; probability: number; isWon: boolean; isLost: boolean;
 }
 export interface Deal {
-  id: string; companyId?: string | null; title: string; stageId: string;
+  id: string; companyId?: string | null; projectId?: string | null; title: string; stageId: string;
   amount?: string | number | null; currency?: string | null; expectedCloseDate?: string | null;
   ownerId?: string | null; lostReason?: string | null; version?: number;
+}
+
+export interface ProjectLite { id: string; name: string; key?: string | null }
+
+/** Projects for deal linking – the "which offering is this lead for" dimension. */
+export function useProjectsLookup() {
+  return useQuery<ProjectLite[]>({
+    queryKey: ['projects', 'lookup'],
+    queryFn: () => api.get<{ data: ProjectLite[] }>('/projects').then((r) => r.data.map((p: any) => ({ id: p.id, name: p.name, key: p.key }))),
+    staleTime: 5 * 60_000,
+  });
 }
 export interface Contact {
   id: string; firstName?: string | null; lastName?: string | null; email?: string | null;

@@ -8,7 +8,7 @@ import { api, ApiError } from '../../lib/api';
 import { useT } from '../../lib/i18n';
 import { Button, Input, Select, Spinner } from '../ui';
 import { Dialog, toast } from '../overlays';
-import { CURRENCIES, COMPANY_STATUSES, useCompanies, useDealStages, type Company, type Stage } from './shared';
+import { CURRENCIES, COMPANY_STATUSES, useCompanies, useDealStages, useProjectsLookup, type Company, type Stage } from './shared';
 
 function errMsg(e: unknown, fallback: string): string {
   return e instanceof ApiError ? e.message : fallback;
@@ -95,11 +95,14 @@ export function NewDealDialog({ open, onClose, lockedCompanyId, defaultStageId, 
   const qc = useQueryClient();
   const stagesQ = useDealStages();
   const companiesQ = useCompanies();
+  const projectsQ = useProjectsLookup();
   const stages = stagesQ.data ?? [];
   const companies = companiesQ.data ?? [];
+  const projects = projectsQ.data ?? [];
 
   const [title, setTitle] = useState('');
   const [companyId, setCompanyId] = useState(lockedCompanyId ?? '');
+  const [projectId, setProjectId] = useState('');
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState('USD');
   const [stageId, setStageId] = useState('');
@@ -109,11 +112,12 @@ export function NewDealDialog({ open, onClose, lockedCompanyId, defaultStageId, 
   const effectiveStage = stageId || defaultStageId || stages[0]?.id || '';
   const effectiveCompany = lockedCompanyId ?? companyId;
 
-  const reset = () => { setTitle(''); setCompanyId(lockedCompanyId ?? ''); setAmount(''); setCurrency('USD'); setStageId(''); setError(null); };
+  const reset = () => { setTitle(''); setCompanyId(lockedCompanyId ?? ''); setProjectId(''); setAmount(''); setCurrency('USD'); setStageId(''); setError(null); };
 
   const mut = useMutation({
     mutationFn: () => api.post('/deals', {
       companyId: effectiveCompany,
+      projectId: projectId || undefined,
       title: title.trim(),
       stageId: effectiveStage || undefined,
       amount: amount ? Number(amount) : undefined,
@@ -166,6 +170,14 @@ export function NewDealDialog({ open, onClose, lockedCompanyId, defaultStageId, 
             {stages.map((s: Stage) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </Select>
         </Field>
+        {projects.length > 0 && (
+          <Field label={`${t('crm.project')} · ${t('crm.linkProjectHint')}`}>
+            <Select value={projectId} onChange={(e) => setProjectId(e.target.value)} className="w-full">
+              <option value="">{t('crm.noProject')}</option>
+              {projects.map((p) => <option key={p.id} value={p.id}>{p.name}{p.key ? ` (${p.key})` : ''}</option>)}
+            </Select>
+          </Field>
+        )}
         {error && <p className="text-[13px] text-destructive">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="ghost" size="sm" onClick={() => { reset(); onClose(); }}>{t('common.cancel')}</Button>

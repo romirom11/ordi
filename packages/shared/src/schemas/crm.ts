@@ -37,6 +37,8 @@ export const dealStageInputSchema = z.object({
 
 export const dealInputSchema = z.object({
   companyId: idSchema,
+  /** Optional link to the product/delivery project this deal sells into. */
+  projectId: idSchema.nullable().optional(),
   title: z.string().min(1),
   stageId: idSchema,
   amount: z.number().min(0).default(0),

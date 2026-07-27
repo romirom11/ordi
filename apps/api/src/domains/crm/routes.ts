@@ -15,6 +15,14 @@ import { assertVersion } from '../../core/locking';
 import { page } from '../../lib/http';
 import * as svc from './service';
 
+/** A deal may only link to a live project – the FK allows any id, deleted ones included. */
+async function assertProjectExists(projectId: string): Promise<void> {
+  const { db } = getDb();
+  const [p] = await db.select({ id: schema.projects.id }).from(schema.projects)
+    .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
+  if (!p) throw err.validation('Unknown project');
+}
+
 function parseCfFilters(c: any): CustomFieldFilter[] {
   const raw = c.req.query('cf');
   if (!raw) return [];
@@ -135,9 +143,13 @@ export function crmRoutes() {
   app.get('/deals', guard('deals.read'), async (c) => {
     const { db } = getDb();
     const companyId = c.req.query('companyId');
+    // projectId filter: a ulid narrows to that project, the literal 'none' to unlinked deals.
+    const projectId = c.req.query('projectId');
     const rows = await db.select().from(schema.deals).where(and(
       isNull(schema.deals.deletedAt),
       companyId ? eq(schema.deals.companyId, companyId) : undefined,
+      projectId === 'none' ? isNull(schema.deals.projectId)
+        : projectId ? eq(schema.deals.projectId, projectId) : undefined,
     )).orderBy(desc(schema.deals.createdAt));
     return c.json({ data: rows });
   });
@@ -146,9 +158,10 @@ export function crmRoutes() {
     const body = dealInputSchema.parse(await c.req.json());
     const { db } = getDb();
     const actor = currentActor(c);
+    if (body.projectId) await assertProjectExists(body.projectId);
     const id = ulid();
     await db.insert(schema.deals).values({
-      id, companyId: body.companyId, title: body.title, stageId: body.stageId,
+      id, companyId: body.companyId, projectId: body.projectId ?? null, title: body.title, stageId: body.stageId,
       amount: String(body.amount), currency: body.currency, expectedCloseDate: body.expectedCloseDate ?? null,
       ownerId: body.ownerId ?? null, customFields: body.customFields ?? {}, createdBy: actor.userId,
     });
@@ -163,8 +176,9 @@ export function crmRoutes() {
     const { db } = getDb();
     const deal = await svc.getDeal(c.req.param('id'));
     assertVersion(deal, body.version, deal);
+    if (body.projectId) await assertProjectExists(body.projectId);
     const patch: Record<string, unknown> = {};
-    for (const k of ['title', 'amount', 'currency', 'expectedCloseDate', 'ownerId', 'customFields', 'stageId']) {
+    for (const k of ['title', 'amount', 'currency', 'expectedCloseDate', 'ownerId', 'customFields', 'stageId', 'projectId']) {
       if ((body as any)[k] !== undefined) patch[k] = k === 'amount' ? String((body as any)[k]) : (body as any)[k];
     }
     await db.update(schema.deals).set(patch).where(and(eq(schema.deals.id, deal.id), eq(schema.deals.version, deal.version)));

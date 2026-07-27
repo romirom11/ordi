@@ -5,7 +5,7 @@
  */
 import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, ExternalLink, ArrowRightLeft, Trash2 } from 'lucide-react';
+import { CalendarClock, ExternalLink, ArrowRightLeft, FolderKanban, Trash2 } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { useNavigate } from '../../lib/router';
 import { useTabs } from '../../lib/tabs';
@@ -14,7 +14,7 @@ import { useT } from '../../lib/i18n';
 import { Avatar, EmptyState, Skeleton, Tooltip, cn, fmtMoney, fmtDate } from '../ui';
 import { ContextMenu, ConfirmDialog, toast, type ContextMenuEntry } from '../overlays';
 import { LostReasonDialog } from './dialogs';
-import { useAllDeals, useCompanies, useDealStages, useUsersLookup, type Deal, type Stage } from './shared';
+import { useAllDeals, useCompanies, useDealStages, useProjectsLookup, useUsersLookup, type Deal, type Stage } from './shared';
 
 export function PipelineTab() {
   const t = useT();
@@ -29,11 +29,26 @@ export function PipelineTab() {
   const dealsQ = useAllDeals();
   const companiesQ = useCompanies();
   const usersQ = useUsersLookup();
+  const projectsQ = useProjectsLookup();
 
   const stages = stagesQ.data ?? [];
-  const deals = dealsQ.data ?? [];
+  const allDeals = dealsQ.data ?? [];
   const companyMap = useMemo(() => new Map((companiesQ.data ?? []).map((c) => [c.id, c])), [companiesQ.data]);
   const userMap = useMemo(() => new Map((usersQ.data ?? []).map((u) => [u.id, u])), [usersQ.data]);
+  const projectMap = useMemo(() => new Map((projectsQ.data ?? []).map((p) => [p.id, p])), [projectsQ.data]);
+
+  // Filter by linked project: '' = all, 'none' = unlinked, otherwise a project id.
+  // Chips appear only once at least one deal is linked – zero setup, zero noise.
+  const [projectFilter, setProjectFilter] = useState('');
+  const linkedProjectIds = useMemo(
+    () => [...new Set(allDeals.map((d) => d.projectId).filter((x): x is string => !!x))],
+    [allDeals],
+  );
+  const deals = useMemo(() => {
+    if (!projectFilter) return allDeals;
+    if (projectFilter === 'none') return allDeals.filter((d) => !d.projectId);
+    return allDeals.filter((d) => d.projectId === projectFilter);
+  }, [allDeals, projectFilter]);
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [overStage, setOverStage] = useState<string | null>(null);
@@ -109,7 +124,28 @@ export function PipelineTab() {
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-x-auto">
+    <div className="flex min-h-0 flex-1 flex-col">
+      {linkedProjectIds.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1 px-4 pt-3">
+          {[
+            { key: '', label: t('common.all') },
+            ...linkedProjectIds.map((pid) => ({ key: pid, label: projectMap.get(pid)?.name ?? '…' })),
+            { key: 'none', label: t('crm.noProject') },
+          ].map((chip) => (
+            <button
+              key={chip.key || 'all'}
+              onClick={() => setProjectFilter(chip.key)}
+              className={cn(
+                'h-7 rounded-md px-2.5 text-xs font-medium transition-colors duration-150',
+                projectFilter === chip.key ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+              )}
+            >
+              {chip.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="min-h-0 flex-1 overflow-x-auto">
       <div className="flex h-full gap-3 p-4">
         {stages.map((stage) => {
           const list = deals.filter((d) => d.stageId === stage.id);
@@ -163,6 +199,7 @@ export function PipelineTab() {
                 ) : list.map((d) => {
                   const company = d.companyId ? companyMap.get(d.companyId) : undefined;
                   const owner = d.ownerId ? userMap.get(d.ownerId) : undefined;
+                  const project = d.projectId ? projectMap.get(d.projectId) : undefined;
                   return (
                     <ContextMenu key={d.id} items={dealMenu(d)}>
                     <div
@@ -181,6 +218,13 @@ export function PipelineTab() {
                         <div className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
                           <Avatar name={company.name} size={14} />
                           <span className="truncate">{company.name}</span>
+                        </div>
+                      )}
+                      {project && (
+                        <div className="mt-1 flex items-center gap-1 text-[11px] text-faint">
+                          <FolderKanban size={11} />
+                          <span className="truncate">{project.name}</span>
+                          {project.key && <span className="shrink-0 font-mono text-[10px]">{project.key}</span>}
                         </div>
                       )}
                       <div className="mt-2 flex items-center justify-between">
@@ -204,6 +248,7 @@ export function PipelineTab() {
             </div>
           );
         })}
+      </div>
       </div>
 
       <LostReasonDialog

@@ -100,12 +100,16 @@ export function buildServer(client: OrdiClient): McpServer {
   })) };
 }));
 
-  server.tool('list_deals', 'List deals, optionally for one company – the way to obtain dealId for move_deal', {
+  server.tool('list_deals', 'List deals, filterable by company and by linked project – the way to obtain dealId for move_deal', {
   companyId: z.string().optional(),
-}, ({ companyId }) => wrap(async () => {
-  const res = await client.get<{ data: Record<string, unknown>[] }>(`/deals${companyId ? `?companyId=${encodeURIComponent(companyId)}` : ''}`);
+  projectId: z.string().optional().describe('Filter by linked project id, or the literal "none" for unlinked deals'),
+}, ({ companyId, projectId }) => wrap(async () => {
+  const qs = new URLSearchParams();
+  if (companyId) qs.set('companyId', companyId);
+  if (projectId) qs.set('projectId', projectId);
+  const res = await client.get<{ data: Record<string, unknown>[] }>(`/deals${qs.toString() ? `?${qs}` : ''}`);
   return { data: res.data.map((d) => ({
-    id: d.id, title: d.title, companyId: d.companyId, stageId: d.stageId,
+    id: d.id, title: d.title, companyId: d.companyId, projectId: d.projectId, stageId: d.stageId,
     amount: d.amount, currency: d.currency, expectedCloseDate: d.expectedCloseDate, ownerId: d.ownerId,
   })) };
 }));
@@ -232,8 +236,9 @@ export function buildServer(client: OrdiClient): McpServer {
   customFields: z.record(z.string(), z.unknown()).optional().describe('Keyed by custom field key (see list_custom_fields)'),
 }, (args) => wrap(() => client.post('/contacts', args)));
 
-  server.tool('create_deal', 'Create a deal in a pipeline stage (use list_deal_stages for stageId)', {
+  server.tool('create_deal', 'Create a deal in a pipeline stage (use list_deal_stages for stageId). Link it to the product/delivery project it sells into via projectId (use list_projects) so leads for different offerings stay separable.', {
   companyId: z.string(), title: z.string(), stageId: z.string(),
+  projectId: z.string().optional().describe('Project this deal sells into, e.g. the SaaS product project for a product lead'),
   amount: z.number().min(0).optional(), currency: z.string().length(3).optional().describe('Defaults to USD'),
   expectedCloseDate: z.string().optional().describe('YYYY-MM-DD'),
   customFields: z.record(z.string(), z.unknown()).optional().describe('Keyed by custom field key (see list_custom_fields)'),

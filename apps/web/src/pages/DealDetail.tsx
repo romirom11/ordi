@@ -7,7 +7,7 @@
  */
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Activity as ActivityIcon, CalendarClock, ChevronDown, Handshake } from 'lucide-react';
+import { Activity as ActivityIcon, CalendarClock, ChevronDown, ExternalLink as ExternalLinkIcon, FolderKanban, Handshake } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { Link } from '../lib/router';
 import { useCan, useMe } from '../lib/auth';
@@ -17,7 +17,7 @@ import {
   cn, fmtMoney, fmtDate, fmtRelative,
 } from '../components/ui';
 import { DropdownMenu, MenuItem, MenuLabel, toast } from '../components/overlays';
-import { useDealStages, useUsersLookup, CURRENCIES, type Company, type Deal, type Stage } from '../components/crm/shared';
+import { useDealStages, useProjectsLookup, useUsersLookup, CURRENCIES, type Company, type Deal, type ProjectLite, type Stage } from '../components/crm/shared';
 import { EditableName, NotesSection, OwnerPicker, PropRow, SectionHeader } from '../components/crm/detail';
 import { LostReasonDialog } from '../components/crm/dialogs';
 
@@ -40,10 +40,13 @@ export function DealDetailPage({ id }: { id: string }) {
     enabled: !!dealQ.data?.companyId && can('crm.read'),
   });
 
+  const projectsQ = useProjectsLookup();
+
   const d = dealQ.data;
   const stages = stagesQ.data ?? [];
   const stage = stages.find((s) => s.id === d?.stageId);
   const owner = d?.ownerId ? (usersQ.data ?? []).find((u) => u.id === d.ownerId) : undefined;
+  const project = d?.projectId ? (projectsQ.data ?? []).find((p) => p.id === d.projectId) : undefined;
 
   const [lostFor, setLostFor] = useState<string | null>(null);
 
@@ -115,6 +118,12 @@ export function DealDetailPage({ id }: { id: string }) {
                     <span className="truncate">{companyQ.data.name}</span>
                   </Link>
                 )}
+                <ProjectPicker
+                  project={project}
+                  projects={projectsQ.data ?? []}
+                  editable={canWrite}
+                  onPick={(pid) => patch.mutate({ projectId: pid })}
+                />
                 <OwnerPicker
                   owner={owner}
                   users={usersQ.data ?? []}
@@ -151,6 +160,58 @@ export function DealDetailPage({ id }: { id: string }) {
         }}
       />
     </div>
+  );
+}
+
+/* ─────────────── Project picker ─────────────── */
+
+function ProjectPicker({ project, projects, editable, onPick }: {
+  project?: ProjectLite; projects: ProjectLite[]; editable: boolean; onPick: (id: string | null) => void;
+}) {
+  const t = useT();
+  const content = (
+    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+      <FolderKanban size={13} className={project ? undefined : 'text-faint'} />
+      {project ? (
+        <>
+          <span className="truncate">{project.name}</span>
+          {project.key && <span className="shrink-0 font-mono text-[10px] text-faint">{project.key}</span>}
+        </>
+      ) : (
+        <span className="text-faint">{t('crm.noProject')}</span>
+      )}
+    </span>
+  );
+  // Read-only: a linked project is a link; an empty slot is just text.
+  if (!editable) {
+    return project
+      ? <Link to={`/projects/${project.id}`} className="rounded-md px-1.5 py-0.5 transition-colors hover:bg-muted">{content}</Link>
+      : content;
+  }
+  return (
+    <span className="inline-flex items-center">
+      {project && (
+        <Link to={`/projects/${project.id}`} aria-label={t('crm.viewProject')} className="rounded-md p-0.5 text-faint transition-colors hover:bg-muted hover:text-foreground">
+          <ExternalLinkIcon size={12} />
+        </Link>
+      )}
+      <DropdownMenu
+        align="start"
+        trigger={<button className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-muted">{content}<ChevronDown size={12} className="text-faint" /></button>}
+      >
+        <MenuLabel>{t('crm.linkProjectHint')}</MenuLabel>
+        <MenuItem checked={!project} onSelect={() => project && onPick(null)}>{t('crm.noProject')}</MenuItem>
+        {projects.map((p) => (
+          <MenuItem key={p.id} checked={p.id === project?.id} onSelect={() => p.id !== project?.id && onPick(p.id)}>
+            <span className="flex items-center gap-2">
+              <FolderKanban size={13} className="text-muted-foreground" />
+              <span className="flex-1 truncate">{p.name}</span>
+              {p.key && <span className="font-mono text-[10px] text-faint">{p.key}</span>}
+            </span>
+          </MenuItem>
+        ))}
+      </DropdownMenu>
+    </span>
   );
 }
 
