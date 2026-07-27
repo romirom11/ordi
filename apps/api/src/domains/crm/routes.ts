@@ -206,22 +206,28 @@ export function crmRoutes() {
       id, companyId: body.companyId ?? null, contactId: body.contactId ?? null, dealId: body.dealId ?? null,
       body: body.body, pinned: body.pinned, createdBy: actor.userId,
     });
+    // Fact-only (like task comments): the note body itself stays out of the diff.
+    await writeActivity(db, { entityType: 'note', entityId: id, action: 'created', actorId: actor.userId, actorType: actor.actorType });
     return c.json({ id }, 201);
   });
 
   app.patch('/notes/:id', guard('crm.write'), async (c) => {
     const body = await c.req.json();
     const { db } = getDb();
+    const actor = currentActor(c);
     await db.update(schema.notes).set({
       ...(body.body !== undefined ? { body: body.body } : {}),
       ...(body.pinned !== undefined ? { pinned: body.pinned } : {}),
     }).where(eq(schema.notes.id, c.req.param('id')));
+    await writeActivity(db, { entityType: 'note', entityId: c.req.param('id'), action: 'updated', actorId: actor.userId, actorType: actor.actorType });
     return c.json({ ok: true });
   });
 
   app.delete('/notes/:id', guard('crm.write'), async (c) => {
     const { db } = getDb();
+    const actor = currentActor(c);
     await db.update(schema.notes).set({ deletedAt: new Date() }).where(eq(schema.notes.id, c.req.param('id')));
+    await writeActivity(db, { entityType: 'note', entityId: c.req.param('id'), action: 'deleted', actorId: actor.userId, actorType: actor.actorType });
     return c.json({ ok: true });
   });
 

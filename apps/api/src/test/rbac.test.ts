@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { getDb, schema } from '@ordi/db';
+import { getDb, schema, eq } from '@ordi/db';
 import { ulid } from 'ulid';
 import { resetDb, seedRolesAndUsers, reqAs, anon, json } from './helpers';
 
@@ -102,6 +102,24 @@ describe('dashboard feed hides activity outside the actor’s domains', () => {
     const body = await json(reqAs(users.member!.cookie).get('/dashboard'));
     expect(body.receivables).toBeUndefined();
     expect(body.overdue).toBeUndefined();
+  });
+});
+
+describe('CRM notes leave an audit trail', () => {
+  it('creating a note writes a fact-only activity record (body stays out of the diff)', async () => {
+    const company = await json(reqAs(users.owner!.cookie).post('/companies', { name: 'NoteCo' }));
+    const res = await reqAs(users.owner!.cookie).post('/notes', {
+      companyId: company.id,
+      body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'secret plans' }] }] },
+    });
+    expect(res.status).toBe(201);
+
+    const { db } = getDb();
+    const rows = await db.select().from(schema.activityLog).where(eq(schema.activityLog.entityType, 'note'));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.action).toBe('created');
+    expect(rows[0]!.actorId).toBe(users.owner!.userId);
+    expect(JSON.stringify(rows[0]!.diff)).not.toContain('secret plans');
   });
 });
 
