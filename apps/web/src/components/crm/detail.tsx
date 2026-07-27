@@ -5,7 +5,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, Check, Pencil, Pin, Trash2 } from 'lucide-react';
+import { ChevronDown, Check, Download, FileText, Paperclip, Pin, Trash2, Upload } from 'lucide-react';
 import { api, qs, ApiError } from '../../lib/api';
 import { useT } from '../../lib/i18n';
 import { Avatar, Button, Card, EmptyState, IconButton, Skeleton, Spinner, Tooltip, cn, fmtDate } from '../ui';
@@ -14,6 +14,7 @@ import { RichEditor } from '../richtext/RichEditor';
 import { RichText, docIsEmpty } from '../richtext/RichText';
 
 export interface Note { id: string; body?: unknown; createdAt?: string; authorName?: string; pinned?: boolean }
+export interface FileRow { id: string; filename: string; size?: number | null; mime?: string | null; createdAt?: string }
 
 /* ─────────────── Inline editable name ─────────────── */
 
@@ -115,7 +116,8 @@ export function PropRow({ label, children }: { label: string; children: React.Re
   return (
     <div className="flex items-baseline justify-between gap-3 py-1.5 text-[13px]">
       <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
-      <span className="min-w-0 truncate text-right">{children}</span>
+      {/* Values wrap – an ellipsis in a 300px card hides exactly the data the card exists to show. */}
+      <span className="min-w-0 break-words text-right">{children}</span>
     </div>
   );
 }
@@ -164,17 +166,48 @@ export function NotesSection({ companyId, dealId, canWrite }: { companyId?: stri
   const submit = () => { if (docIsEmpty(doc) || create.isPending) return; create.mutate(doc); };
   const notes = data ?? [];
 
+  // Click-away saves the note being edited. Blur alone is not enough:
+  // ProseMirror keeps focus when the click lands on non-focusable text.
+  const editBoxRef = useRef<HTMLDivElement | null>(null);
+  const editStateRef = useRef<{ id: string | null; doc: any }>({ id: null, doc: null });
+  editStateRef.current = { id: editingId, doc: editDoc };
+  useEffect(() => {
+    if (!editingId) return;
+    const onDown = (e: MouseEvent) => {
+      const box = editBoxRef.current;
+      if (!box || box.contains(e.target as Node)) return;
+      const { id: curId, doc: cur } = editStateRef.current;
+      if (curId && !docIsEmpty(cur)) update.mutate({ id: curId, body: cur });
+      else { setEditingId(null); setEditDoc(null); }
+    };
+    document.addEventListener('mousedown', onDown, true);
+    // The editor mounts unfocused – put the caret at the end so typing lands
+    // in the note immediately, like clicking into a Notion block.
+    requestAnimationFrame(() => {
+      const el = editBoxRef.current?.querySelector<HTMLElement>('[contenteditable="true"]');
+      if (!el) return;
+      el.focus();
+      const sel = window.getSelection();
+      if (sel) { const range = document.createRange(); range.selectNodeContents(el); range.collapse(false); sel.removeAllRanges(); sel.addRange(range); }
+    });
+    return () => document.removeEventListener('mousedown', onDown, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId]);
+
   return (
     <section>
       <SectionHeader icon={<Pin size={15} />} title={t('crm.notes')} count={notes.length} />
       {canWrite && (
-        <div className="mb-4 space-y-2">
-          <RichEditor key={editorKey} value={doc} onChange={setDoc} compact placeholder={t('crm.notePlaceholder')} onSubmit={submit} />
-          <div className="flex justify-end">
-            <Button size="sm" onClick={submit} disabled={create.isPending || docIsEmpty(doc)}>
-              {create.isPending ? <Spinner /> : t('crm.saveNote')}
-            </Button>
-          </div>
+        <div className="mb-4 rounded-lg border border-border/70 px-3 py-2 transition-colors focus-within:border-border-strong">
+          <RichEditor key={editorKey} value={doc} onChange={setDoc} compact bare placeholder={t('crm.notePlaceholder')} onSubmit={submit} />
+          {!docIsEmpty(doc) && (
+            <div className="mt-2 flex justify-end gap-2">
+              <Button variant="ghost" size="xs" onClick={() => { setDoc(null); setEditorKey((k) => k + 1); }}>{t('common.cancel')}</Button>
+              <Button size="xs" onClick={submit} disabled={create.isPending}>
+                {create.isPending ? <Spinner /> : t('crm.saveNote')}
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
@@ -187,27 +220,31 @@ export function NotesSection({ companyId, dealId, canWrite }: { companyId?: stri
           {notes.map((n) => (
             <Card key={n.id} className={cn('group/note p-3', n.pinned && 'border-primary/30 bg-primary/[0.03]')}>
               {editingId === n.id ? (
-                <div className="space-y-2">
-                  <RichEditor value={editDoc} onChange={setEditDoc} compact onSubmit={() => !docIsEmpty(editDoc) && update.mutate({ id: n.id, body: editDoc })} />
-                  <div className="flex justify-end gap-2">
-                    <Button variant="ghost" size="xs" onClick={() => { setEditingId(null); setEditDoc(null); }}>{t('common.cancel')}</Button>
-                    <Button size="xs" disabled={update.isPending || docIsEmpty(editDoc)} onClick={() => update.mutate({ id: n.id, body: editDoc })}>
-                      {update.isPending ? <Spinner /> : t('common.save')}
-                    </Button>
-                  </div>
+                // Notion-style: the note body itself is the editor. Click-away and
+                // focus-away save, Esc discards, Cmd/Ctrl+Enter saves explicitly.
+                <div
+                  ref={editBoxRef}
+                  onBlur={(e) => {
+                    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                    if (!docIsEmpty(editDoc)) update.mutate({ id: n.id, body: editDoc });
+                    else { setEditingId(null); setEditDoc(null); }
+                  }}
+                  onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setEditingId(null); setEditDoc(null); } }}
+                >
+                  <RichEditor value={editDoc} onChange={setEditDoc} compact bare onSubmit={() => !docIsEmpty(editDoc) && update.mutate({ id: n.id, body: editDoc })} />
+                  {update.isPending && <div className="mt-1 flex justify-end"><Spinner /></div>}
                 </div>
               ) : (
                 <div className="flex items-start justify-between gap-2">
-                  <RichText doc={n.body} className="min-w-0 flex-1 text-[13px]" />
+                  {/* Click the text to edit in place – the same affordance as KB pages. */}
+                  <div
+                    className={cn('min-w-0 flex-1', canWrite && 'cursor-text')}
+                    onClick={() => { if (canWrite) { setEditingId(n.id); setEditDoc(n.body); } }}
+                  >
+                    <RichText doc={n.body} className="text-[13px]" />
+                  </div>
                   {canWrite && (
                     <span className="flex shrink-0 items-center">
-                      <Tooltip label={t('common.edit')}>
-                        <IconButton size="sm" aria-label={t('common.edit')}
-                          onClick={() => { setEditingId(n.id); setEditDoc(n.body); }}
-                          className="opacity-0 group-hover/note:opacity-100">
-                          <Pencil size={13} />
-                        </IconButton>
-                      </Tooltip>
                       <Tooltip label={t('common.delete')}>
                         <IconButton size="sm" aria-label={t('common.delete')} onClick={() => setToDelete(n)}
                           className="opacity-0 hover:text-destructive group-hover/note:opacity-100">
@@ -243,6 +280,140 @@ export function NotesSection({ companyId, dealId, canWrite }: { companyId?: stri
         onConfirm={() => toDelete && del.mutate(toDelete.id)}
         title={t('crm.deleteNoteTitle')}
         body={t('crm.deleteNoteBody')}
+        confirmLabel={t('common.delete')}
+        danger
+        pending={del.isPending}
+      />
+    </section>
+  );
+}
+
+/* ─────────────── Files (company or deal) ─────────────── */
+
+function fmtSize(bytes?: number | null): string {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * Attachments for a CRM entity: presigned S3 upload (the app's standard file
+ * path, PRD §14.5), list with download links, delete with confirm.
+ */
+export function FilesSection({ entityType, entityId, canWrite }: {
+  entityType: 'company' | 'deal'; entityId: string; canWrite: boolean;
+}) {
+  const t = useT();
+  const qc = useQueryClient();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [toDelete, setToDelete] = useState<FileRow | null>(null);
+
+  const queryKey = ['attachments', entityType, entityId];
+  const { data, isLoading } = useQuery<FileRow[]>({
+    queryKey,
+    queryFn: () => api.get<{ data: FileRow[] }>(`/attachments${qs({ entityType, entityId })}`).then((r) => r.data),
+  });
+  const files = data ?? [];
+
+  const upload = async (file: File) => {
+    setUploading(true);
+    try {
+      const presign = await api.post<{ uploadUrl: string; fileKey: string }>('/attachments/presign', {
+        filename: file.name, size: file.size, mime: file.type || 'application/octet-stream',
+        entityType, entityId,
+      });
+      // Dev without S3 returns a local:// stub – register anyway so the flow
+      // stays demonstrable; production always has real storage (deployment docs).
+      if (!presign.uploadUrl.startsWith('local://')) {
+        const put = await fetch(presign.uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type || 'application/octet-stream' } });
+        if (!put.ok) throw new Error(`Upload failed (${put.status})`);
+      }
+      await api.post('/attachments/register', {
+        entityType, entityId, fileKey: presign.fileKey, filename: file.name, size: file.size,
+        mime: file.type || 'application/octet-stream',
+      });
+      qc.invalidateQueries({ queryKey });
+      toast(t('crm.fileUploaded'));
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : t('crm.uploadFailed'));
+    } finally {
+      setUploading(false);
+      if (inputRef.current) inputRef.current.value = '';
+    }
+  };
+
+  const download = async (f: FileRow) => {
+    const res = await api.get<{ url: string }>(`/attachments/${f.id}/url`);
+    if (res.url.startsWith('local://')) { toast.error(t('crm.storageNotConfigured')); return; }
+    window.open(res.url, '_blank', 'noopener');
+  };
+
+  const del = useMutation({
+    mutationFn: (id: string) => api.del(`/attachments/${id}`),
+    onSuccess: () => { setToDelete(null); qc.invalidateQueries({ queryKey }); toast(t('crm.fileDeleted')); },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
+  });
+
+  return (
+    <section>
+      <SectionHeader
+        icon={<Paperclip size={15} />}
+        title={t('crm.files')}
+        count={files.length}
+        action={canWrite && (
+          <>
+            <input
+              ref={inputRef}
+              type="file"
+              className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); }}
+            />
+            <Button variant="outline" size="xs" disabled={uploading} onClick={() => inputRef.current?.click()}>
+              {uploading ? <Spinner /> : <Upload size={13} />} {t('crm.uploadFile')}
+            </Button>
+          </>
+        )}
+      />
+      {isLoading ? (
+        <div className="space-y-1">{[0, 1].map((i) => <Skeleton key={i} className="h-10 rounded-md" />)}</div>
+      ) : files.length === 0 ? (
+        <EmptyState icon={<Paperclip size={18} />} title={t('crm.noFiles')} hint={canWrite ? t('crm.noFilesHint') : undefined} />
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-border">
+          {files.map((f, i) => (
+            <div key={f.id} className={cn('group/file flex items-center gap-3 px-3 py-2', i > 0 && 'border-t border-border')}>
+              <FileText size={16} className="shrink-0 text-muted-foreground" />
+              <button onClick={() => download(f)} className="min-w-0 flex-1 truncate text-left text-[13px] font-medium hover:underline" title={f.filename}>
+                {f.filename}
+              </button>
+              <span className="shrink-0 text-xs tabular-nums text-faint">{fmtSize(f.size)}</span>
+              <span className="shrink-0 text-xs text-faint">{fmtDate(f.createdAt)}</span>
+              <Tooltip label={t('crm.downloadFile')}>
+                <IconButton size="sm" aria-label={t('crm.downloadFile')} onClick={() => download(f)}>
+                  <Download size={13} />
+                </IconButton>
+              </Tooltip>
+              {canWrite && (
+                <Tooltip label={t('common.delete')}>
+                  <IconButton size="sm" aria-label={t('common.delete')} onClick={() => setToDelete(f)}
+                    className="opacity-0 transition-opacity duration-150 hover:text-destructive group-hover/file:opacity-100">
+                    <Trash2 size={13} />
+                  </IconButton>
+                </Tooltip>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={!!toDelete}
+        onClose={() => setToDelete(null)}
+        onConfirm={() => toDelete && del.mutate(toDelete.id)}
+        title={t('crm.deleteFileTitle')}
+        body={toDelete ? t('crm.deleteFileBody').replace('{name}', toDelete.filename) : ''}
         confirmLabel={t('common.delete')}
         danger
         pending={del.isPending}
