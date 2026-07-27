@@ -26,6 +26,7 @@ import { ProjectResources, type ProjectLink } from '../components/project/Projec
 import { ProjectUpdates } from '../components/project/ProjectUpdates';
 import { ProjectMilestones } from '../components/project/ProjectMilestones';
 import { ProjectActivity } from '../components/project/ProjectActivity';
+import { ProjectDeals } from '../components/project/ProjectDeals';
 import { ProjectIntegrations } from '../components/project/ProjectIntegrations';
 import { ProjectContextMenu, TaskContextMenu } from '../components/project/contextMenus';
 import { PROJECT_STATUSES, STATUS_META, type UserLite } from '../components/project/pickers';
@@ -1038,6 +1039,8 @@ function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageM
             </section>
 
             <ProjectMilestones projectId={id} canWrite={canWrite} />
+
+            <ProjectDeals projectId={id} />
 
             <ProjectActivity projectId={id} users={users} />
           </>
