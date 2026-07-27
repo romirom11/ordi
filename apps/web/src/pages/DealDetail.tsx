@@ -11,6 +11,7 @@ import { Activity as ActivityIcon, CalendarClock, ChevronDown, ExternalLink as E
 import { api, ApiError } from '../lib/api';
 import { Link } from '../lib/router';
 import { useCan, useMe } from '../lib/auth';
+import { usePageTitle } from '../lib/tabs';
 import { useT } from '../lib/i18n';
 import {
   Avatar, Badge, Breadcrumbs, Card, EmptyState, Input, Skeleton,
@@ -20,6 +21,7 @@ import { DropdownMenu, MenuItem, MenuLabel, toast } from '../components/overlays
 import { useDealStages, useProjectsLookup, useUsersLookup, CURRENCIES, type Company, type Deal, type ProjectLite, type Stage } from '../components/crm/shared';
 import { EditableName, NotesSection, OwnerPicker, PropRow, SectionHeader } from '../components/crm/detail';
 import { LostReasonDialog } from '../components/crm/dialogs';
+import { DateField } from '../components/DatePicker';
 
 interface DealFull extends Deal { customFields?: Record<string, unknown>; createdAt?: string | null }
 interface FieldDef { id: string; key: string; label: string; type: string; options?: { value: string; label: string }[]; deprecated?: boolean }
@@ -43,6 +45,8 @@ export function DealDetailPage({ id }: { id: string }) {
   const projectsQ = useProjectsLookup();
 
   const d = dealQ.data;
+  // Tab and window title carry the deal, not a generic "CRM".
+  usePageTitle(d?.title);
   const stages = stagesQ.data ?? [];
   const stage = stages.find((s) => s.id === d?.stageId);
   const owner = d?.ownerId ? (usersQ.data ?? []).find((u) => u.id === d.ownerId) : undefined;
@@ -281,11 +285,11 @@ function DealPropertiesCard({ deal, stage, loading, editable, onPatch }: {
           </PropRow>
           <PropRow label={t('crm.expectedClose')}>
             {editable ? (
-              <input
-                type="date"
-                value={deal.expectedCloseDate ?? ''}
-                onChange={(e) => onPatch({ expectedCloseDate: e.target.value || null })}
-                className="rounded-md bg-transparent text-right text-[13px] tabular-nums outline-none transition-colors hover:bg-muted focus:ring-2 focus:ring-ring/25"
+              <DateField
+                size="sm"
+                value={deal.expectedCloseDate ?? null}
+                onChange={(v) => onPatch({ expectedCloseDate: v })}
+                className="w-32"
               />
             ) : deal.expectedCloseDate ? (
               <span className="inline-flex items-center gap-1 tabular-nums"><CalendarClock size={12} /> {fmtDate(deal.expectedCloseDate)}</span>

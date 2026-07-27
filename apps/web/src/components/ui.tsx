@@ -1,5 +1,6 @@
 import { clsx } from 'clsx';
-import { forwardRef, Fragment, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes, type CSSProperties } from 'react';
+import { forwardRef, Fragment, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronRight } from 'lucide-react';
 import { usePageTitle } from '../lib/tabs';
 import { Link } from '../lib/router';
@@ -458,24 +459,65 @@ export function ProgressRing({ value, size = 16, stroke = 2.5, color, className 
   );
 }
 
-/* ───────────────────────── Tooltip (CSS, delayed in / instant out) ───────────────────────── */
+/* ───────────────────────── Tooltip (portal, clamped to the viewport) ───────────────────────── */
 
+/**
+ * Rendered through a portal with fixed positioning: the old CSS-absolute
+ * version was clipped by any overflow ancestor and by the viewport edge
+ * (e.g. a phone-number tooltip on the rightmost column of a table).
+ */
 export function Tooltip({ label, children, side = 'top' }: { label: ReactNode; children: ReactNode; side?: 'top' | 'bottom' | 'right' }) {
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  const tipRef = useRef<HTMLSpanElement>(null);
+  const [pos, setPos] = useState<CSSProperties>({ visibility: 'hidden' });
+
+  useLayoutEffect(() => {
+    if (!anchor) return;
+    const tip = tipRef.current;
+    if (!tip) return;
+    const { width: tw, height: th } = tip.getBoundingClientRect();
+    const GAP = 6;
+    const PAD = 8;
+    let top: number;
+    let left: number;
+    if (side === 'right') {
+      top = anchor.top + anchor.height / 2 - th / 2;
+      left = anchor.right + GAP;
+      if (left + tw > window.innerWidth - PAD) left = anchor.left - tw - GAP; // flip to the left
+    } else {
+      left = anchor.left + anchor.width / 2 - tw / 2;
+      top = side === 'bottom' ? anchor.bottom + GAP : anchor.top - th - GAP;
+      if (top < PAD) top = anchor.bottom + GAP; // flip below
+      if (top + th > window.innerHeight - PAD) top = anchor.top - th - GAP; // flip above
+    }
+    left = Math.min(Math.max(left, PAD), window.innerWidth - tw - PAD);
+    top = Math.min(Math.max(top, PAD), window.innerHeight - th - PAD);
+    setPos({ top, left });
+  }, [anchor, side]);
+
+  const show = (e: { currentTarget: Element }) => setAnchor(e.currentTarget.getBoundingClientRect());
+  const hide = () => { setAnchor(null); setPos({ visibility: 'hidden' }); };
+
   return (
-    <span className="group/tt relative inline-flex">
+    <span
+      className="inline-flex"
+      onMouseEnter={show}
+      onMouseLeave={hide}
+      onFocus={show}
+      onBlur={hide}
+    >
       {children}
-      <span
-        role="tooltip"
-        className={cn(
-          'pointer-events-none absolute z-50 whitespace-nowrap rounded-md bg-elevated px-2 py-1 text-xs text-foreground shadow-pop',
-          'opacity-0 transition-opacity duration-150 ease-out group-hover/tt:opacity-100 group-hover/tt:delay-[80ms]',
-          side === 'top' && 'bottom-full left-1/2 mb-1.5 -translate-x-1/2',
-          side === 'bottom' && 'top-full left-1/2 mt-1.5 -translate-x-1/2',
-          side === 'right' && 'left-full top-1/2 ml-1.5 -translate-y-1/2',
-        )}
-      >
-        {label}
-      </span>
+      {anchor && createPortal(
+        <span
+          ref={tipRef}
+          role="tooltip"
+          style={pos}
+          className="anim-fade-in pointer-events-none fixed z-[70] whitespace-nowrap rounded-md bg-elevated px-2 py-1 text-xs text-foreground shadow-pop"
+        >
+          {label}
+        </span>,
+        document.body,
+      )}
     </span>
   );
 }

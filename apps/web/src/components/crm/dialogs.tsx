@@ -2,7 +2,7 @@
  * CRM create/edit dialogs: new client, new deal, add contact, lost-reason prompt.
  * All use the shared Dialog overlay + toast feedback (no native alert/confirm).
  */
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../../lib/api';
 import { useT } from '../../lib/i18n';
@@ -188,8 +188,10 @@ export function NewDealDialog({ open, onClose, lockedCompanyId, defaultStageId, 
   );
 }
 
-export function AddContactDialog({ open, onClose, companyId }: {
+/** Create or edit a contact: pass `contact` to edit, omit it to create. */
+export function ContactDialog({ open, onClose, companyId, contact }: {
   open: boolean; onClose: () => void; companyId: string;
+  contact?: { id: string; firstName?: string | null; lastName?: string | null; email?: string | null; phone?: string | null; position?: string | null };
 }) {
   const t = useT();
   const qc = useQueryClient();
@@ -200,13 +202,29 @@ export function AddContactDialog({ open, onClose, companyId }: {
   const [position, setPosition] = useState('');
   const [error, setError] = useState<string | null>(null);
 
+  // Prefill from the contact being edited each time the dialog opens.
+  useEffect(() => {
+    if (!open) return;
+    setFirst(contact?.firstName ?? '');
+    setLast(contact?.lastName ?? '');
+    setEmail(contact?.email ?? '');
+    setPhone(contact?.phone ?? '');
+    setPosition(contact?.position ?? '');
+    setError(null);
+  }, [open, contact]);
+
   const reset = () => { setFirst(''); setLast(''); setEmail(''); setPhone(''); setPosition(''); setError(null); };
 
   const mut = useMutation({
-    mutationFn: () => api.post('/contacts', {
-      companyId, firstName: first.trim(), lastName: last.trim() || undefined,
-      email: email.trim() || undefined, phone: phone.trim() || undefined, position: position.trim() || undefined,
-    }),
+    mutationFn: () => {
+      const body = {
+        firstName: first.trim(), lastName: last.trim() || (contact ? '' : undefined),
+        email: email.trim() || null, phone: phone.trim() || null, position: position.trim() || null,
+      };
+      return contact
+        ? api.patch(`/contacts/${contact.id}`, body)
+        : api.post('/contacts', { companyId, ...body, email: body.email ?? undefined, phone: body.phone ?? undefined, position: body.position ?? undefined });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['contacts', companyId] });
       toast(t('common.saved'));
@@ -224,7 +242,7 @@ export function AddContactDialog({ open, onClose, companyId }: {
   };
 
   return (
-    <Dialog open={open} onClose={() => { reset(); onClose(); }} title={t('crm.addContact')} width={440}>
+    <Dialog open={open} onClose={() => { reset(); onClose(); }} title={contact ? t('crm.editContact') : t('crm.addContact')} width={440}>
       <form onSubmit={submit} className="space-y-3 px-4 pb-4 pt-1">
         <div className="grid grid-cols-2 gap-3">
           <Field label={t('crm.firstName')}>
@@ -248,7 +266,7 @@ export function AddContactDialog({ open, onClose, companyId }: {
         {error && <p className="text-[13px] text-destructive">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="ghost" size="sm" onClick={() => { reset(); onClose(); }}>{t('common.cancel')}</Button>
-          <Button type="submit" size="sm" disabled={mut.isPending}>{mut.isPending ? <Spinner /> : t('common.add')}</Button>
+          <Button type="submit" size="sm" disabled={mut.isPending}>{mut.isPending ? <Spinner /> : contact ? t('common.save') : t('common.add')}</Button>
         </div>
       </form>
     </Dialog>

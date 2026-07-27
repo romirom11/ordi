@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from '../lib/router';
 import { useCan } from '../lib/auth';
+import { usePageTitle } from '../lib/tabs';
 import { api, appOrigin, ApiError } from '../lib/api';
 import { Button, Input, Select, Card, Breadcrumbs, Skeleton, fmtMoney, fmtDate, cn } from '../components/ui';
 import { Dialog, ConfirmDialog, toast } from '../components/overlays';
@@ -125,6 +126,8 @@ export function InvoiceDetailPage({ id }: { id: string }) {
   const [showCancel, setShowCancel] = useState(false);
   const invoice = useQuery({ queryKey: ['invoice', id], queryFn: () => api.get<Invoice>(`/invoices/${id}`) });
   const wsQ = useWorkspaceSettings();
+  // Tab title shows the invoice number, not a generic "Finance".
+  usePageTitle(invoice.data?.number ?? undefined);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['invoice', id] });

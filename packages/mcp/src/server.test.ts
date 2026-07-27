@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { buildServer, scrub, textToDoc } from './server';
+import { buildServer, decodeEntities, scrub, textToDoc } from './server';
 import { OrdiClient } from './client';
 
 function fakeApi(routes: Record<string, unknown>, posts: Array<{ path: string; body: unknown }> = []): OrdiClient {
@@ -237,6 +237,22 @@ describe('textToDoc', () => {
       content: [{ type: 'paragraph', content: [{ type: 'text', text: 'a' }, { type: 'hardBreak' }, { type: 'text', text: 'b' }] }],
     });
     expect(textToDoc('')).toEqual({ type: 'doc', content: [{ type: 'paragraph', content: [] }] });
+  });
+});
+
+describe('decodeEntities', () => {
+  it('decodes escaped text in every string field of a write body', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({}, posts));
+    await client.callTool({ name: 'create_contact', arguments: {
+      companyId: 'c1', firstName: 'Stanislav', position: 'Co-founder &amp; CEO &#39;verified&#39;',
+    } });
+    expect(posts[0]!.body).toMatchObject({ position: "Co-founder & CEO 'verified'" });
+  });
+
+  it('leaves clean text and non-strings alone', () => {
+    expect(decodeEntities({ a: 'R&D dept', n: 5, ok: true })).toEqual({ a: 'R&D dept', n: 5, ok: true });
+    expect(decodeEntities('a &lt;b&gt; &quot;c&quot;')).toBe('a <b> "c"');
   });
 });
 
