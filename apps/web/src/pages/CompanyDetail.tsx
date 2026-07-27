@@ -124,7 +124,6 @@ export function CompanyDetailPage({ id }: { id: string }) {
             <InvoicesSection companyId={id} />
             <ContactsSection companyId={id} canWrite={canWrite} />
             <NotesSection companyId={id} canWrite={canWrite} />
-            <FilesSection entityType="company" entityId={id} canWrite={canWrite} />
             <CompanyActivity companyId={id} users={usersQ.data ?? []} />
           </div>
         </div>
@@ -137,6 +136,7 @@ export function CompanyDetailPage({ id }: { id: string }) {
             onPatch={(body) => patch.mutate(body)}
           />
           <ProjectsRail companyId={id} />
+          <FilesSection entityType="company" entityId={id} canWrite={canWrite} variant="rail" />
         </aside>
       </div>
 
