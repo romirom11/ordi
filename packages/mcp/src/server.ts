@@ -124,13 +124,8 @@ export function buildServer(client: OrdiClient): McpServer {
   })) };
 }));
 
-  server.tool('get_contact', 'One contact with every field, including customFields', { contactId: z.string(), companyId: z.string().describe('The contact’s company (contacts are listed per company)') },
-  ({ contactId, companyId }) => wrap(async () => {
-  const res = await client.get<{ data: Record<string, unknown>[] }>(`/contacts?companyId=${encodeURIComponent(companyId)}`);
-  const found = res.data.find((ct) => ct.id === contactId);
-  if (!found) throw new Error(`No contact ${contactId} in company ${companyId}`);
-  return found;
-}));
+  server.tool('get_contact', 'One contact with every field, including customFields', { contactId: z.string() },
+  ({ contactId }) => wrap(() => client.get(`/contacts/${contactId}`)));
 
   server.tool('list_deals', 'List deals, filterable by company and by linked project – the way to obtain dealId for move_deal', {
   companyId: z.string().optional(),

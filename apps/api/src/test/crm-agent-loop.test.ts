@@ -66,9 +66,10 @@ describe('custom fields survive a single-key update', () => {
       companyId, firstName: 'Ada', customFields: { a: 1, b: 2 },
     }))).id;
     await owner.patch(`/contacts/${contactId}`, { customFields: { b: 3 } });
-    const contact = (await json(owner.get(`/contacts?companyId=${companyId}`))).data
-      .find((c: any) => c.id === contactId);
+    // read back on the id alone, without knowing the company
+    const contact = await json(owner.get(`/contacts/${contactId}`));
     expect(contact.customFields).toEqual({ a: 1, b: 3 });
+    expect((await owner.get(`/contacts/${ulid()}`)).status).toBe(404);
   });
 });
 

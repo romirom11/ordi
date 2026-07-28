@@ -81,6 +81,16 @@ export function crmRoutes() {
     return c.json({ data: await svc.listContacts(companyId) });
   });
 
+  // One contact by id: every other CRM record reads back on its own id, and a
+  // caller holding a contactId should not have to know its company to look it up.
+  app.get('/contacts/:id', guard('crm.read'), async (c) => {
+    const { db } = getDb();
+    const [contact] = await db.select().from(schema.contacts)
+      .where(and(eq(schema.contacts.id, c.req.param('id')), isNull(schema.contacts.deletedAt)));
+    if (!contact) throw err.notFound('Contact not found');
+    return c.json(contact);
+  });
+
   app.post('/contacts', guard('crm.write'), async (c) => {
     const body = contactInputSchema.parse(await c.req.json());
     const id = await svc.createContact(currentActor(c), body);
