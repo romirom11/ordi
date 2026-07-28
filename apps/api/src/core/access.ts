@@ -3,7 +3,7 @@
  * (one cached query per request), and assert helpers used by services.
  */
 import { getDb, schema, eq, and, inArray, isNull, or } from '@ordi/db';
-import { type AccessContext, canAccessProject, canAccessSpace } from '@ordi/shared';
+import { type AccessContext, projectAccessRank, spaceAccessRank } from '@ordi/shared';
 import type { Actor } from '../context';
 import { err } from '../lib/errors';
 
@@ -61,7 +61,32 @@ export async function accessibleProjectIds(
   return ids;
 }
 
-/** Assert the actor can access a project at minRole, else 404 (no existence leak). */
+const PROJECT_RANK = { viewer: 1, member: 2, admin: 3 } as const;
+const SPACE_RANK = { viewer: 1, editor: 2 } as const;
+const PROJECT_ROLE_OF_RANK = [null, 'viewer', 'member', 'admin'] as const;
+
+/**
+ * The project role the actor effectively holds – the membership row, or what a
+ * workspace project grants their permissions. Spaces attached to a project
+ * inherit this, so a project admin edits the project's space whether the rights
+ * came from a membership row or from projects.write.
+ */
+export function effectiveProjectRole(
+  actor: Actor,
+  project: { id: string; visibility: 'workspace' | 'private' },
+): 'admin' | 'member' | 'viewer' | null {
+  const rank = projectAccessRank(actor.access, { visibility: project.visibility, projectId: project.id });
+  return PROJECT_ROLE_OF_RANK[rank] ?? null;
+}
+
+/**
+ * Assert the actor can access a project at minRole.
+ *
+ * Invisible (or absent) => 404, so existence never leaks. Visible but below
+ * minRole => 403 naming what is missing: "Project not found" on a project the
+ * user is looking at reads as a broken app rather than as a permission
+ * boundary, which is exactly how the too-strict write rule used to surface.
+ */
 export async function assertProject(
   actor: Actor,
   projectId: string,
@@ -73,16 +98,24 @@ export async function assertProject(
     .from(schema.projects)
     .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
   if (!project) throw err.notFound('Project not found');
-  const ok = canAccessProject(actor.access, {
+  const rank = projectAccessRank(actor.access, {
     visibility: project.visibility as 'workspace' | 'private',
     projectId,
-    minRole,
   });
-  if (!ok) throw err.notFound('Project not found');
+  if (rank < PROJECT_RANK[minRole]) {
+    if (rank < PROJECT_RANK.viewer) throw err.notFound('Project not found');
+    throw err.forbidden(
+      `This needs ${minRole} rights on the project – ask a project admin to add you, or get the projects.write permission.`,
+      'projects.write',
+    );
+  }
   return { ...project, visibility: project.visibility as 'workspace' | 'private' };
 }
 
-/** Assert space access; project-linked spaces inherit project membership. */
+/**
+ * Assert space access; project-linked spaces inherit project membership.
+ * Same 404-vs-403 split as assertProject.
+ */
 export async function assertSpace(
   actor: Actor,
   spaceId: string,
@@ -94,15 +127,30 @@ export async function assertSpace(
     .from(schema.kbSpaces)
     .where(and(eq(schema.kbSpaces.id, spaceId), isNull(schema.kbSpaces.deletedAt)));
   if (!space) throw err.notFound('Space not found');
-  const inheritedProjectRole = space.projectId
-    ? actor.access.projectMemberships.get(space.projectId) ?? null
-    : null;
-  const ok = canAccessSpace(actor.access, {
+  let inheritedProjectRole: 'admin' | 'member' | 'viewer' | null = null;
+  if (space.projectId) {
+    const [project] = await db
+      .select({ id: schema.projects.id, visibility: schema.projects.visibility })
+      .from(schema.projects)
+      .where(and(eq(schema.projects.id, space.projectId), isNull(schema.projects.deletedAt)));
+    if (project) {
+      inheritedProjectRole = effectiveProjectRole(actor, {
+        id: project.id,
+        visibility: project.visibility as 'workspace' | 'private',
+      });
+    }
+  }
+  const rank = spaceAccessRank(actor.access, {
     visibility: space.visibility as 'workspace' | 'private',
     spaceId,
-    minRole,
     inheritedProjectRole,
   });
-  if (!ok) throw err.notFound('Space not found');
+  if (rank < SPACE_RANK[minRole]) {
+    if (rank < SPACE_RANK.viewer) throw err.notFound('Space not found');
+    throw err.forbidden(
+      'This needs editor rights on the space – ask a space editor to add you, or get the kb.write permission.',
+      'kb.write',
+    );
+  }
   return { ...space, visibility: space.visibility as 'workspace' | 'private' };
 }

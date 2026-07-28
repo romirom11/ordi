@@ -118,10 +118,13 @@ export function projectsRoutes() {
   // The join row only stores an id, so the repository is joined in: a project
   // admin without `integrations.manage` still gets names to render, and nobody
   // has to fall back to showing a raw id.
+  // Reading the binding is viewer-level: the project page renders the linked
+  // repositories for everyone who can open the project, and gating the read on
+  // admin made that panel answer 404 to its own readers.
   app.get('/projects/:id/repositories', async (c) => {
     const actor = currentActor(c);
     const projectId = c.req.param('id');
-    await assertProject(actor, projectId, 'admin');
+    await assertProject(actor, projectId, 'viewer');
     const { db } = getDb();
     const rows = await db.select({
       projectId: schema.projectRepositories.projectId,
@@ -163,7 +166,7 @@ export function projectsRoutes() {
   app.get('/projects/:id/automation-rules', async (c) => {
     const actor = currentActor(c);
     const projectId = c.req.param('id');
-    await assertProject(actor, projectId, 'admin');
+    await assertProject(actor, projectId, 'viewer');
     const { db } = getDb();
     return c.json({ data: await db.select().from(schema.gitAutomationRules).where(eq(schema.gitAutomationRules.projectId, projectId)) });
   });

@@ -12,7 +12,7 @@ import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { emit } from '../../core/events';
 import { assertVersion } from '../../core/locking';
-import { assertSpace, assertProject } from '../../core/access';
+import { assertSpace, assertProject, effectiveProjectRole } from '../../core/access';
 
 const SOFT_LOCK_TTL_MS = 120 * 1000; // SOFT_LOCK_TTL_SECONDS
 
@@ -200,17 +200,40 @@ function canSeePage(pg: PageRow, actor: Actor, isEditor: boolean): boolean {
   return true;
 }
 
-/** Replicate canAccessSpace against a loaded row (avoids a query per space). */
-function canAccessSpaceRow(actor: Actor, space: SpaceRow, minRole: 'viewer' | 'editor' = 'viewer'): boolean {
-  const inheritedProjectRole = space.projectId
-    ? actor.access.projectMemberships.get(space.projectId) ?? null
-    : null;
+/**
+ * Replicate canAccessSpace against a loaded row (avoids a query per space).
+ * `projectRoles` carries the effective role per linked project, since that role
+ * is no longer just the membership row (see access.effectiveProjectRole).
+ */
+function canAccessSpaceRow(
+  actor: Actor,
+  space: SpaceRow,
+  projectRoles: Map<string, 'admin' | 'member' | 'viewer' | null>,
+  minRole: 'viewer' | 'editor' = 'viewer',
+): boolean {
+  const inheritedProjectRole = space.projectId ? projectRoles.get(space.projectId) ?? null : null;
   return canAccessSpace(actor.access, {
     visibility: space.visibility as 'workspace' | 'private',
     spaceId: space.id,
     minRole,
     inheritedProjectRole,
   });
+}
+
+/** Effective project role for every project the given spaces hang off. */
+async function projectRolesFor(actor: Actor, spaces: SpaceRow[]): Promise<Map<string, 'admin' | 'member' | 'viewer' | null>> {
+  const ids = [...new Set(spaces.map((s) => s.projectId).filter((id): id is string => !!id))];
+  const roles = new Map<string, 'admin' | 'member' | 'viewer' | null>();
+  if (!ids.length) return roles;
+  const { db } = getDb();
+  const rows = await db
+    .select({ id: schema.projects.id, visibility: schema.projects.visibility })
+    .from(schema.projects)
+    .where(and(inArray(schema.projects.id, ids), isNull(schema.projects.deletedAt)));
+  for (const p of rows) {
+    roles.set(p.id, effectiveProjectRole(actor, { id: p.id, visibility: p.visibility as 'workspace' | 'private' }));
+  }
+  return roles;
 }
 
 async function nextVersionNo(pageId: string): Promise<number> {
@@ -281,7 +304,8 @@ export async function listSpaces(actor: Actor): Promise<SpaceRow[]> {
     .from(schema.kbSpaces)
     .where(isNull(schema.kbSpaces.deletedAt))
     .orderBy(schema.kbSpaces.position, desc(schema.kbSpaces.createdAt));
-  return rows.filter((s) => canAccessSpaceRow(actor, s));
+  const projectRoles = await projectRolesFor(actor, rows);
+  return rows.filter((s) => canAccessSpaceRow(actor, s, projectRoles));
 }
 
 export async function createSpace(actor: Actor, input: any): Promise<string> {
@@ -824,8 +848,9 @@ export async function listTemplates(actor: Actor, spaceId?: string): Promise<Pag
   const spaces = await listSpaces(actor);
   const spaceIds = spaces.map((s) => s.id);
   if (!spaceIds.length) return [];
+  const projectRoles = await projectRolesFor(actor, spaces);
   const editorFlags = new Map<string, boolean>();
-  for (const s of spaces) editorFlags.set(s.id, canAccessSpaceRow(actor, s, 'editor'));
+  for (const s of spaces) editorFlags.set(s.id, canAccessSpaceRow(actor, s, projectRoles, 'editor'));
   const rows = await db
     .select()
     .from(schema.kbPages)

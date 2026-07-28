@@ -218,7 +218,11 @@ allowed = hasPermission(user.role, required_permission)
 
 Guest завжди взаємодіє тільки через членство. Створювач проєкту автоматично admin.
 
-**KB-простори.** `kb_spaces.visibility`: workspace | private; `space_members` (space_id, user_id, role: editor | viewer). Простір, привʼязаний до проєкту, успадковує членство проєкту (project admin → editor, member → editor, viewer → viewer) плюс власні додаткові члени.
+`workspace` — це і є "unrestricted" з правила 4.1, тому на такому проєкті рівень задають самі permissions ролі: `projects.read` → viewer, `projects.write` → admin (і, отже, все, що може member). Членство потрібне для `private` і для того, щоб дати доступ вужче, ніж роль. `projects.read` лишається підлогою: без нього проєкт не потрапляє в `accessibleProjectIds`, а отже не відкривається — те, що видно в списку, і те, що відкривається, завжди збігається.
+
+**KB-простори.** `kb_spaces.visibility`: workspace | private; `space_members` (space_id, user_id, role: editor | viewer). Простір, привʼязаний до проєкту, успадковує ефективну роль на проєкті (project admin → editor, member → editor, viewer → viewer) плюс власні додаткові члени. Аналогічно проєктам, на `workspace`-просторі рівень дають permissions: `kb.read` → viewer, `kb.write` → editor.
+
+Рівня, якого не вистачає на ресурсі, який користувач бачить, — це 403 з поясненням, не 404: 404 лишається тільки для ресурсів поза видимістю (без витоку існування).
 
 **Фінанси.** Ресурсних списків немає: доступ керується виключно permissions (finance.*). Обґрунтування: фінанси або довірені цілком, або приховані цілком; пер-клієнтний фінансовий доступ не реалізується (компроміс у розділі 22).
 
