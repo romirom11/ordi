@@ -3,15 +3,21 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.15.0
+
+- New project is a composed sheet rather than a form with chips bolted on:
+  workspace trail, the project icon beside a borderless title, a summary,
+  one chip row for key, type, client, visibility, priority, lead, members,
+  start, target and labels, and a description in the same sheet.
+
 ## v1.14.0
 
 - Changing a project's visibility no longer crashes the page: a spinner
   rendered as a block element inside a paragraph, which WebKit (the
   desktop app) turns into a NotFoundError when it unmounts. Spinners are
   inline elements now, so the class of bug is closed.
-- New project is a composed sheet: icon and name, a summary, one chip row
-  for key, type, client, visibility, priority, lead, members, dates and
-  labels, and a description field. Visibility defaults to private.
+- New projects choose visibility, lead, members and dates in the create
+  dialog, and default to private.
 - My tasks separates Assigned from Created; a task filed for someone else
   is no longer listed as work to do. `/me/tasks` returns `created` in
   place of `createdUnassigned`.
