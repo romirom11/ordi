@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, FolderKanban, Lock, Target, ChevronDown } from 'lucide-react';
+import { Plus, FolderKanban, Lock, Globe, Target, ChevronDown, UserCircle2, Users, CalendarDays } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
 import { Link, useNavigate } from '../lib/router';
-import { useCan } from '../lib/auth';
+import { useCan, useMe } from '../lib/auth';
 import {
   Button, Input, Select, Badge, PageHeader, Breadcrumbs, Skeleton, EmptyState, Spinner,
-  Avatar, ProgressRing, Tooltip, fmtDate, cn,
+  Avatar, AvatarGroup, ProgressRing, Tooltip, fmtDate, cn,
 } from '../components/ui';
-import { Dialog, DropdownMenu, MenuItem } from '../components/overlays';
+import { DateField } from '../components/DatePicker';
+import { useUsersLookup } from '../lib/queries';
+import { Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator } from '../components/overlays';
 import { toast } from '../components/overlays';
 import { ProjectIcon } from '../components/project/ProjectIcon';
 import { ProjectContextMenu } from '../components/project/contextMenus';
@@ -308,6 +310,11 @@ export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: 
   const t = useT();
   const canCrm = useCan()('crm.read');
   const [name, setName] = useState('');
+  const [visibility, setVisibility] = useState<'workspace' | 'private'>('private');
+  const [leadId, setLeadId] = useState<string | null>(null);
+  const [memberIds, setMemberIds] = useState<string[]>([]);
+  const [startDate, setStartDate] = useState<string | null>(null);
+  const [targetDate, setTargetDate] = useState<string | null>(null);
   const [key, setKey] = useState('');
   const [keyTouched, setKeyTouched] = useState(false);
   const [typeId, setTypeId] = useState('');
@@ -317,7 +324,8 @@ export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: 
   // Fresh form every time the dialog opens.
   useEffect(() => {
     if (!open) return;
-    setName(''); setKey(''); setKeyTouched(false); setTypeId(''); setCompanyId(defaultCompanyId ?? ''); setError(null);
+    setName(''); setKey(''); setKeyTouched(false); setTypeId(''); setCompanyId(defaultCompanyId ?? '');
+    setVisibility('private'); setLeadId(null); setMemberIds([]); setStartDate(null); setTargetDate(null); setError(null);
   }, [open, defaultCompanyId]);
 
   const typesQ = useQuery<ProjectTypeLite[]>({
@@ -347,11 +355,28 @@ export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: 
 
   const selectedType = types.find((x) => x.id === typeId);
   const needsClient = !!selectedType?.requiresClient;
+  const meId = useMe().user.id;
+  const usersQ = useUsersLookup();
+  const users = usersQ.data ?? [];
+  const lead = leadId ? users.find((u) => u.id === leadId) : undefined;
 
   const mut = useMutation({
-    mutationFn: () => api.post<Project>('/projects', {
-      name, key, projectTypeId: typeId, companyId: companyId || undefined,
-    }),
+    // Members are a second call – the project has to exist to have any. The
+    // lead is added as one too: leading a project one cannot open is not a role.
+    mutationFn: async () => {
+      const project = await api.post<Project>('/projects', {
+        name, key, projectTypeId: typeId, companyId: companyId || undefined, visibility,
+        leadId, startDate, targetDate,
+      });
+      // Never re-add yourself: createProject already made the creator a project
+      // admin, and upserting them as a plain member would take that away.
+      const invite = [...new Set([...memberIds, ...(leadId ? [leadId] : [])])].filter((id) => id !== meId);
+      for (const userId of invite) {
+        await api.post(`/projects/${project.id}/members`, { userId, role: 'member', canWriteTasks: true })
+          .catch(() => { /* the creator is already a member; a failed invite must not lose the project */ });
+      }
+      return project;
+    },
     onSuccess: (p) => onCreated(p.id),
     onError: (e) => { const m = e instanceof ApiError ? e.message : t('projects.createFailed'); setError(m); toast.error(m); },
   });
@@ -450,6 +475,96 @@ export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: 
             )}
           </div>
         )}
+        {/* Everything that decides who sees the project and when it runs is
+            chosen here, not hunted for afterwards in the rail. Visibility in
+            particular used to be assumed workspace-wide with nothing on screen
+            saying so, which is how a project nobody was added to still showed
+            up for everybody. */}
+        <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+          <DropdownMenu
+            align="start"
+            width={260}
+            trigger={(
+              <FormChip active={visibility === 'private'}>
+                {visibility === 'private' ? <Lock size={13} /> : <Globe size={13} />}
+                {visibility === 'private' ? t('projects.visPrivate') : t('projects.visWorkspace')}
+              </FormChip>
+            )}
+          >
+            <MenuLabel>{t('projects.visibility')}</MenuLabel>
+            <MenuItem icon={<Lock size={15} />} checked={visibility === 'private'} onSelect={() => setVisibility('private')}>
+              <span className="flex flex-col">
+                <span>{t('projects.visPrivate')}</span>
+                <span className="text-xs text-faint">{t('projects.visPrivateHint')}</span>
+              </span>
+            </MenuItem>
+            <MenuItem icon={<Globe size={15} />} checked={visibility === 'workspace'} onSelect={() => setVisibility('workspace')}>
+              <span className="flex flex-col">
+                <span>{t('projects.visWorkspace')}</span>
+                <span className="text-xs text-faint">{t('projects.visWorkspaceHint')}</span>
+              </span>
+            </MenuItem>
+          </DropdownMenu>
+
+          <DropdownMenu
+            align="start"
+            width={230}
+            trigger={(
+              <FormChip active={!!lead}>
+                {lead ? <Avatar name={lead.name} src={lead.avatar} size={16} /> : <UserCircle2 size={13} />}
+                {lead ? lead.name : t('projects.lead')}
+              </FormChip>
+            )}
+          >
+            <MenuLabel>{t('projects.lead')}</MenuLabel>
+            <MenuItem icon={<UserCircle2 size={16} />} checked={!leadId} onSelect={() => setLeadId(null)}>{t('projects.noLead')}</MenuItem>
+            <MenuSeparator />
+            {users.map((u) => (
+              <MenuItem key={u.id} icon={<Avatar name={u.name} src={u.avatar} size={18} />} checked={leadId === u.id} onSelect={() => setLeadId(u.id)}>
+                {u.name}
+              </MenuItem>
+            ))}
+          </DropdownMenu>
+
+          <DropdownMenu
+            align="start"
+            width={230}
+            trigger={(
+              <FormChip active={memberIds.length > 0}>
+                {memberIds.length > 0
+                  ? <AvatarGroup users={users.filter((u) => memberIds.includes(u.id))} size={16} max={3} />
+                  : <Users size={13} />}
+                {memberIds.length > 0 ? String(memberIds.length) : t('access.members')}
+              </FormChip>
+            )}
+          >
+            <MenuLabel>{t('access.members')}</MenuLabel>
+            {users.map((u) => (
+              <MenuItem
+                key={u.id}
+                icon={<Avatar name={u.name} src={u.avatar} size={18} />}
+                checked={memberIds.includes(u.id)}
+                onSelect={() => setMemberIds((ids) => (ids.includes(u.id) ? ids.filter((x) => x !== u.id) : [...ids, u.id]))}
+              >
+                {u.name}
+              </MenuItem>
+            ))}
+          </DropdownMenu>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">{t('projects.startDate')}</label>
+            <DateField value={startDate} onChange={setStartDate} placeholder={t('projects.setStart')} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">{t('projects.targetDate')}</label>
+            <DateField value={targetDate} onChange={setTargetDate} placeholder={t('projects.setTarget')} min={startDate ?? undefined} />
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {visibility === 'private' ? t('projects.visPrivateHint') : t('projects.visWorkspaceHint')}
+        </p>
         {error && <p className="text-sm text-destructive">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="ghost" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
@@ -457,5 +572,21 @@ export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: 
         </div>
       </form>
     </Dialog>
+  );
+}
+
+/** A Linear-style pill for a dialog's inline choices: icon, value, no border noise until it carries one. */
+function FormChip({ children, active }: { children: ReactNode; active?: boolean }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-full border px-2.5 text-xs transition-colors duration-150',
+        active
+          ? 'border-primary/40 bg-primary/10 text-foreground'
+          : 'border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground',
+      )}
+    >
+      {children}
+    </span>
   );
 }

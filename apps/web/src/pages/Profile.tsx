@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../lib/api';
 import { useMe } from '../lib/auth';
-import { Button, Input, Select, Card, Badge, Switch, Checkbox, Avatar, PageHeader, PageBody, Breadcrumbs, Skeleton, fmtDate } from '../components/ui';
+import { Button, Input, Select, Card, Badge, Switch, Checkbox, Avatar, PageHeader, PageBody, Breadcrumbs, Skeleton, Spinner, fmtDate } from '../components/ui';
 import { toast } from '../components/overlays';
-import { Check, Copy, KeyRound, Plus, ShieldCheck, Trash2 } from 'lucide-react';
+import { Camera, Check, Copy, KeyRound, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import { extendDict, useT } from '../lib/i18n';
-import { DATE_FORMATS, formatSample, rememberDateFormat, type DateFormat } from '../lib/dates';
+import { DATE_FORMATS, TIME_ZONES, formatSample, offsetLabel, rememberDateFormat, type DateFormat } from '../lib/dates';
+import { downscaleImage } from '../components/settings/image';
 
 extendDict({
   en: {
@@ -17,6 +18,10 @@ extendDict({
     'profile.notifSaveFailed': 'Could not update notification preference.',
     'profile.tokenCreated': 'API token created.',
     'profile.tokenRevoked': 'Token revoked.',
+    'profile.avatarChange': 'Change photo',
+    'profile.avatarRemove': 'Remove',
+    'profile.avatarInvalid': "Couldn't read that image.",
+    'profile.avatarTooLarge': 'Image too large after processing – try a simpler image.',
     'profile.twoFactorEnabled': 'Two-factor authentication enabled.',
     'profile.twoFactorDisabled': 'Two-factor authentication disabled.',
   },
@@ -28,6 +33,10 @@ extendDict({
     'profile.notifSaveFailed': 'Не вдалося оновити налаштування сповіщень.',
     'profile.tokenCreated': 'API-токен створено.',
     'profile.tokenRevoked': 'Токен відкликано.',
+    'profile.avatarChange': 'Змінити фото',
+    'profile.avatarRemove': 'Прибрати',
+    'profile.avatarInvalid': 'Не вдалося прочитати зображення.',
+    'profile.avatarTooLarge': 'Зображення завелике після обробки – оберіть простіше.',
     'profile.twoFactorEnabled': 'Двофакторну автентифікацію увімкнено.',
     'profile.twoFactorDisabled': 'Двофакторну автентифікацію вимкнено.',
   },
@@ -101,30 +110,85 @@ function ProfileInfoCard() {
   const me = useMe();
   const qc = useQueryClient();
   const [name, setName] = useState(me.user.name);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
   const dirty = name.trim() !== me.user.name && name.trim().length > 0;
 
   const save = useMutation({
-    mutationFn: () => api.patch('/me', { name: name.trim() }),
+    mutationFn: (body: Record<string, unknown>) => api.patch('/me', body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['me'] });
+      qc.invalidateQueries({ queryKey: ['users-lookup'] });
       toast(t('common.saved'));
     },
     onError: () => toast.error(t('profile.saveFailedShort')),
   });
 
+  /**
+   * Same path the workspace logo takes: downscale in the browser, store the
+   * result on the record. The avatar was rendered everywhere and settable
+   * nowhere, so everyone stayed on their initials.
+   */
+  const pickAvatar = async (file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { toast.error(t('profile.avatarInvalid')); return; }
+    setUploading(true);
+    try {
+      const { dataUrl, bytes } = await downscaleImage(file);
+      if (bytes > 200 * 1024) { toast.error(t('profile.avatarTooLarge')); return; }
+      await save.mutateAsync({ avatar: dataUrl });
+    } catch {
+      toast.error(t('profile.avatarInvalid'));
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
   return (
     <Card className="p-4">
       <SectionHeader title={t('profile.profileInfo')} />
       <div className="mb-4 flex items-center gap-3">
-        <Avatar name={me.user.name} src={me.user.avatar} size={56} />
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={uploading}
+          title={t('profile.avatarChange')}
+          className="group relative shrink-0 rounded-full outline-none ring-offset-2 ring-offset-card focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Avatar name={me.user.name} src={me.user.avatar} size={56} />
+          <span className="absolute inset-0 grid place-items-center rounded-full bg-black/55 text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+            {uploading ? <Spinner className="h-4 w-4" /> : <Camera size={16} />}
+          </span>
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => { void pickAvatar(e.target.files?.[0]); }}
+        />
         <div className="min-w-0">
           <div className="truncate text-[15px] font-semibold">{me.user.name}</div>
           <div className="truncate text-sm text-muted-foreground">{me.user.email}</div>
+          <div className="mt-1 flex items-center gap-2 text-xs">
+            <button type="button" className="text-primary transition-colors hover:underline" onClick={() => fileRef.current?.click()} disabled={uploading}>
+              {t('profile.avatarChange')}
+            </button>
+            {me.user.avatar && (
+              <>
+                <span className="text-faint">·</span>
+                <button type="button" className="text-muted-foreground transition-colors hover:text-destructive" onClick={() => save.mutate({ avatar: null })}>
+                  {t('profile.avatarRemove')}
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
       <form
         className="max-w-xs space-y-1.5"
-        onSubmit={(e) => { e.preventDefault(); if (dirty) save.mutate(); }}
+        onSubmit={(e) => { e.preventDefault(); if (dirty) save.mutate({ name: name.trim() }); }}
       >
         <label className="block text-xs text-muted-foreground">{t('profile.name')}</label>
         <Input value={name} onChange={(e) => setName(e.target.value)} />
@@ -171,7 +235,12 @@ function PreferencesCard() {
         </label>
         <label className="space-y-1.5 text-xs text-muted-foreground">
           <span className="block">{t('profile.timezone')}</span>
-          <Input value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="Europe/Kyiv" />
+          {/* Typed by hand, a zone had to be spelled exactly as the IANA
+              database spells it, with no way to see the list or the offset. */}
+          <Select value={timezone} onChange={(e) => setTimezone(e.target.value)} className="block w-full">
+            {!TIME_ZONES.includes(timezone) && <option value={timezone}>{timezone}</option>}
+            {TIME_ZONES.map((tz) => <option key={tz} value={tz}>{tz.replace(/_/g, ' ')} ({offsetLabel(tz)})</option>)}
+          </Select>
         </label>
         <label className="space-y-1.5 text-xs text-muted-foreground sm:col-span-2">
           <span className="block">{t('profile.dateFormat')}</span>

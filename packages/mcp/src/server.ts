@@ -145,6 +145,12 @@ export function buildServer(client: OrdiClient): McpServer {
   server.tool('get_deal', 'One deal with every field, including customFields – reading a deal never needs a write', { dealId: z.string() },
   ({ dealId }) => wrap(() => client.get(`/deals/${dealId}`)));
 
+  server.tool('list_users', 'Workspace users – the way to obtain a userId for ownerId on a company or deal', {},
+  () => wrap(async () => {
+  const res = await client.get<{ data: Record<string, unknown>[] }>('/users/lookup');
+  return { data: res.data.map((u) => ({ id: u.id, name: u.name })) };
+}));
+
   server.tool('list_notes', 'CRM notes on a company, contact or deal, newest first, bodies rendered as plain text', {
   companyId: z.string().optional(), contactId: z.string().optional(), dealId: z.string().optional(),
   limit: z.number().optional().describe('Defaults to 20'),
@@ -199,6 +205,36 @@ export function buildServer(client: OrdiClient): McpServer {
 
   server.tool('find_kb_page', 'Search knowledge base pages', { query: z.string() },
   ({ query }) => wrap(() => client.get(`/search?q=${encodeURIComponent(query)}`)));
+
+  server.tool('list_kb_spaces', 'Knowledge base spaces the token owner can read – the way to obtain spaceId for create_kb_page', {},
+  () => wrap(async () => {
+  const res = await client.get<{ data: Record<string, unknown>[] }>('/spaces');
+  return { data: res.data.map((s) => ({
+    id: s.id, name: s.name, projectId: s.projectId, visibility: s.visibility,
+  })) };
+}));
+
+  server.tool('list_kb_pages', 'Pages of one space (see list_kb_spaces) – titles and ids, without the bodies', { spaceId: z.string() },
+  ({ spaceId }) => wrap(async () => {
+  const res = await client.get<{ data: Record<string, unknown>[] }>(`/spaces/${spaceId}/pages`);
+  return { data: res.data.map((p) => ({
+    id: p.id, spaceId: p.spaceId, parentId: p.parentId, title: p.title,
+    published: p.published, isTemplate: p.isTemplate, updatedAt: p.updatedAt,
+  })) };
+}));
+
+  server.tool('get_kb_page', 'One knowledge base page with its body as plain text', { pageId: z.string() },
+  ({ pageId }) => wrap(async () => {
+  const page = await client.get<Record<string, unknown>>(`/pages/${pageId}`);
+  return { ...page, body: undefined, text: docToText(page.body) };
+}));
+
+  server.tool('update_kb_page', 'Rewrite a knowledge base page. The text replaces the body, so send the whole page – read it with get_kb_page first.', {
+  pageId: z.string(), title: z.string().optional(), text: z.string().optional(),
+}, ({ pageId, title, text: body }) => wrap(() => client.patch(`/pages/${pageId}`, {
+  ...(title === undefined ? {} : { title }),
+  ...(body === undefined ? {} : { body: textToDoc(body) }),
+})));
 
   server.tool('get_project_profitability', 'Project profitability (requires finance.read_costs scope)', { projectId: z.string() },
   ({ projectId }) => wrap(() => client.get(`/finance/profitability?scope=project&projectId=${projectId}`)));
@@ -270,8 +306,16 @@ export function buildServer(client: OrdiClient): McpServer {
   return client.post('/notes', { companyId, contactId, dealId, body: textToDoc(body) });
 }));
 
+  server.tool('update_note', 'Rewrite a note (see list_notes for noteId). The text replaces the body, so send the whole note, not a fragment – this is how a card whose facts moved into fields gets trimmed, or a stale one superseded.', {
+  noteId: z.string(), text: z.string(),
+  pinned: z.boolean().optional().describe('Keep it at the top of the record'),
+}, ({ noteId, text: body, pinned }) => wrap(() => client.patch(`/notes/${noteId}`, {
+  body: textToDoc(body), ...(pinned === undefined ? {} : { pinned }),
+})));
+
   server.tool('create_company', 'Create a CRM company. Refuses a name or domain that already exists – update the existing record instead of doubling it.', {
   name: z.string(), domain: z.string().optional(), status: z.enum(COMPANY_STATUSES).optional().describe('Defaults to lead'),
+  ownerId: z.string().optional().describe('Who owns the relationship (see list_users)'),
   billingEmail: z.string().optional(), defaultCurrency: z.string().length(3).optional(), paymentTermsDays: z.number().int().optional(),
   customFields: z.record(z.string(), z.unknown()).optional().describe('Keyed by custom field key (see list_custom_fields)'),
   allowDuplicate: z.boolean().optional().describe('Create anyway when a same-named company legitimately exists'),
@@ -300,6 +344,7 @@ export function buildServer(client: OrdiClient): McpServer {
   server.tool('update_company', 'Update a CRM company. customFields merge by key: send only the fields you are changing, the rest keep their values.', {
   companyId: z.string(),
   name: z.string().optional(), domain: z.string().optional(), status: z.enum(COMPANY_STATUSES).optional(),
+  ownerId: z.string().optional().describe('Who owns the relationship (see list_users)'),
   billingEmail: z.string().optional(), defaultCurrency: z.string().length(3).optional(), paymentTermsDays: z.number().int().optional(),
   customFields: z.record(z.string(), z.unknown()).optional().describe('Keyed by custom field key (see list_custom_fields); null clears one'),
 }, ({ companyId, ...patch }) => wrap(() => client.patch(`/companies/${companyId}`, patch)));
@@ -331,6 +376,7 @@ export function buildServer(client: OrdiClient): McpServer {
   projectId: z.string().optional().describe('Project this deal sells into, e.g. the SaaS product project for a product lead'),
   amount: z.number().min(0).optional(), currency: z.string().length(3).optional().describe('Defaults to USD'),
   expectedCloseDate: z.string().optional().describe('YYYY-MM-DD'),
+  ownerId: z.string().optional().describe('Who is responsible for the deal (see list_users)'),
   customFields: z.record(z.string(), z.unknown()).optional().describe('Keyed by custom field key (see list_custom_fields)'),
 }, (args) => wrap(() => client.post('/deals', args)));
 

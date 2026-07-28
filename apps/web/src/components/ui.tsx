@@ -332,8 +332,17 @@ export function RailChip({ children, empty, disabled, caret }: {
   );
 }
 
+/**
+ * A span, not a div, because a spinner belongs next to text – inside a <p>, a
+ * <button>, a label. A block element there is invalid HTML, and the parser
+ * fixes it by closing the paragraph early: React's tree then disagrees with
+ * the real DOM, and removing the spinner when the save finishes throws
+ * NotFoundError. WebKit (the desktop app) crashes the page on it; Chromium
+ * only warns, which is how "changing project visibility breaks the page"
+ * reached a user before it reached a test.
+ */
 export function Spinner({ className }: { className?: string }) {
-  return <div className={cn('h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/40 border-t-foreground', className)} />;
+  return <span className={cn('inline-block h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-muted-foreground/40 border-t-foreground align-middle', className)} />;
 }
 
 export function Skeleton({ className }: { className?: string }) {

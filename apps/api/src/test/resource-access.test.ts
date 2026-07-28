@@ -202,3 +202,29 @@ describe('kb: kb.write creates pages in workspace spaces', () => {
     expect((await writer.as.get(`/spaces/${spaceId}`)).status).toBe(404);
   });
 });
+
+describe('my tasks: assigned and created are two lists', () => {
+  it('a task I filed for someone else is created, not assigned', async () => {
+    const owner = reqAs(users.owner!.cookie);
+    const statuses = (await json(owner.get(`/projects/${openProject}/task-statuses`))).data as any[];
+    // developer files one for the viewer, and one for nobody
+    await developer.as.post('/tasks', { projectId: openProject, title: 'For the viewer', statusId: statuses[0].id, assigneeIds: [viewer.userId] });
+    await developer.as.post('/tasks', { projectId: openProject, title: 'For nobody', statusId: statuses[0].id });
+
+    const mine = await json(developer.as.get('/me/tasks'));
+    const assigned = [...mine.overdue, ...mine.today, ...mine.week, ...mine.later];
+    expect(assigned.map((t: any) => t.title)).not.toContain('For the viewer');
+    expect(assigned.map((t: any) => t.title)).not.toContain('For nobody');
+
+    const created = mine.created as any[];
+    expect(created.map((t) => t.title)).toEqual(expect.arrayContaining(['For the viewer', 'For nobody']));
+    expect(created.find((t) => t.title === 'For the viewer').has_assignee).toBe(true);
+    expect(created.find((t) => t.title === 'For nobody').has_assignee).toBe(false);
+
+    // and the person it was filed for holds it
+    const theirs = await json(viewer.as.get('/me/tasks'));
+    expect([...theirs.overdue, ...theirs.today, ...theirs.week, ...theirs.later].map((t: any) => t.title))
+      .toContain('For the viewer');
+    expect(theirs.created).toEqual([]);
+  });
+});

@@ -187,3 +187,48 @@ function build(year: number, month: number, day: number): Date | null {
   // Rejects 31 February and friends, which JS would silently roll over.
   return d.getMonth() === month - 1 && d.getDate() === day ? d : null;
 }
+
+/**
+ * Every IANA zone the runtime knows. The profile used to take a typed string,
+ * so a zone had to be spelled the way the database spells it ("Europe/Kyiv",
+ * not "Kyiv" or "GMT+3") with nothing to check it against.
+ *
+ * `Intl.supportedValuesOf` is ES2022; the fallback covers the engines that
+ * lack it with the zones an agency is likely to sit in, and the value already
+ * stored is always offered whatever the list says.
+ */
+const FALLBACK_ZONES = [
+  'UTC', 'Europe/Kyiv', 'Europe/Warsaw', 'Europe/Berlin', 'Europe/London', 'Europe/Lisbon',
+  'Europe/Madrid', 'Europe/Rome', 'Europe/Amsterdam', 'Europe/Prague', 'Europe/Bucharest',
+  'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Toronto',
+  'America/Sao_Paulo', 'Asia/Dubai', 'Asia/Jerusalem', 'Asia/Singapore', 'Asia/Tokyo',
+  'Australia/Sydney',
+];
+
+export const TIME_ZONES: string[] = (() => {
+  const supported = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf;
+  try {
+    const zones = supported?.('timeZone');
+    if (zones?.length) return zones;
+  } catch { /* older engine */ }
+  return FALLBACK_ZONES;
+})();
+
+/** "GMT+3" for a zone, so the list reads as offsets and not only as city names. */
+export function offsetLabel(timeZone: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'shortOffset' }).formatToParts(new Date());
+    return parts.find((p) => p.type === 'timeZoneName')?.value ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/** The zone the browser is in – offered as the default when nothing is stored. */
+export function guessTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}

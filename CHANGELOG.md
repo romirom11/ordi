@@ -3,6 +3,24 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.14.0
+
+- Changing a project's visibility no longer crashes the page: a spinner
+  rendered as a block element inside a paragraph, which WebKit (the
+  desktop app) turns into a NotFoundError when it unmounts. Spinners are
+  inline elements now, so the class of bug is closed.
+- New projects choose visibility, lead, members and dates in the create
+  dialog, and default to private.
+- My tasks separates Assigned from Created; a task filed for someone else
+  is no longer listed as work to do. `/me/tasks` returns `created` in
+  place of `createdUnassigned`.
+- Clicking a notification marks it read.
+- Profile photo upload, and a timezone picker instead of a typed string.
+- MCP: update_note, list_kb_spaces / list_kb_pages / get_kb_page /
+  update_kb_page, list_users, and ownerId on create_company and
+  create_deal. Everything an agent writes it can now read back and
+  correct.
+
 ## v1.13.0
 
 - Workspace projects and KB spaces answer to the role, not only to
