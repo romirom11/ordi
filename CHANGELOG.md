@@ -3,6 +3,13 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.15.0
+
+- New project is a composed sheet rather than a form with chips bolted on:
+  workspace trail, the project icon beside a borderless title, a summary,
+  one chip row for key, type, client, visibility, priority, lead, members,
+  start, target and labels, and a description in the same sheet.
+
 ## v1.14.0
 
 - Changing a project's visibility no longer crashes the page: a spinner
