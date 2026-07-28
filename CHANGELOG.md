@@ -26,9 +26,13 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   behaviour - paid, approval, balance and quota, half days,
   carry-forward. The API had the CRUD; nothing in the app reached it.
 - MCP: single-record reads for companies, contacts and deals, customFields
-  in every list, update tools for all three, list_notes plus notes in
-  search, a duplicate guard on create_company, a structured reason with
-  move_deal, and update_custom_field for retiring a definition.
+  in every list, update tools for all three, list_notes and update_note
+  plus notes in search, the knowledge base reachable end to end
+  (list_kb_spaces / list_kb_pages / get_kb_page / update_kb_page),
+  list_users and ownerId on create, a duplicate guard on create_company, a
+  structured reason with move_deal, and update_custom_field for retiring a
+  definition. Everything an agent can write it can now read back and
+  correct.
 - customFields merge by key on PATCH for every entity that has them -
   setting one field no longer erases the rest.
 

@@ -390,3 +390,53 @@ describe('request_leave', () => {
     expect(posts).toEqual([{ path: '/leave-requests', body: { leaveTypeId: 'lt1', fromDate: '2026-09-01', toDate: '2026-09-05', reason: '' } }]);
   });
 });
+
+describe('notes and KB pages can be rewritten, not only written', () => {
+  it('update_note replaces the body and can pin', async () => {
+    const patches: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApiRw({}, [], patches));
+    await client.callTool({ name: 'update_note', arguments: { noteId: 'n1', text: 'Trimmed card\nOne fact left' } });
+    await client.callTool({ name: 'update_note', arguments: { noteId: 'n1', text: 'x', pinned: true } });
+    expect(patches[0]).toEqual({ path: '/notes/n1', body: { body: textToDoc('Trimmed card\nOne fact left') } });
+    expect(patches[1]!.body).toMatchObject({ pinned: true });
+  });
+
+  it('list_kb_spaces gives the spaceId create_kb_page needs', async () => {
+    const client = await connect(fakeApi({ '/spaces': { data: [
+      { id: 's1', name: 'Sales', projectId: null, visibility: 'workspace', position: 0, version: 2, deletedAt: null },
+    ] } }));
+    const body = JSON.parse((await client.callTool({ name: 'list_kb_spaces', arguments: {} }) as any).content[0].text);
+    expect(body.data).toEqual([{ id: 's1', name: 'Sales', projectId: null, visibility: 'workspace' }]);
+  });
+
+  it('get_kb_page reads the body as text, update_kb_page writes it back', async () => {
+    const patches: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApiRw({ '/pages/pg1': {
+      id: 'pg1', spaceId: 's1', title: 'Disqualified prospects', body: textToDoc('UK Business Events\nNo budget'), version: 5,
+    } }, [], patches));
+    const page = JSON.parse((await client.callTool({ name: 'get_kb_page', arguments: { pageId: 'pg1' } }) as any).content[0].text);
+    expect(page.text).toBe('UK Business Events\nNo budget');
+    expect(page.body).toBeUndefined();
+    await client.callTool({ name: 'update_kb_page', arguments: { pageId: 'pg1', text: 'UK Business Events – disqualified' } });
+    expect(patches).toEqual([{ path: '/pages/pg1', body: { body: textToDoc('UK Business Events – disqualified') } }]);
+  });
+});
+
+describe('an owner can be assigned on create', () => {
+  it('list_users resolves ids, and create_deal / create_company take ownerId', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({
+      '/users/lookup': { data: [{ id: 'u1', name: 'Roman', avatar: null }] },
+      '/companies': { data: [], nextCursor: null },
+    }, posts));
+    const users = JSON.parse((await client.callTool({ name: 'list_users', arguments: {} }) as any).content[0].text);
+    expect(users.data).toEqual([{ id: 'u1', name: 'Roman' }]);
+
+    await client.callTool({ name: 'create_deal', arguments: { companyId: 'c1', title: 'Retainer', stageId: 's1', ownerId: 'u1' } });
+    await client.callTool({ name: 'create_company', arguments: { name: 'Northwind', ownerId: 'u1' } });
+    expect(posts).toEqual([
+      { path: '/deals', body: { companyId: 'c1', title: 'Retainer', stageId: 's1', ownerId: 'u1' } },
+      { path: '/companies', body: { name: 'Northwind', ownerId: 'u1' } },
+    ]);
+  });
+});
