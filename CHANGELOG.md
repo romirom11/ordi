@@ -9,8 +9,9 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   rendered as a block element inside a paragraph, which WebKit (the
   desktop app) turns into a NotFoundError when it unmounts. Spinners are
   inline elements now, so the class of bug is closed.
-- New projects choose visibility, lead, members and dates in the create
-  dialog, and default to private.
+- New project is a composed sheet: icon and name, a summary, one chip row
+  for key, type, client, visibility, priority, lead, members, dates and
+  labels, and a description field. Visibility defaults to private.
 - My tasks separates Assigned from Created; a task filed for someone else
   is no longer listed as work to do. `/me/tasks` returns `created` in
   place of `createdUnassigned`.

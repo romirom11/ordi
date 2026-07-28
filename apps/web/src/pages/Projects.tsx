@@ -1,19 +1,24 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, FolderKanban, Lock, Globe, Target, ChevronDown, UserCircle2, Users, CalendarDays } from 'lucide-react';
+import {
+  Plus, FolderKanban, Lock, Globe, Target, ChevronRight, UserCircle2, Users, CalendarDays,
+  Building2, Tag as TagIcon,
+} from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
 import { Link, useNavigate } from '../lib/router';
 import { useCan, useMe } from '../lib/auth';
 import {
-  Button, Input, Select, Badge, PageHeader, Breadcrumbs, Skeleton, EmptyState, Spinner,
-  Avatar, AvatarGroup, ProgressRing, Tooltip, fmtDate, cn,
+  Button, Input, Badge, PageHeader, Breadcrumbs, Skeleton, EmptyState, Spinner,
+  Avatar, AvatarGroup, PriorityIcon, ProgressRing, Tooltip, fmtDate, cn,
 } from '../components/ui';
-import { DateField } from '../components/DatePicker';
-import { useUsersLookup } from '../lib/queries';
-import { Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator } from '../components/overlays';
+import { Calendar } from '../components/DatePicker';
+import { useLabels, useUsersLookup } from '../lib/queries';
+import { Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator, useMenuClose } from '../components/overlays';
 import { toast } from '../components/overlays';
 import { ProjectIcon } from '../components/project/ProjectIcon';
 import { ProjectContextMenu } from '../components/project/contextMenus';
+import { PRIORITIES, PRIORITY_LABEL_KEY } from '../components/project/taskViewPrefs';
+import { textToDoc } from '@ordi/shared';
 import { useT, extendDict } from '../lib/i18n';
 
 extendDict({
@@ -32,6 +37,14 @@ extendDict({
     'projects.count': 'projects',
     'projects.type': 'Type',
     'projects.selectType': 'Select type…',
+    'projects.namePlaceholder': 'Project name',
+    'projects.summaryPlaceholder': 'Add a short summary…',
+    'projects.descriptionPlaceholder': 'Write a description, a project brief, or collect ideas…',
+    'projects.createProject': 'Create project',
+    'projects.keyHint': '2-5 letters, used in task refs like MKT-12.',
+    'projects.noClient': 'No client',
+    'projects.priority': 'Priority',
+    'projects.labels': 'Labels',
   },
   uk: {
     'projects.noClientsYet': 'Клієнтів ще немає.',
@@ -48,6 +61,14 @@ extendDict({
     'projects.count': 'проєктів',
     'projects.type': 'Тип',
     'projects.selectType': 'Оберіть тип…',
+    'projects.namePlaceholder': 'Назва проєкту',
+    'projects.summaryPlaceholder': 'Додайте короткий опис…',
+    'projects.descriptionPlaceholder': 'Опишіть проєкт, бриф або зберіть ідеї…',
+    'projects.createProject': 'Створити проєкт',
+    'projects.keyHint': '2-5 літер, використовується в номерах задач: MKT-12.',
+    'projects.noClient': 'Без клієнта',
+    'projects.priority': 'Пріоритет',
+    'projects.labels': 'Мітки',
   },
 });
 
@@ -304,15 +325,29 @@ function deriveProjectKey(name: string): string {
   return k.length >= 2 ? k : '';
 }
 
+/**
+ * New project – a composed sheet rather than a stack of labelled boxes: the
+ * icon and the name lead, a summary sits under them, and every choice that
+ * decides who sees the project and when it runs is a chip on one row. The
+ * description writes itself in the same sheet.
+ *
+ * Ordi's own fields (type, client, key) are chips too, so the row reads as one
+ * set of decisions instead of a form above and a toolbar below.
+ */
 export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: {
   open: boolean; onClose: () => void; onCreated: (id: string) => void; defaultCompanyId?: string;
 }) {
   const t = useT();
   const canCrm = useCan()('crm.read');
+  const meId = useMe().user.id;
   const [name, setName] = useState('');
+  const [summary, setSummary] = useState('');
+  const [description, setDescription] = useState('');
   const [visibility, setVisibility] = useState<'workspace' | 'private'>('private');
+  const [priority, setPriority] = useState<string>('none');
   const [leadId, setLeadId] = useState<string | null>(null);
   const [memberIds, setMemberIds] = useState<string[]>([]);
+  const [labelIds, setLabelIds] = useState<string[]>([]);
   const [startDate, setStartDate] = useState<string | null>(null);
   const [targetDate, setTargetDate] = useState<string | null>(null);
   const [key, setKey] = useState('');
@@ -324,10 +359,16 @@ export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: 
   // Fresh form every time the dialog opens.
   useEffect(() => {
     if (!open) return;
-    setName(''); setKey(''); setKeyTouched(false); setTypeId(''); setCompanyId(defaultCompanyId ?? '');
-    setVisibility('private'); setLeadId(null); setMemberIds([]); setStartDate(null); setTargetDate(null); setError(null);
+    setName(''); setSummary(''); setDescription(''); setKey(''); setKeyTouched(false);
+    setTypeId(''); setCompanyId(defaultCompanyId ?? ''); setVisibility('private'); setPriority('none');
+    setLeadId(null); setMemberIds([]); setLabelIds([]); setStartDate(null); setTargetDate(null); setError(null);
   }, [open, defaultCompanyId]);
 
+  const wsQ = useQuery<{ name?: string }>({
+    queryKey: ['workspace-settings'],
+    queryFn: () => api.get<{ name?: string }>('/settings/workspace').catch(() => ({})),
+    staleTime: 5 * 60_000,
+  });
   const typesQ = useQuery<ProjectTypeLite[]>({
     queryKey: ['project-types'],
     queryFn: () => api.get<{ data: ProjectTypeLite[] }>('/project-types').then((r) => r.data),
@@ -341,6 +382,10 @@ export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: 
   });
   const companies = companiesQ.data ?? [];
   const noClientsYet = canCrm && companiesQ.isSuccess && companies.length === 0;
+  const usersQ = useUsersLookup();
+  const users = usersQ.data ?? [];
+  const labelsQ = useLabels('project');
+  const labels = labelsQ.data ?? [];
 
   // Preselect a sensible type: with no clients in the workspace a client-requiring
   // default would dead-end the very first project, so fall back to the first type
@@ -355,25 +400,41 @@ export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: 
 
   const selectedType = types.find((x) => x.id === typeId);
   const needsClient = !!selectedType?.requiresClient;
-  const meId = useMe().user.id;
-  const usersQ = useUsersLookup();
-  const users = usersQ.data ?? [];
   const lead = leadId ? users.find((u) => u.id === leadId) : undefined;
+  const client = companyId ? companies.find((c) => c.id === companyId) : undefined;
 
   const mut = useMutation({
-    // Members are a second call – the project has to exist to have any. The
-    // lead is added as one too: leading a project one cannot open is not a role.
+    /**
+     * Create, then finish. `POST /projects` takes the fields a project cannot
+     * exist without; summary, priority and labels are project *edits*, and
+     * members need a project to belong to – so they follow in one patch and
+     * one call each, and none of them can lose the project if they fail.
+     */
     mutationFn: async () => {
       const project = await api.post<Project>('/projects', {
-        name, key, projectTypeId: typeId, companyId: companyId || undefined, visibility,
-        leadId, startDate, targetDate,
+        name: name.trim(),
+        key,
+        projectTypeId: typeId,
+        companyId: companyId || undefined,
+        visibility,
+        leadId,
+        startDate,
+        targetDate,
+        // The overview reads the description as stored tiptap JSON.
+        description: description.trim() ? JSON.stringify(textToDoc(description.trim())) : undefined,
       });
+      const patch: Record<string, unknown> = {};
+      if (summary.trim()) patch.summary = summary.trim();
+      if (priority !== 'none') patch.priority = priority;
+      if (labelIds.length) patch.labelIds = labelIds;
+      if (Object.keys(patch).length) {
+        await api.patch(`/projects/${project.id}`, patch).catch(() => { /* the project exists; a lost chip is not worth losing it */ });
+      }
       // Never re-add yourself: createProject already made the creator a project
       // admin, and upserting them as a plain member would take that away.
       const invite = [...new Set([...memberIds, ...(leadId ? [leadId] : [])])].filter((id) => id !== meId);
       for (const userId of invite) {
-        await api.post(`/projects/${project.id}/members`, { userId, role: 'member', canWriteTasks: true })
-          .catch(() => { /* the creator is already a member; a failed invite must not lose the project */ });
+        await api.post(`/projects/${project.id}/members`, { userId, role: 'member', canWriteTasks: true }).catch(() => {});
       }
       return project;
     },
@@ -392,100 +453,114 @@ export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: 
   };
 
   return (
-    <Dialog open={open} onClose={onClose} title={t('projects.newProject')} width={460}>
-      <form onSubmit={submit} className="space-y-3 px-4 pb-4 pt-1">
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">{t('common.name')}</label>
-          <Input
-            autoFocus
-            value={name}
-            onChange={(e) => {
-              setName(e.target.value);
-              if (!keyTouched) setKey(deriveProjectKey(e.target.value));
-            }}
-            placeholder="Marketing site"
-          />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">{t('projects.key')}</label>
-            <Input
-              value={key}
+    <Dialog
+      open={open}
+      onClose={onClose}
+      width={720}
+      title={(
+        <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+          <span className="truncate">{wsQ.data?.name || 'ordi'}</span>
+          <ChevronRight size={12} className="text-faint" />
+          <span className="text-foreground">{t('projects.newProject')}</span>
+        </span>
+      )}
+    >
+      <form onSubmit={submit} className="px-5 pb-4 pt-3">
+        <div className="flex items-start gap-3">
+          <ProjectIcon seed={key || name || 'new'} size={36} radius={9} className="mt-1.5" />
+          <div className="min-w-0 flex-1">
+            <input
+              autoFocus
+              value={name}
               onChange={(e) => {
-                const v = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5);
-                setKey(v);
-                // Manual edits stop auto-derivation; clearing the field resumes it.
-                setKeyTouched(v !== '');
+                setName(e.target.value);
+                if (!keyTouched) setKey(deriveProjectKey(e.target.value));
               }}
-              placeholder="MKT"
-              className="font-mono uppercase"
+              placeholder={t('projects.namePlaceholder')}
+              className="w-full bg-transparent text-[22px] font-semibold leading-tight outline-none placeholder:text-faint focus-visible:outline-none"
+            />
+            <input
+              value={summary}
+              onChange={(e) => setSummary(e.target.value)}
+              placeholder={t('projects.summaryPlaceholder')}
+              maxLength={500}
+              className="mt-1 w-full bg-transparent text-[13px] outline-none placeholder:text-faint focus-visible:outline-none"
             />
           </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">{t('projects.type')}</label>
+        </div>
+
+        <div className="mt-3.5 flex flex-wrap items-center gap-1.5">
+          {/* Key: ordi needs one and derives it from the name, so it stays a chip
+              until someone wants to change it. */}
+          <DropdownMenu
+            align="start"
+            width={200}
+            trigger={<FormChip active={!!key} label={t('projects.key')}><span className="font-mono">{key || t('projects.key')}</span></FormChip>}
+          >
+            <MenuLabel>{t('projects.key')}</MenuLabel>
+            <div className="p-1">
+              <Input
+                value={key}
+                onChange={(e) => {
+                  const v = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5);
+                  setKey(v);
+                  setKeyTouched(v !== '');
+                }}
+                placeholder="MKT"
+                className="font-mono uppercase"
+              />
+              <p className="mt-1 px-0.5 text-[11px] text-faint">{t('projects.keyHint')}</p>
+            </div>
+          </DropdownMenu>
+
+          <DropdownMenu
+            align="start"
+            width={220}
+            trigger={(
+              <FormChip active={!!selectedType} label={t('projects.type')}>
+                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: selectedType?.color ?? '#8a8f98' }} />
+                {selectedType?.name ?? t('projects.selectType')}
+              </FormChip>
+            )}
+          >
+            <MenuLabel>{t('projects.type')}</MenuLabel>
+            {types.map((pt) => (
+              <MenuItem
+                key={pt.id}
+                checked={pt.id === typeId}
+                icon={<span className="h-2 w-2 rounded-full" style={{ backgroundColor: pt.color ?? '#8a8f98' }} />}
+                onSelect={() => setTypeId(pt.id)}
+              >
+                {pt.name}
+              </MenuItem>
+            ))}
+          </DropdownMenu>
+
+          {canCrm && (companies.length > 0 || needsClient) && (
             <DropdownMenu
               align="start"
-              width={220}
-              className="block w-full"
-              trigger={
-                <button
-                  type="button"
-                  className="flex h-8 w-full items-center gap-2 rounded-md border border-input bg-transparent px-2.5 text-[13px] outline-none transition-colors duration-150 hover:border-border-strong focus-visible:border-primary/60"
-                >
-                  {selectedType ? (
-                    <>
-                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: selectedType.color ?? '#8a8f98' }} />
-                      <span className="truncate">{selectedType.name}</span>
-                    </>
-                  ) : (
-                    <span className="truncate text-faint">{typesQ.isLoading ? t('common.loading') : t('projects.selectType')}</span>
-                  )}
-                  <ChevronDown size={13} className="ml-auto shrink-0 text-faint" />
-                </button>
-              }
+              width={240}
+              trigger={(
+                <FormChip active={!!client} label={t('crm.client')}>
+                  <Building2 size={13} />
+                  {client?.name ?? t('crm.client')}
+                  {needsClient && !client && <span className="text-destructive">*</span>}
+                </FormChip>
+              )}
             >
-              {types.map((pt) => (
-                <MenuItem
-                  key={pt.id}
-                  checked={pt.id === typeId}
-                  icon={<span className="h-2 w-2 rounded-full" style={{ backgroundColor: pt.color ?? '#8a8f98' }} />}
-                  onSelect={() => setTypeId(pt.id)}
-                >
-                  {pt.name}
-                </MenuItem>
+              <MenuLabel>{t('crm.client')}</MenuLabel>
+              {!needsClient && <MenuItem checked={!companyId} onSelect={() => setCompanyId('')}>{t('projects.noClient')}</MenuItem>}
+              {companies.map((c) => (
+                <MenuItem key={c.id} checked={c.id === companyId} onSelect={() => setCompanyId(c.id)}>{c.name}</MenuItem>
               ))}
             </DropdownMenu>
-          </div>
-        </div>
-        {(needsClient || !!defaultCompanyId) && (
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">{t('crm.client')}</label>
-            {canCrm && noClientsYet ? (
-              <p className="text-xs text-muted-foreground">
-                {t('projects.noClientsYet')}{' '}
-                <Link to="/crm" className="text-primary hover:underline">{t('projects.addClientFirst')}</Link>
-              </p>
-            ) : canCrm ? (
-              <Select value={companyId} onChange={(e) => setCompanyId(e.target.value)} className="w-full">
-                <option value="">{companiesQ.isLoading ? t('common.loading') : t('projects.selectClient')}</option>
-                {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </Select>
-            ) : (
-              <Input value={companyId} onChange={(e) => setCompanyId(e.target.value)} placeholder="Company ID" />
-            )}
-          </div>
-        )}
-        {/* Everything that decides who sees the project and when it runs is
-            chosen here, not hunted for afterwards in the rail. Visibility in
-            particular used to be assumed workspace-wide with nothing on screen
-            saying so, which is how a project nobody was added to still showed
-            up for everybody. */}
-        <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+          )}
+
           <DropdownMenu
             align="start"
             width={260}
             trigger={(
-              <FormChip active={visibility === 'private'}>
+              <FormChip active={visibility === 'private'} label={t('projects.visibility')}>
                 {visibility === 'private' ? <Lock size={13} /> : <Globe size={13} />}
                 {visibility === 'private' ? t('projects.visPrivate') : t('projects.visWorkspace')}
               </FormChip>
@@ -508,9 +583,27 @@ export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: 
 
           <DropdownMenu
             align="start"
+            width={200}
+            trigger={(
+              <FormChip active={priority !== 'none'} label={t('projects.priority')}>
+                <PriorityIcon priority={priority} size={13} />
+                {priority === 'none' ? t('projects.priority') : t(PRIORITY_LABEL_KEY[priority] ?? 'projects.priority')}
+              </FormChip>
+            )}
+          >
+            <MenuLabel>{t('projects.priority')}</MenuLabel>
+            {PRIORITIES.map((p) => (
+              <MenuItem key={p} icon={<PriorityIcon priority={p} size={14} />} checked={priority === p} onSelect={() => setPriority(p)}>
+                {t(PRIORITY_LABEL_KEY[p] ?? p)}
+              </MenuItem>
+            ))}
+          </DropdownMenu>
+
+          <DropdownMenu
+            align="start"
             width={230}
             trigger={(
-              <FormChip active={!!lead}>
+              <FormChip active={!!lead} label={t('projects.lead')}>
                 {lead ? <Avatar name={lead.name} src={lead.avatar} size={16} /> : <UserCircle2 size={13} />}
                 {lead ? lead.name : t('projects.lead')}
               </FormChip>
@@ -530,7 +623,7 @@ export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: 
             align="start"
             width={230}
             trigger={(
-              <FormChip active={memberIds.length > 0}>
+              <FormChip active={memberIds.length > 0} label={t('access.members')}>
                 {memberIds.length > 0
                   ? <AvatarGroup users={users.filter((u) => memberIds.includes(u.id))} size={16} max={3} />
                   : <Users size={13} />}
@@ -550,35 +643,110 @@ export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: 
               </MenuItem>
             ))}
           </DropdownMenu>
+
+          <DateChip value={startDate} onChange={setStartDate} label={t('projects.startDate')} />
+          <DateChip value={targetDate} onChange={setTargetDate} label={t('projects.targetDate')} min={startDate} />
+
+          {labels.length > 0 && (
+            <DropdownMenu
+              align="start"
+              width={230}
+              trigger={(
+                <FormChip active={labelIds.length > 0} label={t('projects.labels')}>
+                  <TagIcon size={13} />
+                  {labelIds.length > 0 ? String(labelIds.length) : t('projects.labels')}
+                </FormChip>
+              )}
+            >
+              <MenuLabel>{t('projects.labels')}</MenuLabel>
+              {labels.map((l) => (
+                <MenuItem
+                  key={l.id}
+                  icon={<span className="h-2 w-2 rounded-full" style={{ backgroundColor: l.color ?? '#8a8f98' }} />}
+                  checked={labelIds.includes(l.id)}
+                  onSelect={() => setLabelIds((ids) => (ids.includes(l.id) ? ids.filter((x) => x !== l.id) : [...ids, l.id]))}
+                >
+                  {l.name}
+                </MenuItem>
+              ))}
+            </DropdownMenu>
+          )}
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">{t('projects.startDate')}</label>
-            <DateField value={startDate} onChange={setStartDate} placeholder={t('projects.setStart')} />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">{t('projects.targetDate')}</label>
-            <DateField value={targetDate} onChange={setTargetDate} placeholder={t('projects.setTarget')} min={startDate ?? undefined} />
-          </div>
+        <div className="mt-4 border-t border-border pt-3">
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder={t('projects.descriptionPlaceholder')}
+            rows={5}
+            className="w-full resize-none bg-transparent text-[13px] leading-relaxed outline-none placeholder:text-faint focus-visible:outline-none"
+          />
         </div>
-        <p className="text-xs text-muted-foreground">
-          {visibility === 'private' ? t('projects.visPrivateHint') : t('projects.visWorkspaceHint')}
-        </p>
+
+        {noClientsYet && needsClient && (
+          <p className="text-xs text-muted-foreground">
+            {t('projects.noClientsYet')}{' '}
+            <Link to="/crm" className="text-primary hover:underline">{t('projects.addClientFirst')}</Link>
+          </p>
+        )}
         {error && <p className="text-sm text-destructive">{error}</p>}
-        <div className="flex justify-end gap-2 pt-1">
-          <Button type="button" variant="ghost" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button type="submit" size="sm" disabled={mut.isPending}>{mut.isPending ? <Spinner /> : t('common.create')}</Button>
-        </div>
       </form>
+
+      <div className="flex items-center justify-between gap-3 border-t border-border px-5 py-3">
+        <span className="truncate text-xs text-muted-foreground">
+          {visibility === 'private' ? t('projects.visPrivateHint') : t('projects.visWorkspaceHint')}
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          <Button type="button" variant="ghost" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button size="sm" onClick={submit} disabled={mut.isPending}>
+            {mut.isPending ? <Spinner /> : t('projects.createProject')}
+          </Button>
+        </span>
+      </div>
     </Dialog>
   );
 }
 
+/** A date as a chip: the calendar lives in the menu, like every other choice on the row. */
+function DateChip({ value, onChange, label, min }: {
+  value: string | null; onChange: (v: string | null) => void; label: string; min?: string | null;
+}) {
+  const t = useT();
+  return (
+    <DropdownMenu
+      align="start"
+      width={264}
+      trigger={(
+        <FormChip active={!!value} label={label}>
+          <CalendarDays size={13} />
+          {value ? fmtDate(value) : label}
+        </FormChip>
+      )}
+    >
+      <MenuLabel>{label}</MenuLabel>
+      <CalendarChoice value={value} min={min} onSelect={onChange} />
+      {value && (
+        <>
+          <MenuSeparator />
+          <MenuItem danger onSelect={() => onChange(null)}>{t('projects.clearDate')}</MenuItem>
+        </>
+      )}
+    </DropdownMenu>
+  );
+}
+
+/** Picking a day applies it and closes the menu. */
+function CalendarChoice({ value, min, onSelect }: { value: string | null; min?: string | null; onSelect: (v: string) => void }) {
+  const close = useMenuClose();
+  return <Calendar value={value} min={min ?? undefined} onSelect={(day) => { onSelect(day); close(); }} />;
+}
+
 /** A Linear-style pill for a dialog's inline choices: icon, value, no border noise until it carries one. */
-function FormChip({ children, active }: { children: ReactNode; active?: boolean }) {
+function FormChip({ children, active, label }: { children: ReactNode; active?: boolean; label?: string }) {
   return (
     <span
+      title={label}
+      aria-label={label}
       className={cn(
         'inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-full border px-2.5 text-xs transition-colors duration-150',
         active
