@@ -66,6 +66,43 @@ const SPACE_RANK = { viewer: 1, editor: 2 } as const;
 const PROJECT_ROLE_OF_RANK = [null, 'viewer', 'member', 'admin'] as const;
 
 /**
+ * Every KB space the actor can read: workspace spaces (with kb.read), spaces
+ * they are a member of, and the spaces of projects they can reach. The
+ * counterpart of accessibleProjectIds, for the feeds and search that pull
+ * space-owned rows straight out of the database.
+ */
+const spaceCacheKey = Symbol('accessibleSpaceIds');
+export async function accessibleSpaceIds(actor: Actor): Promise<string[]> {
+  const anyActor = actor as unknown as Record<symbol, string[] | undefined>;
+  if (anyActor[spaceCacheKey]) return anyActor[spaceCacheKey]!;
+  const { db } = getDb();
+  const spaces = await db
+    .select({ id: schema.kbSpaces.id, visibility: schema.kbSpaces.visibility, projectId: schema.kbSpaces.projectId })
+    .from(schema.kbSpaces)
+    .where(isNull(schema.kbSpaces.deletedAt));
+  const projectIds = [...new Set(spaces.map((s) => s.projectId).filter((id): id is string => !!id))];
+  const projects = projectIds.length
+    ? await db
+      .select({ id: schema.projects.id, visibility: schema.projects.visibility })
+      .from(schema.projects)
+      .where(and(inArray(schema.projects.id, projectIds), isNull(schema.projects.deletedAt)))
+    : [];
+  const roleOfProject = new Map(projects.map((p) => [
+    p.id,
+    effectiveProjectRole(actor, { id: p.id, visibility: p.visibility as 'workspace' | 'private' }),
+  ]));
+  const ids = spaces
+    .filter((s) => spaceAccessRank(actor.access, {
+      visibility: s.visibility as 'workspace' | 'private',
+      spaceId: s.id,
+      inheritedProjectRole: s.projectId ? roleOfProject.get(s.projectId) ?? null : null,
+    }) >= SPACE_RANK.viewer)
+    .map((s) => s.id);
+  anyActor[spaceCacheKey] = ids;
+  return ids;
+}
+
+/**
  * The project role the actor effectively holds – the membership row, or what a
  * workspace project grants their permissions. Spaces attached to a project
  * inherit this, so a project admin edits the project's space whether the rights

@@ -13,6 +13,7 @@ import {
 import type { AppEnv, Actor } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { guard } from '../../core/rbac';
+import { accessibleProjectIds } from '../../core/access';
 import { err } from '../../lib/errors';
 import * as svc from './service';
 
@@ -286,11 +287,19 @@ export function peopleRoutes() {
   });
 
   // ── Resourcing: allocations (PRD §12.4) ──
-  app.get('/allocations', guardAny('people.read', 'projects.read'), async (c) =>
-    c.json({ data: await svc.listAllocations({
+  // An allocation names a project, so the resourcing board only shows the ones
+  // whose project the actor can open – otherwise a private project's staffing
+  // (and its name, through the board's project column) was public to the
+  // permission holders.
+  app.get('/allocations', guardAny('people.read', 'projects.read'), async (c) => {
+    const actor = currentActor(c);
+    const rows = await svc.listAllocations({
       userId: c.req.query('userId'), projectId: c.req.query('projectId'),
       from: c.req.query('from'), to: c.req.query('to'),
-    }) }));
+    });
+    const visible = new Set(await accessibleProjectIds(actor));
+    return c.json({ data: rows.filter((a) => visible.has(a.projectId)) });
+  });
 
   app.post('/allocations', guard('people.write'), async (c) => {
     const body = allocationInputSchema.parse(await c.req.json());

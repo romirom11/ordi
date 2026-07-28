@@ -75,10 +75,15 @@ describe('compensation requires people.read_compensation', () => {
 
 describe('dashboard feed hides activity outside the actor’s domains', () => {
   beforeAll(async () => {
+    const owner = reqAs(users.owner!.cookie);
+    // A real task in a workspace project: the feed resolves every project-scoped
+    // record back to its project, so a fabricated id would (rightly) be dropped.
+    const type = await json(owner.post('/project-types', { name: 'Feed', revenueSource: 'none' }));
+    const project = await json(owner.post('/projects', { name: 'Feed', key: 'FEED', projectTypeId: type.id }));
+    await owner.post('/tasks', { projectId: project.id, title: 'Visible task' });
     const { db } = getDb();
     await db.insert(schema.activityLog).values([
       { id: ulid(), entityType: 'invoice', entityId: ulid(), actorId: users.owner!.userId, action: 'created', diff: {}, sensitivity: 'normal' },
-      { id: ulid(), entityType: 'task', entityId: ulid(), actorId: users.owner!.userId, action: 'created', diff: {}, sensitivity: 'normal' },
       { id: ulid(), entityType: 'invoice', entityId: ulid(), actorId: users.member!.userId, action: 'viewed', diff: {}, sensitivity: 'normal' },
     ]);
   });

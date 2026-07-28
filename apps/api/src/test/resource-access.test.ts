@@ -113,6 +113,63 @@ describe('projects: workspace visibility is unrestricted, private is members-onl
   });
 });
 
+describe('nothing about a private project surfaces sideways', () => {
+  let taskId = '';
+  let privateSpace2 = '';
+
+  beforeAll(async () => {
+    const owner = reqAs(users.owner!.cookie);
+    const statuses = (await json(owner.get(`/projects/${privateProject}/task-statuses`))).data as any[];
+    taskId = (await json(owner.post('/tasks', {
+      projectId: privateProject, title: 'Codename Harpoon', statusId: statuses[0].id,
+      assigneeIds: [viewer.userId],
+    }))).id;
+    await owner.post(`/projects/${privateProject}/milestones`, { name: 'Harpoon beta' });
+    await owner.post('/allocations', { userId: viewer.userId, projectId: privateProject, hoursPerWeek: 10, fromDate: '2026-01-01', toDate: '2026-12-31' });
+    privateSpace2 = (await json(owner.post('/spaces', { name: 'Harpoon docs', visibility: 'private' }))).id;
+    await owner.post('/pages', { spaceId: privateSpace2, title: 'Harpoon rollout' });
+  });
+
+  it('the home feed does not narrate it', async () => {
+    const dash = await json(viewer.as.get('/dashboard'));
+    const raw = JSON.stringify(dash);
+    expect(raw).not.toContain('Codename Harpoon');
+    expect(raw).not.toContain(privateProject);
+    // ...while the project the role can see still shows up
+    const owner = reqAs(users.owner!.cookie);
+    await owner.post('/tasks', { projectId: openProject, title: 'Open work' });
+    const after = await json(viewer.as.get('/dashboard'));
+    expect((after.recentActivity as any[]).some((a) => a.entityType === 'task')).toBe(true);
+  });
+
+  it('an assignment inside it does not appear in my tasks', async () => {
+    const dash = await json(viewer.as.get('/dashboard'));
+    const mine = [...dash.myTasks.overdue, ...dash.myTasks.today, ...dash.myTasks.upcoming];
+    expect(mine.some((t: any) => t.id === taskId)).toBe(false);
+    expect((await json(viewer.as.get('/me/tasks'))).overdue).toBeDefined();
+  });
+
+  it('its activity trail is not readable by entity id', async () => {
+    expect((await viewer.as.get(`/audit/entity/project/${privateProject}`)).status).toBe(200);
+    expect((await json(viewer.as.get(`/audit/entity/project/${privateProject}`))).data).toEqual([]);
+    expect((await json(viewer.as.get(`/audit/entity/task/${taskId}`))).data).toEqual([]);
+    // and a domain the role has no permission for is refused outright
+    expect((await viewer.as.get(`/audit/entity/invoice/${ulid()}`)).status).toBe(403);
+  });
+
+  it('its staffing stays off the resourcing board', async () => {
+    const rows = (await json(viewer.as.get('/allocations'))).data as any[];
+    expect(rows.some((a) => a.projectId === privateProject)).toBe(false);
+  });
+
+  it('its pages stay out of search', async () => {
+    const hits = (await json(viewer.as.get('/search?q=Harpoon'))).data as any[];
+    expect(hits).toEqual([]);
+    const ownerHits = (await json(reqAs(users.owner!.cookie).get('/search?q=Harpoon'))).data as any[];
+    expect(ownerHits.some((h) => h.kind === 'page')).toBe(true);
+  });
+});
+
 describe('kb: kb.write creates pages in workspace spaces', () => {
   it('creates a page in a space it is not a member of', async () => {
     const res = await writer.as.post('/pages', { spaceId: openSpace, title: 'Onboarding' });

@@ -4,7 +4,7 @@ import { ulid } from 'ulid';
 import { dashboardInputSchema, dashboardWidgetInputSchema } from '@ordi/shared';
 import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
-import { visibleActivityTypes } from '../../core/activity';
+import { scopeActivityToResources, visibleActivityTypes } from '../../core/activity';
 import { accessibleProjectIds } from '../../core/access';
 import { err } from '../../lib/errors';
 
@@ -21,15 +21,18 @@ export function dashboardRoutes() {
     const out: Record<string, unknown> = {};
     const today = new Date().toISOString().slice(0, 10);
 
-    // My tasks today / overdue
-    const myTasks = await db.execute(sql`
-      select t.id, t.title, t.due_date, t.priority, p.key, t.number, ts.category
+    // My tasks today / overdue – within the projects the actor can open, like
+    // every other task list. An assignment into a project one cannot reach used
+    // to show here and 404 on click.
+    const myTasks = projectIds.length ? await db.execute(sql`
+      select t.id, t.title, t.due_date, t.priority, p.key, t.number, ts.category, t.project_id
       from tasks t
       join task_assignees ta on ta.task_id = t.id and ta.user_id = ${actor.userId}
       join projects p on p.id = t.project_id
       join task_statuses ts on ts.id = t.status_id
       where t.deleted_at is null and ts.category not in ('done','canceled')
-      order by t.due_date nulls last limit 50`);
+        and t.project_id in ${sql.raw('(' + projectIds.map((id) => `'${id.replace(/'/g, "''")}'`).join(',') + ')')}
+      order by t.due_date nulls last limit 50`) : [];
     out.myTasks = {
       overdue: (myTasks as any[]).filter((t) => t.due_date && t.due_date < today),
       today: (myTasks as any[]).filter((t) => t.due_date === today),
@@ -57,11 +60,14 @@ export function dashboardRoutes() {
       out.dealsByStage = deals;
     }
 
-    // Recent activity, filtered by access: sensitivity (normal only unless privileged)
-    // and entity domain (only types the actor's permissions cover; own actions always visible).
+    // Recent activity, filtered by access: sensitivity (normal only unless
+    // privileged), entity domain (only types the actor's permissions cover; own
+    // actions always visible) and then the resource itself – the domain check
+    // alone let a private project's records narrate themselves to anyone with
+    // projects.read. Over-fetch, because that last pass removes rows.
     const canSensitive = perms.has('people.read_sensitive') || perms.has('people.read_compensation');
     const visibleTypes = visibleActivityTypes(perms);
-    const activity = await db.select().from(schema.activityLog)
+    const candidates = await db.select().from(schema.activityLog)
       .where(and(
         canSensitive ? undefined : eq(schema.activityLog.sensitivity, 'normal'),
         visibleTypes === null ? undefined : or(
@@ -69,8 +75,8 @@ export function dashboardRoutes() {
           visibleTypes.length ? inArray(schema.activityLog.entityType, visibleTypes) : undefined,
         ),
       ))
-      .orderBy(desc(schema.activityLog.createdAt)).limit(15);
-    out.recentActivity = activity;
+      .orderBy(desc(schema.activityLog.createdAt)).limit(90);
+    out.recentActivity = (await scopeActivityToResources(actor, candidates)).slice(0, 15);
     out.projectCount = projectIds.length;
 
     return c.json(out);
