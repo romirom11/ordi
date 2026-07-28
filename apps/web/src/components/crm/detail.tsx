@@ -3,7 +3,7 @@
  * title, owner picker, section shell, property rows and the notes section.
  * Notes attach to a company OR a deal – same editor, same rendering.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, Check, Download, FileText, Paperclip, Pin, Trash2, Upload } from 'lucide-react';
 import { api, qs, ApiError } from '../../lib/api';
@@ -151,10 +151,12 @@ export function NotesSection({ companyId, dealId, canWrite }: { companyId?: stri
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('crm.saveNoteFailed')),
   });
 
+  const savingEditRef = useRef(false);
   const update = useMutation({
     mutationFn: (v: { id: string; body: any }) => api.patch(`/notes/${v.id}`, { body: v.body }),
     onSuccess: () => { qc.invalidateQueries({ queryKey }); setEditingId(null); setEditDoc(null); toast(t('common.saved')); },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('crm.saveNoteFailed')),
+    onSettled: () => { savingEditRef.current = false; },
   });
 
   const pin = useMutation({
@@ -177,14 +179,26 @@ export function NotesSection({ companyId, dealId, canWrite }: { companyId?: stri
   const editBoxRef = useRef<HTMLDivElement | null>(null);
   const editStateRef = useRef<{ id: string | null; doc: any }>({ id: null, doc: null });
   editStateRef.current = { id: editingId, doc: editDoc };
+
+  // Click-away, blur and Cmd+Enter all commit the same edit, and a single click
+  // on a focusable element fires two of them before the first PATCH resolves.
+  // The ref guard keeps that one edit to one request (and one toast); the
+  // mutation clears it in onSettled so a failed save can be retried.
+  const commitEdit = useCallback(() => {
+    if (savingEditRef.current) return;
+    const { id, doc: cur } = editStateRef.current;
+    if (!id) return;
+    if (docIsEmpty(cur)) { setEditingId(null); setEditDoc(null); return; }
+    savingEditRef.current = true;
+    update.mutate({ id, body: cur });
+  }, [update]);
+
   useEffect(() => {
     if (!editingId) return;
     const onDown = (e: MouseEvent) => {
       const box = editBoxRef.current;
       if (!box || box.contains(e.target as Node)) return;
-      const { id: curId, doc: cur } = editStateRef.current;
-      if (curId && !docIsEmpty(cur)) update.mutate({ id: curId, body: cur });
-      else { setEditingId(null); setEditDoc(null); }
+      commitEdit();
     };
     document.addEventListener('mousedown', onDown, true);
     // The editor mounts unfocused – put the caret at the end so typing lands
@@ -234,12 +248,11 @@ export function NotesSection({ companyId, dealId, canWrite }: { companyId?: stri
                   ref={editBoxRef}
                   onBlur={(e) => {
                     if (e.currentTarget.contains(e.relatedTarget as Node)) return;
-                    if (!docIsEmpty(editDoc)) update.mutate({ id: n.id, body: editDoc });
-                    else { setEditingId(null); setEditDoc(null); }
+                    commitEdit();
                   }}
                   onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setEditingId(null); setEditDoc(null); } }}
                 >
-                  <RichEditor value={editDoc} onChange={setEditDoc} compact bare onSubmit={() => !docIsEmpty(editDoc) && update.mutate({ id: n.id, body: editDoc })} />
+                  <RichEditor value={editDoc} onChange={setEditDoc} compact bare onSubmit={commitEdit} />
                   {update.isPending && <div className="mt-1 flex justify-end"><Spinner /></div>}
                 </div>
               ) : (
