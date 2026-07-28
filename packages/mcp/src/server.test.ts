@@ -271,8 +271,18 @@ describe('sales workspace tools', () => {
       name: 'update_lead',
       arguments: { leadId: 'l1', nurtureUntil: 'next quarter' },
     });
+    const conflictingFollowUp = await client.callTool({
+      name: 'complete_sales_activity',
+      arguments: {
+        activityId: 'a1',
+        leadStatus: 'nurture',
+        nurtureUntil: '2026-08-27',
+        nextActivity: { type: 'follow_up', dueAt: '2026-08-27T09:00:00Z' },
+      },
+    });
     expect(missingDate.isError).toBe(true);
     expect(invalidDate.isError).toBe(true);
+    expect(conflictingFollowUp.isError).toBe(true);
     expect(posts).toHaveLength(0);
   });
 });

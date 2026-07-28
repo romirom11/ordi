@@ -284,7 +284,7 @@ extendDict({
     'crm.importResearch': 'Import research',
     'crm.workTitle': 'What needs attention',
     'crm.workHint': 'Sales actions ordered by urgency.',
-    'crm.workMine': 'My work',
+    'crm.workMine': 'Mine + unassigned',
     'crm.workTeam': 'Team',
     'crm.queue.overdue': 'Overdue',
     'crm.queue.today': 'Due today',
@@ -376,7 +376,7 @@ extendDict({
     'crm.importResearch': 'Імпортувати ресерч',
     'crm.workTitle': 'Що потребує уваги',
     'crm.workHint': 'Наступні дії з продажів за терміновістю.',
-    'crm.workMine': 'Моя робота',
+    'crm.workMine': 'Моє + без власника',
     'crm.workTeam': 'Команда',
     'crm.queue.overdue': 'Прострочено',
     'crm.queue.today': 'На сьогодні',
@@ -578,11 +578,11 @@ export interface SalesWorkItem {
 }
 
 export interface SalesWork {
-  overdue: SalesWorkItem[];
-  dueToday: SalesWorkItem[];
-  waitingReply: SalesWorkItem[];
-  nurtureDue: SalesWorkItem[];
-  noNextAction: SalesWorkItem[];
+  overdue: { rows: SalesWorkItem[]; total: number };
+  dueToday: { rows: SalesWorkItem[]; total: number };
+  waitingReply: { rows: SalesWorkItem[]; total: number };
+  nurtureDue: { rows: SalesWorkItem[]; total: number };
+  noNextAction: { rows: SalesWorkItem[]; total: number };
 }
 
 export interface ProjectLite { id: string; name: string; key?: string | null }

@@ -187,7 +187,9 @@ export function CompleteActivityDialog({ activity, onClose }: {
   const [nurtureUntil, setNurtureUntil] = useState(() => toDateInput(new Date(Date.now() + 30 * 86_400_000)));
   const [error, setError] = useState<string | null>(null);
   const isLead = !!activity?.leadId;
-  const terminalLeadStatus = isLead && (leadStatus === 'disqualified' || leadStatus === 'no_response');
+  const followUpDisabled = isLead && (
+    leadStatus === 'nurture' || leadStatus === 'disqualified' || leadStatus === 'no_response'
+  );
   const close = () => {
     setOutcome('');
     setLeadStatus('waiting_reply');
@@ -254,7 +256,7 @@ export function CompleteActivityDialog({ activity, onClose }: {
           <input
             type="checkbox"
             checked={followUp}
-            disabled={terminalLeadStatus}
+            disabled={followUpDisabled}
             onChange={(event) => setFollowUp(event.target.checked)}
           />
           {t('crm.followUp')}

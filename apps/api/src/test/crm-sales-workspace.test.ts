@@ -166,15 +166,24 @@ describe('research import and daily work', () => {
       status: 'ready',
       ownerId: users.member!.userId,
     }));
+    const ownerlessDeal = await json(reqAs(users.owner!.cookie).post('/deals', {
+      companyId,
+      title: 'Unassigned deal',
+      stageId: qualifiedStageId,
+    }));
     const work = await json(reqAs(users.owner!.cookie).get('/sales-work'));
     expect(nurtureWithoutDate.status).toBe(400);
-    expect(work.waitingReply.some((row: any) => row.id === leadId)).toBe(true);
-    expect(work.noNextAction.some((row: any) => row.id === noAction.id)).toBe(true);
-    expect(Object.values(work).flat().some((row: any) => row.id === someoneElsesLead.id)).toBe(false);
+    expect(work.waitingReply.rows.some((row: any) => row.id === leadId)).toBe(true);
+    expect(work.noNextAction.rows.some((row: any) => row.id === noAction.id)).toBe(true);
+    expect(work.noNextAction.rows.some((row: any) => row.id === ownerlessDeal.id)).toBe(true);
+    expect(Object.values(work).flatMap((bucket: any) => bucket.rows)
+      .some((row: any) => row.id === someoneElsesLead.id)).toBe(false);
     const teamWork = await json(reqAs(users.owner!.cookie).get('/sales-work?scope=all'));
-    expect(teamWork.noNextAction.some((row: any) => row.id === someoneElsesLead.id)).toBe(true);
+    expect(teamWork.noNextAction.rows.some((row: any) => row.id === someoneElsesLead.id)).toBe(true);
     const bounded = await json(reqAs(users.owner!.cookie).get('/sales-work?scope=all&limit=1'));
-    expect(Object.values(bounded).every((rows: any) => rows.length <= 1)).toBe(true);
+    expect(Object.values(bounded).every((bucket: any) => bucket.rows.length <= 1)).toBe(true);
+    expect(bounded.noNextAction.rows).toHaveLength(1);
+    expect(bounded.noNextAction.total).toBeGreaterThan(1);
   });
 
   it('snoozes nurture independently and returns it only on the chosen date', async () => {
@@ -188,12 +197,26 @@ describe('research import and daily work', () => {
       type: 'follow_up',
       dueAt: new Date().toISOString(),
     }));
+    const conflictingActivity = await json(reqAs(users.owner!.cookie).post('/sales-activities', {
+      leadId: nurtureLead.id,
+      type: 'follow_up',
+      dueAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+    }));
     const missingDate = await reqAs(users.owner!.cookie).post(`/sales-activities/${activity.id}/complete`, {
       leadStatus: 'nurture',
     });
     expect(missingDate.status).toBe(400);
 
     const tomorrow = localDateAfter(1);
+    const conflictingFollowUp = await reqAs(users.owner!.cookie).post(`/sales-activities/${activity.id}/complete`, {
+      leadStatus: 'nurture',
+      nurtureUntil: tomorrow,
+      nextActivity: {
+        type: 'follow_up',
+        dueAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+      },
+    });
+    expect(conflictingFollowUp.status).toBe(400);
     const completed = await reqAs(users.owner!.cookie).post(`/sales-activities/${activity.id}/complete`, {
       leadStatus: 'nurture',
       nurtureUntil: tomorrow,
@@ -201,8 +224,18 @@ describe('research import and daily work', () => {
     expect(completed.status).toBe(200);
     const snoozed = await json(reqAs(users.owner!.cookie).get(`/leads/${nurtureLead.id}`));
     expect(snoozed).toMatchObject({ status: 'nurture', nurtureUntil: tomorrow });
+    const parkedActivities = (await json(reqAs(users.owner!.cookie)
+      .get(`/sales-activities?leadId=${nurtureLead.id}`))).data;
+    expect(parkedActivities.find((row: any) => row.id === conflictingActivity.id)?.status).toBe('cancelled');
+    const scheduleWhileParked = await reqAs(users.owner!.cookie).post('/sales-activities', {
+      leadId: nurtureLead.id,
+      type: 'follow_up',
+      dueAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+    });
+    expect(scheduleWhileParked.status).toBe(422);
     const beforeReturn = await json(reqAs(users.owner!.cookie).get('/sales-work'));
-    expect(Object.values(beforeReturn).flat().some((row: any) => row.id === nurtureLead.id)).toBe(false);
+    expect(Object.values(beforeReturn).flatMap((bucket: any) => bucket.rows)
+      .some((row: any) => row.id === nurtureLead.id)).toBe(false);
 
     const today = localDateAfter(0);
     await reqAs(users.owner!.cookie).patch(`/leads/${nurtureLead.id}`, {
@@ -210,7 +243,7 @@ describe('research import and daily work', () => {
       version: snoozed.version,
     });
     const due = await json(reqAs(users.owner!.cookie).get('/sales-work'));
-    expect(due.nurtureDue.some((row: any) => row.id === nurtureLead.id)).toBe(true);
+    expect(due.nurtureDue.rows.some((row: any) => row.id === nurtureLead.id)).toBe(true);
   });
 
   it('keeps deal stage names out of lead lifecycle classification', async () => {
@@ -221,7 +254,7 @@ describe('research import and daily work', () => {
       ownerId: users.owner!.userId,
     }));
     const work = await json(reqAs(users.owner!.cookie).get('/sales-work'));
-    expect(work.noNextAction.some((row: any) => row.id === deal.id && row.entityType === 'deal')).toBe(true);
+    expect(work.noNextAction.rows.some((row: any) => row.id === deal.id && row.entityType === 'deal')).toBe(true);
   });
 
   it('keeps converted status behind the conversion action and rejects unsafe source links', async () => {

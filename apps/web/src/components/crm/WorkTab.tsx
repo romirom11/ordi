@@ -21,14 +21,14 @@ export function WorkTab() {
 
   const work = workQ.data;
   if (!work) return <EmptyState title={t('common.error')} />;
-  const total = Object.values(work).reduce((sum, rows) => sum + rows.length, 0);
+  const total = Object.values(work).reduce((sum, bucket) => sum + bucket.total, 0);
 
   const groups = [
-    { key: 'overdue', title: t('crm.queue.overdue'), rows: work.overdue, icon: <AlertCircle size={15} className="text-destructive" /> },
-    { key: 'today', title: t('crm.queue.today'), rows: work.dueToday, icon: <Clock3 size={15} className="text-warning" /> },
-    { key: 'waiting', title: t('crm.queue.waiting'), rows: work.waitingReply, icon: <Inbox size={15} className="text-primary" /> },
-    { key: 'nurture', title: t('crm.queue.nurture'), rows: work.nurtureDue, icon: <PauseCircle size={15} className="text-muted-foreground" /> },
-    { key: 'none', title: t('crm.queue.noAction'), rows: work.noNextAction, icon: <CalendarClock size={15} className="text-faint" /> },
+    { key: 'overdue', title: t('crm.queue.overdue'), ...work.overdue, icon: <AlertCircle size={15} className="text-destructive" /> },
+    { key: 'today', title: t('crm.queue.today'), ...work.dueToday, icon: <Clock3 size={15} className="text-warning" /> },
+    { key: 'waiting', title: t('crm.queue.waiting'), ...work.waitingReply, icon: <Inbox size={15} className="text-primary" /> },
+    { key: 'nurture', title: t('crm.queue.nurture'), ...work.nurtureDue, icon: <PauseCircle size={15} className="text-muted-foreground" /> },
+    { key: 'none', title: t('crm.queue.noAction'), ...work.noNextAction, icon: <CalendarClock size={15} className="text-faint" /> },
   ];
 
   return (
@@ -52,7 +52,7 @@ export function WorkTab() {
             <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               {group.icon}
               <span>{group.title}</span>
-              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] tabular-nums">{group.rows.length}</span>
+              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] tabular-nums">{group.total}</span>
             </div>
             <div className="divide-y divide-border rounded-lg border border-border bg-card">
               {group.rows.map((row) => (

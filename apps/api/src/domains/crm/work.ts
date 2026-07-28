@@ -6,6 +6,7 @@ type WorkBucket = 'overdue' | 'dueToday' | 'waitingReply' | 'nurtureDue' | 'noNe
 
 interface WorkQueryRow {
   bucket: WorkBucket;
+  bucketTotal: number;
   entityType: 'lead' | 'deal';
   id: string;
   title: string;
@@ -54,6 +55,11 @@ interface WorkItem {
   } | null;
 }
 
+interface WorkBucketResult {
+  rows: WorkItem[];
+  total: number;
+}
+
 function boundedLimit(value: number | undefined): number {
   return Number.isFinite(value) ? Math.max(1, Math.min(Math.trunc(value!), 200)) : 50;
 }
@@ -73,12 +79,12 @@ export async function salesWork(
   const canReadDeals = actor.access.permissions.has('deals.read');
   const limit = boundedLimit(params.limit);
   const mineOnly = params.scope !== 'all';
-  const work: Record<WorkBucket, WorkItem[]> = {
-    overdue: [],
-    dueToday: [],
-    waitingReply: [],
-    nurtureDue: [],
-    noNextAction: [],
+  const work: Record<WorkBucket, WorkBucketResult> = {
+    overdue: { rows: [], total: 0 },
+    dueToday: { rows: [], total: 0 },
+    waitingReply: { rows: [], total: 0 },
+    nurtureDue: { rows: [], total: 0 },
+    noNextAction: { rows: [], total: 0 },
   };
   const now = new Date();
   const startToday = new Date(now);
@@ -112,10 +118,10 @@ export async function salesWork(
         a.created_at as activity_created_at,
         a.version as activity_version,
         case
-          when l.status = 'nurture' then
-            case when l.nurture_until is not null and l.nurture_until <= ${today} then 'nurtureDue' end
           when a.due_at < ${startTodayIso}::timestamptz then 'overdue'
           when a.due_at <= ${endTodayIso}::timestamptz then 'dueToday'
+          when l.status = 'nurture' then
+            case when l.nurture_until is not null and l.nurture_until <= ${today} then 'nurtureDue' end
           when l.status = 'waiting_reply' then 'waitingReply'
           when a.id is null then 'noNextAction'
         end as bucket
@@ -131,7 +137,9 @@ export async function salesWork(
       ) a on true
       where l.deleted_at is null
         and l.status not in ('converted', 'disqualified', 'no_response')
-        and ${mineOnly ? sql`coalesce(a.owner_id, l.owner_id) = ${actor.userId}` : sql`true`}
+        and ${mineOnly
+          ? sql`(coalesce(a.owner_id, l.owner_id) = ${actor.userId} or coalesce(a.owner_id, l.owner_id) is null)`
+          : sql`true`}
     ),
     deal_work as (
       select
@@ -173,14 +181,17 @@ export async function salesWork(
       ) a on true
       where d.deleted_at is null
         and ${canReadDeals ? sql`true` : sql`false`}
-        and ${mineOnly ? sql`coalesce(a.owner_id, d.owner_id) = ${actor.userId}` : sql`true`}
+        and ${mineOnly
+          ? sql`(coalesce(a.owner_id, d.owner_id) = ${actor.userId} or coalesce(a.owner_id, d.owner_id) is null)`
+          : sql`true`}
     ),
     ranked as (
       select combined.*,
              row_number() over (
                partition by bucket
                order by activity_due_at nulls last, nurture_until nulls last, id
-             ) as queue_rank
+             ) as queue_rank,
+             count(*) over (partition by bucket)::int as bucket_total
       from (
         select * from lead_work
         union all
@@ -190,6 +201,7 @@ export async function salesWork(
     )
     select
       bucket,
+      bucket_total as "bucketTotal",
       entity_type as "entityType",
       id,
       title,
@@ -240,7 +252,10 @@ export async function salesWork(
         version: row.activityVersion!,
       } : null,
     };
-    if (row.bucket in work) work[row.bucket].push(item);
+    if (row.bucket in work) {
+      work[row.bucket].total = Number(row.bucketTotal);
+      work[row.bucket].rows.push(item);
+    }
   }
   return work;
 }

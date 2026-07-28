@@ -448,8 +448,12 @@ export function buildServer(client: OrdiClient): McpServer {
     subject: z.string().optional(), context: z.string().optional(),
   }).optional(),
 }, ({ activityId, ...body }) => wrap(async () => {
-  if (body.nextActivity && (body.leadStatus === 'disqualified' || body.leadStatus === 'no_response')) {
-    throw new Error('Terminal lead statuses cannot have a follow-up activity');
+  if (body.nextActivity && (
+    body.leadStatus === 'nurture'
+    || body.leadStatus === 'disqualified'
+    || body.leadStatus === 'no_response'
+  )) {
+    throw new Error('Nurture and terminal lead statuses cannot have a follow-up activity');
   }
   if (body.leadStatus === 'nurture' && !body.nurtureUntil) {
     throw new Error('nurtureUntil is required when leadStatus is nurture');

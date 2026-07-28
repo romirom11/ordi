@@ -202,11 +202,15 @@ export const salesActivityCompleteSchema = z.object({
   leadStatus: z.enum(LEAD_ACTIVITY_OUTCOME_STATUSES).optional(),
   nurtureUntil: dateOnlySchema.optional(),
 }).superRefine((value, ctx) => {
-  if (value.nextActivity && (value.leadStatus === 'disqualified' || value.leadStatus === 'no_response')) {
+  if (value.nextActivity && (
+    value.leadStatus === 'nurture'
+    || value.leadStatus === 'disqualified'
+    || value.leadStatus === 'no_response'
+  )) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['nextActivity'],
-      message: 'Terminal lead statuses cannot have a follow-up activity',
+      message: 'Nurture and terminal lead statuses cannot have a follow-up activity',
     });
   }
   if (value.leadStatus === 'nurture' && !value.nurtureUntil) {

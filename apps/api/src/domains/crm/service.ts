@@ -187,7 +187,7 @@ export async function getDeal(id: string) {
 
 // ── Leads, research and sales work ──
 
-const STOPPED_LEAD_STATUSES = new Set(['disqualified', 'no_response']);
+const CANCELS_PLANNED_LEAD_STATUSES = new Set(['nurture', 'disqualified', 'no_response']);
 
 function normalized(value: string | null | undefined): string {
   return (value ?? '').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
@@ -404,7 +404,10 @@ export async function updateLead(actor: Actor, id: string, input: any) {
   if (input.customFields !== undefined) patch.customFields = mergeCustomFields(before.customFields, input.customFields);
   await db.update(schema.leads).set(patch)
     .where(and(eq(schema.leads.id, id), eq(schema.leads.version, before.version)));
-  if (input.status && STOPPED_LEAD_STATUSES.has(input.status)) {
+  if (
+    CANCELS_PLANNED_LEAD_STATUSES.has(nextStatus)
+    && (input.status !== undefined || input.nurtureUntil !== undefined)
+  ) {
     await db.update(schema.salesActivities).set({ status: 'cancelled' }).where(and(
       eq(schema.salesActivities.leadId, id),
       eq(schema.salesActivities.status, 'planned'),
@@ -690,6 +693,9 @@ export async function getSalesActivity(id: string) {
 async function activityParent(input: any) {
   if (input.leadId) {
     const lead = await getLeadRecord(input.leadId);
+    if (lead.status === 'nurture') {
+      throw err.domain('Move the lead out of nurture before scheduling an activity');
+    }
     const contactId = input.contactId === undefined ? lead.contactId : input.contactId;
     await assertContactCompany(lead.companyId, contactId);
     return { leadId: lead.id, dealId: null, companyId: lead.companyId, contactId, ownerId: input.ownerId ?? lead.ownerId };
@@ -779,7 +785,7 @@ export async function completeSalesActivity(actor: Actor, id: string, input: any
         status: input.leadStatus,
         nurtureUntil: input.leadStatus === 'nurture' ? input.nurtureUntil : null,
       }).where(eq(schema.leads.id, before.leadId));
-      if (STOPPED_LEAD_STATUSES.has(input.leadStatus)) {
+      if (CANCELS_PLANNED_LEAD_STATUSES.has(input.leadStatus)) {
         await tx.update(schema.salesActivities).set({ status: 'cancelled' }).where(and(
           eq(schema.salesActivities.leadId, before.leadId),
           eq(schema.salesActivities.status, 'planned'),
