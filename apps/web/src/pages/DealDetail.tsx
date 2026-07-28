@@ -123,7 +123,7 @@ export function DealDetailPage({ id }: { id: string }) {
             <ActivitySection dealId={id} />
           </div>
         </div>
-        <aside className="order-1 shrink-0 space-y-6 overflow-auto border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-72 min-[1100px]:border-b-0 min-[1100px]:border-l">
+        <aside className="order-1 shrink-0 space-y-6 overflow-auto border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-80 min-[1100px]:border-b-0 min-[1100px]:border-l">
           <DealRail
             deal={d}
             stage={stage}
@@ -403,7 +403,7 @@ function CustomFieldsRail({ deal, editable, onPatch }: {
       <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('crm.customFields')}</h2>
       <div className="space-y-0.5">
         {defs.map((f) => (
-          <RailField key={f.id} label={f.label}>
+          <RailField key={f.id} label={f.label} wideLabel>
             <CustomFieldValue field={f} value={values[f.key]} editable={editable} users={usersQ.data ?? []} onSave={(v) => save(f.key, v)} />
           </RailField>
         ))}
