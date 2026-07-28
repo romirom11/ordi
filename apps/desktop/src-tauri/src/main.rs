@@ -5,6 +5,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use tauri::{Emitter, Manager};
+// Only the runtime scheme registration below needs this trait, and that is
+// Windows/Linux-only – importing it unconditionally warns on macOS.
+#[cfg(any(windows, target_os = "linux"))]
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_global_shortcut::{ShortcutState, GlobalShortcutExt};
 use tauri_plugin_updater::UpdaterExt;
