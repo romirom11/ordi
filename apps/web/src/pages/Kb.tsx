@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '../lib/router';
 import { useTabs } from '../lib/tabs';
@@ -619,6 +619,7 @@ function PageDetailView({ pageId, spaceId, canWrite }: { pageId: string; spaceId
   const [title, setTitle] = useState('');
   const [bodyDoc, setBodyDoc] = useState<any>(EMPTY_DOC);
   const [showVersions, setShowVersions] = useState(false);
+  const titleRef = useRef<HTMLTextAreaElement>(null);
 
   const page = useQuery({ queryKey: ['page', pageId], queryFn: () => api.get<PageDetail>(`/pages/${pageId}`) });
   const spaces = useQuery({ queryKey: ['spaces'], queryFn: () => api.get<{ data: Space[] }>('/spaces') });
@@ -636,6 +637,22 @@ function PageDetailView({ pageId, spaceId, canWrite }: { pageId: string; spaceId
       setBodyDoc(page.data.body ?? EMPTY_DOC);
     }
   }, [page.data]);
+
+  /* Grow the title box to fit, so long titles wrap instead of being clipped. */
+  useLayoutEffect(() => {
+    const el = titleRef.current;
+    if (!el) return;
+    const fit = () => { el.style.height = '0px'; el.style.height = `${el.scrollHeight}px`; };
+    fit();
+    let lastWidth = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === lastWidth) return; // ignore our own height changes
+      lastWidth = el.clientWidth;
+      fit();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [title]);
 
   const dirty = !!page.data && (
     title !== (page.data.title ?? '') || JSON.stringify(bodyDoc) !== JSON.stringify(page.data.body ?? EMPTY_DOC)
@@ -719,12 +736,17 @@ function PageDetailView({ pageId, spaceId, canWrite }: { pageId: string; spaceId
 
       <div className="flex gap-4">
         <div className="min-w-0 flex-1 pb-24">
-          <input
+          <textarea
+            ref={titleRef}
+            rows={1}
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => setTitle(e.target.value.replace(/\n/g, ' '))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLTextAreaElement).blur(); }
+            }}
             placeholder={t('kb.untitled')}
             readOnly={!canWrite}
-            className="w-full truncate bg-transparent text-[28px] font-bold leading-tight text-foreground outline-none placeholder:text-faint"
+            className="w-full resize-none overflow-hidden break-words bg-transparent text-[28px] font-bold leading-tight text-foreground outline-none placeholder:text-faint focus-visible:outline-none"
           />
           <p className="mb-5 mt-1 text-xs text-faint">
             {page.data.updatedAt ? `${t('kb.updated')} ${fmtDate(page.data.updatedAt)}` : ' '}
