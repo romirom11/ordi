@@ -3,6 +3,24 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.14.0
+
+- Changing a project's visibility no longer crashes the page: a spinner
+  rendered as a block element inside a paragraph, which WebKit (the
+  desktop app) turns into a NotFoundError when it unmounts. Spinners are
+  inline elements now, so the class of bug is closed.
+- New projects choose visibility, lead, members and dates in the create
+  dialog, and default to private.
+- My tasks separates Assigned from Created; a task filed for someone else
+  is no longer listed as work to do. `/me/tasks` returns `created` in
+  place of `createdUnassigned`.
+- Clicking a notification marks it read.
+- Profile photo upload, and a timezone picker instead of a typed string.
+- MCP: update_note, list_kb_spaces / list_kb_pages / get_kb_page /
+  update_kb_page, list_users, and ownerId on create_company and
+  create_deal. Everything an agent writes it can now read back and
+  correct.
+
 ## v1.13.0
 
 - Workspace projects and KB spaces answer to the role, not only to
@@ -26,24 +44,11 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   behaviour - paid, approval, balance and quota, half days,
   carry-forward. The API had the CRUD; nothing in the app reached it.
 - MCP: single-record reads for companies, contacts and deals, customFields
-  in every list, update tools for all three, list_notes and update_note
-  plus notes in search, the knowledge base reachable end to end
-  (list_kb_spaces / list_kb_pages / get_kb_page / update_kb_page),
-  list_users and ownerId on create, a duplicate guard on create_company, a
-  structured reason with move_deal, and update_custom_field for retiring a
-  definition. Everything an agent can write it can now read back and
-  correct.
+  in every list, update tools for all three, list_notes plus notes in
+  search, a duplicate guard on create_company, a structured reason with
+  move_deal, and update_custom_field for retiring a definition.
 - customFields merge by key on PATCH for every entity that has them -
   setting one field no longer erases the rest.
-- Changing a project's visibility no longer crashes the page: a spinner
-  rendered as a block element inside a paragraph, which WebKit (the
-  desktop app) turns into a NotFoundError on unmount.
-- New projects choose visibility, lead, members and dates in the create
-  dialog, and default to private.
-- My tasks separates Assigned from Created; a task filed for someone else
-  is no longer listed as work to do.
-- Clicking a notification marks it read.
-- Profile photo upload, and a timezone picker instead of a typed string.
 
 ## v1.12.0
 
