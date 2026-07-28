@@ -8,7 +8,7 @@ import { z } from 'zod';
 import {
   COMPANY_STATUSES, CUSTOM_FIELD_ENTITIES, CUSTOM_FIELD_TYPES, LEAD_STATUSES,
   LEAD_ACTIVITY_OUTCOME_STATUSES, SALES_ACTIVITY_TYPES, WRITABLE_LEAD_STATUSES,
-  docToText, textToDoc,
+  dateOnlySchema, researchImportSchema, docToText, textToDoc,
 } from '@ordi/shared';
 import { OrdiClient } from './client';
 
@@ -151,18 +151,22 @@ export function buildServer(client: OrdiClient): McpServer {
   server.tool('get_lead', 'One lead with structured research, conversion link and custom fields', { leadId: z.string() },
   ({ leadId }) => wrap(() => client.get(`/leads/${leadId}`)));
 
-  server.tool('get_sales_work', 'Due sales work grouped into overdue, today, waiting for reply, nurture due and no-next-action queues', {},
-  () => wrap(() => client.get('/sales-work')));
+  server.tool('get_sales_work', 'Due sales work grouped into overdue, today, waiting for reply, nurture due and no-next-action queues', {
+  scope: z.enum(['mine', 'all']).optional().describe('Defaults to mine; use all for the whole sales team'),
+}, ({ scope }) => wrap(() => client.get(`/sales-work?scope=${scope ?? 'mine'}`)));
 
   server.tool('list_sales_activities', 'List planned and completed sales activities for a lead, deal or company', {
   leadId: z.string().optional(), dealId: z.string().optional(), companyId: z.string().optional(),
-  status: z.enum(['planned', 'completed', 'cancelled']).optional(),
-}, ({ leadId, dealId, companyId, status }) => wrap(async () => {
+  ownerId: z.string().optional(), status: z.enum(['planned', 'completed', 'cancelled']).optional(),
+  limit: z.number().int().min(1).max(200).optional().describe('Defaults to 100'),
+}, ({ leadId, dealId, companyId, ownerId, status, limit }) => wrap(async () => {
   const qs = new URLSearchParams();
   if (leadId) qs.set('leadId', leadId);
   if (dealId) qs.set('dealId', dealId);
   if (companyId) qs.set('companyId', companyId);
+  if (ownerId) qs.set('ownerId', ownerId);
   if (status) qs.set('status', status);
+  if (limit) qs.set('limit', String(limit));
   return client.get(`/sales-activities${qs.toString() ? `?${qs}` : ''}`);
 }));
 
@@ -410,16 +414,21 @@ export function buildServer(client: OrdiClient): McpServer {
   title: z.string().optional(), product: z.string().optional(), score: z.number().int().min(0).max(100).optional(),
   signal: z.string().optional(), painSignal: z.string().optional(), evidence: z.string().optional(),
   whyFit: z.string().optional(), whyNow: z.string().optional(), sourceUrl: z.string().optional(),
-  opener: z.string().optional(), caution: z.string().optional(), nurtureUntil: z.string().optional(),
+  opener: z.string().optional(), caution: z.string().optional(), nurtureUntil: dateOnlySchema.nullable().optional(),
   disqualifiedReason: z.string().optional(), ownerId: z.string().optional(),
-}, ({ leadId, ...patch }) => wrap(() => client.patch(`/leads/${leadId}`, patch)));
+}, ({ leadId, ...patch }) => wrap(() => {
+  if (patch.status === 'nurture' && !patch.nurtureUntil) {
+    throw new Error('nurtureUntil is required when status is nurture');
+  }
+  return client.patch(`/leads/${leadId}`, patch);
+}));
 
   server.tool('preview_research_import', 'Validate and preview a structured B2B research batch without writing data', {
-  payload: z.record(z.string(), z.unknown()),
+  payload: researchImportSchema.describe('Research batch with title, product context, prospects and optional exclusions'),
 }, ({ payload }) => wrap(() => client.post('/leads/import/preview', payload)));
 
-  server.tool('import_research', 'Import one structured B2B research batch. The API deduplicates companies and leads and retains exclusions.', {
-  payload: z.record(z.string(), z.unknown()),
+  server.tool('import_research', 'Import one structured B2B research batch. Each prospect includes name plus optional domain/company_url, evidence, fit, timing, source, opener, caution, dimensions and secondary_sources. The API matches companies by domain first, deduplicates leads and retains exclusions.', {
+  payload: researchImportSchema.describe('Research batch with title, product context, prospects and optional exclusions'),
 }, ({ payload }) => wrap(() => client.post('/leads/import', payload)));
 
   server.tool('schedule_sales_activity', 'Schedule the next sales action for exactly one lead or deal', {
@@ -433,6 +442,7 @@ export function buildServer(client: OrdiClient): McpServer {
 
   server.tool('complete_sales_activity', 'Complete a planned sales activity and optionally schedule its follow-up in the same action', {
   activityId: z.string(), outcome: z.string().optional(), leadStatus: z.enum(LEAD_ACTIVITY_OUTCOME_STATUSES).optional(),
+  nurtureUntil: dateOnlySchema.optional().describe('Required when leadStatus is nurture; independent of follow-up timing'),
   nextActivity: z.object({
     type: z.enum(SALES_ACTIVITY_TYPES), dueAt: z.string(), channel: z.string().optional(),
     subject: z.string().optional(), context: z.string().optional(),
@@ -440,6 +450,9 @@ export function buildServer(client: OrdiClient): McpServer {
 }, ({ activityId, ...body }) => wrap(async () => {
   if (body.nextActivity && (body.leadStatus === 'disqualified' || body.leadStatus === 'no_response')) {
     throw new Error('Terminal lead statuses cannot have a follow-up activity');
+  }
+  if (body.leadStatus === 'nurture' && !body.nurtureUntil) {
+    throw new Error('nurtureUntil is required when leadStatus is nurture');
   }
   return client.post(`/sales-activities/${activityId}/complete`, body);
 }));

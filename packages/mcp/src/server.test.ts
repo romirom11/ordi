@@ -216,6 +216,20 @@ describe('sales workspace tools', () => {
     expect(posts).toEqual([{ path: '/leads/import/preview', body: payload }]);
   });
 
+  it('describes and validates the structured research import contract', async () => {
+    const client = await connect(fakeApi({}));
+    const tool = (await client.listTools()).tools.find((item) => item.name === 'import_research');
+    const payloadSchema = (tool?.inputSchema as any)?.properties?.payload;
+    expect(payloadSchema?.properties).toHaveProperty('title');
+    expect(payloadSchema?.properties).toHaveProperty('prospects');
+
+    const invalid = await client.callTool({
+      name: 'import_research',
+      arguments: { payload: { prospects: [{ name: 'Acme' }] } },
+    });
+    expect(invalid.isError).toBe(true);
+  });
+
   it('requires exactly one activity parent before calling the API', async () => {
     const posts: Array<{ path: string; body: unknown }> = [];
     const client = await connect(fakeApi({}, posts));
@@ -243,6 +257,22 @@ describe('sales workspace tools', () => {
       },
     });
     expect(terminalFollowUp.isError).toBe(true);
+    expect(posts).toHaveLength(0);
+  });
+
+  it('requires a valid independent return date for nurture', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({}, posts));
+    const missingDate = await client.callTool({
+      name: 'complete_sales_activity',
+      arguments: { activityId: 'a1', leadStatus: 'nurture' },
+    });
+    const invalidDate = await client.callTool({
+      name: 'update_lead',
+      arguments: { leadId: 'l1', nurtureUntil: 'next quarter' },
+    });
+    expect(missingDate.isError).toBe(true);
+    expect(invalidDate.isError).toBe(true);
     expect(posts).toHaveLength(0);
   });
 });

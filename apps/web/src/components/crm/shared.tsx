@@ -284,6 +284,8 @@ extendDict({
     'crm.importResearch': 'Import research',
     'crm.workTitle': 'What needs attention',
     'crm.workHint': 'Sales actions ordered by urgency.',
+    'crm.workMine': 'My work',
+    'crm.workTeam': 'Team',
     'crm.queue.overdue': 'Overdue',
     'crm.queue.today': 'Due today',
     'crm.queue.waiting': 'Waiting for reply',
@@ -316,6 +318,7 @@ extendDict({
     'crm.outcome': 'Outcome',
     'crm.context': 'Context',
     'crm.followUp': 'Schedule follow-up',
+    'crm.nurtureUntil': 'Return to lead on',
     'crm.salesHistory': 'Sales history',
     'crm.noSalesActivity': 'No sales activity yet.',
     'crm.research': 'Research',
@@ -362,6 +365,7 @@ extendDict({
     'crm.legacyLeadDealHint': 'This record predates the Leads workspace. Keep it as a qualified deal or move it to Leads.',
     'crm.qualifiedFromLead': 'Qualified from a researched lead',
     'crm.viewResearch': 'View original research',
+    'crm.convertedHistoryMoved': 'Sales history, notes and files continue on the qualified deal.',
   },
   uk: {
     'crm.tabWork': 'Робота',
@@ -372,6 +376,8 @@ extendDict({
     'crm.importResearch': 'Імпортувати ресерч',
     'crm.workTitle': 'Що потребує уваги',
     'crm.workHint': 'Наступні дії з продажів за терміновістю.',
+    'crm.workMine': 'Моя робота',
+    'crm.workTeam': 'Команда',
     'crm.queue.overdue': 'Прострочено',
     'crm.queue.today': 'На сьогодні',
     'crm.queue.waiting': 'Чекаємо відповіді',
@@ -404,6 +410,7 @@ extendDict({
     'crm.outcome': 'Результат',
     'crm.context': 'Контекст',
     'crm.followUp': 'Запланувати фолоу-ап',
+    'crm.nurtureUntil': 'Повернутися до ліда',
     'crm.salesHistory': 'Історія продажу',
     'crm.noSalesActivity': 'Дій з продажу ще немає.',
     'crm.research': 'Ресерч',
@@ -450,6 +457,7 @@ extendDict({
     'crm.legacyLeadDealHint': 'Цей запис створено до нового розділу «Ліди». Залиште як кваліфіковану угоду або перенесіть у ліди.',
     'crm.qualifiedFromLead': 'Кваліфіковано з дослідженого ліда',
     'crm.viewResearch': 'Відкрити початковий ресерч',
+    'crm.convertedHistoryMoved': 'Історія продажу, нотатки й файли продовжуються у кваліфікованій угоді.',
   },
 });
 
@@ -501,6 +509,7 @@ export interface Deal {
   id: string; companyId?: string | null; projectId?: string | null; sourceLeadId?: string | null; title: string; stageId: string;
   amount?: string | number | null; currency?: string | null; expectedCloseDate?: string | null;
   ownerId?: string | null; lostReason?: string | null; version?: number;
+  nextActivity?: SalesActivity | null;
 }
 
 export interface Lead {
@@ -533,6 +542,7 @@ export interface Lead {
   ownerId?: string | null;
   convertedDealId?: string | null;
   legacyDealId?: string | null;
+  nextActivity?: SalesActivity | null;
   createdAt?: string | null;
   version?: number;
 }
@@ -630,17 +640,24 @@ export function useContacts(companyId?: string | null) {
   });
 }
 
-export function useSalesActivities(params: { leadId?: string; dealId?: string; companyId?: string; status?: string }) {
+export function useSalesActivities(params: {
+  leadId?: string;
+  dealId?: string;
+  companyId?: string;
+  ownerId?: string;
+  status?: string;
+  limit?: number;
+}) {
   return useQuery<SalesActivity[]>({
     queryKey: ['sales-activities', params],
     queryFn: () => api.get<{ data: SalesActivity[] }>(`/sales-activities${qs(params)}`).then((r) => r.data),
   });
 }
 
-export function useSalesWork() {
+export function useSalesWork(scope: 'mine' | 'all' = 'mine') {
   return useQuery<SalesWork>({
-    queryKey: ['sales-work'],
-    queryFn: () => api.get<SalesWork>('/sales-work'),
+    queryKey: ['sales-work', scope],
+    queryFn: () => api.get<SalesWork>(`/sales-work${qs({ scope, limit: 50 })}`),
   });
 }
 

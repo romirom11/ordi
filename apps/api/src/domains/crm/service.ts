@@ -187,11 +187,51 @@ export async function getDeal(id: string) {
 
 // ── Leads, research and sales work ──
 
-const TERMINAL_LEAD_STATUSES = new Set(['converted', 'disqualified', 'no_response']);
 const STOPPED_LEAD_STATUSES = new Set(['disqualified', 'no_response']);
 
 function normalized(value: string | null | undefined): string {
   return (value ?? '').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
+}
+
+function boundedLimit(value: number | undefined, fallback: number, maximum: number): number {
+  return Number.isFinite(value) ? Math.max(1, Math.min(Math.trunc(value!), maximum)) : fallback;
+}
+
+const NON_COMPANY_HOSTS = [
+  'indeed.com',
+  'linkedin.com',
+  'companieshouse.gov.uk',
+  'find-and-update.company-information.service.gov.uk',
+  'heyjobs.co',
+];
+
+function normalizedDomain(value: string | null | undefined): string | null {
+  const raw = value?.trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw.includes('://') ? raw : `https://${raw}`);
+    return url.hostname.toLocaleLowerCase().replace(/^www\./, '') || null;
+  } catch {
+    return null;
+  }
+}
+
+function isCompanyHost(host: string): boolean {
+  return !NON_COMPANY_HOSTS.some((blocked) => host === blocked || host.endsWith(`.${blocked}`));
+}
+
+function prospectDomain(prospect: any): string | null {
+  const explicit = normalizedDomain(prospect.domain ?? prospect.company_url);
+  if (explicit) return explicit;
+  const urls = [
+    ...(prospect.secondary_sources ?? []).map((source: any) => source?.url),
+    prospect.source_url,
+  ];
+  for (const value of urls) {
+    const host = normalizedDomain(value);
+    if (host && isCompanyHost(host)) return host;
+  }
+  return null;
 }
 
 function researchCheckedAt(value: string | null | undefined): Date | null {
@@ -246,7 +286,12 @@ export async function listLeads(params: {
       ? sql`(${schema.leads.title} ilike ${'%' + params.q + '%'} or ${schema.leads.painSignal} ilike ${'%' + params.q + '%'} or ${schema.leads.evidence} ilike ${'%' + params.q + '%'})`
       : undefined,
   )).orderBy(desc(schema.leads.createdAt)).limit(params.limit ?? 100);
-  return enrichLeads(rows);
+  const [enriched, activities] = await Promise.all([
+    enrichLeads(rows),
+    nextSalesActivities({ leadIds: rows.map((row) => row.id) }),
+  ]);
+  const nextByLead = new Map(activities.map((activity) => [activity.leadId, activity]));
+  return enriched.map((lead) => ({ ...lead, nextActivity: nextByLead.get(lead.id) ?? null }));
 }
 
 async function getLeadRecord(id: string) {
@@ -284,6 +329,9 @@ async function assertLeadContact(companyId: string, contactId: string | null | u
 
 export async function createLead(actor: Actor, input: any) {
   await assertLeadContact(input.companyId, input.contactId);
+  if (input.status === 'nurture' && !input.nurtureUntil) {
+    throw err.validation('A nurture return date is required');
+  }
   const { db } = getDb();
   const id = ulid();
   await db.insert(schema.leads).values({
@@ -334,6 +382,11 @@ export async function updateLead(actor: Actor, id: string, input: any) {
   assertVersion(before, input.version, before);
   const nextCompanyId = input.companyId ?? before.companyId;
   const nextContactId = input.contactId === undefined ? before.contactId : input.contactId;
+  const nextStatus = input.status ?? before.status;
+  const nextNurtureUntil = input.nurtureUntil === undefined ? before.nurtureUntil : input.nurtureUntil;
+  if (nextStatus === 'nurture' && !nextNurtureUntil) {
+    throw err.validation('A nurture return date is required');
+  }
   if (input.companyId !== undefined || input.contactId !== undefined) await assertLeadContact(nextCompanyId, nextContactId);
   const patch: Record<string, unknown> = {};
   for (const key of [
@@ -343,6 +396,9 @@ export async function updateLead(actor: Actor, id: string, input: any) {
     'rawResearch', 'nurtureUntil', 'disqualifiedReason', 'ownerId',
   ]) {
     if (input[key] !== undefined) patch[key] = input[key];
+  }
+  if (input.status && input.status !== 'nurture' && input.nurtureUntil === undefined) {
+    patch.nurtureUntil = null;
   }
   if (input.sourceCheckedAt !== undefined) patch.sourceCheckedAt = input.sourceCheckedAt ? new Date(input.sourceCheckedAt) : null;
   if (input.customFields !== undefined) patch.customFields = mergeCustomFields(before.customFields, input.customFields);
@@ -383,11 +439,16 @@ export async function softDeleteLead(actor: Actor, id: string) {
 export async function previewResearchImport(payload: any) {
   const { db } = getDb();
   const [companies, existingLeads] = await Promise.all([
-    db.select({ id: schema.companies.id, name: schema.companies.name }).from(schema.companies).where(isNull(schema.companies.deletedAt)),
+    db.select({ id: schema.companies.id, name: schema.companies.name, domain: schema.companies.domain })
+      .from(schema.companies).where(isNull(schema.companies.deletedAt)),
     db.select({ id: schema.leads.id, companyId: schema.leads.companyId, product: schema.leads.product, title: schema.leads.title })
       .from(schema.leads).where(isNull(schema.leads.deletedAt)),
   ]);
   const companyByName = new Map(companies.map((company) => [normalized(company.name), company]));
+  const companyByDomain = new Map(companies.flatMap((company) => {
+    const domain = normalizedDomain(company.domain);
+    return domain ? [[domain, company] as const] : [];
+  }));
   const leadIdByKey = new Map(existingLeads.map((lead) => [
     `${lead.companyId}:${normalized(lead.product || lead.title)}`,
     lead.id,
@@ -397,13 +458,15 @@ export async function previewResearchImport(payload: any) {
   let companiesToCreate = 0;
   let leadsToCreate = 0;
   const matches = payload.prospects.map((prospect: any) => {
+    const domain = prospectDomain(prospect);
     const companyNameKey = normalized(prospect.name);
-    const company = companyByName.get(companyNameKey);
-    if (!company && !newCompanyKeys.has(companyNameKey)) {
-      newCompanyKeys.add(companyNameKey);
+    const company = (domain ? companyByDomain.get(domain) : undefined) ?? companyByName.get(companyNameKey);
+    const newCompanyKey = domain ? `domain:${domain}` : `name:${companyNameKey}`;
+    if (!company && !newCompanyKeys.has(newCompanyKey)) {
+      newCompanyKeys.add(newCompanyKey);
       companiesToCreate += 1;
     }
-    const companyKey = company?.id ?? `new:${companyNameKey}`;
+    const companyKey = company?.id ?? `new:${newCompanyKey}`;
     const leadKey = `${companyKey}:${normalized(payload.product || prospect.name)}`;
     const duplicateLeadId = company ? leadIdByKey.get(leadKey) : undefined;
     const duplicateInPayload = payloadLeadKeys.has(leadKey);
@@ -413,6 +476,7 @@ export async function previewResearchImport(payload: any) {
     }
     return {
       name: prospect.name,
+      domain,
       companyId: company?.id ?? null,
       leadId: duplicateLeadId ?? null,
       action: duplicateLeadId || duplicateInPayload ? 'skip' : company ? 'create_lead' : 'create_company_and_lead',
@@ -457,6 +521,11 @@ export async function importResearch(actor: Actor, payload: any) {
 
     const companyRows = await tx.select().from(schema.companies).where(isNull(schema.companies.deletedAt));
     const companyIdByName = new Map(companyRows.map((company) => [normalized(company.name), company.id]));
+    const companyIdByDomain = new Map(companyRows.flatMap((company) => {
+      const domain = normalizedDomain(company.domain);
+      return domain ? [[domain, company.id] as const] : [];
+    }));
+    const companyById = new Map(companyRows.map((company) => [company.id, company]));
     const leadRows = await tx.select().from(schema.leads).where(isNull(schema.leads.deletedAt));
     const leadIdByKey = new Map(leadRows.map((lead) => [
       `${lead.companyId}:${normalized(lead.product || lead.title)}`,
@@ -467,18 +536,25 @@ export async function importResearch(actor: Actor, payload: any) {
     let createdLeads = 0;
 
     for (const prospect of payload.prospects) {
-      let companyId = companyIdByName.get(normalized(prospect.name));
+      const domain = prospectDomain(prospect);
+      let companyId = (domain ? companyIdByDomain.get(domain) : undefined)
+        ?? companyIdByName.get(normalized(prospect.name));
       if (!companyId) {
         companyId = ulid();
         await tx.insert(schema.companies).values({
           id: companyId,
           name: prospect.name,
+          domain,
           status: 'lead',
           ownerId: actor.userId,
           createdBy: actor.userId,
         });
         companyIdByName.set(normalized(prospect.name), companyId);
+        if (domain) companyIdByDomain.set(domain, companyId);
         createdCompanies += 1;
+      } else if (domain && !companyById.get(companyId)?.domain) {
+        await tx.update(schema.companies).set({ domain }).where(eq(schema.companies.id, companyId));
+        companyIdByDomain.set(domain, companyId);
       }
 
       const key = `${companyId}:${normalized(payload.product || prospect.name)}`;
@@ -554,16 +630,20 @@ export async function listSalesActivities(params: {
   leadId?: string;
   dealId?: string;
   companyId?: string;
+  ownerId?: string;
   status?: string;
   includeLeads?: boolean;
   includeDeals?: boolean;
+  limit?: number;
 }) {
   const { db } = getDb();
+  const limit = boundedLimit(params.limit, 100, 200);
   return db.select().from(schema.salesActivities).where(and(
     isNull(schema.salesActivities.deletedAt),
     params.leadId ? eq(schema.salesActivities.leadId, params.leadId) : undefined,
     params.dealId ? eq(schema.salesActivities.dealId, params.dealId) : undefined,
     params.companyId ? eq(schema.salesActivities.companyId, params.companyId) : undefined,
+    params.ownerId ? eq(schema.salesActivities.ownerId, params.ownerId) : undefined,
     params.status ? eq(schema.salesActivities.status, params.status) : undefined,
     params.includeLeads === false ? isNull(schema.salesActivities.leadId) : undefined,
     params.includeDeals === false ? isNull(schema.salesActivities.dealId) : undefined,
@@ -571,7 +651,30 @@ export async function listSalesActivities(params: {
     sql`case when ${schema.salesActivities.status} = 'planned' then 0 else 1 end`,
     asc(schema.salesActivities.dueAt),
     desc(schema.salesActivities.createdAt),
-  );
+  ).limit(limit);
+}
+
+export async function nextSalesActivities(params: { leadIds?: string[]; dealIds?: string[] }) {
+  const { db } = getDb();
+  const leadIds = [...new Set(params.leadIds ?? [])];
+  const dealIds = [...new Set(params.dealIds ?? [])];
+  const [leadActivities, dealActivities] = await Promise.all([
+    leadIds.length
+      ? db.selectDistinctOn([schema.salesActivities.leadId]).from(schema.salesActivities).where(and(
+        inArray(schema.salesActivities.leadId, leadIds),
+        eq(schema.salesActivities.status, 'planned'),
+        isNull(schema.salesActivities.deletedAt),
+      )).orderBy(schema.salesActivities.leadId, asc(schema.salesActivities.dueAt), asc(schema.salesActivities.createdAt))
+      : [],
+    dealIds.length
+      ? db.selectDistinctOn([schema.salesActivities.dealId]).from(schema.salesActivities).where(and(
+        inArray(schema.salesActivities.dealId, dealIds),
+        eq(schema.salesActivities.status, 'planned'),
+        isNull(schema.salesActivities.deletedAt),
+      )).orderBy(schema.salesActivities.dealId, asc(schema.salesActivities.dueAt), asc(schema.salesActivities.createdAt))
+      : [],
+  ]);
+  return [...leadActivities, ...dealActivities];
 }
 
 export async function getSalesActivity(id: string) {
@@ -608,14 +711,14 @@ export async function createSalesActivity(actor: Actor, input: any) {
     channel: input.channel ?? null,
     subject: input.subject ?? null,
     context: input.context ?? null,
-    dueAt: input.dueAt ? new Date(input.dueAt) : null,
+    dueAt: new Date(input.dueAt),
     createdBy: actor.userId,
   });
   await writeActivity(db, {
     entityType: parent.leadId ? 'lead' : 'deal',
     entityId: parent.leadId ?? parent.dealId!,
     action: 'sales_activity_created',
-    after: { activityId: id, type: input.type, dueAt: input.dueAt ?? null },
+    after: { activityId: id, type: input.type, dueAt: input.dueAt },
     actorId: actor.userId,
     actorType: actor.actorType,
   });
@@ -635,7 +738,7 @@ export async function updateSalesActivity(actor: Actor, id: string, input: any) 
   for (const key of ['type', 'channel', 'subject', 'context', 'ownerId']) {
     if (input[key] !== undefined) patch[key] = input[key];
   }
-  if (input.dueAt !== undefined) patch.dueAt = input.dueAt ? new Date(input.dueAt) : null;
+  if (input.dueAt !== undefined) patch.dueAt = new Date(input.dueAt);
   await db.update(schema.salesActivities).set(patch)
     .where(and(eq(schema.salesActivities.id, id), eq(schema.salesActivities.version, before.version)));
   await writeActivity(db, {
@@ -674,7 +777,7 @@ export async function completeSalesActivity(actor: Actor, id: string, input: any
     if (before.leadId && input.leadStatus) {
       await tx.update(schema.leads).set({
         status: input.leadStatus,
-        nurtureUntil: input.leadStatus === 'nurture' ? input.nextActivity?.dueAt?.slice(0, 10) ?? null : null,
+        nurtureUntil: input.leadStatus === 'nurture' ? input.nurtureUntil : null,
       }).where(eq(schema.leads.id, before.leadId));
       if (STOPPED_LEAD_STATUSES.has(input.leadStatus)) {
         await tx.update(schema.salesActivities).set({ status: 'cancelled' }).where(and(
@@ -736,82 +839,6 @@ export async function cancelSalesActivity(actor: Actor, id: string, version?: nu
     actorId: actor.userId,
     actorType: actor.actorType,
   });
-}
-
-export async function salesWork(actor: Actor) {
-  const { db } = getDb();
-  const canReadDeals = actor.access.permissions.has('deals.read');
-  const [leadRows, dealRows, plannedActivities, companyRows, stageRows] = await Promise.all([
-    db.select().from(schema.leads).where(isNull(schema.leads.deletedAt)),
-    canReadDeals
-      ? db.select().from(schema.deals).where(isNull(schema.deals.deletedAt))
-      : [],
-    db.select().from(schema.salesActivities).where(and(
-      isNull(schema.salesActivities.deletedAt),
-      eq(schema.salesActivities.status, 'planned'),
-      canReadDeals ? undefined : isNull(schema.salesActivities.dealId),
-    )).orderBy(asc(schema.salesActivities.dueAt)),
-    db.select({ id: schema.companies.id, name: schema.companies.name }).from(schema.companies).where(isNull(schema.companies.deletedAt)),
-    canReadDeals ? db.select().from(schema.dealStages) : [],
-  ]);
-  const companies = new Map(companyRows.map((row) => [row.id, row.name]));
-  const stages = new Map(stageRows.map((row) => [row.id, row]));
-  const nextByLead = new Map<string, any>();
-  const nextByDeal = new Map<string, any>();
-  for (const activity of plannedActivities) {
-    if (activity.leadId && !nextByLead.has(activity.leadId)) nextByLead.set(activity.leadId, activity);
-    if (activity.dealId && !nextByDeal.has(activity.dealId)) nextByDeal.set(activity.dealId, activity);
-  }
-  const work = {
-    overdue: [] as any[],
-    dueToday: [] as any[],
-    waitingReply: [] as any[],
-    nurtureDue: [] as any[],
-    noNextAction: [] as any[],
-  };
-  const now = new Date();
-  const startToday = new Date(now);
-  startToday.setHours(0, 0, 0, 0);
-  const endToday = new Date(now);
-  endToday.setHours(23, 59, 59, 999);
-  const classify = (row: any, next: any, status: string) => {
-    if (next?.dueAt && next.dueAt < startToday) work.overdue.push(row);
-    else if (next?.dueAt && next.dueAt <= endToday) work.dueToday.push(row);
-    else if (status === 'waiting_reply') work.waitingReply.push(row);
-    else if (status === 'nurture' && row.nurtureUntil && row.nurtureUntil <= endToday.toISOString().slice(0, 10)) work.nurtureDue.push(row);
-    else if ((!next || !next.dueAt) && (status !== 'nurture' || !row.nurtureUntil)) work.noNextAction.push(row);
-  };
-  for (const lead of leadRows) {
-    if (TERMINAL_LEAD_STATUSES.has(lead.status)) continue;
-    const next = nextByLead.get(lead.id) ?? null;
-    const row = {
-      entityType: 'lead',
-      id: lead.id,
-      title: lead.title,
-      companyId: lead.companyId,
-      companyName: companies.get(lead.companyId) ?? '',
-      status: lead.status,
-      nurtureUntil: lead.nurtureUntil,
-      nextActivity: next,
-    };
-    classify(row, next, lead.status);
-  }
-  for (const deal of dealRows) {
-    const stage = stages.get(deal.stageId);
-    if (!stage || stage.isWon || stage.isLost) continue;
-    const next = nextByDeal.get(deal.id) ?? null;
-    const row = {
-      entityType: 'deal',
-      id: deal.id,
-      title: deal.title,
-      companyId: deal.companyId,
-      companyName: companies.get(deal.companyId) ?? '',
-      status: stage.name,
-      nextActivity: next,
-    };
-    classify(row, next, stage.name);
-  }
-  return work;
 }
 
 export async function convertLead(actor: Actor, id: string, input: any) {
@@ -891,6 +918,8 @@ export async function convertLead(actor: Actor, id: string, input: any) {
     return { dealId, alreadyConverted: false };
   });
 }
+
+export { salesWork } from './work';
 
 export async function demoteDealToLead(actor: Actor, id: string, input: any) {
   const { db } = getDb();

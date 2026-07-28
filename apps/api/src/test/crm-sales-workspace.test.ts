@@ -6,6 +6,16 @@ import { json, reqAs, resetDb, seedRolesAndUsers } from './helpers';
 let users: Awaited<ReturnType<typeof seedRolesAndUsers>>;
 let qualifiedStageId: string;
 let legacyLeadStageId: string;
+let nurtureDealStageId: string;
+
+function localDateAfter(days: number): string {
+  const value = new Date();
+  value.setDate(value.getDate() + days);
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 const research = {
   title: 'kdn.agency — shortlist',
@@ -25,21 +35,22 @@ const research = {
       why_fit: 'Implementation mandate exceeds the role.',
       why_now: 'The vacancy is active.',
       source_title: 'Business Development & Marketing Graduate',
-      source_url: 'https://example.test/lea-hough',
+      source_url: 'https://uk.indeed.com/viewjob?jk=lea-hough',
       source_type: 'Current public listing',
       signal_date: '2026-07-27',
       suggested_channel: 'LinkedIn',
       opener: 'Hi Michael — I saw the AI adoption brief.',
       caution: 'Revalidate before outreach.',
       dimensions: { pain_strength: 5, product_fit: 5 },
-      secondary_sources: [{ title: 'Our People', url: 'https://example.test/team', supports: 'Team structure' }],
+      secondary_sources: [{ title: 'Our People', url: 'https://www.leahough.co.uk/our-people/', supports: 'Team structure' }],
     },
     {
       name: 'Joint Inspection Group',
       stage: 'High intent',
       score: 95,
       pain_signal: 'A seven-person team coordinates auditable documents.',
-      source_url: 'https://example.test/jig',
+      source_url: 'https://uk.indeed.com/viewjob?jk=jig',
+      secondary_sources: [{ title: 'JIG Team', url: 'https://www.jig.org/about/company-structure/jig-staff/' }],
     },
   ],
   patterns: [{ title: 'The role arrives first' }],
@@ -54,9 +65,11 @@ beforeAll(async () => {
   const { db } = getDb();
   legacyLeadStageId = ulid();
   qualifiedStageId = ulid();
+  nurtureDealStageId = ulid();
   await db.insert(schema.dealStages).values([
     { id: legacyLeadStageId, name: 'Lead', position: 0, probability: 10 },
     { id: qualifiedStageId, name: 'Qualified', position: 1, probability: 30 },
+    { id: nurtureDealStageId, name: 'Nurture', position: 2, probability: 20 },
   ]);
 });
 
@@ -96,6 +109,7 @@ describe('research import and daily work', () => {
       painSignal: 'A graduate role owns practice-wide AI adoption.',
       opener: 'Hi Michael — I saw the AI adoption brief.',
       sourceCheckedAt: '2026-07-27T00:00:00.000Z',
+      nextActivity: { type: 'review', status: 'planned' },
     });
     leadId = lea.id;
     companyId = lea.companyId;
@@ -103,6 +117,20 @@ describe('research import and daily work', () => {
     const activities = (await json(reqAs(users.owner!.cookie).get(`/sales-activities?leadId=${leadId}`))).data;
     expect(activities).toHaveLength(1);
     expect(activities[0]).toMatchObject({ type: 'review', status: 'planned' });
+  });
+
+  it('matches company aliases by domain before normalized name', async () => {
+    const preview = await json(reqAs(users.owner!.cookie).post('/leads/import/preview', {
+      ...research,
+      title: 'Domain alias preview',
+      prospects: [{
+        ...research.prospects[0],
+        name: 'Lea Hough and Co',
+        company_url: 'https://leahough.co.uk',
+      }],
+    }));
+    expect(preview).toMatchObject({ companiesToCreate: 0, leadsToCreate: 0 });
+    expect(preview.matches[0]).toMatchObject({ companyId, action: 'skip', domain: 'leahough.co.uk' });
   });
 
   it('completes outreach and schedules the follow-up in one command', async () => {
@@ -120,22 +148,80 @@ describe('research import and daily work', () => {
     expect((await json(reqAs(users.owner!.cookie).get(`/leads/${leadId}`))).status).toBe('waiting_reply');
   });
 
-  it('derives waiting and no-next-action queues', async () => {
+  it('derives owner-scoped waiting and no-next-action queues', async () => {
     const noAction = await json(reqAs(users.owner!.cookie).post('/leads', {
       companyId,
       title: 'Second workflow',
       product: 'Automation audit',
       status: 'ready',
     }));
-    const nurtureWithoutDate = await json(reqAs(users.owner!.cookie).post('/leads', {
+    const nurtureWithoutDate = await reqAs(users.owner!.cookie).post('/leads', {
       companyId,
       title: 'Nurture without a date',
       status: 'nurture',
+    });
+    const someoneElsesLead = await json(reqAs(users.owner!.cookie).post('/leads', {
+      companyId,
+      title: 'Owned by another seller',
+      status: 'ready',
+      ownerId: users.member!.userId,
     }));
     const work = await json(reqAs(users.owner!.cookie).get('/sales-work'));
+    expect(nurtureWithoutDate.status).toBe(400);
     expect(work.waitingReply.some((row: any) => row.id === leadId)).toBe(true);
     expect(work.noNextAction.some((row: any) => row.id === noAction.id)).toBe(true);
-    expect(work.noNextAction.some((row: any) => row.id === nurtureWithoutDate.id)).toBe(true);
+    expect(Object.values(work).flat().some((row: any) => row.id === someoneElsesLead.id)).toBe(false);
+    const teamWork = await json(reqAs(users.owner!.cookie).get('/sales-work?scope=all'));
+    expect(teamWork.noNextAction.some((row: any) => row.id === someoneElsesLead.id)).toBe(true);
+    const bounded = await json(reqAs(users.owner!.cookie).get('/sales-work?scope=all&limit=1'));
+    expect(Object.values(bounded).every((rows: any) => rows.length <= 1)).toBe(true);
+  });
+
+  it('snoozes nurture independently and returns it only on the chosen date', async () => {
+    const nurtureLead = await json(reqAs(users.owner!.cookie).post('/leads', {
+      companyId,
+      title: 'Nurture return date',
+      status: 'ready',
+    }));
+    const activity = await json(reqAs(users.owner!.cookie).post('/sales-activities', {
+      leadId: nurtureLead.id,
+      type: 'follow_up',
+      dueAt: new Date().toISOString(),
+    }));
+    const missingDate = await reqAs(users.owner!.cookie).post(`/sales-activities/${activity.id}/complete`, {
+      leadStatus: 'nurture',
+    });
+    expect(missingDate.status).toBe(400);
+
+    const tomorrow = localDateAfter(1);
+    const completed = await reqAs(users.owner!.cookie).post(`/sales-activities/${activity.id}/complete`, {
+      leadStatus: 'nurture',
+      nurtureUntil: tomorrow,
+    });
+    expect(completed.status).toBe(200);
+    const snoozed = await json(reqAs(users.owner!.cookie).get(`/leads/${nurtureLead.id}`));
+    expect(snoozed).toMatchObject({ status: 'nurture', nurtureUntil: tomorrow });
+    const beforeReturn = await json(reqAs(users.owner!.cookie).get('/sales-work'));
+    expect(Object.values(beforeReturn).flat().some((row: any) => row.id === nurtureLead.id)).toBe(false);
+
+    const today = localDateAfter(0);
+    await reqAs(users.owner!.cookie).patch(`/leads/${nurtureLead.id}`, {
+      nurtureUntil: today,
+      version: snoozed.version,
+    });
+    const due = await json(reqAs(users.owner!.cookie).get('/sales-work'));
+    expect(due.nurtureDue.some((row: any) => row.id === nurtureLead.id)).toBe(true);
+  });
+
+  it('keeps deal stage names out of lead lifecycle classification', async () => {
+    const deal = await json(reqAs(users.owner!.cookie).post('/deals', {
+      companyId,
+      title: 'Deal in a stage named Nurture',
+      stageId: nurtureDealStageId,
+      ownerId: users.owner!.userId,
+    }));
+    const work = await json(reqAs(users.owner!.cookie).get('/sales-work'));
+    expect(work.noNextAction.some((row: any) => row.id === deal.id && row.entityType === 'deal')).toBe(true);
   });
 
   it('keeps converted status behind the conversion action and rejects unsafe source links', async () => {
@@ -153,6 +239,12 @@ describe('research import and daily work', () => {
       sourceUrl: 'not a URL',
     });
     expect(malformedLink.status).toBe(400);
+    const invalidNurtureDate = await reqAs(users.owner!.cookie).post('/leads', {
+      companyId,
+      title: 'Invalid nurture date',
+      nurtureUntil: 'next quarter',
+    });
+    expect(invalidNurtureDate.status).toBe(400);
   });
 
   it('stops follow-ups when a lead reaches a terminal outcome', async () => {
@@ -211,6 +303,36 @@ describe('sales activity data integrity', () => {
       createdBy: users.owner!.userId,
     })).rejects.toThrow();
   });
+
+  it('requires a due date for every sales activity and rejects clearing it', async () => {
+    const { db } = getDb();
+    const companyId = ulid();
+    const leadId = ulid();
+    await db.insert(schema.companies).values({ id: companyId, name: 'Due Date Check', createdBy: users.owner!.userId });
+    await db.insert(schema.leads).values({
+      id: leadId,
+      companyId,
+      title: 'Due date lead',
+      createdBy: users.owner!.userId,
+    });
+    await expect(db.insert(schema.salesActivities).values({
+      id: ulid(),
+      leadId,
+      companyId,
+      type: 'review',
+      status: 'planned',
+      createdBy: users.owner!.userId,
+    } as any)).rejects.toThrow();
+
+    const activity = await json(reqAs(users.owner!.cookie).post('/sales-activities', {
+      leadId,
+      type: 'review',
+      dueAt: new Date().toISOString(),
+    }));
+    expect((await reqAs(users.owner!.cookie).patch(`/sales-activities/${activity.id}`, {
+      dueAt: null,
+    })).status).toBe(400);
+  });
 });
 
 describe('lead and deal boundary', () => {
@@ -266,6 +388,9 @@ describe('lead and deal boundary', () => {
     expect((await json(reqAs(users.owner!.cookie).get(`/notes?dealId=${deal.id}`))).data).toHaveLength(1);
     expect((await json(reqAs(users.owner!.cookie).get(`/attachments?entityType=deal&entityId=${deal.id}`))).data[0].id).toBe(file.id);
     expect((await json(reqAs(users.owner!.cookie).get(`/sales-activities?dealId=${deal.id}`))).data.length).toBeGreaterThan(0);
+    const listedDeal = (await json(reqAs(users.owner!.cookie).get('/deals'))).data
+      .find((row: any) => row.id === deal.id);
+    expect(listedDeal.nextActivity).toMatchObject({ dealId: deal.id, status: 'planned' });
   });
 
   it('demotes a legacy Lead-stage deal without losing its note', async () => {

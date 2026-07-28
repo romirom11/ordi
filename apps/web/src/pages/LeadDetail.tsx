@@ -161,8 +161,22 @@ export function LeadDetailPage({ id }: { id: string }) {
               )}
             </section>
 
-            <SalesActivityPanel leadId={id} canWrite={canWrite} />
-            <NotesSection leadId={id} canWrite={canWrite} />
+            {lead.status === 'converted' && lead.convertedDealId ? (
+              <Card className="flex items-center justify-between gap-3 border-primary/30 p-4">
+                <p className="text-[13px] text-muted-foreground">{t('crm.convertedHistoryMoved')}</p>
+                <Link
+                  to={`/deals/${lead.convertedDealId}`}
+                  className="inline-flex shrink-0 items-center gap-1 text-[13px] font-medium text-primary hover:underline"
+                >
+                  {t('crm.deal')} <ChevronRight size={13} />
+                </Link>
+              </Card>
+            ) : (
+              <>
+                <SalesActivityPanel leadId={id} canWrite={canWrite} />
+                <NotesSection leadId={id} canWrite={canWrite} />
+              </>
+            )}
           </div>
         </main>
 
@@ -173,7 +187,9 @@ export function LeadDetailPage({ id }: { id: string }) {
               <RailField label={t('common.status')}>
                 {canWrite && lead.status !== 'converted' ? (
                   <Select className="w-full border-0" value={lead.status} onChange={(event) => patch.mutate({ status: event.target.value })}>
-                    {LEAD_STATUSES.filter((status) => status !== 'converted').map((status) => (
+                    {LEAD_STATUSES.filter((status) => (
+                      status !== 'converted' && (status !== 'nurture' || lead.status === 'nurture')
+                    )).map((status) => (
                       <option key={status} value={status}>{t(`crm.status.${status}`)}</option>
                     ))}
                   </Select>
@@ -213,7 +229,9 @@ export function LeadDetailPage({ id }: { id: string }) {
               <RailField label={t('crm.created')}><RailChip disabled>{fmtDate(lead.createdAt)}</RailChip></RailField>
             </div>
           </div>
-          <FilesSection entityType="lead" entityId={id} canWrite={canWrite} variant="rail" />
+          {lead.status !== 'converted' && (
+            <FilesSection entityType="lead" entityId={id} canWrite={canWrite} variant="rail" />
+          )}
         </aside>
       </div>
     </div>

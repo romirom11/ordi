@@ -222,7 +222,7 @@ The API remains mounted under `/api/v1`. Lead and sales-work routes live in the 
 
 - Lead statuses are `new`, `needs_review`, `ready`, `waiting_reply`, `engaged`, `nurture`, `converted`, `disqualified`, and `no_response`.
 - Activity statuses are `planned`, `completed`, and `cancelled`; types are extensible text values with common UI presets.
-- Work queue membership is derived from active leads/deals and their earliest planned activity. `waiting_reply` is a lead state, while overdue/today/nurture/no-next-action are derived views.
+- Work queue membership is derived in bounded SQL from active leads/deals and their earliest planned activity. It defaults to the current owner with an explicit team scope. `waiting_reply` is a lead state, while overdue/today/nurture/no-next-action are derived views; nurture return dates take precedence over activity timing.
 - Existing deals in a stage named `Lead` remain deals until the user chooses demotion.
 - Existing deal amounts and API payloads remain readable. Create and update payloads accept omitted or null amounts.
 - Existing company status values remain valid; the UI labels a company as a client only when its lifecycle supports that interpretation.

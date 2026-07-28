@@ -20,6 +20,11 @@ function toLocalInput(date: Date): string {
   return local.toISOString().slice(0, 16);
 }
 
+function toDateInput(date: Date): string {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
+}
+
 function errorText(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
 }
@@ -119,7 +124,7 @@ export function ScheduleActivityDialog({ open, onClose, leadId, dealId }: {
       leadId,
       dealId,
       type,
-      dueAt: dueAt ? new Date(dueAt).toISOString() : null,
+      dueAt: new Date(dueAt).toISOString(),
       channel: channel.trim() || undefined,
       subject: subject.trim() || undefined,
       context: context.trim() || undefined,
@@ -179,6 +184,7 @@ export function CompleteActivityDialog({ activity, onClose }: {
   const [leadStatus, setLeadStatus] = useState('waiting_reply');
   const [followUp, setFollowUp] = useState(true);
   const [dueAt, setDueAt] = useState(() => toLocalInput(new Date(Date.now() + 5 * 86_400_000)));
+  const [nurtureUntil, setNurtureUntil] = useState(() => toDateInput(new Date(Date.now() + 30 * 86_400_000)));
   const [error, setError] = useState<string | null>(null);
   const isLead = !!activity?.leadId;
   const terminalLeadStatus = isLead && (leadStatus === 'disqualified' || leadStatus === 'no_response');
@@ -186,6 +192,7 @@ export function CompleteActivityDialog({ activity, onClose }: {
     setOutcome('');
     setLeadStatus('waiting_reply');
     setFollowUp(true);
+    setNurtureUntil(toDateInput(new Date(Date.now() + 30 * 86_400_000)));
     setError(null);
     onClose();
   };
@@ -194,12 +201,13 @@ export function CompleteActivityDialog({ activity, onClose }: {
     outcome: outcome.trim() || undefined,
     version: activity?.version,
     leadStatus: isLead ? leadStatus : undefined,
+    nurtureUntil: isLead && leadStatus === 'nurture' ? nurtureUntil : undefined,
     nextActivity: followUp && dueAt ? {
       type: leadStatus === 'nurture' ? 'nurture' : 'follow_up',
       channel: activity?.channel ?? undefined,
       dueAt: new Date(dueAt).toISOString(),
     } : undefined,
-  }), [activity, dueAt, followUp, isLead, leadStatus, outcome]);
+  }), [activity, dueAt, followUp, isLead, leadStatus, nurtureUntil, outcome]);
 
   const mutation = useMutation({
     mutationFn: () => api.post(`/sales-activities/${activity!.id}/complete`, body),
@@ -228,12 +236,18 @@ export function CompleteActivityDialog({ activity, onClose }: {
                 const value = event.target.value;
                 setLeadStatus(value);
                 if (value === 'disqualified' || value === 'no_response') setFollowUp(false);
+                if (value === 'nurture') setFollowUp(false);
               }}
             >
               {LEAD_ACTIVITY_OUTCOME_STATUSES.map((value) => (
                 <option key={value} value={value}>{t(`crm.status.${value}`)}</option>
               ))}
             </Select>
+          </Field>
+        )}
+        {isLead && leadStatus === 'nurture' && (
+          <Field label={t('crm.nurtureUntil')}>
+            <Input required type="date" value={nurtureUntil} onChange={(event) => setNurtureUntil(event.target.value)} />
           </Field>
         )}
         <label className="flex items-center gap-2 text-[13px]">

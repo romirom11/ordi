@@ -216,7 +216,9 @@ export function crmRoutes() {
       projectId === 'none' ? isNull(schema.deals.projectId)
         : projectId ? eq(schema.deals.projectId, projectId) : undefined,
     )).orderBy(desc(schema.deals.createdAt));
-    return c.json({ data: rows });
+    const activities = await svc.nextSalesActivities({ dealIds: rows.map((row) => row.id) });
+    const nextByDeal = new Map(activities.map((activity) => [activity.dealId, activity]));
+    return c.json({ data: rows.map((row) => ({ ...row, nextActivity: nextByDeal.get(row.id) ?? null })) });
   });
 
   app.post('/deals', guard('deals.write'), async (c) => {
@@ -270,7 +272,13 @@ export function crmRoutes() {
   });
 
   // ── Sales activities and Work queue ──
-  app.get('/sales-work', guard('crm.read'), async (c) => c.json(await svc.salesWork(currentActor(c))));
+  app.get('/sales-work', guard('crm.read'), async (c) => {
+    const scope = c.req.query('scope') === 'all' ? 'all' : 'mine';
+    return c.json(await svc.salesWork(currentActor(c), {
+      scope,
+      limit: Number(c.req.query('limit') ?? 50),
+    }));
+  });
 
   app.get('/sales-activities', async (c) => {
     const actor = currentActor(c);
@@ -285,9 +293,11 @@ export function crmRoutes() {
       leadId,
       dealId,
       companyId: c.req.query('companyId'),
+      ownerId: c.req.query('ownerId'),
       status: c.req.query('status'),
       includeLeads: canReadLeads,
       includeDeals: canReadDeals,
+      limit: Number(c.req.query('limit') ?? 100),
     }) });
   });
 

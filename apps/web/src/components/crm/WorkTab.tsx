@@ -3,14 +3,15 @@ import { AlertCircle, CalendarClock, Check, Clock3, Inbox, PauseCircle } from 'l
 import { useNavigate } from '../../lib/router';
 import { useCan } from '../../lib/auth';
 import { useT } from '../../lib/i18n';
-import { Button, EmptyState, Skeleton, fmtRelative } from '../ui';
+import { Button, EmptyState, Select, Skeleton, fmtRelative } from '../ui';
 import { CompleteActivityDialog, ScheduleActivityDialog } from './SalesActivityPanel';
 import { salesActivityTypeLabel, useSalesWork, type SalesActivity, type SalesWorkItem } from './shared';
 
 export function WorkTab() {
   const t = useT();
   const can = useCan();
-  const workQ = useSalesWork();
+  const [scope, setScope] = useState<'mine' | 'all'>('mine');
+  const workQ = useSalesWork(scope);
   const [complete, setComplete] = useState<SalesActivity | null>(null);
   const [schedule, setSchedule] = useState<SalesWorkItem | null>(null);
 
@@ -21,9 +22,6 @@ export function WorkTab() {
   const work = workQ.data;
   if (!work) return <EmptyState title={t('common.error')} />;
   const total = Object.values(work).reduce((sum, rows) => sum + rows.length, 0);
-  if (total === 0) {
-    return <EmptyState icon={<Check size={20} />} title={t('crm.allCaughtUp')} hint={t('crm.workHint')} />;
-  }
 
   const groups = [
     { key: 'overdue', title: t('crm.queue.overdue'), rows: work.overdue, icon: <AlertCircle size={15} className="text-destructive" /> },
@@ -36,10 +34,19 @@ export function WorkTab() {
   return (
     <div className="flex-1 overflow-auto p-6">
       <div className="mx-auto max-w-5xl space-y-6">
-        <div>
-          <h2 className="text-base font-semibold">{t('crm.workTitle')}</h2>
-          <p className="text-[13px] text-muted-foreground">{t('crm.workHint')}</p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold">{t('crm.workTitle')}</h2>
+            <p className="text-[13px] text-muted-foreground">{t('crm.workHint')}</p>
+          </div>
+          <Select value={scope} onChange={(event) => setScope(event.target.value as 'mine' | 'all')}>
+            <option value="mine">{t('crm.workMine')}</option>
+            <option value="all">{t('crm.workTeam')}</option>
+          </Select>
         </div>
+        {total === 0 && (
+          <EmptyState icon={<Check size={20} />} title={t('crm.allCaughtUp')} hint={t('crm.workHint')} />
+        )}
         {groups.filter((group) => group.rows.length > 0).map((group) => (
           <section key={group.key}>
             <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">

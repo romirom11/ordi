@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Search, Target } from 'lucide-react';
 import { useNavigate } from '../../lib/router';
 import { useT } from '../../lib/i18n';
 import { EmptyState, Input, Select, Skeleton, fmtRelative } from '../ui';
 import {
   LEAD_STATUSES, StatusPill, salesActivityTypeLabel,
-  useLeads, useSalesActivities, type SalesActivity,
+  useLeads,
 } from './shared';
 
 export function LeadsTab() {
@@ -14,14 +14,6 @@ export function LeadsTab() {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const leadsQ = useLeads({ q, status });
-  const activitiesQ = useSalesActivities({ status: 'planned' });
-  const nextByLead = useMemo(() => {
-    const map = new Map<string, SalesActivity>();
-    for (const activity of activitiesQ.data ?? []) {
-      if (activity.leadId && !map.has(activity.leadId)) map.set(activity.leadId, activity);
-    }
-    return map;
-  }, [activitiesQ.data]);
   const leads = leadsQ.data ?? [];
 
   return (
@@ -55,7 +47,7 @@ export function LeadsTab() {
               <span>{t('crm.nextAction')}</span>
             </div>
             {leads.map((lead) => {
-              const next = nextByLead.get(lead.id);
+              const next = lead.nextActivity;
               return (
                 <button
                   key={lead.id}

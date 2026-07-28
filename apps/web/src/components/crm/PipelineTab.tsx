@@ -15,8 +15,8 @@ import { Avatar, EmptyState, Skeleton, Tooltip, cn, fmtMoney, fmtDate } from '..
 import { ContextMenu, ConfirmDialog, toast, type ContextMenuEntry } from '../overlays';
 import { LostReasonDialog } from './dialogs';
 import {
-  useAllDeals, useCompanies, useDealStages, useProjectsLookup, useSalesActivities,
-  useUsersLookup, salesActivityTypeLabel, type Deal, type SalesActivity, type Stage,
+  useAllDeals, useCompanies, useDealStages, useProjectsLookup,
+  useUsersLookup, salesActivityTypeLabel, type Deal, type Stage,
 } from './shared';
 
 export function PipelineTab() {
@@ -33,7 +33,6 @@ export function PipelineTab() {
   const companiesQ = useCompanies();
   const usersQ = useUsersLookup();
   const projectsQ = useProjectsLookup();
-  const activitiesQ = useSalesActivities({ status: 'planned' });
 
   const stages = stagesQ.data ?? [];
   const allDeals = dealsQ.data ?? [];
@@ -41,12 +40,10 @@ export function PipelineTab() {
   const userMap = useMemo(() => new Map((usersQ.data ?? []).map((u) => [u.id, u])), [usersQ.data]);
   const projectMap = useMemo(() => new Map((projectsQ.data ?? []).map((p) => [p.id, p])), [projectsQ.data]);
   const nextByDeal = useMemo(() => {
-    const map = new Map<string, SalesActivity>();
-    for (const activity of activitiesQ.data ?? []) {
-      if (activity.dealId && !map.has(activity.dealId)) map.set(activity.dealId, activity);
-    }
+    const map = new Map<string, NonNullable<Deal['nextActivity']>>();
+    for (const deal of allDeals) if (deal.nextActivity) map.set(deal.id, deal.nextActivity);
     return map;
-  }, [activitiesQ.data]);
+  }, [allDeals]);
 
   // Filter by linked project: '' = all, 'none' = unlinked, otherwise a project id.
   // Chips appear only once at least one deal is linked – zero setup, zero noise.
@@ -166,9 +163,17 @@ export function PipelineTab() {
             if (aDue && !bDue) return 1;
             return (aDue ? new Date(aDue).getTime() : 0) - (bDue ? new Date(bDue).getTime() : 0);
           });
-          const sum = list.reduce((n, d) => n + Number(d.amount ?? 0), 0);
-          const weighted = sum * (stage.probability / 100);
-          const currency = list[0]?.currency ?? 'USD';
+          const totalsByCurrency = new Map<string, number>();
+          for (const deal of list) {
+            const currency = deal.currency ?? 'USD';
+            totalsByCurrency.set(currency, (totalsByCurrency.get(currency) ?? 0) + Number(deal.amount ?? 0));
+          }
+          if (totalsByCurrency.size === 0) totalsByCurrency.set('USD', 0);
+          const totals = [...totalsByCurrency.entries()].sort(([a], [b]) => a.localeCompare(b));
+          const totalLabel = totals.map(([currency, amount]) => fmtMoney(amount, currency)).join(' · ');
+          const weightedLabel = totals
+            .map(([currency, amount]) => fmtMoney(amount * (stage.probability / 100), currency))
+            .join(' · ');
           const isOver = overStage === stage.id;
           return (
             <div
@@ -195,10 +200,10 @@ export function PipelineTab() {
                   <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">{list.length}</span>
                 </div>
                 <div className="mt-1 flex items-center justify-between text-xs">
-                  <span className="font-semibold tabular-nums">{fmtMoney(sum, currency)}</span>
+                  <span className="truncate font-semibold tabular-nums" title={totalLabel}>{totalLabel}</span>
                   {!stage.isWon && !stage.isLost && (
                     <Tooltip label={t('crm.weightedShort')}>
-                      <span className="tabular-nums text-faint">≈ {fmtMoney(weighted, currency)}</span>
+                      <span className="max-w-28 truncate tabular-nums text-faint" title={weightedLabel}>≈ {weightedLabel}</span>
                     </Tooltip>
                   )}
                 </div>

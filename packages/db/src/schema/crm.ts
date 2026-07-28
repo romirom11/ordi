@@ -23,6 +23,7 @@ export const companies = pgTable('companies', {
 }, (t) => ({
   statusIdx: index('companies_status_idx').on(t.status),
   ownerIdx: index('companies_owner_idx').on(t.ownerId),
+  domainIdx: index('companies_domain_idx').on(t.domain),
 }));
 
 export const contacts = pgTable('contacts', {
@@ -158,7 +159,7 @@ export const salesActivities = pgTable('sales_activities', {
   subject: text('subject'),
   context: text('context'),
   outcome: text('outcome'),
-  dueAt: timestamp('due_at', { withTimezone: true }),
+  dueAt: timestamp('due_at', { withTimezone: true }).notNull(),
   completedAt: timestamp('completed_at', { withTimezone: true }),
   ownerId: text('owner_id').references(() => users.id),
   createdBy: createdBy(),
@@ -171,6 +172,8 @@ export const salesActivities = pgTable('sales_activities', {
   companyIdx: index('sales_activities_company_idx').on(t.companyId),
   ownerIdx: index('sales_activities_owner_idx').on(t.ownerId),
   dueIdx: index('sales_activities_due_idx').on(t.status, t.dueAt),
+  leadDueIdx: index('sales_activities_lead_due_idx').on(t.leadId, t.status, t.dueAt),
+  dealDueIdx: index('sales_activities_deal_due_idx').on(t.dealId, t.status, t.dueAt),
   parentCheck: check('sales_activities_parent_check', sql`(${t.leadId} is null) <> (${t.dealId} is null)`),
 }));
 

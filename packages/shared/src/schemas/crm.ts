@@ -117,6 +117,13 @@ const publicHttpUrlSchema = z.string().url().refine((value) => {
   }
 }, 'Only public HTTP(S) URLs are allowed');
 
+export const dateOnlySchema = z.string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD')
+  .refine((value) => {
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  }, 'Expected a valid calendar date');
+
 const secondarySourceSchema = z.object({
   title: z.string(),
   url: publicHttpUrlSchema,
@@ -147,7 +154,7 @@ export const leadInputSchema = z.object({
   dimensions: z.record(z.string(), z.number()).optional(),
   secondarySources: z.array(secondarySourceSchema).optional(),
   rawResearch: z.record(z.string(), z.unknown()).optional(),
-  nurtureUntil: z.string().nullable().optional(),
+  nurtureUntil: dateOnlySchema.nullable().optional(),
   disqualifiedReason: z.string().nullable().optional(),
   ownerId: idSchema.nullable().optional(),
   customFields: customFieldsSchema.optional(),
@@ -175,7 +182,7 @@ export const salesActivityUpdateSchema = z.object({
   channel: z.string().nullable().optional(),
   subject: z.string().nullable().optional(),
   context: z.string().nullable().optional(),
-  dueAt: z.string().datetime({ offset: true }).nullable().optional(),
+  dueAt: z.string().datetime({ offset: true }).optional(),
   ownerId: idSchema.nullable().optional(),
   version: z.number().int().optional(),
 });
@@ -193,12 +200,27 @@ export const salesActivityCompleteSchema = z.object({
     ownerId: idSchema.nullable().optional(),
   }).optional(),
   leadStatus: z.enum(LEAD_ACTIVITY_OUTCOME_STATUSES).optional(),
+  nurtureUntil: dateOnlySchema.optional(),
 }).superRefine((value, ctx) => {
   if (value.nextActivity && (value.leadStatus === 'disqualified' || value.leadStatus === 'no_response')) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['nextActivity'],
       message: 'Terminal lead statuses cannot have a follow-up activity',
+    });
+  }
+  if (value.leadStatus === 'nurture' && !value.nurtureUntil) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['nurtureUntil'],
+      message: 'A nurture return date is required',
+    });
+  }
+  if (value.leadStatus !== 'nurture' && value.nurtureUntil) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['nurtureUntil'],
+      message: 'A nurture return date requires nurture status',
     });
   }
 });
@@ -220,6 +242,8 @@ export const dealDemoteSchema = z.object({
 
 export const researchProspectSchema = z.object({
   name: z.string().min(1),
+  domain: z.string().optional(),
+  company_url: publicHttpUrlSchema.optional(),
   type: z.string().optional(),
   stage: z.string().optional(),
   score: z.number().int().min(0).max(100).optional(),
