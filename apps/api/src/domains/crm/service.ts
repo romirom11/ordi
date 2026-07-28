@@ -8,6 +8,8 @@ import { emit } from '../../core/events';
 import { assertVersion } from '../../core/locking';
 import { buildCustomFieldFilter, mergeCustomFields } from '../../core/customfields';
 
+type DbReader = Pick<ReturnType<typeof getDb>['db'], 'select'>;
+
 export async function listCompanies(params: {
   q?: string; status?: string; ownerId?: string; cfFilters?: CustomFieldFilter[]; limit: number;
 }) {
@@ -311,10 +313,13 @@ export async function getLead(id: string) {
   return { ...enriched!, convertedDealId: convertedDeal?.id ?? null };
 }
 
-async function assertContactCompany(companyId: string, contactId: string | null | undefined): Promise<void> {
+async function assertContactCompany(
+  companyId: string,
+  contactId: string | null | undefined,
+  dbOrTx: DbReader = getDb().db,
+): Promise<void> {
   if (!contactId) return;
-  const { db } = getDb();
-  const [contact] = await db.select({ id: schema.contacts.id }).from(schema.contacts).where(and(
+  const [contact] = await dbOrTx.select({ id: schema.contacts.id }).from(schema.contacts).where(and(
     eq(schema.contacts.id, contactId),
     eq(schema.contacts.companyId, companyId),
     isNull(schema.contacts.deletedAt),
@@ -690,45 +695,87 @@ export async function getSalesActivity(id: string) {
   return activity;
 }
 
-async function activityParent(input: any) {
+async function activityParent(dbOrTx: DbReader, input: any) {
   if (input.leadId) {
-    const lead = await getLeadRecord(input.leadId);
-    if (lead.status === 'nurture') {
-      throw err.domain('Move the lead out of nurture before scheduling an activity');
-    }
+    const [lead] = await dbOrTx.select().from(schema.leads).where(and(
+      eq(schema.leads.id, input.leadId),
+      isNull(schema.leads.deletedAt),
+    )).for('update');
+    if (!lead) throw err.notFound('Lead not found');
     const contactId = input.contactId === undefined ? lead.contactId : input.contactId;
-    await assertContactCompany(lead.companyId, contactId);
-    return { leadId: lead.id, dealId: null, companyId: lead.companyId, contactId, ownerId: input.ownerId ?? lead.ownerId };
+    await assertContactCompany(lead.companyId, contactId, dbOrTx);
+    return {
+      parent: {
+        leadId: lead.id,
+        dealId: null,
+        companyId: lead.companyId,
+        contactId,
+        ownerId: input.ownerId ?? lead.ownerId,
+      },
+      nurture: lead.status === 'nurture'
+        ? { status: lead.status, nurtureUntil: lead.nurtureUntil }
+        : null,
+    };
   }
-  const deal = await getDeal(input.dealId);
-  await assertContactCompany(deal.companyId, input.contactId);
-  return { leadId: null, dealId: deal.id, companyId: deal.companyId, contactId: input.contactId ?? null, ownerId: input.ownerId ?? deal.ownerId };
+  const [deal] = await dbOrTx.select().from(schema.deals).where(and(
+    eq(schema.deals.id, input.dealId),
+    isNull(schema.deals.deletedAt),
+  )).for('update');
+  if (!deal) throw err.notFound('Deal not found');
+  await assertContactCompany(deal.companyId, input.contactId, dbOrTx);
+  return {
+    parent: {
+      leadId: null,
+      dealId: deal.id,
+      companyId: deal.companyId,
+      contactId: input.contactId ?? null,
+      ownerId: input.ownerId ?? deal.ownerId,
+    },
+    nurture: null,
+  };
 }
 
 export async function createSalesActivity(actor: Actor, input: any) {
   const { db } = getDb();
-  const parent = await activityParent(input);
-  const id = ulid();
-  await db.insert(schema.salesActivities).values({
-    id,
-    ...parent,
-    type: input.type,
-    status: 'planned',
-    channel: input.channel ?? null,
-    subject: input.subject ?? null,
-    context: input.context ?? null,
-    dueAt: new Date(input.dueAt),
-    createdBy: actor.userId,
+  return db.transaction(async (tx) => {
+    const { parent, nurture } = await activityParent(tx, input);
+    const id = ulid();
+    if (nurture && parent.leadId) {
+      await tx.update(schema.leads).set({
+        status: 'ready',
+        nurtureUntil: null,
+      }).where(eq(schema.leads.id, parent.leadId));
+      await writeActivity(tx, {
+        entityType: 'lead',
+        entityId: parent.leadId,
+        action: 'updated',
+        before: nurture,
+        after: { status: 'ready', nurtureUntil: null },
+        actorId: actor.userId,
+        actorType: actor.actorType,
+      });
+    }
+    await tx.insert(schema.salesActivities).values({
+      id,
+      ...parent,
+      type: input.type,
+      status: 'planned',
+      channel: input.channel ?? null,
+      subject: input.subject ?? null,
+      context: input.context ?? null,
+      dueAt: new Date(input.dueAt),
+      createdBy: actor.userId,
+    });
+    await writeActivity(tx, {
+      entityType: parent.leadId ? 'lead' : 'deal',
+      entityId: parent.leadId ?? parent.dealId!,
+      action: 'sales_activity_created',
+      after: { activityId: id, type: input.type, dueAt: input.dueAt },
+      actorId: actor.userId,
+      actorType: actor.actorType,
+    });
+    return id;
   });
-  await writeActivity(db, {
-    entityType: parent.leadId ? 'lead' : 'deal',
-    entityId: parent.leadId ?? parent.dealId!,
-    action: 'sales_activity_created',
-    after: { activityId: id, type: input.type, dueAt: input.dueAt },
-    actorId: actor.userId,
-    actorType: actor.actorType,
-  });
-  return id;
 }
 
 export async function updateSalesActivity(actor: Actor, id: string, input: any) {

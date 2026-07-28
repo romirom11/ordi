@@ -132,6 +132,10 @@ export function ScheduleActivityDialog({ open, onClose, leadId, dealId }: {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sales-activities'] });
       qc.invalidateQueries({ queryKey: ['sales-work'] });
+      if (leadId) {
+        qc.invalidateQueries({ queryKey: ['leads'] });
+        qc.invalidateQueries({ queryKey: ['lead', leadId] });
+      }
       reset();
       onClose();
     },

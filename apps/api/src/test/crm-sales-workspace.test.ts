@@ -227,12 +227,6 @@ describe('research import and daily work', () => {
     const parkedActivities = (await json(reqAs(users.owner!.cookie)
       .get(`/sales-activities?leadId=${nurtureLead.id}`))).data;
     expect(parkedActivities.find((row: any) => row.id === conflictingActivity.id)?.status).toBe('cancelled');
-    const scheduleWhileParked = await reqAs(users.owner!.cookie).post('/sales-activities', {
-      leadId: nurtureLead.id,
-      type: 'follow_up',
-      dueAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
-    });
-    expect(scheduleWhileParked.status).toBe(422);
     const beforeReturn = await json(reqAs(users.owner!.cookie).get('/sales-work'));
     expect(Object.values(beforeReturn).flatMap((bucket: any) => bucket.rows)
       .some((row: any) => row.id === nurtureLead.id)).toBe(false);
@@ -244,6 +238,21 @@ describe('research import and daily work', () => {
     });
     const due = await json(reqAs(users.owner!.cookie).get('/sales-work'));
     expect(due.nurtureDue.rows.some((row: any) => row.id === nurtureLead.id)).toBe(true);
+
+    const resumedActivity = await reqAs(users.owner!.cookie).post('/sales-activities', {
+      leadId: nurtureLead.id,
+      type: 'follow_up',
+      dueAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+    });
+    expect(resumedActivity.status).toBe(201);
+    const resumedActivityId = ((await resumedActivity.json()) as { id: string }).id;
+    const resumed = await json(reqAs(users.owner!.cookie).get(`/leads/${nurtureLead.id}`));
+    expect(resumed).toMatchObject({ status: 'ready', nurtureUntil: null });
+    const resumedActivities = (await json(reqAs(users.owner!.cookie)
+      .get(`/sales-activities?leadId=${nurtureLead.id}`))).data;
+    expect(resumedActivities.find((row: any) => row.id === resumedActivityId)?.status).toBe('planned');
+    const afterResume = await json(reqAs(users.owner!.cookie).get('/sales-work'));
+    expect(afterResume.nurtureDue.rows.some((row: any) => row.id === nurtureLead.id)).toBe(false);
   });
 
   it('keeps deal stage names out of lead lifecycle classification', async () => {
