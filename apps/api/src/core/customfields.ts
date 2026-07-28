@@ -36,6 +36,21 @@ export function invalidateRegistry(entityType?: string): void {
   else registryCache.clear();
 }
 
+/**
+ * Merge a PATCH's customFields into the stored blob, per key.
+ *
+ * The column holds every custom field of a record in one JSONB object, so
+ * assigning the incoming object wholesale made a caller who set one field
+ * erase all the others – invisible in the UI (its editor round-trips the whole
+ * object) and destructive for every API/MCP client that sends just the field it
+ * changed. Passing an explicit null clears a key; omitting a key keeps it.
+ */
+export function mergeCustomFields(before: unknown, incoming: unknown): Record<string, unknown> {
+  const base = (before && typeof before === 'object' && !Array.isArray(before) ? before : {}) as Record<string, unknown>;
+  const patch = (incoming && typeof incoming === 'object' && !Array.isArray(incoming) ? incoming : {}) as Record<string, unknown>;
+  return { ...base, ...patch };
+}
+
 const OPS_BY_TYPE: Record<CustomFieldType, string[]> = {
   number: ['eq', 'gt', 'lt', 'between'],
   date: ['before', 'after', 'between', 'eq'],

@@ -26,3 +26,4 @@ export * from './calc/aging';
 export * from './calc/leave';
 export * from './calc/rbac';
 export * from './calc/redaction';
+export * from './calc/richtext';

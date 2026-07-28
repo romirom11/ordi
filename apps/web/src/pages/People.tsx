@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { CreateProfileDialog, type CreateProfileTarget } from '../components/people/CreateProfileDialog';
 import { OrgStructureView } from '../components/people/OrgStructureView';
+import { useLeaveTypes } from '../lib/queries';
 import { useT, extendDict } from '../lib/i18n';
 import { DateField } from '../components/DatePicker';
 
@@ -37,6 +38,8 @@ extendDict({
     'people.leaveApprovedToast': 'Request approved',
     'people.leaveRejectedToast': 'Request rejected',
     'people.leaveSubmitted': 'Request submitted',
+    'people.leaveFor': 'For',
+    'people.leaveForMe': 'Myself',
     'people.moveFailed': 'Could not move the applicant',
     'people.hireFailed': 'Could not hire the applicant',
     'people.hired': 'Applicant hired',
@@ -71,6 +74,8 @@ extendDict({
     'people.leaveApprovedToast': 'Заявку погоджено',
     'people.leaveRejectedToast': 'Заявку відхилено',
     'people.leaveSubmitted': 'Заявку надіслано',
+    'people.leaveFor': 'Кому',
+    'people.leaveForMe': 'Собі',
     'people.moveFailed': 'Не вдалося перемістити кандидата',
     'people.hireFailed': 'Не вдалося найняти кандидата',
     'people.hired': 'Кандидата найнято',
@@ -349,16 +354,31 @@ function LeaveView() {
   const can = useCan();
   const canApprove = can('people.approve_leave');
   const requests = useQuery({ queryKey: ['leaveRequests'], queryFn: () => api.get<{ data: LeaveRequest[] }>('/leave-requests') });
-  const types = useQuery({ queryKey: ['leaveTypes'], queryFn: () => api.get<{ data: LeaveType[] }>('/leave-types') });
-  const [form, setForm] = useState({ leaveTypeId: '', fromDate: '', toDate: '', reason: '' });
+  const types = useLeaveTypes();
+  // Filing for someone else is an HR act; everyone else files for themselves,
+  // which the API infers from the session – no employee id to send.
+  const canRequestForOthers = can('people.write') || can('people.manage_leave') || can('people.approve_leave');
+  const directory = useQuery({
+    queryKey: ['peopleDirectory'],
+    queryFn: () => api.get<{ data: DirectoryRow[] }>('/people/directory'),
+    enabled: canRequestForOthers && can('people.read'),
+  });
+  const staff = (directory.data?.data ?? []).filter((r) => r.employeeId && r.status === 'active');
+  const [form, setForm] = useState({ employeeId: '', leaveTypeId: '', fromDate: '', toDate: '', reason: '' });
   const create = useMutation({
-    mutationFn: () => api.post('/leave-requests', { leaveTypeId: form.leaveTypeId, fromDate: form.fromDate, toDate: form.toDate, reason: form.reason }),
+    mutationFn: () => api.post('/leave-requests', {
+      ...(form.employeeId ? { employeeId: form.employeeId } : {}),
+      leaveTypeId: form.leaveTypeId, fromDate: form.fromDate, toDate: form.toDate, reason: form.reason,
+    }),
     onSuccess: () => {
-      setForm({ leaveTypeId: '', fromDate: '', toDate: '', reason: '' });
+      setForm({ employeeId: '', leaveTypeId: '', fromDate: '', toDate: '', reason: '' });
       qc.invalidateQueries({ queryKey: ['leaveRequests'] });
       toast(t('people.leaveSubmitted'));
     },
-    onError: () => toast.error(t('people.leaveCreateFailed')),
+    // The API says exactly what is wrong ("your account is not linked to an
+    // employee record", "overlaps an existing request"); a generic failure
+    // toast threw that away and left people guessing.
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('people.leaveCreateFailed')),
   });
   const decide = useMutation({
     mutationFn: ({ id, action }: { id: string; action: 'approve' | 'reject' }) => api.post(`/leave-requests/${id}/${action}`),
@@ -369,7 +389,7 @@ function LeaveView() {
     onError: () => toast.error(t('people.leaveDecideFailed')),
   });
   const rows = requests.data?.data ?? [];
-  const typeList = types.data?.data ?? [];
+  const typeList = types.data ?? [];
 
   return (
     <div className="grid gap-6 p-6 lg:grid-cols-3">
@@ -428,6 +448,15 @@ function LeaveView() {
       <Card className="h-fit p-4">
         <div className="mb-3 text-[13px] font-medium">{t('people.requestLeave')}</div>
         <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (form.leaveTypeId && form.fromDate) create.mutate(); }}>
+          {canRequestForOthers && staff.length > 0 && (
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">{t('people.leaveFor')}</label>
+              <Select value={form.employeeId} onChange={(e) => setForm((f) => ({ ...f, employeeId: e.target.value }))} className="w-full">
+                <option value="">{t('people.leaveForMe')}</option>
+                {staff.map((r) => <option key={r.employeeId} value={r.employeeId!}>{r.name}</option>)}
+              </Select>
+            </div>
+          )}
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">{t('dashboards.type')}</label>
             <Select value={form.leaveTypeId} onChange={(e) => setForm((f) => ({ ...f, leaveTypeId: e.target.value }))} className="w-full">

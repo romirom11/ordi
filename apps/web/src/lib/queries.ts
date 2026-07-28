@@ -60,3 +60,24 @@ export function useProjectMembers(projectId: string): UseQueryResult<ProjectMemb
     queryFn: () => api.get<{ data: ProjectMember[] }>(`/projects/${projectId}/members`).then((r) => r.data),
   });
 }
+
+export interface LeaveTypeLookup {
+  id: string;
+  name: string;
+  isPaid?: boolean;
+  needsApproval?: boolean;
+  affectsBalance?: boolean;
+  allowHalfDay?: boolean;
+  /** numeric columns arrive as strings */
+  annualQuota?: string | number;
+  carryForwardLimit?: string | number;
+  carryForwardExpiry?: string | null;
+}
+
+/** The absence vocabulary – read by the request form and edited in settings. */
+export function useLeaveTypes(): UseQueryResult<LeaveTypeLookup[]> {
+  return useQuery({
+    queryKey: ['leaveTypes'],
+    queryFn: () => api.get<{ data: LeaveTypeLookup[] }>('/leave-types').then((r) => r.data),
+  });
+}

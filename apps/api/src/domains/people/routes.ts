@@ -13,6 +13,7 @@ import {
 import type { AppEnv, Actor } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { guard } from '../../core/rbac';
+import { accessibleProjectIds } from '../../core/access';
 import { err } from '../../lib/errors';
 import * as svc from './service';
 
@@ -115,7 +116,10 @@ export function peopleRoutes() {
   });
 
   // ── Leave types (PRD §12.2) ──
-  app.get('/leave-types', guard('people.read'), async (c) => c.json({ data: await svc.listLeaveTypes() }));
+  // Readable by anyone signed in: it is the vocabulary of the request form
+  // (names and flags, nothing about a person), and filing leave does not need
+  // people.read. Defining the types still does – people.manage_leave.
+  app.get('/leave-types', async (c) => c.json({ data: await svc.listLeaveTypes() }));
   app.post('/leave-types', guard('people.manage_leave'), async (c) => {
     const body = leaveTypeInputSchema.parse(await c.req.json());
     return c.json({ id: await svc.createLeaveType(body) }, 201);
@@ -141,27 +145,41 @@ export function peopleRoutes() {
   });
 
   // ── Leave requests (PRD §12.2) ──
-  app.get('/leave-requests', guard('people.read'), async (c) =>
-    c.json({ data: await svc.listLeaveRequests({ employeeId: c.req.query('employeeId'), status: c.req.query('status') }) }));
+  // Leave is the one part of People everybody takes part in: an employee files
+  // their own and a manager decides their reports', neither of which is
+  // "reading the HR module". So these authorize per request in the service
+  // (own / manager / approver) instead of demanding people.read, which the
+  // Member and Manager roles do not carry – the list is the exception, since
+  // seeing everyone's absences is exactly that read.
+  app.get('/leave-requests', async (c) => {
+    const actor = currentActor(c);
+    const requested = c.req.query('employeeId');
+    if (actor.access.permissions.has('people.read')) {
+      return c.json({ data: await svc.listLeaveRequests({ employeeId: requested, status: c.req.query('status') }) });
+    }
+    const own = await svc.employeeOfUser(actor.userId);
+    if (!own || (requested && requested !== own.id)) throw err.forbidden('Missing permission people.read', 'people.read');
+    return c.json({ data: await svc.listLeaveRequests({ employeeId: own.id, status: c.req.query('status') }) });
+  });
 
-  app.post('/leave-requests', guard('people.read'), async (c) => {
+  app.post('/leave-requests', async (c) => {
     const body = leaveRequestInputSchema.parse(await c.req.json());
     return c.json(await svc.createLeaveRequest(currentActor(c), body), 201);
   });
 
-  app.post('/leave-requests/:id/approve', guard('people.read'), async (c) => {
+  app.post('/leave-requests/:id/approve', async (c) => {
     const raw = await c.req.json().catch(() => ({}));
     const { comment } = leaveDecisionSchema.parse({ decision: 'approve', comment: raw?.comment });
     return c.json(await svc.decideLeave(currentActor(c), c.req.param('id'), 'approved', comment));
   });
 
-  app.post('/leave-requests/:id/reject', guard('people.read'), async (c) => {
+  app.post('/leave-requests/:id/reject', async (c) => {
     const raw = await c.req.json().catch(() => ({}));
     const { comment } = leaveDecisionSchema.parse({ decision: 'reject', comment: raw?.comment });
     return c.json(await svc.decideLeave(currentActor(c), c.req.param('id'), 'rejected', comment));
   });
 
-  app.post('/leave-requests/:id/cancel', guard('people.read'), async (c) => {
+  app.post('/leave-requests/:id/cancel', async (c) => {
     const raw = await c.req.json().catch(() => ({}));
     const comment = typeof raw?.comment === 'string' ? raw.comment : '';
     return c.json(await svc.decideLeave(currentActor(c), c.req.param('id'), 'canceled', comment));
@@ -272,11 +290,19 @@ export function peopleRoutes() {
   });
 
   // ── Resourcing: allocations (PRD §12.4) ──
-  app.get('/allocations', guardAny('people.read', 'projects.read'), async (c) =>
-    c.json({ data: await svc.listAllocations({
+  // An allocation names a project, so the resourcing board only shows the ones
+  // whose project the actor can open – otherwise a private project's staffing
+  // (and its name, through the board's project column) was public to the
+  // permission holders.
+  app.get('/allocations', guardAny('people.read', 'projects.read'), async (c) => {
+    const actor = currentActor(c);
+    const rows = await svc.listAllocations({
       userId: c.req.query('userId'), projectId: c.req.query('projectId'),
       from: c.req.query('from'), to: c.req.query('to'),
-    }) }));
+    });
+    const visible = new Set(await accessibleProjectIds(actor));
+    return c.json({ data: rows.filter((a) => visible.has(a.projectId)) });
+  });
 
   app.post('/allocations', guard('people.write'), async (c) => {
     const body = allocationInputSchema.parse(await c.req.json());

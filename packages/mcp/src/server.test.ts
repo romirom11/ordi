@@ -77,7 +77,7 @@ describe('tool catalog', () => {
     const body = JSON.parse((res.content as any)[0].text);
     expect(body.data).toEqual([{
       id: 'p1', key: 'SOL', name: 'Solovei', status: 'active', priority: 'none',
-      companyId: null, leadId: null, startDate: null, targetDate: null,
+      companyId: null, leadId: null, startDate: null, targetDate: null, customFields: {},
     }]);
   });
 
@@ -115,9 +115,11 @@ describe('CRM create/list tools', () => {
     const res = await client.callTool({ name: 'list_deals', arguments: { companyId: 'c1', projectId: 'p1' } });
     expect(requested).toBe('/deals?companyId=c1&projectId=p1');
     const body = JSON.parse((res.content as any)[0].text);
+    // customFields ride along: an agent that wrote one has to be able to read it
+    // back without moving the deal to see it.
     expect(body.data).toEqual([{
       id: 'd1', title: 'Retainer', companyId: 'c1', projectId: 'p1', stageId: 's1', amount: '5000', currency: 'USD',
-      expectedCloseDate: null, ownerId: null,
+      expectedCloseDate: null, ownerId: null, lostReason: undefined, customFields: { secretish: 1 },
     }]);
   });
 
@@ -271,5 +273,120 @@ describe('create_note', () => {
     const res = await client.callTool({ name: 'create_note', arguments: { text: 'orphan' } });
     expect(res.isError).toBe(true);
     expect(posts).toEqual([]);
+  });
+});
+
+/** fakeApi with PATCH capture, for the update tools. */
+function fakeApiRw(
+  routes: Record<string, unknown>,
+  posts: Array<{ path: string; body: unknown }> = [],
+  patches: Array<{ path: string; body: unknown }> = [],
+): OrdiClient {
+  const client = fakeApi(routes, posts);
+  client.patch = async <T>(path: string, body?: unknown): Promise<T> => {
+    patches.push({ path, body });
+    return { ok: true } as T;
+  };
+  return client;
+}
+
+describe('reading back what was written', () => {
+  it('offers a single-record read for every CRM entity, and notes', async () => {
+    const client = await connect(fakeApi({}));
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    for (const n of ['get_company', 'get_contact', 'get_deal', 'list_notes']) expect(names).toContain(n);
+  });
+
+  it('get_deal reads without moving the deal', async () => {
+    const client = await connect(fakeApi({ '/deals/d1': {
+      id: 'd1', title: 'Retainer', stageId: 's1', customFields: { lost_reason_code: 'price' }, version: 4,
+    } }));
+    const body = JSON.parse((await client.callTool({ name: 'get_deal', arguments: { dealId: 'd1' } }) as any).content[0].text);
+    expect(body).toEqual({ id: 'd1', title: 'Retainer', stageId: 's1', customFields: { lost_reason_code: 'price' } });
+  });
+
+  it('list_notes renders bodies as text', async () => {
+    const client = await connect(fakeApi({ '/notes': { data: [
+      { id: 'n1', dealId: 'd1', companyId: null, contactId: null, pinned: false, createdAt: 'x', createdBy: 'u1',
+        body: textToDoc('PROSPECT CARD\nBudget confirmed'), version: 1 },
+    ] } }));
+    const body = JSON.parse((await client.callTool({ name: 'list_notes', arguments: { dealId: 'd1' } }) as any).content[0].text);
+    expect(body.data[0].text).toBe('PROSPECT CARD\nBudget confirmed');
+  });
+
+  it('list_notes needs a target', async () => {
+    const client = await connect(fakeApi({}));
+    expect((await client.callTool({ name: 'list_notes', arguments: {} })).isError).toBe(true);
+  });
+});
+
+describe('CRM update tools', () => {
+  it('patch company, contact and deal by id', async () => {
+    const patches: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApiRw({}, [], patches));
+    await client.callTool({ name: 'update_company', arguments: { companyId: 'c1', customFields: { icp_fit: 'high' } } });
+    await client.callTool({ name: 'update_contact', arguments: { contactId: 'ct1', position: 'CTO' } });
+    await client.callTool({ name: 'update_deal', arguments: { dealId: 'd1', amount: 9000 } });
+    expect(patches).toEqual([
+      { path: '/companies/c1', body: { customFields: { icp_fit: 'high' } } },
+      { path: '/contacts/ct1', body: { position: 'CTO' } },
+      { path: '/deals/d1', body: { amount: 9000 } },
+    ]);
+  });
+
+  it('move_deal writes the structured reason with the move', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const patches: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApiRw({}, posts, patches));
+    await client.callTool({ name: 'move_deal', arguments: {
+      dealId: 'd1', stageId: 'lost', lostReason: 'Postponed', customFields: { lost_reason_code: 'timing' },
+    } });
+    expect(patches).toEqual([{ path: '/deals/d1', body: { customFields: { lost_reason_code: 'timing' } } }]);
+    expect(posts).toEqual([{ path: '/deals/d1/move', body: { stageId: 'lost', lostReason: 'Postponed' } }]);
+  });
+
+  it('update_custom_field retires a definition instead of deleting it', async () => {
+    const patches: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApiRw({}, [], patches));
+    await client.callTool({ name: 'update_custom_field', arguments: { fieldId: 'f1', deprecated: true } });
+    expect(patches).toEqual([{ path: '/custom-fields/f1', body: { deprecated: true } }]);
+  });
+});
+
+describe('create_company does not double the CRM', () => {
+  it('refuses a name that already exists and names the record to update', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({ '/companies': { data: [
+      { id: 'c1', name: 'Northwind ', domain: 'https://www.northwind.io/', status: 'lead' },
+    ], nextCursor: null } }, posts));
+    const res = await client.callTool({ name: 'create_company', arguments: { name: 'northwind' } });
+    expect(res.isError).toBe(true);
+    expect((res.content as any)[0].text).toContain('c1');
+    expect(posts).toEqual([]);
+  });
+
+  it('matches on domain too, and allowDuplicate overrides', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const routes = { '/companies': { data: [{ id: 'c1', name: 'Other', domain: 'northwind.io' }], nextCursor: null } };
+    const client = await connect(fakeApi(routes, posts));
+    expect((await client.callTool({ name: 'create_company', arguments: { name: 'Northwind Inc', domain: 'www.northwind.io' } })).isError).toBe(true);
+    await client.callTool({ name: 'create_company', arguments: { name: 'Northwind Inc', domain: 'www.northwind.io', allowDuplicate: true } });
+    expect(posts).toEqual([{ path: '/companies', body: { name: 'Northwind Inc', domain: 'www.northwind.io' } }]);
+  });
+
+  it('creates anyway when the lookup is not permitted', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({}, posts)); // every GET throws
+    await client.callTool({ name: 'create_company', arguments: { name: 'Northwind' } });
+    expect(posts).toEqual([{ path: '/companies', body: { name: 'Northwind' } }]);
+  });
+});
+
+describe('request_leave', () => {
+  it('files for the token owner when no employee is named', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({}, posts));
+    await client.callTool({ name: 'request_leave', arguments: { leaveTypeId: 'lt1', fromDate: '2026-09-01', toDate: '2026-09-05' } });
+    expect(posts).toEqual([{ path: '/leave-requests', body: { leaveTypeId: 'lt1', fromDate: '2026-09-01', toDate: '2026-09-05', reason: '' } }]);
   });
 });

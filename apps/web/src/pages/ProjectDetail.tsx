@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
 import { Link, useNavigate, useSearchParams } from '../lib/router';
-import { useCan } from '../lib/auth';
+import { useCan, useProjectRole } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import {
   Button, IconButton, Input, Card, Badge, Skeleton, EmptyState, Spinner, Avatar, AvatarGroup,
@@ -127,7 +127,7 @@ interface Project {
   id: string; name: string; key: string; status: string; projectTypeId?: string | null;
   companyId?: string | null; companyName?: string | null; description?: unknown;
   leadId?: string | null; startDate?: string | null; targetDate?: string | null;
-  visibility?: string; version?: number; settings?: Record<string, unknown>;
+  visibility?: 'workspace' | 'private'; version?: number; settings?: Record<string, unknown>;
   summary?: string; priority?: string; links?: ProjectLink[]; labelIds?: string[];
 }
 interface TaskStatus {
@@ -162,9 +162,6 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
   const params = useSearchParams();
   const qc = useQueryClient();
   const can = useCan();
-  const canWrite = can('projects.write') || can('projects.create');
-  const canDelete = can('projects.delete');
-  const isAdmin = can('projects.write');
 
   const rawSection = params.get('section') ?? '';
   const tab: Tab = (TABS as readonly string[]).includes(rawSection) ? (rawSection as Tab) : 'overview';
@@ -184,6 +181,14 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
   const statuses = (statusesQ.data ?? []).slice().sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
   const project = projectQ.data;
   const users = usersQ.data ?? [];
+
+  // What this user may do *here*: a membership row, or what a workspace project
+  // grants their role. A plain permission check offered edits the server then
+  // refused (and hid them from project admins who hold no global write).
+  const role = useProjectRole(id, project?.visibility);
+  const canWrite = role === 'admin' || role === 'member';
+  const isAdmin = role === 'admin';
+  const canDelete = isAdmin && can('projects.delete');
 
   usePageTitle(project ? `${project.key} · ${project.name}` : null);
 
@@ -231,7 +236,7 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
             onManageMembers={() => setTab('settings')}
           />
         )}
-        {tab === 'tasks' && <TasksTab id={id} statuses={statuses} statusesLoading={statusesQ.isLoading} projectKey={project?.key} users={users} onOpen={openTask} />}
+        {tab === 'tasks' && <TasksTab id={id} statuses={statuses} statusesLoading={statusesQ.isLoading} projectKey={project?.key} users={users} canWrite={canWrite} onOpen={openTask} />}
         {tab === 'cycles' && <CyclesTab id={id} />}
         {tab === 'settings' && <SettingsTab project={project} isAdmin={isAdmin} onPatch={(b) => patchProject.mutate(b)} pending={patchProject.isPending} />}
       </div>
@@ -422,13 +427,12 @@ function buildGroups(
   }
 }
 
-function TasksTab({ id, statuses, statusesLoading, projectKey, users, onOpen }: {
-  id: string; statuses: TaskStatus[]; statusesLoading: boolean; projectKey?: string; users: UserLite[]; onOpen: (tid: string) => void;
+function TasksTab({ id, statuses, statusesLoading, projectKey, users, canWrite, onOpen }: {
+  id: string; statuses: TaskStatus[]; statusesLoading: boolean; projectKey?: string; users: UserLite[];
+  canWrite: boolean; onOpen: (tid: string) => void;
 }) {
   const t = useT();
   const qc = useQueryClient();
-  const can = useCan();
-  const canWrite = can('projects.write') || can('projects.create');
 
   const [prefs, setPrefsState] = useState<TaskViewPrefs>(() => loadPrefs(id));
   const [filters, setFilters] = useState<TaskFilters>(EMPTY_FILTERS);

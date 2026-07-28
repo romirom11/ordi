@@ -416,17 +416,61 @@ async function findApproverFallback(): Promise<string | null> {
   return rows[0]?.userId ?? null;
 }
 
+/**
+ * Requests carry the two names they are read by – whose leave and which type.
+ * Without the joins the list rendered "–" for both, so a queue of pending
+ * requests said nothing about who was asking for what.
+ */
 export async function listLeaveRequests(params: { employeeId?: string; status?: string }) {
   const { db } = getDb();
-  return db.select().from(schema.leaveRequests).where(and(
-    params.employeeId ? eq(schema.leaveRequests.employeeId, params.employeeId) : undefined,
-    params.status ? eq(schema.leaveRequests.status, params.status) : undefined,
-  )).orderBy(desc(schema.leaveRequests.fromDate));
+  return db.select({
+    id: schema.leaveRequests.id,
+    employeeId: schema.leaveRequests.employeeId,
+    leaveTypeId: schema.leaveRequests.leaveTypeId,
+    fromDate: schema.leaveRequests.fromDate,
+    toDate: schema.leaveRequests.toDate,
+    halfDay: schema.leaveRequests.halfDay,
+    reason: schema.leaveRequests.reason,
+    status: schema.leaveRequests.status,
+    approverId: schema.leaveRequests.approverId,
+    decidedAt: schema.leaveRequests.decidedAt,
+    decisionComment: schema.leaveRequests.decisionComment,
+    createdAt: schema.leaveRequests.createdAt,
+    employeeName: sql<string>`btrim(coalesce(${schema.employees.firstName}, '') || ' ' || coalesce(${schema.employees.lastName}, ''))`,
+    leaveTypeName: schema.leaveTypes.name,
+  }).from(schema.leaveRequests)
+    .leftJoin(schema.employees, eq(schema.employees.id, schema.leaveRequests.employeeId))
+    .leftJoin(schema.leaveTypes, eq(schema.leaveTypes.id, schema.leaveRequests.leaveTypeId))
+    .where(and(
+      params.employeeId ? eq(schema.leaveRequests.employeeId, params.employeeId) : undefined,
+      params.status ? eq(schema.leaveRequests.status, params.status) : undefined,
+    )).orderBy(desc(schema.leaveRequests.fromDate));
+}
+
+/**
+ * The employee card behind a user account, if there is one. Contractors and
+ * staff without a login exist as employees with no user, and users without an
+ * employee card exist too – so self-service asks, it does not assume.
+ */
+export async function employeeOfUser(userId: string) {
+  const { db } = getDb();
+  const [e] = await db.select().from(schema.employees)
+    .where(and(eq(schema.employees.userId, userId), isNull(schema.employees.deletedAt)));
+  return e ?? null;
 }
 
 export async function createLeaveRequest(actor: Actor, input: any) {
   const { db } = getDb();
-  const employee = await loadEmployee(input.employeeId);
+  // Requesting your own leave is the common case (PRD §12.2), so employeeId is
+  // optional: without it the request is for whoever is asking. It used to be
+  // required and the leave form never sent one, which failed every submission
+  // as "employeeId: Required".
+  const employee = input.employeeId
+    ? await loadEmployee(input.employeeId)
+    : await employeeOfUser(actor.userId);
+  if (!employee) {
+    throw err.domain('Your account is not linked to an employee record – ask HR to link it, or name the employee explicitly.');
+  }
 
   // An employee may request for themselves; broader HR roles may request for anyone.
   const canForOthers = actor.access.permissions.has('people.write')
@@ -459,7 +503,9 @@ export async function createLeaveRequest(actor: Actor, input: any) {
   });
   await writeActivity(db, { entityType: 'leave_request', entityId: id, action: 'requested', after: { ...input, days }, actorId: actor.userId, actorType: actor.actorType });
   await emit({ type: 'leave.requested', aggregateType: 'leave_request', aggregateId: id, payload: { approverId, employeeUserId: employee.userId, days }, actorId: actor.userId, actorType: actor.actorType });
-  return { id, days, approverId };
+  // employeeId back in the response: the caller may not have named one, and a
+  // client that just filed a request should not have to guess who it is for.
+  return { id, employeeId: employee.id, days, approverId };
 }
 
 async function adjustBalanceUsed(employeeId: string, leaveTypeId: string, period: string, delta: number) {

@@ -3,6 +3,35 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.13.0
+
+- Workspace projects and KB spaces answer to the role, not only to
+  membership: `projects.read` views a workspace project and
+  `projects.write` works and administers it, `kb.read` views a workspace
+  space and `kb.write` edits it. Private resources stay members-only.
+  A role with kb.read + kb.write could previously not create a page
+  anywhere, and every refused write surfaced as "not found".
+- A level the actor lacks on a resource it can see is a 403 naming what is
+  missing; 404 stays for resources outside visibility.
+- Resource access reaches the places that read project-owned rows
+  directly: the home activity feed and "my tasks", the per-entity audit
+  trail (which had no check at all), Resourcing allocations, and KB pages
+  in search.
+- Requesting leave works. The form never sent an employeeId and the API
+  required one, so every submission failed; it is optional now and means
+  the requester. Leave writes authorize per request (own / manager /
+  approver) instead of requiring people.read, and the list finally names
+  the person and the type instead of rendering "–".
+- Settings → Leave types: the absence vocabulary and each type's
+  behaviour - paid, approval, balance and quota, half days,
+  carry-forward. The API had the CRUD; nothing in the app reached it.
+- MCP: single-record reads for companies, contacts and deals, customFields
+  in every list, update tools for all three, list_notes plus notes in
+  search, a duplicate guard on create_company, a structured reason with
+  move_deal, and update_custom_field for retiring a definition.
+- customFields merge by key on PATCH for every entity that has them -
+  setting one field no longer erases the rest.
+
 ## v1.12.0
 
 - CRM record pages took the shape of the project and task records: a

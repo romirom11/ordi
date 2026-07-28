@@ -5,7 +5,7 @@
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { COMPANY_STATUSES, CUSTOM_FIELD_ENTITIES, CUSTOM_FIELD_TYPES } from '@ordi/shared';
+import { COMPANY_STATUSES, CUSTOM_FIELD_ENTITIES, CUSTOM_FIELD_TYPES, docToText, textToDoc } from '@ordi/shared';
 import { OrdiClient } from './client';
 
 /**
@@ -51,21 +51,11 @@ export function decodeEntities<T>(value: T): T {
 }
 
 /**
- * Plain text → tiptap doc. Agents send multi-line text; cramming it into a
- * single paragraph node loses every line break in the web renderer. Blank
- * lines separate paragraphs, single newlines become hard breaks.
+ * Plain text ⇄ tiptap doc, shared with the API so an agent writes and reads
+ * back the same thing: multi-line text keeps its breaks in the web renderer,
+ * and a stored body comes back as text instead of a node tree.
  */
-export function textToDoc(text: string): Record<string, unknown> {
-  const paragraphs = text.replace(/\r\n/g, '\n').split(/\n{2,}/).map((para) => {
-    const content: Record<string, unknown>[] = [];
-    para.split('\n').forEach((line, i) => {
-      if (i > 0) content.push({ type: 'hardBreak' });
-      if (line) content.push({ type: 'text', text: line });
-    });
-    return { type: 'paragraph', content };
-  });
-  return { type: 'doc', content: paragraphs };
-}
+export { textToDoc, docToText };
 
 export function buildServer(client: OrdiClient): McpServer {
   const server = new McpServer({ name: 'ordi', version: '1.0.0' });
@@ -85,7 +75,7 @@ export function buildServer(client: OrdiClient): McpServer {
 }
 
 // ── Read tools ──
-  server.tool('search', 'Search companies, projects, tasks, invoices and KB pages by name/title/number. Matches titles and indexed text, not arbitrary fields; use list_projects / list_companies to enumerate instead of guessing names.', { query: z.string() },
+  server.tool('search', 'Search companies, projects, tasks, CRM notes, invoices and KB pages by name/title/number. Matches titles, note bodies and indexed text, not arbitrary fields; use list_projects / list_companies / list_notes to enumerate instead of guessing names.', { query: z.string() },
   ({ query }) => wrap(() => client.get(`/search?q=${encodeURIComponent(query)}`)));
 
   server.tool('list_projects', 'List projects the token owner can access – the way to obtain projectId for the other project tools', {
@@ -98,6 +88,7 @@ export function buildServer(client: OrdiClient): McpServer {
   return { data: res.data.map((p) => ({
     id: p.id, key: p.key, name: p.name, status: p.status, priority: p.priority,
     companyId: p.companyId, leadId: p.leadId, startDate: p.startDate, targetDate: p.targetDate,
+    customFields: p.customFields ?? {},
   })) };
 }));
 
@@ -113,8 +104,12 @@ export function buildServer(client: OrdiClient): McpServer {
   return { data: res.data.map((co) => ({
     id: co.id, name: co.name, domain: co.domain, status: co.status,
     ownerId: co.ownerId, defaultCurrency: co.defaultCurrency, paymentTermsDays: co.paymentTermsDays,
+    customFields: co.customFields ?? {},
   })), nextCursor: res.nextCursor };
 }));
+
+  server.tool('get_company', 'One company with every field, including customFields – read back what a write stored', { companyId: z.string() },
+  ({ companyId }) => wrap(() => client.get(`/companies/${companyId}`)));
 
   server.tool('get_company_overview', 'Company metrics: projects, tasks, and (if permitted) receivables', { companyId: z.string() },
   ({ companyId }) => wrap(() => client.get(`/companies/${companyId}/overview`)));
@@ -125,8 +120,12 @@ export function buildServer(client: OrdiClient): McpServer {
   return { data: res.data.map((ct) => ({
     id: ct.id, companyId: ct.companyId, firstName: ct.firstName, lastName: ct.lastName,
     email: ct.email, phone: ct.phone, position: ct.position, isPrimary: ct.isPrimary,
+    customFields: ct.customFields ?? {},
   })) };
 }));
+
+  server.tool('get_contact', 'One contact with every field, including customFields', { contactId: z.string() },
+  ({ contactId }) => wrap(() => client.get(`/contacts/${contactId}`)));
 
   server.tool('list_deals', 'List deals, filterable by company and by linked project – the way to obtain dealId for move_deal', {
   companyId: z.string().optional(),
@@ -139,6 +138,26 @@ export function buildServer(client: OrdiClient): McpServer {
   return { data: res.data.map((d) => ({
     id: d.id, title: d.title, companyId: d.companyId, projectId: d.projectId, stageId: d.stageId,
     amount: d.amount, currency: d.currency, expectedCloseDate: d.expectedCloseDate, ownerId: d.ownerId,
+    lostReason: d.lostReason, customFields: d.customFields ?? {},
+  })) };
+}));
+
+  server.tool('get_deal', 'One deal with every field, including customFields – reading a deal never needs a write', { dealId: z.string() },
+  ({ dealId }) => wrap(() => client.get(`/deals/${dealId}`)));
+
+  server.tool('list_notes', 'CRM notes on a company, contact or deal, newest first, bodies rendered as plain text', {
+  companyId: z.string().optional(), contactId: z.string().optional(), dealId: z.string().optional(),
+  limit: z.number().optional().describe('Defaults to 20'),
+}, ({ companyId, contactId, dealId, limit }) => wrap(async () => {
+  if (!companyId && !contactId && !dealId) throw new Error('One of companyId, contactId or dealId is required');
+  const qs = new URLSearchParams();
+  if (companyId) qs.set('companyId', companyId);
+  if (contactId) qs.set('contactId', contactId);
+  if (dealId) qs.set('dealId', dealId);
+  const res = await client.get<{ data: Record<string, unknown>[] }>(`/notes?${qs}`);
+  return { data: res.data.slice(0, limit ?? 20).map((n) => ({
+    id: n.id, companyId: n.companyId, contactId: n.contactId, dealId: n.dealId,
+    pinned: n.pinned, createdAt: n.createdAt, createdBy: n.createdBy, text: docToText(n.body),
   })) };
 }));
 
@@ -251,11 +270,54 @@ export function buildServer(client: OrdiClient): McpServer {
   return client.post('/notes', { companyId, contactId, dealId, body: textToDoc(body) });
 }));
 
-  server.tool('create_company', 'Create a CRM company', {
+  server.tool('create_company', 'Create a CRM company. Refuses a name or domain that already exists – update the existing record instead of doubling it.', {
   name: z.string(), domain: z.string().optional(), status: z.enum(COMPANY_STATUSES).optional().describe('Defaults to lead'),
   billingEmail: z.string().optional(), defaultCurrency: z.string().length(3).optional(), paymentTermsDays: z.number().int().optional(),
   customFields: z.record(z.string(), z.unknown()).optional().describe('Keyed by custom field key (see list_custom_fields)'),
-}, (args) => wrap(() => client.post('/companies', args)));
+  allowDuplicate: z.boolean().optional().describe('Create anyway when a same-named company legitimately exists'),
+}, ({ allowDuplicate, ...args }) => wrap(async () => {
+  // A re-run of the same import is the normal way this tool gets called twice;
+  // without this check the second pass silently doubles the CRM. A token that
+  // may write but not read cannot look first – then the create proceeds, since
+  // refusing to create because the check is unavailable is the worse failure.
+  if (!allowDuplicate) {
+    const hit = await client
+      .get<{ data: Record<string, unknown>[] }>(`/companies?q=${encodeURIComponent(args.name)}&limit=50`)
+      .then((existing) => {
+        const norm = (v: unknown) => String(v ?? '').trim().toLowerCase();
+        const host = (v: unknown) => norm(v).replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+        return existing.data.find((co) => norm(co.name) === norm(args.name)
+          || (!!args.domain && !!host(co.domain) && host(co.domain) === host(args.domain))) ?? null;
+      })
+      .catch(() => null);
+    if (hit) {
+      throw new Error(`Company already exists: ${hit.name} (id ${hit.id}). Use update_company to change it, or pass allowDuplicate: true.`);
+    }
+  }
+  return client.post('/companies', args);
+}));
+
+  server.tool('update_company', 'Update a CRM company. customFields merge by key: send only the fields you are changing, the rest keep their values.', {
+  companyId: z.string(),
+  name: z.string().optional(), domain: z.string().optional(), status: z.enum(COMPANY_STATUSES).optional(),
+  billingEmail: z.string().optional(), defaultCurrency: z.string().length(3).optional(), paymentTermsDays: z.number().int().optional(),
+  customFields: z.record(z.string(), z.unknown()).optional().describe('Keyed by custom field key (see list_custom_fields); null clears one'),
+}, ({ companyId, ...patch }) => wrap(() => client.patch(`/companies/${companyId}`, patch)));
+
+  server.tool('update_contact', 'Update a contact. customFields merge by key.', {
+  contactId: z.string(),
+  firstName: z.string().optional(), lastName: z.string().optional(), email: z.string().optional(),
+  phone: z.string().optional(), position: z.string().optional(), isPrimary: z.boolean().optional(),
+  customFields: z.record(z.string(), z.unknown()).optional().describe('Keyed by custom field key; null clears one'),
+}, ({ contactId, ...patch }) => wrap(() => client.patch(`/contacts/${contactId}`, patch)));
+
+  server.tool('update_deal', 'Update a deal – amount, dates, owner, linked project, custom fields. customFields merge by key. Use move_deal to change the stage.', {
+  dealId: z.string(),
+  title: z.string().optional(), amount: z.number().min(0).optional(), currency: z.string().length(3).optional(),
+  expectedCloseDate: z.string().optional().describe('YYYY-MM-DD'), ownerId: z.string().optional(),
+  projectId: z.string().optional().describe('Project this deal sells into'),
+  customFields: z.record(z.string(), z.unknown()).optional().describe('Keyed by custom field key; null clears one'),
+}, ({ dealId, ...patch }) => wrap(() => client.patch(`/deals/${dealId}`, patch)));
 
   server.tool('create_contact', 'Create a contact in a CRM company', {
   companyId: z.string(), firstName: z.string(), lastName: z.string().optional(),
@@ -279,14 +341,30 @@ export function buildServer(client: OrdiClient): McpServer {
   required: z.boolean().optional(), showInList: z.boolean().optional().describe('Show as a column in list views'),
 }, (args) => wrap(() => client.post('/custom-fields', args)));
 
-  server.tool('move_deal', 'Move a deal to a stage (use list_deal_stages for stageId)', { dealId: z.string(), stageId: z.string(), lostReason: z.string().optional() },
-  ({ dealId, stageId, lostReason }) => wrap(() => client.post(`/deals/${dealId}/move`, { stageId, lostReason })));
+  server.tool('update_custom_field', 'Edit a custom field definition: label, select options, flags, or retire it with deprecated (key and type are immutable, and deprecating keeps the stored values). Requires settings.manage scope.', {
+  fieldId: z.string().describe('From list_custom_fields'),
+  label: z.string().optional(),
+  options: z.array(z.object({ value: z.string(), label: z.string() })).optional().describe('For select / multiselect types'),
+  required: z.boolean().optional(), showInList: z.boolean().optional(),
+  deprecated: z.boolean().optional().describe('Retire the field: hidden from editors, existing values kept'),
+}, ({ fieldId, ...patch }) => wrap(() => client.patch(`/custom-fields/${fieldId}`, patch)));
+
+  server.tool('move_deal', 'Move a deal to a stage (use list_deal_stages for stageId). `lostReason` is the free-text detail a lost stage requires; when the workspace also has a structured reason field, set it in the same call through customFields so the two never disagree.', {
+  dealId: z.string(), stageId: z.string(),
+  lostReason: z.string().optional().describe('Required by stages marked lost'),
+  customFields: z.record(z.string(), z.unknown()).optional().describe('Merged by key, e.g. a lost_reason_code select (see list_custom_fields)'),
+}, ({ dealId, stageId, lostReason, customFields }) => wrap(async () => {
+  if (customFields) await client.patch(`/deals/${dealId}`, { customFields });
+  return client.post(`/deals/${dealId}/move`, { stageId, lostReason });
+}));
 
   server.tool('create_kb_page', 'Create a knowledge base page (line breaks are preserved; blank line = new paragraph)', { spaceId: z.string(), title: z.string(), text: z.string().optional() },
   ({ spaceId, title, text: body }) => wrap(() => client.post('/pages', { spaceId, title, body: textToDoc(body ?? '') })));
 
-  server.tool('request_leave', 'Request leave for an employee', {
-  employeeId: z.string(), leaveTypeId: z.string(), fromDate: z.string(), toDate: z.string(), reason: z.string().optional(),
+  server.tool('request_leave', 'Request leave – for the token owner by default, or for another employee with the HR scopes', {
+  leaveTypeId: z.string(), fromDate: z.string(), toDate: z.string(),
+  employeeId: z.string().optional().describe('Defaults to the token owner’s own employee record'),
+  reason: z.string().optional(),
 }, (args) => wrap(() => client.post('/leave-requests', { ...args, reason: args.reason ?? '' })));
 
   server.tool('approve_leave', 'Approve a leave request', { requestId: z.string() },

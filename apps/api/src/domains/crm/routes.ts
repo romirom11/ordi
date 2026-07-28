@@ -12,6 +12,7 @@ import { guard } from '../../core/rbac';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { assertVersion } from '../../core/locking';
+import { mergeCustomFields } from '../../core/customfields';
 import { page } from '../../lib/http';
 import * as svc from './service';
 
@@ -80,6 +81,16 @@ export function crmRoutes() {
     return c.json({ data: await svc.listContacts(companyId) });
   });
 
+  // One contact by id: every other CRM record reads back on its own id, and a
+  // caller holding a contactId should not have to know its company to look it up.
+  app.get('/contacts/:id', guard('crm.read'), async (c) => {
+    const { db } = getDb();
+    const [contact] = await db.select().from(schema.contacts)
+      .where(and(eq(schema.contacts.id, c.req.param('id')), isNull(schema.contacts.deletedAt)));
+    if (!contact) throw err.notFound('Contact not found');
+    return c.json(contact);
+  });
+
   app.post('/contacts', guard('crm.write'), async (c) => {
     const body = contactInputSchema.parse(await c.req.json());
     const id = await svc.createContact(currentActor(c), body);
@@ -93,9 +104,10 @@ export function crmRoutes() {
     if (!before) throw err.notFound();
     assertVersion(before, body.version, before);
     const patch: Record<string, unknown> = {};
-    for (const k of ['firstName', 'lastName', 'email', 'phone', 'position', 'isPrimary', 'customFields']) {
+    for (const k of ['firstName', 'lastName', 'email', 'phone', 'position', 'isPrimary']) {
       if ((body as any)[k] !== undefined) patch[k] = (body as any)[k];
     }
+    if (body.customFields !== undefined) patch.customFields = mergeCustomFields(before.customFields, body.customFields);
     if (patch.isPrimary === true) {
       await db.update(schema.contacts).set({ isPrimary: false }).where(eq(schema.contacts.companyId, before.companyId));
     }
@@ -178,9 +190,10 @@ export function crmRoutes() {
     assertVersion(deal, body.version, deal);
     if (body.projectId) await assertProjectExists(body.projectId);
     const patch: Record<string, unknown> = {};
-    for (const k of ['title', 'amount', 'currency', 'expectedCloseDate', 'ownerId', 'customFields', 'stageId', 'projectId']) {
+    for (const k of ['title', 'amount', 'currency', 'expectedCloseDate', 'ownerId', 'stageId', 'projectId']) {
       if ((body as any)[k] !== undefined) patch[k] = k === 'amount' ? String((body as any)[k]) : (body as any)[k];
     }
+    if (body.customFields !== undefined) patch.customFields = mergeCustomFields(deal.customFields, body.customFields);
     await db.update(schema.deals).set(patch).where(and(eq(schema.deals.id, deal.id), eq(schema.deals.version, deal.version)));
     return c.json(await svc.getDeal(deal.id));
   });
