@@ -296,10 +296,14 @@ export async function listLeads(params: {
   return enriched.map((lead) => ({ ...lead, nextActivity: nextByLead.get(lead.id) ?? null }));
 }
 
-async function getLeadRecord(id: string) {
-  const { db } = getDb();
-  const [lead] = await db.select().from(schema.leads)
+async function getLeadRecord(
+  id: string,
+  dbOrTx: DbReader = getDb().db,
+  lock = false,
+) {
+  const query = dbOrTx.select().from(schema.leads)
     .where(and(eq(schema.leads.id, id), isNull(schema.leads.deletedAt)));
+  const [lead] = lock ? await query.for('update') : await query;
   if (!lead) throw err.notFound('Lead not found');
   return lead;
 }
@@ -327,9 +331,17 @@ async function assertContactCompany(
   if (!contact) throw err.validation('Contact does not belong to the company');
 }
 
-async function assertLeadContact(companyId: string, contactId: string | null | undefined): Promise<void> {
-  await getCompany(companyId);
-  await assertContactCompany(companyId, contactId);
+async function assertLeadContact(
+  companyId: string,
+  contactId: string | null | undefined,
+  dbOrTx: DbReader = getDb().db,
+): Promise<void> {
+  const [company] = await dbOrTx.select({ id: schema.companies.id }).from(schema.companies).where(and(
+    eq(schema.companies.id, companyId),
+    isNull(schema.companies.deletedAt),
+  ));
+  if (!company) throw err.notFound('Company not found');
+  await assertContactCompany(companyId, contactId, dbOrTx);
 }
 
 export async function createLead(actor: Actor, input: any) {
@@ -383,50 +395,58 @@ export async function createLead(actor: Actor, input: any) {
 
 export async function updateLead(actor: Actor, id: string, input: any) {
   const { db } = getDb();
-  const before = await getLeadRecord(id);
-  assertVersion(before, input.version, before);
-  const nextCompanyId = input.companyId ?? before.companyId;
-  const nextContactId = input.contactId === undefined ? before.contactId : input.contactId;
-  const nextStatus = input.status ?? before.status;
-  const nextNurtureUntil = input.nurtureUntil === undefined ? before.nurtureUntil : input.nurtureUntil;
-  if (nextStatus === 'nurture' && !nextNurtureUntil) {
-    throw err.validation('A nurture return date is required');
-  }
-  if (input.companyId !== undefined || input.contactId !== undefined) await assertLeadContact(nextCompanyId, nextContactId);
-  const patch: Record<string, unknown> = {};
-  for (const key of [
-    'companyId', 'contactId', 'researchBatchId', 'title', 'product', 'status', 'score', 'signal',
-    'painSignal', 'evidence', 'whyFit', 'whyNow', 'sourceTitle', 'sourceUrl', 'sourceType',
-    'signalDate', 'suggestedChannel', 'opener', 'caution', 'dimensions', 'secondarySources',
-    'rawResearch', 'nurtureUntil', 'disqualifiedReason', 'ownerId',
-  ]) {
-    if (input[key] !== undefined) patch[key] = input[key];
-  }
-  if (input.status && input.status !== 'nurture' && input.nurtureUntil === undefined) {
-    patch.nurtureUntil = null;
-  }
-  if (input.sourceCheckedAt !== undefined) patch.sourceCheckedAt = input.sourceCheckedAt ? new Date(input.sourceCheckedAt) : null;
-  if (input.customFields !== undefined) patch.customFields = mergeCustomFields(before.customFields, input.customFields);
-  await db.update(schema.leads).set(patch)
-    .where(and(eq(schema.leads.id, id), eq(schema.leads.version, before.version)));
-  if (
-    CANCELS_PLANNED_LEAD_STATUSES.has(nextStatus)
-    && (input.status !== undefined || input.nurtureUntil !== undefined)
-  ) {
-    await db.update(schema.salesActivities).set({ status: 'cancelled' }).where(and(
-      eq(schema.salesActivities.leadId, id),
-      eq(schema.salesActivities.status, 'planned'),
-      isNull(schema.salesActivities.deletedAt),
-    ));
-  }
-  await writeActivity(db, {
-    entityType: 'lead',
-    entityId: id,
-    action: 'updated',
-    before,
-    after: patch,
-    actorId: actor.userId,
-    actorType: actor.actorType,
+  await db.transaction(async (tx) => {
+    const before = await getLeadRecord(id, tx, true);
+    assertVersion(before, input.version, before);
+    const nextCompanyId = input.companyId ?? before.companyId;
+    const nextContactId = input.contactId === undefined ? before.contactId : input.contactId;
+    const nextStatus = input.status ?? before.status;
+    const nextNurtureUntil = input.nurtureUntil === undefined ? before.nurtureUntil : input.nurtureUntil;
+    if (nextStatus === 'nurture' && !nextNurtureUntil) {
+      throw err.validation('A nurture return date is required');
+    }
+    if (input.companyId !== undefined || input.contactId !== undefined) {
+      await assertLeadContact(nextCompanyId, nextContactId, tx);
+    }
+    const patch: Record<string, unknown> = {};
+    for (const key of [
+      'companyId', 'contactId', 'researchBatchId', 'title', 'product', 'status', 'score', 'signal',
+      'painSignal', 'evidence', 'whyFit', 'whyNow', 'sourceTitle', 'sourceUrl', 'sourceType',
+      'signalDate', 'suggestedChannel', 'opener', 'caution', 'dimensions', 'secondarySources',
+      'rawResearch', 'nurtureUntil', 'disqualifiedReason', 'ownerId',
+    ]) {
+      if (input[key] !== undefined) patch[key] = input[key];
+    }
+    if (input.status && input.status !== 'nurture' && input.nurtureUntil === undefined) {
+      patch.nurtureUntil = null;
+    }
+    if (input.sourceCheckedAt !== undefined) {
+      patch.sourceCheckedAt = input.sourceCheckedAt ? new Date(input.sourceCheckedAt) : null;
+    }
+    if (input.customFields !== undefined) {
+      patch.customFields = mergeCustomFields(before.customFields, input.customFields);
+    }
+    await tx.update(schema.leads).set(patch)
+      .where(and(eq(schema.leads.id, id), eq(schema.leads.version, before.version)));
+    if (
+      CANCELS_PLANNED_LEAD_STATUSES.has(nextStatus)
+      && (input.status !== undefined || input.nurtureUntil !== undefined)
+    ) {
+      await tx.update(schema.salesActivities).set({ status: 'cancelled' }).where(and(
+        eq(schema.salesActivities.leadId, id),
+        eq(schema.salesActivities.status, 'planned'),
+        isNull(schema.salesActivities.deletedAt),
+      ));
+    }
+    await writeActivity(tx, {
+      entityType: 'lead',
+      entityId: id,
+      action: 'updated',
+      before,
+      after: patch,
+      actorId: actor.userId,
+      actorType: actor.actorType,
+    });
   });
   return getLead(id);
 }

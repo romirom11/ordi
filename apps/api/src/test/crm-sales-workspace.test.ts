@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { getDb, schema, eq } from '@ordi/db';
+import { getDb, schema, eq, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import { json, reqAs, resetDb, seedRolesAndUsers } from './helpers';
 
@@ -427,6 +427,57 @@ describe('research import and daily work', () => {
 });
 
 describe('sales activity data integrity', () => {
+  it('rolls back a lead transition when cancelling its activities fails', async () => {
+    const { db } = getDb();
+    const companyId = ulid();
+    await db.insert(schema.companies).values({
+      id: companyId,
+      name: 'Atomic Lead Update',
+      createdBy: users.owner!.userId,
+    });
+    const lead = await json(reqAs(users.owner!.cookie).post('/leads', {
+      companyId,
+      title: 'Atomic transition',
+      status: 'ready',
+    }));
+    await reqAs(users.owner!.cookie).post('/sales-activities', {
+      leadId: lead.id,
+      type: 'follow_up',
+      dueAt: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    const before = await json(reqAs(users.owner!.cookie).get(`/leads/${lead.id}`));
+
+    await db.execute(sql.raw(`
+      alter table sales_activities
+      add constraint sales_activities_test_no_cancelled
+      check (status <> 'cancelled') not valid
+    `));
+    try {
+      const response = await reqAs(users.owner!.cookie).patch(`/leads/${lead.id}`, {
+        status: 'nurture',
+        nurtureUntil: localDateAfter(30),
+        version: before.version,
+      });
+      expect(response.status).toBe(500);
+
+      const after = await json(reqAs(users.owner!.cookie).get(`/leads/${lead.id}`));
+      expect(after).toMatchObject({
+        status: 'ready',
+        nurtureUntil: null,
+        version: before.version,
+      });
+      const activities = (await json(reqAs(users.owner!.cookie)
+        .get(`/sales-activities?leadId=${lead.id}`))).data;
+      expect(activities).toHaveLength(1);
+      expect(activities[0].status).toBe('planned');
+    } finally {
+      await db.execute(sql.raw(`
+        alter table sales_activities
+        drop constraint if exists sales_activities_test_no_cancelled
+      `));
+    }
+  });
+
   it('requires exactly one lead or deal parent at the database boundary', async () => {
     const { db } = getDb();
     const companyId = ulid();
