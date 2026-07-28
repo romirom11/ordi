@@ -274,9 +274,199 @@ extendDict({
   },
 });
 
+extendDict({
+  en: {
+    'crm.tabWork': 'Work',
+    'crm.tabLeads': 'Leads',
+    'crm.tabCompanies': 'Companies',
+    'crm.newLead': 'New lead',
+    'crm.leadCreated': 'Lead created',
+    'crm.importResearch': 'Import research',
+    'crm.workTitle': 'What needs attention',
+    'crm.workHint': 'Sales actions ordered by urgency.',
+    'crm.queue.overdue': 'Overdue',
+    'crm.queue.today': 'Due today',
+    'crm.queue.waiting': 'Waiting for reply',
+    'crm.queue.nurture': 'Nurture due',
+    'crm.queue.noAction': 'No next action',
+    'crm.allCaughtUp': 'No sales work needs attention.',
+    'crm.leadsHint': 'Researched prospects that are not qualified opportunities yet.',
+    'crm.searchLeads': 'Search leads…',
+    'crm.lead': 'Lead',
+    'crm.score': 'Score',
+    'crm.signal': 'Signal',
+    'crm.nextAction': 'Next action',
+    'crm.noNextAction': 'No next action',
+    'crm.scheduleAction': 'Schedule action',
+    'crm.completeAction': 'Complete',
+    'crm.activityType': 'Activity type',
+    'crm.activityType.review': 'Review',
+    'crm.activityType.outreach': 'Outreach',
+    'crm.activityType.follow_up': 'Follow-up',
+    'crm.activityType.call': 'Call',
+    'crm.activityType.meeting': 'Meeting',
+    'crm.activityType.proposal': 'Proposal',
+    'crm.activityType.nurture': 'Nurture',
+    'crm.activityType.other': 'Other',
+    'crm.activityStatus.planned': 'Planned',
+    'crm.activityStatus.completed': 'Completed',
+    'crm.activityStatus.cancelled': 'Cancelled',
+    'crm.dueAt': 'Due',
+    'crm.channel': 'Channel',
+    'crm.outcome': 'Outcome',
+    'crm.context': 'Context',
+    'crm.followUp': 'Schedule follow-up',
+    'crm.salesHistory': 'Sales history',
+    'crm.noSalesActivity': 'No sales activity yet.',
+    'crm.research': 'Research',
+    'crm.painSignal': 'Pain signal',
+    'crm.whyFit': 'Why it fits',
+    'crm.whyNow': 'Why now',
+    'crm.evidence': 'Evidence',
+    'crm.caution': 'Caution',
+    'crm.source': 'Source',
+    'crm.sourceChecked': 'Source checked',
+    'crm.suggestedChannel': 'Suggested channel',
+    'crm.sources': 'Supporting sources',
+    'crm.noContact': 'No contact selected',
+    'crm.copyOpener': 'Copy opener',
+    'crm.openerCopied': 'Opener copied',
+    'crm.opener': 'Opening message',
+    'crm.openSource': 'Open source',
+    'crm.convertToDeal': 'Convert to deal',
+    'crm.converted': 'Lead converted',
+    'crm.demoteToLead': 'Move to leads',
+    'crm.demoted': 'Deal moved to leads',
+    'crm.importPaste': 'Paste the research JSON',
+    'crm.previewImport': 'Preview import',
+    'crm.confirmImport': 'Import leads',
+    'crm.importPreview': '{prospects} prospects · {companies} companies · {leads} leads · {exclusions} exclusions',
+    'crm.imported': 'Research imported',
+    'crm.invalidJson': 'This is not valid JSON.',
+    'crm.importAction.skip': 'Skip duplicate',
+    'crm.importAction.create_lead': 'Create lead',
+    'crm.importAction.create_company_and_lead': 'Create company and lead',
+    'crm.product': 'Product / service',
+    'crm.company': 'Company',
+    'crm.status.new': 'New',
+    'crm.status.needs_review': 'Needs review',
+    'crm.status.ready': 'Ready to contact',
+    'crm.status.waiting_reply': 'Waiting for reply',
+    'crm.status.engaged': 'Engaged',
+    'crm.status.nurture': 'Nurture',
+    'crm.status.converted': 'Converted',
+    'crm.status.disqualified': 'Disqualified',
+    'crm.status.no_response': 'No response',
+    'crm.unknownValue': 'Value unknown',
+    'crm.legacyLeadDeal': 'Legacy pipeline lead',
+    'crm.legacyLeadDealHint': 'This record predates the Leads workspace. Keep it as a qualified deal or move it to Leads.',
+    'crm.qualifiedFromLead': 'Qualified from a researched lead',
+    'crm.viewResearch': 'View original research',
+  },
+  uk: {
+    'crm.tabWork': 'Робота',
+    'crm.tabLeads': 'Ліди',
+    'crm.tabCompanies': 'Компанії',
+    'crm.newLead': 'Новий лід',
+    'crm.leadCreated': 'Лід створено',
+    'crm.importResearch': 'Імпортувати ресерч',
+    'crm.workTitle': 'Що потребує уваги',
+    'crm.workHint': 'Наступні дії з продажів за терміновістю.',
+    'crm.queue.overdue': 'Прострочено',
+    'crm.queue.today': 'На сьогодні',
+    'crm.queue.waiting': 'Чекаємо відповіді',
+    'crm.queue.nurture': 'Повернутися до ліда',
+    'crm.queue.noAction': 'Немає наступної дії',
+    'crm.allCaughtUp': 'Зараз немає продажів, що потребують уваги.',
+    'crm.leadsHint': 'Знайдені потенційні клієнти, які ще не стали кваліфікованими угодами.',
+    'crm.searchLeads': 'Пошук лідів…',
+    'crm.lead': 'Лід',
+    'crm.score': 'Оцінка',
+    'crm.signal': 'Сигнал',
+    'crm.nextAction': 'Наступна дія',
+    'crm.noNextAction': 'Наступної дії немає',
+    'crm.scheduleAction': 'Запланувати дію',
+    'crm.completeAction': 'Виконати',
+    'crm.activityType': 'Тип дії',
+    'crm.activityType.review': 'Перевірка',
+    'crm.activityType.outreach': 'Перший контакт',
+    'crm.activityType.follow_up': 'Повторний контакт',
+    'crm.activityType.call': 'Дзвінок',
+    'crm.activityType.meeting': 'Зустріч',
+    'crm.activityType.proposal': 'Пропозиція',
+    'crm.activityType.nurture': 'Повернення до ліда',
+    'crm.activityType.other': 'Інше',
+    'crm.activityStatus.planned': 'Заплановано',
+    'crm.activityStatus.completed': 'Виконано',
+    'crm.activityStatus.cancelled': 'Скасовано',
+    'crm.dueAt': 'Коли',
+    'crm.channel': 'Канал',
+    'crm.outcome': 'Результат',
+    'crm.context': 'Контекст',
+    'crm.followUp': 'Запланувати фолоу-ап',
+    'crm.salesHistory': 'Історія продажу',
+    'crm.noSalesActivity': 'Дій з продажу ще немає.',
+    'crm.research': 'Ресерч',
+    'crm.painSignal': 'Больовий сигнал',
+    'crm.whyFit': 'Чому підходить',
+    'crm.whyNow': 'Чому зараз',
+    'crm.evidence': 'Докази',
+    'crm.caution': 'Застереження',
+    'crm.source': 'Джерело',
+    'crm.sourceChecked': 'Джерело перевірено',
+    'crm.suggestedChannel': 'Рекомендований канал',
+    'crm.sources': 'Додаткові джерела',
+    'crm.noContact': 'Контакт не вибрано',
+    'crm.copyOpener': 'Скопіювати повідомлення',
+    'crm.openerCopied': 'Текст скопійовано',
+    'crm.opener': 'Початкове повідомлення',
+    'crm.openSource': 'Відкрити джерело',
+    'crm.convertToDeal': 'Створити угоду',
+    'crm.converted': 'Лід конвертовано',
+    'crm.demoteToLead': 'Перенести в ліди',
+    'crm.demoted': 'Угоду перенесено в ліди',
+    'crm.importPaste': 'Вставте JSON з ресерчем',
+    'crm.previewImport': 'Перевірити імпорт',
+    'crm.confirmImport': 'Імпортувати ліди',
+    'crm.importPreview': 'Знайдено: {prospects} · компаній: {companies} · лідів: {leads} · виключень: {exclusions}',
+    'crm.imported': 'Ресерч імпортовано',
+    'crm.invalidJson': 'Це невалідний JSON.',
+    'crm.importAction.skip': 'Пропустити дублікат',
+    'crm.importAction.create_lead': 'Створити лід',
+    'crm.importAction.create_company_and_lead': 'Створити компанію та лід',
+    'crm.product': 'Продукт / послуга',
+    'crm.company': 'Компанія',
+    'crm.status.new': 'Новий',
+    'crm.status.needs_review': 'Перевірити',
+    'crm.status.ready': 'Готовий до контакту',
+    'crm.status.waiting_reply': 'Чекаємо відповіді',
+    'crm.status.engaged': 'В діалозі',
+    'crm.status.nurture': 'Відкласти',
+    'crm.status.converted': 'Конвертовано',
+    'crm.status.disqualified': 'Не підходить',
+    'crm.status.no_response': 'Без відповіді',
+    'crm.unknownValue': 'Сума невідома',
+    'crm.legacyLeadDeal': 'Старий лід у пайплайні',
+    'crm.legacyLeadDealHint': 'Цей запис створено до нового розділу «Ліди». Залиште як кваліфіковану угоду або перенесіть у ліди.',
+    'crm.qualifiedFromLead': 'Кваліфіковано з дослідженого ліда',
+    'crm.viewResearch': 'Відкрити початковий ресерч',
+  },
+});
+
 export const CURRENCIES = ['USD', 'EUR', 'GBP', 'UAH', 'PLN'];
 export const COMPANY_STATUSES = ['lead', 'active', 'paused', 'archived'] as const;
+export const LEAD_STATUSES = ['new', 'needs_review', 'ready', 'waiting_reply', 'engaged', 'nurture', 'converted', 'disqualified', 'no_response'] as const;
+export const LEAD_ACTIVITY_OUTCOME_STATUSES = ['ready', 'waiting_reply', 'engaged', 'nurture', 'disqualified', 'no_response'] as const;
+export const SALES_ACTIVITY_TYPES = ['review', 'outreach', 'follow_up', 'call', 'meeting', 'proposal', 'nurture', 'other'] as const;
 export type CompanyStatus = (typeof COMPANY_STATUSES)[number];
+
+export function salesActivityTypeLabel(t: (key: string, fallback?: string) => string, value: string): string {
+  return t(`crm.activityType.${value}`, value.replaceAll('_', ' '));
+}
+
+export function salesActivityStatusLabel(t: (key: string, fallback?: string) => string, value: string): string {
+  return t(`crm.activityStatus.${value}`, value.replaceAll('_', ' '));
+}
 
 /* Status colour semantics (brief): lead=warning, active=success, paused/archived=faint. */
 export const STATUS_TEXT: Record<string, string> = {
@@ -308,9 +498,81 @@ export interface Stage {
   id: string; name: string; position: number; probability: number; isWon: boolean; isLost: boolean;
 }
 export interface Deal {
-  id: string; companyId?: string | null; projectId?: string | null; title: string; stageId: string;
+  id: string; companyId?: string | null; projectId?: string | null; sourceLeadId?: string | null; title: string; stageId: string;
   amount?: string | number | null; currency?: string | null; expectedCloseDate?: string | null;
   ownerId?: string | null; lostReason?: string | null; version?: number;
+}
+
+export interface Lead {
+  id: string;
+  companyId: string;
+  companyName?: string;
+  contactId?: string | null;
+  contact?: Contact | null;
+  title: string;
+  product?: string | null;
+  status: string;
+  score?: number | null;
+  signal?: string | null;
+  painSignal?: string | null;
+  evidence?: string | null;
+  whyFit?: string | null;
+  whyNow?: string | null;
+  sourceTitle?: string | null;
+  sourceUrl?: string | null;
+  sourceType?: string | null;
+  signalDate?: string | null;
+  sourceCheckedAt?: string | null;
+  suggestedChannel?: string | null;
+  opener?: string | null;
+  caution?: string | null;
+  dimensions?: Record<string, number>;
+  secondarySources?: Array<{ title: string; url: string; supports?: string }>;
+  nurtureUntil?: string | null;
+  disqualifiedReason?: string | null;
+  ownerId?: string | null;
+  convertedDealId?: string | null;
+  legacyDealId?: string | null;
+  createdAt?: string | null;
+  version?: number;
+}
+
+export interface SalesActivity {
+  id: string;
+  leadId?: string | null;
+  dealId?: string | null;
+  companyId: string;
+  contactId?: string | null;
+  type: string;
+  status: 'planned' | 'completed' | 'cancelled';
+  channel?: string | null;
+  subject?: string | null;
+  context?: string | null;
+  outcome?: string | null;
+  dueAt?: string | null;
+  completedAt?: string | null;
+  ownerId?: string | null;
+  createdAt?: string;
+  version?: number;
+}
+
+export interface SalesWorkItem {
+  entityType: 'lead' | 'deal';
+  id: string;
+  title: string;
+  companyId: string;
+  companyName: string;
+  status: string;
+  nurtureUntil?: string | null;
+  nextActivity?: SalesActivity | null;
+}
+
+export interface SalesWork {
+  overdue: SalesWorkItem[];
+  dueToday: SalesWorkItem[];
+  waitingReply: SalesWorkItem[];
+  nurtureDue: SalesWorkItem[];
+  noNextAction: SalesWorkItem[];
 }
 
 export interface ProjectLite { id: string; name: string; key?: string | null }
@@ -342,6 +604,43 @@ export function useAllDeals() {
   return useQuery<Deal[]>({
     queryKey: ['deals'],
     queryFn: () => api.get<{ data: Deal[] }>('/deals').then((r) => r.data),
+  });
+}
+
+export function useLeads(params: { q?: string; status?: string; companyId?: string } = {}) {
+  return useQuery<Lead[]>({
+    queryKey: ['leads', params],
+    queryFn: () => api.get<{ data: Lead[] }>(`/leads${qs(params)}`).then((r) => r.data),
+  });
+}
+
+export function useLead(id?: string | null, enabled = true) {
+  return useQuery<Lead>({
+    queryKey: ['lead', id],
+    queryFn: () => api.get<Lead>(`/leads/${id!}`),
+    enabled: !!id && enabled,
+  });
+}
+
+export function useContacts(companyId?: string | null) {
+  return useQuery<Contact[]>({
+    queryKey: ['contacts', companyId],
+    queryFn: () => api.get<{ data: Contact[] }>(`/contacts${qs({ companyId })}`).then((r) => r.data),
+    enabled: !!companyId,
+  });
+}
+
+export function useSalesActivities(params: { leadId?: string; dealId?: string; companyId?: string; status?: string }) {
+  return useQuery<SalesActivity[]>({
+    queryKey: ['sales-activities', params],
+    queryFn: () => api.get<{ data: SalesActivity[] }>(`/sales-activities${qs(params)}`).then((r) => r.data),
+  });
+}
+
+export function useSalesWork() {
+  return useQuery<SalesWork>({
+    queryKey: ['sales-work'],
+    queryFn: () => api.get<SalesWork>('/sales-work'),
   });
 }
 

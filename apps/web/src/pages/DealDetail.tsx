@@ -8,21 +8,25 @@ import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Activity as ActivityIcon, CalendarClock, ChevronDown, ChevronRight,
-  ExternalLink as ExternalLinkIcon, FolderKanban, Handshake, UserCircle2,
+  ExternalLink as ExternalLinkIcon, FolderKanban, Handshake, Target, UserCircle2,
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
-import { Link } from '../lib/router';
+import { Link, useNavigate } from '../lib/router';
 import { useCan, useMe } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import { useT } from '../lib/i18n';
 import {
-  Avatar, Badge, EmptySection, Input, RailChip, RailField, Skeleton,
+  Avatar, Badge, Button, Card, EmptySection, Input, RailChip, RailField, Skeleton,
   cn, fmtMoney, fmtDate, fmtRelative,
 } from '../components/ui';
 import { DropdownMenu, MenuItem, MenuLabel, toast } from '../components/overlays';
-import { useDealStages, useProjectsLookup, useUsersLookup, CURRENCIES, type Company, type Deal, type ProjectLite, type Stage } from '../components/crm/shared';
+import {
+  useDealStages, useLead, useProjectsLookup, useUsersLookup,
+  CURRENCIES, type Company, type Deal, type ProjectLite, type Stage,
+} from '../components/crm/shared';
 import { EditableName, FilesSection, NotesSection, SectionHeader } from '../components/crm/detail';
 import { LostReasonDialog } from '../components/crm/dialogs';
+import { SalesActivityPanel } from '../components/crm/SalesActivityPanel';
 import { DateField } from '../components/DatePicker';
 import { DateRailPicker } from '../components/project/pickers';
 
@@ -33,6 +37,7 @@ interface ActivityRow { id: string; action?: string; actorId?: string | null; cr
 export function DealDetailPage({ id }: { id: string }) {
   const t = useT();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const can = useCan();
   const canWrite = can('deals.write');
 
@@ -48,6 +53,7 @@ export function DealDetailPage({ id }: { id: string }) {
   const projectsQ = useProjectsLookup();
 
   const d = dealQ.data;
+  const sourceLeadQ = useLead(d?.sourceLeadId, can('crm.read'));
   // Tab and window title carry the deal, not a generic "CRM".
   usePageTitle(d?.title);
   const stages = stagesQ.data ?? [];
@@ -56,6 +62,18 @@ export function DealDetailPage({ id }: { id: string }) {
   const project = d?.projectId ? (projectsQ.data ?? []).find((p) => p.id === d.projectId) : undefined;
 
   const [lostFor, setLostFor] = useState<string | null>(null);
+
+  const demote = useMutation({
+    mutationFn: () => api.post<{ leadId: string }>(`/deals/${id}/demote-to-lead`, {}),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ['deals'] });
+      qc.invalidateQueries({ queryKey: ['leads'] });
+      qc.invalidateQueries({ queryKey: ['sales-work'] });
+      toast(t('crm.demoted'));
+      navigate(`/leads/${result.leadId}`);
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.error')),
+  });
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['deal', id] });
@@ -119,6 +137,42 @@ export function DealDetailPage({ id }: { id: string }) {
       <div className="flex min-h-0 flex-1 flex-col min-[1100px]:flex-row">
         <div className="order-2 min-w-0 flex-1 overflow-auto min-[1100px]:order-1">
           <div className="space-y-7 px-6 py-6">
+            {stage?.name.toLowerCase() === 'lead' && !d?.sourceLeadId && (
+              <Card className="flex items-start gap-3 border-warning/30 bg-warning/5 p-4">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium">{t('crm.legacyLeadDeal')}</p>
+                  <p className="mt-0.5 text-[13px] text-muted-foreground">{t('crm.legacyLeadDealHint')}</p>
+                </div>
+                {canWrite && can('crm.write') && (
+                  <Button size="sm" variant="outline" onClick={() => demote.mutate()} disabled={demote.isPending}>
+                    {t('crm.demoteToLead')}
+                  </Button>
+                )}
+              </Card>
+            )}
+            {sourceLeadQ.data && (
+              <Card className="flex items-start gap-3 border-primary/20 p-4">
+                <Target size={17} className="mt-0.5 shrink-0 text-warning" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium">{t('crm.qualifiedFromLead')}</p>
+                  <p className="mt-0.5 line-clamp-2 text-[13px] text-muted-foreground">
+                    {sourceLeadQ.data.painSignal || sourceLeadQ.data.whyFit || sourceLeadQ.data.title}
+                  </p>
+                  {sourceLeadQ.data.contact && (
+                    <p className="mt-1 text-xs text-faint">
+                      {[sourceLeadQ.data.contact.firstName, sourceLeadQ.data.contact.lastName].filter(Boolean).join(' ')}
+                    </p>
+                  )}
+                </div>
+                <Link
+                  to={`/leads/${sourceLeadQ.data.id}`}
+                  className="shrink-0 text-[13px] font-medium text-primary hover:underline"
+                >
+                  {t('crm.viewResearch')}
+                </Link>
+              </Card>
+            )}
+            <SalesActivityPanel dealId={id} canWrite={canWrite} />
             {can('crm.read') && <NotesSection dealId={id} canWrite={can('crm.write')} />}
             <ActivitySection dealId={id} />
           </div>
@@ -344,7 +398,7 @@ function DealRail({
 
 
 function EditableAmount({ amount, currency, editable, onSave }: {
-  amount?: string | number | null; currency: string; editable: boolean; onSave: (v: number) => void;
+  amount?: string | number | null; currency: string; editable: boolean; onSave: (v: number | null) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -354,8 +408,12 @@ function EditableAmount({ amount, currency, editable, onSave }: {
   if (editing) {
     const commit = () => {
       setEditing(false);
+      if (draft === '') {
+        if (amount != null) onSave(null);
+        return;
+      }
       const v = Number(draft);
-      if (draft !== '' && Number.isFinite(v) && v >= 0 && v !== Number(amount ?? 0)) onSave(v);
+      if (Number.isFinite(v) && v >= 0 && v !== Number(amount ?? 0)) onSave(v);
     };
     return (
       <Input

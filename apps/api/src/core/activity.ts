@@ -23,6 +23,7 @@ const FEED_VISIBILITY: Record<string, Permission> = {
   contact: 'crm.read',
   note: 'crm.read',
   attachment: 'crm.read',
+  lead: 'crm.read',
   deal: 'deals.read',
   invoice: 'finance.read',
   quote: 'finance.read',

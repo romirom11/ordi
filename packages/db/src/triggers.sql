@@ -86,6 +86,12 @@ ALTER TABLE contacts ADD COLUMN IF NOT EXISTS search_vector tsvector
   ) STORED;
 CREATE INDEX IF NOT EXISTS contacts_search_idx ON contacts USING gin (search_vector);
 
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS search_vector tsvector
+  GENERATED ALWAYS AS (
+    to_tsvector('simple', coalesce(title,'') || ' ' || coalesce(product,'') || ' ' || coalesce(pain_signal,'') || ' ' || coalesce(evidence,''))
+  ) STORED;
+CREATE INDEX IF NOT EXISTS leads_search_idx ON leads USING gin (search_vector);
+
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS search_vector tsvector
   GENERATED ALWAYS AS (
     to_tsvector('simple', coalesce(name,'') || ' ' || coalesce(key,'') || ' ' || coalesce(description,''))
@@ -114,6 +120,7 @@ CREATE INDEX IF NOT EXISTS quotes_number_trgm_idx ON quotes USING gin (number gi
 CREATE INDEX IF NOT EXISTS companies_cf_idx ON companies USING gin (custom_fields);
 CREATE INDEX IF NOT EXISTS contacts_cf_idx ON contacts USING gin (custom_fields);
 CREATE INDEX IF NOT EXISTS deals_cf_idx ON deals USING gin (custom_fields);
+CREATE INDEX IF NOT EXISTS leads_cf_idx ON leads USING gin (custom_fields);
 CREATE INDEX IF NOT EXISTS projects_cf_idx ON projects USING gin (custom_fields);
 CREATE INDEX IF NOT EXISTS tasks_cf_idx ON tasks USING gin (custom_fields);
 CREATE INDEX IF NOT EXISTS invoices_cf_idx ON invoices USING gin (custom_fields);

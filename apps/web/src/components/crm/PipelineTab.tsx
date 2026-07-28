@@ -14,7 +14,10 @@ import { useT } from '../../lib/i18n';
 import { Avatar, EmptyState, Skeleton, Tooltip, cn, fmtMoney, fmtDate } from '../ui';
 import { ContextMenu, ConfirmDialog, toast, type ContextMenuEntry } from '../overlays';
 import { LostReasonDialog } from './dialogs';
-import { useAllDeals, useCompanies, useDealStages, useProjectsLookup, useUsersLookup, type Deal, type Stage } from './shared';
+import {
+  useAllDeals, useCompanies, useDealStages, useProjectsLookup, useSalesActivities,
+  useUsersLookup, salesActivityTypeLabel, type Deal, type SalesActivity, type Stage,
+} from './shared';
 
 export function PipelineTab() {
   const t = useT();
@@ -30,12 +33,20 @@ export function PipelineTab() {
   const companiesQ = useCompanies();
   const usersQ = useUsersLookup();
   const projectsQ = useProjectsLookup();
+  const activitiesQ = useSalesActivities({ status: 'planned' });
 
   const stages = stagesQ.data ?? [];
   const allDeals = dealsQ.data ?? [];
   const companyMap = useMemo(() => new Map((companiesQ.data ?? []).map((c) => [c.id, c])), [companiesQ.data]);
   const userMap = useMemo(() => new Map((usersQ.data ?? []).map((u) => [u.id, u])), [usersQ.data]);
   const projectMap = useMemo(() => new Map((projectsQ.data ?? []).map((p) => [p.id, p])), [projectsQ.data]);
+  const nextByDeal = useMemo(() => {
+    const map = new Map<string, SalesActivity>();
+    for (const activity of activitiesQ.data ?? []) {
+      if (activity.dealId && !map.has(activity.dealId)) map.set(activity.dealId, activity);
+    }
+    return map;
+  }, [activitiesQ.data]);
 
   // Filter by linked project: '' = all, 'none' = unlinked, otherwise a project id.
   // Chips appear only once at least one deal is linked – zero setup, zero noise.
@@ -148,7 +159,13 @@ export function PipelineTab() {
       <div className="min-h-0 flex-1 overflow-x-auto">
       <div className="flex h-full gap-3 p-4">
         {stages.map((stage) => {
-          const list = deals.filter((d) => d.stageId === stage.id);
+          const list = deals.filter((d) => d.stageId === stage.id).sort((a, b) => {
+            const aDue = nextByDeal.get(a.id)?.dueAt;
+            const bDue = nextByDeal.get(b.id)?.dueAt;
+            if (!aDue && bDue) return -1;
+            if (aDue && !bDue) return 1;
+            return (aDue ? new Date(aDue).getTime() : 0) - (bDue ? new Date(bDue).getTime() : 0);
+          });
           const sum = list.reduce((n, d) => n + Number(d.amount ?? 0), 0);
           const weighted = sum * (stage.probability / 100);
           const currency = list[0]?.currency ?? 'USD';
@@ -200,6 +217,7 @@ export function PipelineTab() {
                   const company = d.companyId ? companyMap.get(d.companyId) : undefined;
                   const owner = d.ownerId ? userMap.get(d.ownerId) : undefined;
                   const project = d.projectId ? projectMap.get(d.projectId) : undefined;
+                  const next = nextByDeal.get(d.id);
                   return (
                     <ContextMenu key={d.id} items={dealMenu(d)}>
                     <div
@@ -227,6 +245,17 @@ export function PipelineTab() {
                           {project.key && <span className="shrink-0 font-mono text-[10px]">{project.key}</span>}
                         </div>
                       )}
+                      <div className={cn(
+                        'mt-2 flex items-center gap-1 text-[11px]',
+                        next?.dueAt && new Date(next.dueAt).getTime() < Date.now() ? 'text-destructive' : 'text-muted-foreground',
+                      )}>
+                        <CalendarClock size={11} />
+                        <span className="truncate">
+                          {next
+                            ? `${next.subject || salesActivityTypeLabel(t, next.type)}${next.dueAt ? ` · ${fmtDate(next.dueAt)}` : ''}`
+                            : t('crm.noNextAction')}
+                        </span>
+                      </div>
                       <div className="mt-2 flex items-center justify-between">
                         <span className="text-[13px] font-semibold tabular-nums">
                           {d.amount != null ? fmtMoney(d.amount, d.currency ?? 'USD') : '–'}

@@ -1,4 +1,4 @@
-import { getDb, schema, eq, and, isNull, desc, sql, inArray, type SQL } from '@ordi/db';
+import { getDb, schema, eq, and, isNull, desc, asc, sql, inArray, type SQL } from '@ordi/db';
 import { ulid } from 'ulid';
 import type { CustomFieldFilter } from '@ordi/shared';
 import type { Actor } from '../../context';
@@ -74,15 +74,17 @@ export async function softDeleteCompany(actor: Actor, id: string) {
     select
       (select count(*)::int from invoices where company_id = ${id} and deleted_at is null) as invoices,
       (select count(*)::int from projects where company_id = ${id} and deleted_at is null) as projects,
-      (select count(*)::int from deals where company_id = ${id}) as deals
-  `) as unknown as { invoices: number; projects: number; deals: number }[];
+      (select count(*)::int from deals where company_id = ${id}) as deals,
+      (select count(*)::int from leads where company_id = ${id} and deleted_at is null) as leads
+  `) as unknown as { invoices: number; projects: number; deals: number; leads: number }[];
   const invoices = Number(rows[0]?.invoices ?? 0);
   const projects = Number(rows[0]?.projects ?? 0);
   const deals = Number(rows[0]?.deals ?? 0);
+  const leads = Number(rows[0]?.leads ?? 0);
 
-  if (invoices > 0 || projects > 0 || deals > 0) {
-    throw err.domain('Cannot delete a client that still has invoices, projects or deals. Archive it instead.', {
-      invoices, projects, deals,
+  if (invoices > 0 || projects > 0 || deals > 0 || leads > 0) {
+    throw err.domain('Cannot delete a company that still has leads, deals, projects or invoices. Archive it instead.', {
+      invoices, projects, deals, leads,
     });
   }
 
@@ -181,4 +183,789 @@ export async function getDeal(id: string) {
   const [deal] = await db.select().from(schema.deals).where(and(eq(schema.deals.id, id), isNull(schema.deals.deletedAt)));
   if (!deal) throw err.notFound('Deal not found');
   return deal;
+}
+
+// ── Leads, research and sales work ──
+
+const TERMINAL_LEAD_STATUSES = new Set(['converted', 'disqualified', 'no_response']);
+const STOPPED_LEAD_STATUSES = new Set(['disqualified', 'no_response']);
+
+function normalized(value: string | null | undefined): string {
+  return (value ?? '').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
+}
+
+function researchCheckedAt(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+async function enrichLeads<T extends { companyId: string; contactId: string | null }>(rows: T[]) {
+  const { db } = getDb();
+  const companyIds = [...new Set(rows.map((row) => row.companyId))];
+  const contactIds = [...new Set(rows.map((row) => row.contactId).filter(Boolean) as string[])];
+  const [companyRows, contactRows] = await Promise.all([
+    companyIds.length
+      ? db.select({ id: schema.companies.id, name: schema.companies.name }).from(schema.companies).where(inArray(schema.companies.id, companyIds))
+      : [],
+    contactIds.length
+      ? db.select({
+        id: schema.contacts.id,
+        firstName: schema.contacts.firstName,
+        lastName: schema.contacts.lastName,
+        position: schema.contacts.position,
+      }).from(schema.contacts).where(and(
+        inArray(schema.contacts.id, contactIds),
+        isNull(schema.contacts.deletedAt),
+      ))
+      : [],
+  ]);
+  const companiesById = new Map(companyRows.map((row) => [row.id, row.name]));
+  const contactsById = new Map(contactRows.map((row) => [row.id, row]));
+  return rows.map((row) => ({
+    ...row,
+    companyName: companiesById.get(row.companyId) ?? '',
+    contact: row.contactId ? contactsById.get(row.contactId) ?? null : null,
+  }));
+}
+
+export async function listLeads(params: {
+  q?: string;
+  status?: string;
+  companyId?: string;
+  ownerId?: string;
+  limit?: number;
+}) {
+  const { db } = getDb();
+  const rows = await db.select().from(schema.leads).where(and(
+    isNull(schema.leads.deletedAt),
+    params.status ? eq(schema.leads.status, params.status) : undefined,
+    params.companyId ? eq(schema.leads.companyId, params.companyId) : undefined,
+    params.ownerId ? eq(schema.leads.ownerId, params.ownerId) : undefined,
+    params.q
+      ? sql`(${schema.leads.title} ilike ${'%' + params.q + '%'} or ${schema.leads.painSignal} ilike ${'%' + params.q + '%'} or ${schema.leads.evidence} ilike ${'%' + params.q + '%'})`
+      : undefined,
+  )).orderBy(desc(schema.leads.createdAt)).limit(params.limit ?? 100);
+  return enrichLeads(rows);
+}
+
+async function getLeadRecord(id: string) {
+  const { db } = getDb();
+  const [lead] = await db.select().from(schema.leads)
+    .where(and(eq(schema.leads.id, id), isNull(schema.leads.deletedAt)));
+  if (!lead) throw err.notFound('Lead not found');
+  return lead;
+}
+
+export async function getLead(id: string) {
+  const { db } = getDb();
+  const lead = await getLeadRecord(id);
+  const [enriched] = await enrichLeads([lead]);
+  const [convertedDeal] = await db.select({ id: schema.deals.id }).from(schema.deals)
+    .where(and(eq(schema.deals.sourceLeadId, id), isNull(schema.deals.deletedAt)));
+  return { ...enriched!, convertedDealId: convertedDeal?.id ?? null };
+}
+
+async function assertContactCompany(companyId: string, contactId: string | null | undefined): Promise<void> {
+  if (!contactId) return;
+  const { db } = getDb();
+  const [contact] = await db.select({ id: schema.contacts.id }).from(schema.contacts).where(and(
+    eq(schema.contacts.id, contactId),
+    eq(schema.contacts.companyId, companyId),
+    isNull(schema.contacts.deletedAt),
+  ));
+  if (!contact) throw err.validation('Contact does not belong to the company');
+}
+
+async function assertLeadContact(companyId: string, contactId: string | null | undefined): Promise<void> {
+  await getCompany(companyId);
+  await assertContactCompany(companyId, contactId);
+}
+
+export async function createLead(actor: Actor, input: any) {
+  await assertLeadContact(input.companyId, input.contactId);
+  const { db } = getDb();
+  const id = ulid();
+  await db.insert(schema.leads).values({
+    id,
+    companyId: input.companyId,
+    contactId: input.contactId ?? null,
+    researchBatchId: input.researchBatchId ?? null,
+    title: input.title,
+    product: input.product ?? null,
+    status: input.status ?? 'new',
+    score: input.score ?? null,
+    signal: input.signal ?? null,
+    painSignal: input.painSignal ?? null,
+    evidence: input.evidence ?? null,
+    whyFit: input.whyFit ?? null,
+    whyNow: input.whyNow ?? null,
+    sourceTitle: input.sourceTitle ?? null,
+    sourceUrl: input.sourceUrl ?? null,
+    sourceType: input.sourceType ?? null,
+    signalDate: input.signalDate ?? null,
+    sourceCheckedAt: input.sourceCheckedAt ? new Date(input.sourceCheckedAt) : null,
+    suggestedChannel: input.suggestedChannel ?? null,
+    opener: input.opener ?? null,
+    caution: input.caution ?? null,
+    dimensions: input.dimensions ?? {},
+    secondarySources: input.secondarySources ?? [],
+    rawResearch: input.rawResearch ?? {},
+    nurtureUntil: input.nurtureUntil ?? null,
+    disqualifiedReason: input.disqualifiedReason ?? null,
+    ownerId: input.ownerId ?? actor.userId,
+    customFields: input.customFields ?? {},
+    createdBy: actor.userId,
+  });
+  await writeActivity(db, {
+    entityType: 'lead',
+    entityId: id,
+    action: 'created',
+    after: { title: input.title, companyId: input.companyId, status: input.status ?? 'new' },
+    actorId: actor.userId,
+    actorType: actor.actorType,
+  });
+  return id;
+}
+
+export async function updateLead(actor: Actor, id: string, input: any) {
+  const { db } = getDb();
+  const before = await getLeadRecord(id);
+  assertVersion(before, input.version, before);
+  const nextCompanyId = input.companyId ?? before.companyId;
+  const nextContactId = input.contactId === undefined ? before.contactId : input.contactId;
+  if (input.companyId !== undefined || input.contactId !== undefined) await assertLeadContact(nextCompanyId, nextContactId);
+  const patch: Record<string, unknown> = {};
+  for (const key of [
+    'companyId', 'contactId', 'researchBatchId', 'title', 'product', 'status', 'score', 'signal',
+    'painSignal', 'evidence', 'whyFit', 'whyNow', 'sourceTitle', 'sourceUrl', 'sourceType',
+    'signalDate', 'suggestedChannel', 'opener', 'caution', 'dimensions', 'secondarySources',
+    'rawResearch', 'nurtureUntil', 'disqualifiedReason', 'ownerId',
+  ]) {
+    if (input[key] !== undefined) patch[key] = input[key];
+  }
+  if (input.sourceCheckedAt !== undefined) patch.sourceCheckedAt = input.sourceCheckedAt ? new Date(input.sourceCheckedAt) : null;
+  if (input.customFields !== undefined) patch.customFields = mergeCustomFields(before.customFields, input.customFields);
+  await db.update(schema.leads).set(patch)
+    .where(and(eq(schema.leads.id, id), eq(schema.leads.version, before.version)));
+  if (input.status && STOPPED_LEAD_STATUSES.has(input.status)) {
+    await db.update(schema.salesActivities).set({ status: 'cancelled' }).where(and(
+      eq(schema.salesActivities.leadId, id),
+      eq(schema.salesActivities.status, 'planned'),
+      isNull(schema.salesActivities.deletedAt),
+    ));
+  }
+  await writeActivity(db, {
+    entityType: 'lead',
+    entityId: id,
+    action: 'updated',
+    before,
+    after: patch,
+    actorId: actor.userId,
+    actorType: actor.actorType,
+  });
+  return getLead(id);
+}
+
+export async function softDeleteLead(actor: Actor, id: string) {
+  const { db } = getDb();
+  await getLeadRecord(id);
+  await db.update(schema.leads).set({ deletedAt: new Date() }).where(eq(schema.leads.id, id));
+  await writeActivity(db, {
+    entityType: 'lead',
+    entityId: id,
+    action: 'deleted',
+    actorId: actor.userId,
+    actorType: actor.actorType,
+  });
+}
+
+export async function previewResearchImport(payload: any) {
+  const { db } = getDb();
+  const [companies, existingLeads] = await Promise.all([
+    db.select({ id: schema.companies.id, name: schema.companies.name }).from(schema.companies).where(isNull(schema.companies.deletedAt)),
+    db.select({ id: schema.leads.id, companyId: schema.leads.companyId, product: schema.leads.product, title: schema.leads.title })
+      .from(schema.leads).where(isNull(schema.leads.deletedAt)),
+  ]);
+  const companyByName = new Map(companies.map((company) => [normalized(company.name), company]));
+  const leadIdByKey = new Map(existingLeads.map((lead) => [
+    `${lead.companyId}:${normalized(lead.product || lead.title)}`,
+    lead.id,
+  ]));
+  const newCompanyKeys = new Set<string>();
+  const payloadLeadKeys = new Set<string>();
+  let companiesToCreate = 0;
+  let leadsToCreate = 0;
+  const matches = payload.prospects.map((prospect: any) => {
+    const companyNameKey = normalized(prospect.name);
+    const company = companyByName.get(companyNameKey);
+    if (!company && !newCompanyKeys.has(companyNameKey)) {
+      newCompanyKeys.add(companyNameKey);
+      companiesToCreate += 1;
+    }
+    const companyKey = company?.id ?? `new:${companyNameKey}`;
+    const leadKey = `${companyKey}:${normalized(payload.product || prospect.name)}`;
+    const duplicateLeadId = company ? leadIdByKey.get(leadKey) : undefined;
+    const duplicateInPayload = payloadLeadKeys.has(leadKey);
+    if (!duplicateLeadId && !duplicateInPayload) {
+      payloadLeadKeys.add(leadKey);
+      leadsToCreate += 1;
+    }
+    return {
+      name: prospect.name,
+      companyId: company?.id ?? null,
+      leadId: duplicateLeadId ?? null,
+      action: duplicateLeadId || duplicateInPayload ? 'skip' : company ? 'create_lead' : 'create_company_and_lead',
+    };
+  });
+  return {
+    prospects: payload.prospects.length,
+    companiesToCreate,
+    leadsToCreate,
+    exclusions: payload.excluded_candidates?.length ?? 0,
+    matches,
+  };
+}
+
+export async function importResearch(actor: Actor, payload: any) {
+  const { db } = getDb();
+  return db.transaction(async (tx) => {
+    const existingBatches = await tx.select().from(schema.researchBatches).where(and(
+      eq(schema.researchBatches.title, payload.title),
+      payload.generated_at ? eq(schema.researchBatches.generatedAt, payload.generated_at) : undefined,
+      isNull(schema.researchBatches.deletedAt),
+    ));
+    const researchBatchId = existingBatches[0]?.id ?? ulid();
+    if (!existingBatches[0]) {
+      await tx.insert(schema.researchBatches).values({
+        id: researchBatchId,
+        title: payload.title,
+        product: payload.product ?? null,
+        productUrl: payload.product_url ?? null,
+        targetCustomer: payload.target_customer ?? null,
+        searchScope: payload.search_scope ?? null,
+        generatedAt: payload.generated_at ?? null,
+        verdict: payload.verdict ?? null,
+        patterns: payload.patterns ?? [],
+        outreachPlan: payload.outreach_plan ?? {},
+        limits: payload.limits ?? [],
+        excludedCandidates: payload.excluded_candidates ?? [],
+        rawPayload: payload,
+        createdBy: actor.userId,
+      });
+    }
+
+    const companyRows = await tx.select().from(schema.companies).where(isNull(schema.companies.deletedAt));
+    const companyIdByName = new Map(companyRows.map((company) => [normalized(company.name), company.id]));
+    const leadRows = await tx.select().from(schema.leads).where(isNull(schema.leads.deletedAt));
+    const leadIdByKey = new Map(leadRows.map((lead) => [
+      `${lead.companyId}:${normalized(lead.product || lead.title)}`,
+      lead.id,
+    ]));
+    const leadIds: string[] = [];
+    let createdCompanies = 0;
+    let createdLeads = 0;
+
+    for (const prospect of payload.prospects) {
+      let companyId = companyIdByName.get(normalized(prospect.name));
+      if (!companyId) {
+        companyId = ulid();
+        await tx.insert(schema.companies).values({
+          id: companyId,
+          name: prospect.name,
+          status: 'lead',
+          ownerId: actor.userId,
+          createdBy: actor.userId,
+        });
+        companyIdByName.set(normalized(prospect.name), companyId);
+        createdCompanies += 1;
+      }
+
+      const key = `${companyId}:${normalized(payload.product || prospect.name)}`;
+      const duplicateLeadId = leadIdByKey.get(key);
+      if (duplicateLeadId) {
+        leadIds.push(duplicateLeadId);
+        continue;
+      }
+
+      const leadId = ulid();
+      await tx.insert(schema.leads).values({
+        id: leadId,
+        companyId,
+        researchBatchId,
+        title: prospect.name,
+        product: payload.product ?? null,
+        status: 'needs_review',
+        score: prospect.score ?? null,
+        signal: [prospect.stage, prospect.type].filter(Boolean).join(' · ') || null,
+        painSignal: prospect.pain_signal ?? null,
+        evidence: prospect.evidence ?? null,
+        whyFit: prospect.why_fit ?? null,
+        whyNow: prospect.why_now ?? null,
+        sourceTitle: prospect.source_title ?? null,
+        sourceUrl: prospect.source_url ?? null,
+        sourceType: prospect.source_type ?? null,
+        signalDate: prospect.signal_date ?? null,
+        sourceCheckedAt: researchCheckedAt(payload.generated_at),
+        suggestedChannel: prospect.suggested_channel ?? null,
+        opener: prospect.opener ?? null,
+        caution: prospect.caution ?? null,
+        dimensions: prospect.dimensions ?? {},
+        secondarySources: prospect.secondary_sources ?? [],
+        rawResearch: prospect,
+        ownerId: actor.userId,
+        createdBy: actor.userId,
+      });
+      await tx.insert(schema.salesActivities).values({
+        id: ulid(),
+        leadId,
+        companyId,
+        type: 'review',
+        status: 'planned',
+        subject: 'Validate signal and choose outreach',
+        dueAt: new Date(),
+        ownerId: actor.userId,
+        createdBy: actor.userId,
+      });
+      await writeActivity(tx, {
+        entityType: 'lead',
+        entityId: leadId,
+        action: 'imported',
+        after: { researchBatchId, sourceUrl: prospect.source_url ?? null },
+        actorId: actor.userId,
+        actorType: actor.actorType,
+      });
+      leadIdByKey.set(key, leadId);
+      leadIds.push(leadId);
+      createdLeads += 1;
+    }
+
+    return {
+      researchBatchId,
+      leadIds,
+      createdCompanies,
+      createdLeads,
+      exclusions: payload.excluded_candidates?.length ?? 0,
+    };
+  });
+}
+
+export async function listSalesActivities(params: {
+  leadId?: string;
+  dealId?: string;
+  companyId?: string;
+  status?: string;
+  includeLeads?: boolean;
+  includeDeals?: boolean;
+}) {
+  const { db } = getDb();
+  return db.select().from(schema.salesActivities).where(and(
+    isNull(schema.salesActivities.deletedAt),
+    params.leadId ? eq(schema.salesActivities.leadId, params.leadId) : undefined,
+    params.dealId ? eq(schema.salesActivities.dealId, params.dealId) : undefined,
+    params.companyId ? eq(schema.salesActivities.companyId, params.companyId) : undefined,
+    params.status ? eq(schema.salesActivities.status, params.status) : undefined,
+    params.includeLeads === false ? isNull(schema.salesActivities.leadId) : undefined,
+    params.includeDeals === false ? isNull(schema.salesActivities.dealId) : undefined,
+  )).orderBy(
+    sql`case when ${schema.salesActivities.status} = 'planned' then 0 else 1 end`,
+    asc(schema.salesActivities.dueAt),
+    desc(schema.salesActivities.createdAt),
+  );
+}
+
+export async function getSalesActivity(id: string) {
+  const { db } = getDb();
+  const [activity] = await db.select().from(schema.salesActivities).where(and(
+    eq(schema.salesActivities.id, id),
+    isNull(schema.salesActivities.deletedAt),
+  ));
+  if (!activity) throw err.notFound('Sales activity not found');
+  return activity;
+}
+
+async function activityParent(input: any) {
+  if (input.leadId) {
+    const lead = await getLeadRecord(input.leadId);
+    const contactId = input.contactId === undefined ? lead.contactId : input.contactId;
+    await assertContactCompany(lead.companyId, contactId);
+    return { leadId: lead.id, dealId: null, companyId: lead.companyId, contactId, ownerId: input.ownerId ?? lead.ownerId };
+  }
+  const deal = await getDeal(input.dealId);
+  await assertContactCompany(deal.companyId, input.contactId);
+  return { leadId: null, dealId: deal.id, companyId: deal.companyId, contactId: input.contactId ?? null, ownerId: input.ownerId ?? deal.ownerId };
+}
+
+export async function createSalesActivity(actor: Actor, input: any) {
+  const { db } = getDb();
+  const parent = await activityParent(input);
+  const id = ulid();
+  await db.insert(schema.salesActivities).values({
+    id,
+    ...parent,
+    type: input.type,
+    status: 'planned',
+    channel: input.channel ?? null,
+    subject: input.subject ?? null,
+    context: input.context ?? null,
+    dueAt: input.dueAt ? new Date(input.dueAt) : null,
+    createdBy: actor.userId,
+  });
+  await writeActivity(db, {
+    entityType: parent.leadId ? 'lead' : 'deal',
+    entityId: parent.leadId ?? parent.dealId!,
+    action: 'sales_activity_created',
+    after: { activityId: id, type: input.type, dueAt: input.dueAt ?? null },
+    actorId: actor.userId,
+    actorType: actor.actorType,
+  });
+  return id;
+}
+
+export async function updateSalesActivity(actor: Actor, id: string, input: any) {
+  const { db } = getDb();
+  const [before] = await db.select().from(schema.salesActivities).where(and(
+    eq(schema.salesActivities.id, id),
+    isNull(schema.salesActivities.deletedAt),
+  ));
+  if (!before) throw err.notFound('Sales activity not found');
+  assertVersion(before, input.version, before);
+  if (before.status !== 'planned') throw err.domain('Only planned activities can be edited');
+  const patch: Record<string, unknown> = {};
+  for (const key of ['type', 'channel', 'subject', 'context', 'ownerId']) {
+    if (input[key] !== undefined) patch[key] = input[key];
+  }
+  if (input.dueAt !== undefined) patch.dueAt = input.dueAt ? new Date(input.dueAt) : null;
+  await db.update(schema.salesActivities).set(patch)
+    .where(and(eq(schema.salesActivities.id, id), eq(schema.salesActivities.version, before.version)));
+  await writeActivity(db, {
+    entityType: before.leadId ? 'lead' : 'deal',
+    entityId: before.leadId ?? before.dealId!,
+    action: 'sales_activity_updated',
+    before: { activityId: id, ...before },
+    after: { activityId: id, ...patch },
+    actorId: actor.userId,
+    actorType: actor.actorType,
+  });
+  return (await listSalesActivities({
+    leadId: before.leadId ?? undefined,
+    dealId: before.dealId ?? undefined,
+  })).find((row) => row.id === id);
+}
+
+export async function completeSalesActivity(actor: Actor, id: string, input: any) {
+  const { db } = getDb();
+  return db.transaction(async (tx) => {
+    const [before] = await tx.select().from(schema.salesActivities).where(and(
+      eq(schema.salesActivities.id, id),
+      isNull(schema.salesActivities.deletedAt),
+    )).for('update');
+    if (!before) throw err.notFound('Sales activity not found');
+    if (before.status === 'completed') return { activityId: id, nextActivityId: null };
+    if (before.status !== 'planned') throw err.domain('Only planned activities can be completed');
+    if (!before.leadId && input.leadStatus) throw err.validation('A deal activity cannot change lead status');
+    assertVersion(before, input.version, before);
+    await tx.update(schema.salesActivities).set({
+      status: 'completed',
+      outcome: input.outcome ?? null,
+      context: input.context ?? before.context,
+      completedAt: new Date(),
+    }).where(and(eq(schema.salesActivities.id, id), eq(schema.salesActivities.version, before.version)));
+    if (before.leadId && input.leadStatus) {
+      await tx.update(schema.leads).set({
+        status: input.leadStatus,
+        nurtureUntil: input.leadStatus === 'nurture' ? input.nextActivity?.dueAt?.slice(0, 10) ?? null : null,
+      }).where(eq(schema.leads.id, before.leadId));
+      if (STOPPED_LEAD_STATUSES.has(input.leadStatus)) {
+        await tx.update(schema.salesActivities).set({ status: 'cancelled' }).where(and(
+          eq(schema.salesActivities.leadId, before.leadId),
+          eq(schema.salesActivities.status, 'planned'),
+          isNull(schema.salesActivities.deletedAt),
+        ));
+      }
+    }
+    let nextActivityId: string | null = null;
+    if (input.nextActivity) {
+      nextActivityId = ulid();
+      await tx.insert(schema.salesActivities).values({
+        id: nextActivityId,
+        leadId: before.leadId,
+        dealId: before.dealId,
+        companyId: before.companyId,
+        contactId: before.contactId,
+        type: input.nextActivity.type,
+        status: 'planned',
+        channel: input.nextActivity.channel ?? before.channel,
+        subject: input.nextActivity.subject ?? null,
+        context: input.nextActivity.context ?? null,
+        dueAt: new Date(input.nextActivity.dueAt),
+        ownerId: input.nextActivity.ownerId ?? before.ownerId,
+        createdBy: actor.userId,
+      });
+    }
+    await writeActivity(tx, {
+      entityType: before.leadId ? 'lead' : 'deal',
+      entityId: before.leadId ?? before.dealId!,
+      action: 'sales_activity_completed',
+      before: { activityId: id, status: before.status },
+      after: { activityId: id, status: 'completed', outcome: input.outcome ?? null, nextActivityId },
+      actorId: actor.userId,
+      actorType: actor.actorType,
+    });
+    return { activityId: id, nextActivityId };
+  });
+}
+
+export async function cancelSalesActivity(actor: Actor, id: string, version?: number) {
+  const { db } = getDb();
+  const [before] = await db.select().from(schema.salesActivities).where(and(
+    eq(schema.salesActivities.id, id),
+    isNull(schema.salesActivities.deletedAt),
+  ));
+  if (!before) throw err.notFound('Sales activity not found');
+  if (before.status === 'cancelled') return;
+  if (before.status !== 'planned') throw err.domain('Only planned activities can be cancelled');
+  assertVersion(before, version, before);
+  await db.update(schema.salesActivities).set({ status: 'cancelled' })
+    .where(and(eq(schema.salesActivities.id, id), eq(schema.salesActivities.version, before.version)));
+  await writeActivity(db, {
+    entityType: before.leadId ? 'lead' : 'deal',
+    entityId: before.leadId ?? before.dealId!,
+    action: 'sales_activity_cancelled',
+    after: { activityId: id },
+    actorId: actor.userId,
+    actorType: actor.actorType,
+  });
+}
+
+export async function salesWork(actor: Actor) {
+  const { db } = getDb();
+  const canReadDeals = actor.access.permissions.has('deals.read');
+  const [leadRows, dealRows, plannedActivities, companyRows, stageRows] = await Promise.all([
+    db.select().from(schema.leads).where(isNull(schema.leads.deletedAt)),
+    canReadDeals
+      ? db.select().from(schema.deals).where(isNull(schema.deals.deletedAt))
+      : [],
+    db.select().from(schema.salesActivities).where(and(
+      isNull(schema.salesActivities.deletedAt),
+      eq(schema.salesActivities.status, 'planned'),
+      canReadDeals ? undefined : isNull(schema.salesActivities.dealId),
+    )).orderBy(asc(schema.salesActivities.dueAt)),
+    db.select({ id: schema.companies.id, name: schema.companies.name }).from(schema.companies).where(isNull(schema.companies.deletedAt)),
+    canReadDeals ? db.select().from(schema.dealStages) : [],
+  ]);
+  const companies = new Map(companyRows.map((row) => [row.id, row.name]));
+  const stages = new Map(stageRows.map((row) => [row.id, row]));
+  const nextByLead = new Map<string, any>();
+  const nextByDeal = new Map<string, any>();
+  for (const activity of plannedActivities) {
+    if (activity.leadId && !nextByLead.has(activity.leadId)) nextByLead.set(activity.leadId, activity);
+    if (activity.dealId && !nextByDeal.has(activity.dealId)) nextByDeal.set(activity.dealId, activity);
+  }
+  const work = {
+    overdue: [] as any[],
+    dueToday: [] as any[],
+    waitingReply: [] as any[],
+    nurtureDue: [] as any[],
+    noNextAction: [] as any[],
+  };
+  const now = new Date();
+  const startToday = new Date(now);
+  startToday.setHours(0, 0, 0, 0);
+  const endToday = new Date(now);
+  endToday.setHours(23, 59, 59, 999);
+  const classify = (row: any, next: any, status: string) => {
+    if (next?.dueAt && next.dueAt < startToday) work.overdue.push(row);
+    else if (next?.dueAt && next.dueAt <= endToday) work.dueToday.push(row);
+    else if (status === 'waiting_reply') work.waitingReply.push(row);
+    else if (status === 'nurture' && row.nurtureUntil && row.nurtureUntil <= endToday.toISOString().slice(0, 10)) work.nurtureDue.push(row);
+    else if ((!next || !next.dueAt) && (status !== 'nurture' || !row.nurtureUntil)) work.noNextAction.push(row);
+  };
+  for (const lead of leadRows) {
+    if (TERMINAL_LEAD_STATUSES.has(lead.status)) continue;
+    const next = nextByLead.get(lead.id) ?? null;
+    const row = {
+      entityType: 'lead',
+      id: lead.id,
+      title: lead.title,
+      companyId: lead.companyId,
+      companyName: companies.get(lead.companyId) ?? '',
+      status: lead.status,
+      nurtureUntil: lead.nurtureUntil,
+      nextActivity: next,
+    };
+    classify(row, next, lead.status);
+  }
+  for (const deal of dealRows) {
+    const stage = stages.get(deal.stageId);
+    if (!stage || stage.isWon || stage.isLost) continue;
+    const next = nextByDeal.get(deal.id) ?? null;
+    const row = {
+      entityType: 'deal',
+      id: deal.id,
+      title: deal.title,
+      companyId: deal.companyId,
+      companyName: companies.get(deal.companyId) ?? '',
+      status: stage.name,
+      nextActivity: next,
+    };
+    classify(row, next, stage.name);
+  }
+  return work;
+}
+
+export async function convertLead(actor: Actor, id: string, input: any) {
+  const { db } = getDb();
+  return db.transaction(async (tx) => {
+    const [lead] = await tx.select().from(schema.leads).where(and(
+      eq(schema.leads.id, id),
+      isNull(schema.leads.deletedAt),
+    )).for('update');
+    if (!lead) throw err.notFound('Lead not found');
+    const [existing] = await tx.select({ id: schema.deals.id }).from(schema.deals)
+      .where(and(eq(schema.deals.sourceLeadId, id), isNull(schema.deals.deletedAt)));
+    if (existing) return { dealId: existing.id, alreadyConverted: true };
+    if (lead.status !== 'engaged') throw err.domain('Lead must be engaged before conversion');
+
+    const stage = input.stageId
+      ? (await tx.select().from(schema.dealStages).where(eq(schema.dealStages.id, input.stageId)))[0]
+      : (await tx.select().from(schema.dealStages).where(and(
+        eq(schema.dealStages.isWon, false),
+        eq(schema.dealStages.isLost, false),
+        sql`lower(${schema.dealStages.name}) <> 'lead'`,
+      )).orderBy(asc(schema.dealStages.position)).limit(1))[0];
+    if (!stage || stage.isWon || stage.isLost || normalized(stage.name) === 'lead') {
+      throw err.validation('Choose a qualified opportunity stage');
+    }
+    const [company] = await tx.select().from(schema.companies).where(eq(schema.companies.id, lead.companyId));
+    if (!company) throw err.notFound('Company not found');
+    const contactId = input.contactId === undefined ? lead.contactId : input.contactId;
+    if (contactId) {
+      const [contact] = await tx.select({ id: schema.contacts.id }).from(schema.contacts).where(and(
+        eq(schema.contacts.id, contactId),
+        eq(schema.contacts.companyId, lead.companyId),
+        isNull(schema.contacts.deletedAt),
+      ));
+      if (!contact) throw err.validation('Contact does not belong to the company');
+    }
+    const dealId = ulid();
+    await tx.insert(schema.deals).values({
+      id: dealId,
+      companyId: lead.companyId,
+      sourceLeadId: lead.id,
+      title: input.title ?? lead.title,
+      stageId: stage.id,
+      amount: input.amount == null ? null : String(input.amount),
+      currency: input.currency ?? company.defaultCurrency,
+      expectedCloseDate: input.expectedCloseDate ?? null,
+      ownerId: lead.ownerId,
+      createdBy: actor.userId,
+    });
+    await tx.update(schema.leads).set({
+      status: 'converted',
+      contactId,
+    }).where(eq(schema.leads.id, lead.id));
+    await tx.update(schema.notes).set({ leadId: null, dealId }).where(eq(schema.notes.leadId, lead.id));
+    await tx.update(schema.attachments).set({ entityType: 'deal', entityId: dealId }).where(and(
+      eq(schema.attachments.entityType, 'lead'),
+      eq(schema.attachments.entityId, lead.id),
+    ));
+    await tx.update(schema.salesActivities).set({ leadId: null, dealId }).where(eq(schema.salesActivities.leadId, lead.id));
+    await writeActivity(tx, {
+      entityType: 'lead',
+      entityId: lead.id,
+      action: 'converted',
+      before: { status: lead.status },
+      after: { status: 'converted', dealId },
+      actorId: actor.userId,
+      actorType: actor.actorType,
+    });
+    await writeActivity(tx, {
+      entityType: 'deal',
+      entityId: dealId,
+      action: 'created_from_lead',
+      after: { sourceLeadId: lead.id, stageId: stage.id },
+      actorId: actor.userId,
+      actorType: actor.actorType,
+    });
+    return { dealId, alreadyConverted: false };
+  });
+}
+
+export async function demoteDealToLead(actor: Actor, id: string, input: any) {
+  const { db } = getDb();
+  return db.transaction(async (tx) => {
+    const [deal] = await tx.select().from(schema.deals).where(and(
+      eq(schema.deals.id, id),
+      isNull(schema.deals.deletedAt),
+    )).for('update');
+    if (!deal) throw err.notFound('Deal not found');
+    const [existing] = await tx.select({ id: schema.leads.id }).from(schema.leads)
+      .where(and(eq(schema.leads.legacyDealId, id), isNull(schema.leads.deletedAt)));
+    if (existing) return { leadId: existing.id, alreadyDemoted: true };
+    const [stage] = await tx.select().from(schema.dealStages).where(eq(schema.dealStages.id, deal.stageId));
+    if (!stage || normalized(stage.name) !== 'lead') throw err.domain('Only a legacy Lead-stage deal can be demoted');
+    if (deal.sourceLeadId) throw err.domain('A converted lead deal cannot be demoted as a legacy deal');
+    const leadId = ulid();
+    await tx.insert(schema.leads).values({
+      id: leadId,
+      companyId: deal.companyId,
+      legacyDealId: deal.id,
+      title: input.title ?? deal.title,
+      product: input.product ?? null,
+      status: input.status ?? 'needs_review',
+      ownerId: deal.ownerId,
+      rawResearch: {
+        legacyDeal: {
+          amount: deal.amount,
+          currency: deal.currency,
+          expectedCloseDate: deal.expectedCloseDate,
+          customFields: deal.customFields,
+        },
+      },
+      createdBy: actor.userId,
+    });
+    await tx.update(schema.notes).set({ dealId: null, leadId }).where(eq(schema.notes.dealId, deal.id));
+    await tx.update(schema.attachments).set({ entityType: 'lead', entityId: leadId }).where(and(
+      eq(schema.attachments.entityType, 'deal'),
+      eq(schema.attachments.entityId, deal.id),
+    ));
+    await tx.update(schema.salesActivities).set({ dealId: null, leadId }).where(eq(schema.salesActivities.dealId, deal.id));
+    const [planned] = await tx.select({ id: schema.salesActivities.id }).from(schema.salesActivities).where(and(
+      eq(schema.salesActivities.leadId, leadId),
+      eq(schema.salesActivities.status, 'planned'),
+      isNull(schema.salesActivities.deletedAt),
+    )).limit(1);
+    if (!planned) {
+      await tx.insert(schema.salesActivities).values({
+        id: ulid(),
+        leadId,
+        companyId: deal.companyId,
+        type: 'review',
+        status: 'planned',
+        subject: 'Review legacy pipeline record',
+        dueAt: new Date(),
+        ownerId: deal.ownerId ?? actor.userId,
+        createdBy: actor.userId,
+      });
+    }
+    await tx.update(schema.deals).set({ deletedAt: new Date() }).where(eq(schema.deals.id, deal.id));
+    await writeActivity(tx, {
+      entityType: 'deal',
+      entityId: deal.id,
+      action: 'demoted_to_lead',
+      after: { leadId },
+      actorId: actor.userId,
+      actorType: actor.actorType,
+    });
+    await writeActivity(tx, {
+      entityType: 'lead',
+      entityId: leadId,
+      action: 'created_from_deal',
+      after: { legacyDealId: deal.id },
+      actorId: actor.userId,
+      actorType: actor.actorType,
+    });
+    return { leadId, alreadyDemoted: false };
+  });
 }

@@ -4,11 +4,13 @@ import { ulid } from 'ulid';
 import {
   companyInputSchema, companyUpdateSchema, contactInputSchema, contactUpdateSchema,
   dealStageInputSchema, dealInputSchema, dealUpdateSchema, dealMoveSchema, noteInputSchema,
+  leadInputSchema, leadUpdateSchema, researchImportSchema, salesActivityInputSchema,
+  salesActivityUpdateSchema, salesActivityCompleteSchema, leadConvertSchema, dealDemoteSchema,
   type CustomFieldFilter,
 } from '@ordi/shared';
-import type { AppEnv } from '../../context';
+import type { Actor, AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
-import { guard } from '../../core/rbac';
+import { guard, guardAll } from '../../core/rbac';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { assertVersion } from '../../core/locking';
@@ -33,6 +35,13 @@ function parseCfFilters(c: any): CustomFieldFilter[] {
 export function crmRoutes() {
   const app = new Hono<AppEnv>();
   app.use('*', requireAuth);
+
+  const assertSalesActivityWrite = (actor: Actor, dealId?: string | null) => {
+    const permission = dealId ? 'deals.write' : 'crm.write';
+    if (actor.readOnly || !actor.access.permissions.has(permission)) {
+      throw err.forbidden(`Missing permission ${permission}`, permission);
+    }
+  };
 
   // ── Companies ──
   app.get('/companies', guard('crm.read'), async (c) => {
@@ -121,6 +130,50 @@ export function crmRoutes() {
     return c.json({ ok: true });
   });
 
+  // ── Leads and research ──
+  app.get('/leads', guard('crm.read'), async (c) => {
+    return c.json({ data: await svc.listLeads({
+      q: c.req.query('q'),
+      status: c.req.query('status'),
+      companyId: c.req.query('companyId'),
+      ownerId: c.req.query('ownerId'),
+      limit: Number(c.req.query('limit') ?? 100),
+    }) });
+  });
+
+  app.post('/leads/import/preview', guard('crm.read'), async (c) => {
+    const body = researchImportSchema.parse(await c.req.json());
+    return c.json(await svc.previewResearchImport(body));
+  });
+
+  app.post('/leads/import', guard('crm.write'), async (c) => {
+    const body = researchImportSchema.parse(await c.req.json());
+    return c.json(await svc.importResearch(currentActor(c), body), 201);
+  });
+
+  app.post('/leads', guard('crm.write'), async (c) => {
+    const body = leadInputSchema.parse(await c.req.json());
+    const id = await svc.createLead(currentActor(c), body);
+    return c.json({ id }, 201);
+  });
+
+  app.get('/leads/:id', guard('crm.read'), async (c) => c.json(await svc.getLead(c.req.param('id'))));
+
+  app.patch('/leads/:id', guard('crm.write'), async (c) => {
+    const body = leadUpdateSchema.parse(await c.req.json());
+    return c.json(await svc.updateLead(currentActor(c), c.req.param('id'), body));
+  });
+
+  app.post('/leads/:id/convert', guardAll('crm.write', 'deals.write'), async (c) => {
+    const body = leadConvertSchema.parse(await c.req.json().catch(() => ({})));
+    return c.json(await svc.convertLead(currentActor(c), c.req.param('id'), body));
+  });
+
+  app.delete('/leads/:id', guard('crm.delete'), async (c) => {
+    await svc.softDeleteLead(currentActor(c), c.req.param('id'));
+    return c.json({ ok: true });
+  });
+
   // ── Deal stages (config) ──
   app.get('/deal-stages', guard('deals.read'), async (c) => {
     const { db } = getDb();
@@ -174,7 +227,7 @@ export function crmRoutes() {
     const id = ulid();
     await db.insert(schema.deals).values({
       id, companyId: body.companyId, projectId: body.projectId ?? null, title: body.title, stageId: body.stageId,
-      amount: String(body.amount), currency: body.currency, expectedCloseDate: body.expectedCloseDate ?? null,
+      amount: body.amount == null ? null : String(body.amount), currency: body.currency, expectedCloseDate: body.expectedCloseDate ?? null,
       ownerId: body.ownerId ?? null, customFields: body.customFields ?? {}, createdBy: actor.userId,
     });
     await writeActivity(db, { entityType: 'deal', entityId: id, action: 'created', after: body, actorId: actor.userId, actorType: actor.actorType });
@@ -191,7 +244,9 @@ export function crmRoutes() {
     if (body.projectId) await assertProjectExists(body.projectId);
     const patch: Record<string, unknown> = {};
     for (const k of ['title', 'amount', 'currency', 'expectedCloseDate', 'ownerId', 'stageId', 'projectId']) {
-      if ((body as any)[k] !== undefined) patch[k] = k === 'amount' ? String((body as any)[k]) : (body as any)[k];
+      const value = (body as any)[k];
+      if (value === undefined) continue;
+      patch[k] = k === 'amount' && value !== null ? String(value) : value;
     }
     if (body.customFields !== undefined) patch.customFields = mergeCustomFields(deal.customFields, body.customFields);
     await db.update(schema.deals).set(patch).where(and(eq(schema.deals.id, deal.id), eq(schema.deals.version, deal.version)));
@@ -203,9 +258,69 @@ export function crmRoutes() {
     return c.json(await svc.moveDeal(currentActor(c), c.req.param('id'), body.stageId, body.lostReason, body.version));
   });
 
+  app.post('/deals/:id/demote-to-lead', guardAll('crm.write', 'deals.write'), async (c) => {
+    const body = dealDemoteSchema.parse(await c.req.json().catch(() => ({})));
+    return c.json(await svc.demoteDealToLead(currentActor(c), c.req.param('id'), body));
+  });
+
   app.delete('/deals/:id', guard('deals.delete'), async (c) => {
     const { db } = getDb();
     await db.update(schema.deals).set({ deletedAt: new Date() }).where(eq(schema.deals.id, c.req.param('id')));
+    return c.json({ ok: true });
+  });
+
+  // ── Sales activities and Work queue ──
+  app.get('/sales-work', guard('crm.read'), async (c) => c.json(await svc.salesWork(currentActor(c))));
+
+  app.get('/sales-activities', async (c) => {
+    const actor = currentActor(c);
+    const leadId = c.req.query('leadId');
+    const dealId = c.req.query('dealId');
+    const canReadLeads = actor.access.permissions.has('crm.read');
+    const canReadDeals = actor.access.permissions.has('deals.read');
+    if (leadId && !canReadLeads) throw err.forbidden('Missing permission crm.read', 'crm.read');
+    if (dealId && !canReadDeals) throw err.forbidden('Missing permission deals.read', 'deals.read');
+    if (!canReadLeads && !canReadDeals) throw err.forbidden('Missing CRM or deals read permission');
+    return c.json({ data: await svc.listSalesActivities({
+      leadId,
+      dealId,
+      companyId: c.req.query('companyId'),
+      status: c.req.query('status'),
+      includeLeads: canReadLeads,
+      includeDeals: canReadDeals,
+    }) });
+  });
+
+  app.post('/sales-activities', async (c) => {
+    const actor = currentActor(c);
+    const body = salesActivityInputSchema.parse(await c.req.json());
+    assertSalesActivityWrite(actor, body.dealId);
+    const id = await svc.createSalesActivity(actor, body);
+    return c.json({ id }, 201);
+  });
+
+  app.patch('/sales-activities/:id', async (c) => {
+    const actor = currentActor(c);
+    const body = salesActivityUpdateSchema.parse(await c.req.json());
+    const activity = await svc.getSalesActivity(c.req.param('id'));
+    assertSalesActivityWrite(actor, activity.dealId);
+    return c.json(await svc.updateSalesActivity(actor, activity.id, body));
+  });
+
+  app.post('/sales-activities/:id/complete', async (c) => {
+    const actor = currentActor(c);
+    const body = salesActivityCompleteSchema.parse(await c.req.json().catch(() => ({})));
+    const activity = await svc.getSalesActivity(c.req.param('id'));
+    assertSalesActivityWrite(actor, activity.dealId);
+    return c.json(await svc.completeSalesActivity(actor, activity.id, body));
+  });
+
+  app.post('/sales-activities/:id/cancel', async (c) => {
+    const actor = currentActor(c);
+    const body = await c.req.json().catch(() => ({}));
+    const activity = await svc.getSalesActivity(c.req.param('id'));
+    assertSalesActivityWrite(actor, activity.dealId);
+    await svc.cancelSalesActivity(actor, activity.id, body.version);
     return c.json({ ok: true });
   });
 
@@ -214,11 +329,13 @@ export function crmRoutes() {
     const { db } = getDb();
     const companyId = c.req.query('companyId');
     const contactId = c.req.query('contactId');
+    const leadId = c.req.query('leadId');
     const dealId = c.req.query('dealId');
     const rows = await db.select().from(schema.notes).where(and(
       isNull(schema.notes.deletedAt),
       companyId ? eq(schema.notes.companyId, companyId) : undefined,
       contactId ? eq(schema.notes.contactId, contactId) : undefined,
+      leadId ? eq(schema.notes.leadId, leadId) : undefined,
       dealId ? eq(schema.notes.dealId, dealId) : undefined,
     )).orderBy(desc(schema.notes.pinned), desc(schema.notes.createdAt));
     return c.json({ data: rows });
@@ -230,7 +347,8 @@ export function crmRoutes() {
     const actor = currentActor(c);
     const id = ulid();
     await db.insert(schema.notes).values({
-      id, companyId: body.companyId ?? null, contactId: body.contactId ?? null, dealId: body.dealId ?? null,
+      id, companyId: body.companyId ?? null, contactId: body.contactId ?? null,
+      leadId: body.leadId ?? null, dealId: body.dealId ?? null,
       body: body.body, pinned: body.pinned, createdBy: actor.userId,
     });
     // Fact-only (like task comments): the note body itself stays out of the diff.

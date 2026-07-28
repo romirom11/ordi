@@ -1,0 +1,1 @@
+ALTER TABLE "sales_activities" ADD CONSTRAINT "sales_activities_parent_check" CHECK (("sales_activities"."lead_id" is null) <> ("sales_activities"."deal_id" is null));

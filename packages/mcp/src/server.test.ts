@@ -163,6 +163,90 @@ describe('CRM create/list tools', () => {
   });
 });
 
+describe('sales workspace tools', () => {
+  it('exposes lead, work, activity and conversion capabilities', async () => {
+    const client = await connect(fakeApi({}));
+    const names = (await client.listTools()).tools.map((tool) => tool.name);
+    for (const name of [
+      'list_leads', 'get_lead', 'get_sales_work', 'list_sales_activities',
+      'create_lead', 'update_lead', 'preview_research_import', 'import_research', 'schedule_sales_activity',
+      'complete_sales_activity', 'convert_lead', 'demote_deal_to_lead',
+    ]) expect(names).toContain(name);
+  });
+
+  it('lists compact leads with filters', async () => {
+    let requested = '';
+    const api = fakeApi({ '/leads?status=ready&companyId=c1': { data: [{
+      id: 'l1', companyId: 'c1', companyName: 'Acme', title: 'Workflow pilot',
+      product: 'AI pilot', status: 'ready', score: 92, painSignal: 'Manual reporting',
+      rawResearch: { large: true }, version: 2,
+    }] } });
+    const inner = api.get.bind(api);
+    api.get = async <T>(path: string): Promise<T> => { requested = path; return inner<T>(path); };
+    const client = await connect(api);
+    const result = await client.callTool({ name: 'list_leads', arguments: { status: 'ready', companyId: 'c1' } });
+    expect(requested).toBe('/leads?status=ready&companyId=c1');
+    const body = JSON.parse((result.content as any)[0].text);
+    expect(body.data[0]).toMatchObject({ id: 'l1', companyName: 'Acme', score: 92, painSignal: 'Manual reporting' });
+    expect(body.data[0].rawResearch).toBeUndefined();
+  });
+
+  it('schedules, completes and converts through the API contracts', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({}, posts));
+    await client.callTool({ name: 'schedule_sales_activity', arguments: {
+      leadId: 'l1', type: 'outreach', dueAt: '2026-07-29T09:00:00Z', channel: 'linkedin',
+    } });
+    await client.callTool({ name: 'complete_sales_activity', arguments: {
+      activityId: 'a1', outcome: 'Replied', leadStatus: 'engaged',
+    } });
+    await client.callTool({ name: 'convert_lead', arguments: { leadId: 'l1', stageId: 'qualified' } });
+    expect(posts).toEqual([
+      { path: '/sales-activities', body: { leadId: 'l1', type: 'outreach', dueAt: '2026-07-29T09:00:00Z', channel: 'linkedin' } },
+      { path: '/sales-activities/a1/complete', body: { outcome: 'Replied', leadStatus: 'engaged' } },
+      { path: '/leads/l1/convert', body: { stageId: 'qualified' } },
+    ]);
+  });
+
+  it('previews research without committing it', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({}, posts));
+    const payload = { title: 'Shortlist', prospects: [{ name: 'Acme' }] };
+    await client.callTool({ name: 'preview_research_import', arguments: { payload } });
+    expect(posts).toEqual([{ path: '/leads/import/preview', body: payload }]);
+  });
+
+  it('requires exactly one activity parent before calling the API', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({}, posts));
+    const result = await client.callTool({ name: 'schedule_sales_activity', arguments: {
+      leadId: 'l1', dealId: 'd1', type: 'follow_up', dueAt: '2026-07-29T09:00:00Z',
+    } });
+    expect(result.isError).toBe(true);
+    expect(posts).toHaveLength(0);
+  });
+
+  it('does not let an agent mark a lead converted without creating a deal', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({}, posts));
+    const result = await client.callTool({
+      name: 'update_lead',
+      arguments: { leadId: 'l1', status: 'converted' },
+    });
+    expect(result.isError).toBe(true);
+    const terminalFollowUp = await client.callTool({
+      name: 'complete_sales_activity',
+      arguments: {
+        activityId: 'a1',
+        leadStatus: 'disqualified',
+        nextActivity: { type: 'follow_up', dueAt: '2026-07-29T09:00:00Z' },
+      },
+    });
+    expect(terminalFollowUp.isError).toBe(true);
+    expect(posts).toHaveLength(0);
+  });
+});
+
 describe('custom field tools', () => {
   it('exposes list_custom_fields and create_custom_field', async () => {
     const client = await connect(fakeApi({}));

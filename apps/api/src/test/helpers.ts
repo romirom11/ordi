@@ -17,7 +17,7 @@ const TABLES = [
   'leave_requests', 'leave_balances', 'compensation', 'employees', 'applicants', 'job_openings', 'interviews',
   'git_links', 'project_repositories', 'git_automation_rules', 'git_repositories',
   'git_connections', 'git_webhook_deliveries',
-  'deals', 'contacts', 'companies', 'notes', 'attachments', 'activity_log', 'events', 'processed_events',
+  'sales_activities', 'leads', 'research_batches', 'deals', 'contacts', 'companies', 'notes', 'attachments', 'activity_log', 'events', 'processed_events',
   'dead_letter_events', 'notifications', 'sessions', 'api_tokens', 'oauth_auth_codes', 'oauth_clients', 'invites', 'role_permissions',
   'roles', 'users', 'deal_stages', 'applicant_stages', 'leave_types', 'tax_rates',
   'number_sequences', 'task_number_counters', 'custom_field_definitions',

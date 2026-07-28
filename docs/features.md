@@ -23,7 +23,7 @@
 
 | Фіча | Де |
 |---|---|
-| — | — |
+| CRM sales workspace: Work-черга, окремі leads до кваліфікації, імпорт research JSON, наступні дії та конверсія lead → deal | `feat/crm-sales-workspace` |
 
 ## Готово
 
