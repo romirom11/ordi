@@ -35,6 +35,15 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   correct.
 - customFields merge by key on PATCH for every entity that has them -
   setting one field no longer erases the rest.
+- Changing a project's visibility no longer crashes the page: a spinner
+  rendered as a block element inside a paragraph, which WebKit (the
+  desktop app) turns into a NotFoundError on unmount.
+- New projects choose visibility, lead, members and dates in the create
+  dialog, and default to private.
+- My tasks separates Assigned from Created; a task filed for someone else
+  is no longer listed as work to do.
+- Clicking a notification marks it read.
+- Profile photo upload, and a timezone picker instead of a typed string.
 
 ## v1.12.0
 

@@ -1,30 +1,45 @@
 /**
- * My Tasks – Linear-style full-width triage list grouped by due bucket:
- * Overdue / Today / This week / Later / Created by me (unassigned).
+ * My Tasks – Linear-style triage, split the way the reference splits it:
+ * Assigned (what I hold, bucketed Overdue / Today / This week / Later) and
+ * Created (what I filed, whoever holds it now).
+ *
+ * One list conflated the two: a task filed for someone else, or filed with no
+ * assignee at all, sat among the ones actually to do.
  * Items come from GET /me/tasks in snake_case.
  */
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  AlertTriangle, CalendarClock, CalendarRange, CheckSquare, Inbox, UserRoundPlus,
+  AlertTriangle, CalendarClock, CalendarRange, CheckSquare, Inbox, UserRoundPlus, UserRound,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { api } from '../lib/api';
 import { useNavigate } from '../lib/router';
 import {
-  Badge, EmptyState, PageHeader, PriorityIcon, Skeleton, StatusIcon, cn, fmtDate,
+  Badge, EmptyState, PageHeader, PriorityIcon, SegmentedControl, Skeleton, StatusIcon, cn, fmtDate,
 } from '../components/ui';
 import { useT, extendDict } from '../lib/i18n';
 
 extendDict({
   en: {
     'tasks.later': 'Later',
-    'tasks.createdByMe': 'Created by me · unassigned',
+    'tasks.assigned': 'Assigned',
+    'tasks.created': 'Created',
+    'tasks.unassignedGroup': 'Nobody assigned',
+    'tasks.assignedGroup': 'With an assignee',
+    'tasks.noneCreated': 'Nothing you filed is open',
+    'tasks.noneCreatedHint': 'Tasks you create show up here until they are done.',
     'tasks.countOne': 'task',
     'tasks.countMany': 'tasks',
   },
   uk: {
     'tasks.later': 'Пізніше',
-    'tasks.createdByMe': 'Створені мною · без виконавця',
+    'tasks.assigned': 'Призначені мені',
+    'tasks.created': 'Створені мною',
+    'tasks.unassignedGroup': 'Без виконавця',
+    'tasks.assignedGroup': 'З виконавцем',
+    'tasks.noneCreated': 'Немає відкритих задач, які ви створили',
+    'tasks.noneCreatedHint': 'Задачі, які ви створюєте, показуються тут, поки не завершені.',
     'tasks.countOne': 'задача',
     'tasks.countMany': 'задач',
   },
@@ -42,6 +57,8 @@ interface MeTask {
   status_name: string;
   status_color: string;
   ref: string;
+  /** created tab only */
+  has_assignee?: boolean;
 }
 
 interface MeTasksResponse {
@@ -49,17 +66,17 @@ interface MeTasksResponse {
   today: MeTask[];
   week: MeTask[];
   later: MeTask[];
-  createdUnassigned: MeTask[];
+  created: MeTask[];
 }
 
-type SectionKey = keyof MeTasksResponse;
+type Tab = 'assigned' | 'created';
+interface Section { key: string; labelKey: string; icon: ReactNode; accent?: boolean; tasks: MeTask[] }
 
-const SECTIONS: { key: SectionKey; labelKey: string; icon: ReactNode; accent?: boolean }[] = [
+const ASSIGNED_SECTIONS: { key: keyof MeTasksResponse; labelKey: string; icon: ReactNode; accent?: boolean }[] = [
   { key: 'overdue', labelKey: 'common.overdue', icon: <AlertTriangle size={13} />, accent: true },
   { key: 'today', labelKey: 'common.today', icon: <CalendarClock size={13} /> },
   { key: 'week', labelKey: 'tasks.thisWeek', icon: <CalendarRange size={13} /> },
   { key: 'later', labelKey: 'tasks.later', icon: <Inbox size={13} /> },
-  { key: 'createdUnassigned', labelKey: 'tasks.createdByMe', icon: <UserRoundPlus size={13} /> },
 ];
 
 function isOverdue(due: string | null): boolean {
@@ -85,17 +102,32 @@ function LoadingRows() {
 export function MyTasksPage() {
   const t = useT();
   const navigate = useNavigate();
+  const [tab, setTab] = useState<Tab>('assigned');
 
   const { data, isLoading } = useQuery<MeTasksResponse>({
     queryKey: ['me-tasks'],
     queryFn: () => api.get('/me/tasks'),
   });
 
-  const sections = SECTIONS
-    .map((s) => ({ ...s, tasks: data?.[s.key] ?? [] }))
-    .filter((s) => s.tasks.length > 0);
-  const total = sections.reduce((n, s) => n + s.tasks.length, 0);
+  const assignedCount = ASSIGNED_SECTIONS.reduce((n, s) => n + (data?.[s.key]?.length ?? 0), 0);
+  const createdCount = data?.created.length ?? 0;
 
+  const sections: Section[] = useMemo(() => {
+    if (tab === 'assigned') {
+      return ASSIGNED_SECTIONS
+        .map((s) => ({ ...s, tasks: data?.[s.key] ?? [] }))
+        .filter((s) => s.tasks.length > 0);
+    }
+    // What I filed, unassigned first: those are the ones still waiting on a
+    // decision from me, and they are exactly what used to pollute the assigned list.
+    const created = data?.created ?? [];
+    return [
+      { key: 'unassigned', labelKey: 'tasks.unassignedGroup', icon: <UserRoundPlus size={13} />, tasks: created.filter((x) => !x.has_assignee) },
+      { key: 'assignedOut', labelKey: 'tasks.assignedGroup', icon: <UserRound size={13} />, tasks: created.filter((x) => x.has_assignee) },
+    ].filter((s) => s.tasks.length > 0);
+  }, [tab, data]);
+
+  const total = tab === 'assigned' ? assignedCount : createdCount;
   let rowIndex = 0;
 
   return (
@@ -103,6 +135,16 @@ export function MyTasksPage() {
       <PageHeader
         title={t('nav.myTasks')}
         subtitle={isLoading ? t('common.loading') : `${total} ${t(total === 1 ? 'tasks.countOne' : 'tasks.countMany')} · ${t('tasks.myTasksSubtitle')}`}
+        actions={(
+          <SegmentedControl
+            value={tab}
+            onChange={(v) => setTab(v as Tab)}
+            options={[
+              { key: 'assigned', label: `${t('tasks.assigned')} ${assignedCount}`, icon: <UserRound size={13} /> },
+              { key: 'created', label: `${t('tasks.created')} ${createdCount}`, icon: <UserRoundPlus size={13} /> },
+            ]}
+          />
+        )}
       />
 
       {isLoading ? (
@@ -110,8 +152,8 @@ export function MyTasksPage() {
       ) : total === 0 ? (
         <EmptyState
           icon={<CheckSquare size={20} />}
-          title={t('tasks.noneAssigned')}
-          hint={t('tasks.noneAssignedHint')}
+          title={t(tab === 'assigned' ? 'tasks.noneAssigned' : 'tasks.noneCreated')}
+          hint={t(tab === 'assigned' ? 'tasks.noneAssignedHint' : 'tasks.noneCreatedHint')}
         />
       ) : (
         <div className="pb-8">

@@ -913,9 +913,16 @@ export async function updateIntakeSettings(actor: Actor, projectId: string, inpu
 
 // ─────────────────────────── My tasks (PRD §8.5) ───────────────────────────
 
+/**
+ * The two lists a person triages by: what is assigned to them (bucketed by due
+ * date) and what they created. They used to be one list, with created work
+ * folded in under the assigned buckets, so a task filed for someone else read
+ * as a task to do. `created` carries everything still open that the actor
+ * filed, whoever ended up holding it.
+ */
 export async function myTasks(actor: Actor) {
   const ids = await accessibleProjectIds(actor);
-  if (!ids.length) return { overdue: [], today: [], week: [], later: [], createdUnassigned: [] };
+  if (!ids.length) return { overdue: [], today: [], week: [], later: [], created: [] };
   const { db } = getDb();
   const inList = sql.raw('(' + ids.map((i) => `'${i.replace(/'/g, "''")}'`).join(',') + ')');
   const today = new Date().toISOString().slice(0, 10);
@@ -930,14 +937,14 @@ export async function myTasks(actor: Actor) {
     where t.deleted_at is null and ts.category not in ('done','canceled') and t.project_id in ${inList}
     order by t.due_date nulls last`) as any[];
 
-  const createdUnassigned = await db.execute(sql`
-    select t.id, t.title, t.due_date, t.priority, t.number, t.project_id, p.key, ts.category, ts.name as status_name, ts.color as status_color
+  const created = await db.execute(sql`
+    select t.id, t.title, t.due_date, t.priority, t.number, t.project_id, p.key, ts.category, ts.name as status_name, ts.color as status_color,
+      exists (select 1 from task_assignees ta where ta.task_id = t.id) as has_assignee
     from tasks t
     join projects p on p.id = t.project_id
     join task_statuses ts on ts.id = t.status_id
     where t.deleted_at is null and t.created_by = ${actor.userId}
       and ts.category not in ('done','canceled') and t.project_id in ${inList}
-      and not exists (select 1 from task_assignees ta where ta.task_id = t.id)
     order by t.due_date nulls last`) as any[];
 
   const withRef = (r: any) => ({ ...r, ref: refOf(r.key, r.number) });
@@ -947,7 +954,7 @@ export async function myTasks(actor: Actor) {
     today: rows.filter((t) => t.due_date === today),
     week: rows.filter((t) => t.due_date && t.due_date > today && t.due_date <= weekEnd),
     later: rows.filter((t) => !t.due_date || t.due_date > weekEnd),
-    createdUnassigned: (createdUnassigned as any[]).map(withRef),
+    created: (created as any[]).map(withRef),
   };
 }
 

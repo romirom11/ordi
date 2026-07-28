@@ -105,6 +105,13 @@ export function NotificationsBell() {
     mutationFn: () => api.post('/notifications/read-all'),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['notifications'] }),
   });
+  // Opening a notification is reading it. Following the link without this left
+  // the row glowing as new and the badge counting something already seen,
+  // which is why the bell kept insisting on a mention answered minutes ago.
+  const markRead = useMutation({
+    mutationFn: (id: string) => api.post(`/notifications/${id}/read`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['notifications'] }),
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -180,8 +187,10 @@ export function NotificationsBell() {
                 <button
                   key={n.id}
                   type="button"
-                  disabled={!to}
-                  onClick={() => { if (to) { setOpen(false); navigate(to); } }}
+                  onClick={() => {
+                    if (!n.readAt) markRead.mutate(n.id);
+                    if (to) { setOpen(false); navigate(to); }
+                  }}
                   className={cn(
                     'row-enter flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left transition-colors duration-150 hover:bg-muted',
                     n.readAt && 'opacity-55',
