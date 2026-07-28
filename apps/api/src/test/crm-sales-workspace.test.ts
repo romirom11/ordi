@@ -10,11 +10,78 @@ let nurtureDealStageId: string;
 
 function localDateAfter(days: number): string {
   const value = new Date();
-  value.setDate(value.getDate() + days);
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, '0');
-  const day = String(value.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+function zonedDateKey(value: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(value);
+  const part = (type: string) => parts.find((item) => item.type === type)!.value;
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
+function offsetAt(value: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(value);
+  const number = (type: string) => Number(parts.find((item) => item.type === type)!.value);
+  const wallAsUtc = Date.UTC(
+    number('year'),
+    number('month') - 1,
+    number('day'),
+    number('hour'),
+    number('minute'),
+    number('second'),
+  );
+  return wallAsUtc - Math.floor(value.getTime() / 1000) * 1000;
+}
+
+function zonedMidnight(dateKey: string, timeZone: string): Date {
+  const [year, month, day] = dateKey.split('-').map(Number) as [number, number, number];
+  const wallAsUtc = Date.UTC(year, month - 1, day);
+  let instant = wallAsUtc;
+  for (let pass = 0; pass < 4; pass += 1) {
+    const next = wallAsUtc - offsetAt(new Date(instant), timeZone);
+    if (next === instant) break;
+    instant = next;
+  }
+  return new Date(instant);
+}
+
+function nextDateKey(dateKey: string): string {
+  const [year, month, day] = dateKey.split('-').map(Number) as [number, number, number];
+  return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+}
+
+function timezoneBoundaryCase(now: Date): { timeZone: string; dueAt: Date } {
+  const serverStart = new Date(now);
+  serverStart.setHours(0, 0, 0, 0);
+  const serverNext = new Date(serverStart);
+  serverNext.setDate(serverNext.getDate() + 1);
+
+  for (const timeZone of ['Pacific/Kiritimati', 'Etc/GMT+12']) {
+    const today = zonedDateKey(now, timeZone);
+    const start = zonedMidnight(today, timeZone).getTime();
+    const next = zonedMidnight(nextDateKey(today), timeZone).getTime();
+    for (const candidate of [start + 60_000, next - 60_000]) {
+      if (candidate < serverStart.getTime() || candidate >= serverNext.getTime()) {
+        return { timeZone, dueAt: new Date(candidate) };
+      }
+    }
+  }
+  throw new Error('Could not find a timezone boundary outside the server-local day');
 }
 
 const research = {
@@ -171,7 +238,9 @@ describe('research import and daily work', () => {
       title: 'Unassigned deal',
       stageId: qualifiedStageId,
     }));
-    const work = await json(reqAs(users.owner!.cookie).get('/sales-work'));
+    const workResponse = await reqAs(users.owner!.cookie).get('/sales-work');
+    expect(workResponse.status, await workResponse.clone().text()).toBe(200);
+    const work = await json(workResponse);
     expect(nurtureWithoutDate.status).toBe(400);
     expect(work.waitingReply.rows.some((row: any) => row.id === leadId)).toBe(true);
     expect(work.noNextAction.rows.some((row: any) => row.id === noAction.id)).toBe(true);
@@ -264,6 +333,32 @@ describe('research import and daily work', () => {
     }));
     const work = await json(reqAs(users.owner!.cookie).get('/sales-work'));
     expect(work.noNextAction.rows.some((row: any) => row.id === deal.id && row.entityType === 'deal')).toBe(true);
+  });
+
+  it('uses the current seller timezone for due-today boundaries', async () => {
+    const { db } = getDb();
+    const boundary = timezoneBoundaryCase(new Date());
+    await db.update(schema.users).set({ timezone: boundary.timeZone })
+      .where(eq(schema.users.id, users.owner!.userId));
+    try {
+      const lead = await json(reqAs(users.owner!.cookie).post('/leads', {
+        companyId,
+        title: 'Timezone boundary',
+        status: 'ready',
+      }));
+      await reqAs(users.owner!.cookie).post('/sales-activities', {
+        leadId: lead.id,
+        type: 'follow_up',
+        dueAt: boundary.dueAt.toISOString(),
+      });
+
+      const work = await json(reqAs(users.owner!.cookie).get('/sales-work'));
+      expect(work.dueToday.rows.some((row: any) => row.id === lead.id)).toBe(true);
+      expect(work.overdue.rows.some((row: any) => row.id === lead.id)).toBe(false);
+    } finally {
+      await db.update(schema.users).set({ timezone: 'UTC' })
+        .where(eq(schema.users.id, users.owner!.userId));
+    }
   });
 
   it('keeps converted status behind the conversion action and rejects unsafe source links', async () => {

@@ -64,10 +64,25 @@ function boundedLimit(value: number | undefined): number {
   return Number.isFinite(value) ? Math.max(1, Math.min(Math.trunc(value!), 200)) : 50;
 }
 
-function localDateKey(value: Date): string {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, '0');
-  const day = String(value.getDate()).padStart(2, '0');
+function supportedTimeZone(value: string): string {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value }).format();
+    return value;
+  } catch {
+    return 'UTC';
+  }
+}
+
+function localDateKey(value: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(value);
+  const year = parts.find((part) => part.type === 'year')!.value;
+  const month = parts.find((part) => part.type === 'month')!.value;
+  const day = parts.find((part) => part.type === 'day')!.value;
   return `${year}-${month}-${day}`;
 }
 
@@ -86,16 +101,16 @@ export async function salesWork(
     nurtureDue: { rows: [], total: 0 },
     noNextAction: { rows: [], total: 0 },
   };
-  const now = new Date();
-  const startToday = new Date(now);
-  startToday.setHours(0, 0, 0, 0);
-  const endToday = new Date(now);
-  endToday.setHours(23, 59, 59, 999);
-  const startTodayIso = startToday.toISOString();
-  const endTodayIso = endToday.toISOString();
-  const today = localDateKey(endToday);
+  const timeZone = supportedTimeZone(actor.timezone);
+  const today = localDateKey(new Date(), timeZone);
   const rows = await db.execute(sql`
-    with lead_work as (
+    with work_clock as (
+      select
+        ${today}::date as today,
+        (${today}::date::timestamp at time zone ${timeZone}) as day_start,
+        (((${today}::date + 1)::timestamp) at time zone ${timeZone}) as next_day_start
+    ),
+    lead_work as (
       select
         'lead'::text as entity_type,
         l.id,
@@ -118,15 +133,16 @@ export async function salesWork(
         a.created_at as activity_created_at,
         a.version as activity_version,
         case
-          when a.due_at < ${startTodayIso}::timestamptz then 'overdue'
-          when a.due_at <= ${endTodayIso}::timestamptz then 'dueToday'
+          when a.due_at < work_clock.day_start then 'overdue'
+          when a.due_at < work_clock.next_day_start then 'dueToday'
           when l.status = 'nurture' then
-            case when l.nurture_until is not null and l.nurture_until <= ${today} then 'nurtureDue' end
+            case when l.nurture_until is not null and l.nurture_until <= work_clock.today::text then 'nurtureDue' end
           when l.status = 'waiting_reply' then 'waitingReply'
           when a.id is null then 'noNextAction'
         end as bucket
       from leads l
       join companies c on c.id = l.company_id and c.deleted_at is null
+      cross join work_clock
       left join lateral (
         select sa.id, sa.lead_id, sa.deal_id, sa.company_id, sa.contact_id, sa.type,
                sa.channel, sa.subject, sa.context, sa.due_at, sa.owner_id, sa.created_at, sa.version
@@ -164,13 +180,14 @@ export async function salesWork(
         a.created_at as activity_created_at,
         a.version as activity_version,
         case
-          when a.due_at < ${startTodayIso}::timestamptz then 'overdue'
-          when a.due_at <= ${endTodayIso}::timestamptz then 'dueToday'
+          when a.due_at < work_clock.day_start then 'overdue'
+          when a.due_at < work_clock.next_day_start then 'dueToday'
           when a.id is null then 'noNextAction'
         end as bucket
       from deals d
       join companies c on c.id = d.company_id and c.deleted_at is null
       join deal_stages ds on ds.id = d.stage_id and ds.is_won = false and ds.is_lost = false
+      cross join work_clock
       left join lateral (
         select sa.id, sa.lead_id, sa.deal_id, sa.company_id, sa.contact_id, sa.type,
                sa.channel, sa.subject, sa.context, sa.due_at, sa.owner_id, sa.created_at, sa.version

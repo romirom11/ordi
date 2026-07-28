@@ -8,6 +8,7 @@ export interface Actor {
   email: string;
   name: string;
   locale: string;
+  timezone: string;
   readOnly: boolean;
   /** null => full role scope (session); set => API-token scope subset. */
   tokenScopes: string[] | null;

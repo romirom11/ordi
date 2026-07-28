@@ -62,6 +62,7 @@ async function resolveActor(c: Parameters<MiddlewareHandler<AppEnv>>[0]): Promis
     email: user.email,
     name: user.name,
     locale: user.locale,
+    timezone: user.timezone,
     readOnly,
     tokenScopes,
     access,
