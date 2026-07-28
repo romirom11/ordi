@@ -6,7 +6,7 @@ import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { emit } from '../../core/events';
 import { assertVersion } from '../../core/locking';
-import { buildCustomFieldFilter } from '../../core/customfields';
+import { buildCustomFieldFilter, mergeCustomFields } from '../../core/customfields';
 
 export async function listCompanies(params: {
   q?: string; status?: string; ownerId?: string; cfFilters?: CustomFieldFilter[]; limit: number;
@@ -51,9 +51,10 @@ export async function updateCompany(actor: Actor, id: string, input: any) {
   const before = await getCompany(id);
   assertVersion(before, input.version, before);
   const patch: Record<string, unknown> = {};
-  for (const k of ['name', 'domain', 'status', 'ownerId', 'billingEmail', 'address', 'defaultCurrency', 'paymentTermsDays', 'customFields']) {
+  for (const k of ['name', 'domain', 'status', 'ownerId', 'billingEmail', 'address', 'defaultCurrency', 'paymentTermsDays']) {
     if (input[k] !== undefined) patch[k] = input[k];
   }
+  if (input.customFields !== undefined) patch.customFields = mergeCustomFields(before.customFields, input.customFields);
   await db.update(schema.companies).set(patch).where(and(eq(schema.companies.id, id), eq(schema.companies.version, before.version)));
   await writeActivity(db, { entityType: 'company', entityId: id, action: 'updated', before, after: patch, actorId: actor.userId, actorType: actor.actorType });
   return getCompany(id);

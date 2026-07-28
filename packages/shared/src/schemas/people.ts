@@ -45,7 +45,8 @@ export const leaveTypeInputSchema = z.object({
 });
 
 export const leaveRequestInputSchema = z.object({
-  employeeId: idSchema,
+  /** Omitted = the requester themselves (PRD §12.2 self-service). */
+  employeeId: idSchema.optional(),
   leaveTypeId: idSchema,
   fromDate: z.string(),
   toDate: z.string(),

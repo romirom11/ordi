@@ -15,7 +15,7 @@ import { writeActivity } from '../../core/activity';
 import { emit } from '../../core/events';
 import { assertVersion } from '../../core/locking';
 import { assertProject, accessibleProjectIds } from '../../core/access';
-import { buildCustomFieldFilter } from '../../core/customfields';
+import { buildCustomFieldFilter, mergeCustomFields } from '../../core/customfields';
 import { extractMentions } from '../kb/service';
 import { encrypt, generateToken } from '../../lib/crypto';
 import { queueEmail } from '../../lib/email';
@@ -201,9 +201,10 @@ export async function updateProject(actor: Actor, id: string, input: any) {
   if (!before) throw err.notFound('Project not found');
   assertVersion(before, input.version, before);
   const patch: Record<string, unknown> = {};
-  for (const k of ['name', 'status', 'visibility', 'leadId', 'startDate', 'targetDate', 'description', 'summary', 'priority', 'links', 'customFields']) {
+  for (const k of ['name', 'status', 'visibility', 'leadId', 'startDate', 'targetDate', 'description', 'summary', 'priority', 'links']) {
     if (input[k] !== undefined) patch[k] = input[k];
   }
+  if (input.customFields !== undefined) patch.customFields = mergeCustomFields(before.customFields, input.customFields);
   // Company / type changes go through the same requiresClient rule as create.
   // These keys were silently dropped before, which made the rail's company and
   // type pickers (and CRM's "link existing project") 200-OK no-ops.
@@ -511,9 +512,10 @@ export async function updateTask(actor: Actor, id: string, input: any) {
   assertVersion(before, input.version, before);
 
   const patch: Record<string, unknown> = {};
-  for (const k of ['title', 'description', 'statusId', 'typeId', 'priority', 'parentId', 'dueDate', 'startDate', 'cycleId', 'customFields']) {
+  for (const k of ['title', 'description', 'statusId', 'typeId', 'priority', 'parentId', 'dueDate', 'startDate', 'cycleId']) {
     if (input[k] !== undefined) patch[k] = input[k];
   }
+  if (input.customFields !== undefined) patch.customFields = mergeCustomFields(before.customFields, input.customFields);
   if (input.estimate !== undefined) patch.estimate = input.estimate != null ? String(input.estimate) : null;
   if (input.parentId !== undefined && input.parentId) await assertSubtaskDepth(input.parentId);
   if (Object.keys(patch).length) {

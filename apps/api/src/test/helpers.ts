@@ -20,7 +20,7 @@ const TABLES = [
   'deals', 'contacts', 'companies', 'notes', 'attachments', 'activity_log', 'events', 'processed_events',
   'dead_letter_events', 'notifications', 'sessions', 'api_tokens', 'oauth_auth_codes', 'oauth_clients', 'invites', 'role_permissions',
   'roles', 'users', 'deal_stages', 'applicant_stages', 'leave_types', 'tax_rates',
-  'number_sequences', 'task_number_counters',
+  'number_sequences', 'task_number_counters', 'custom_field_definitions',
 ];
 
 export async function resetDb(): Promise<void> {
