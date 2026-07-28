@@ -11,7 +11,7 @@ import { accessibleProjectIds, accessibleSpaceIds } from './access';
 
 /**
  * Cross-entity feeds (home dashboard): the permission required to see activity
- * about each entity type. Fail closed — a type missing here is admin-only
+ * about each entity type. Fail closed – a type missing here is admin-only
  * (audit.read). A viewer's own actions are always visible regardless of this map.
  */
 const FEED_VISIBILITY: Record<string, Permission> = {
