@@ -416,12 +416,35 @@ async function findApproverFallback(): Promise<string | null> {
   return rows[0]?.userId ?? null;
 }
 
+/**
+ * Requests carry the two names they are read by – whose leave and which type.
+ * Without the joins the list rendered "–" for both, so a queue of pending
+ * requests said nothing about who was asking for what.
+ */
 export async function listLeaveRequests(params: { employeeId?: string; status?: string }) {
   const { db } = getDb();
-  return db.select().from(schema.leaveRequests).where(and(
-    params.employeeId ? eq(schema.leaveRequests.employeeId, params.employeeId) : undefined,
-    params.status ? eq(schema.leaveRequests.status, params.status) : undefined,
-  )).orderBy(desc(schema.leaveRequests.fromDate));
+  return db.select({
+    id: schema.leaveRequests.id,
+    employeeId: schema.leaveRequests.employeeId,
+    leaveTypeId: schema.leaveRequests.leaveTypeId,
+    fromDate: schema.leaveRequests.fromDate,
+    toDate: schema.leaveRequests.toDate,
+    halfDay: schema.leaveRequests.halfDay,
+    reason: schema.leaveRequests.reason,
+    status: schema.leaveRequests.status,
+    approverId: schema.leaveRequests.approverId,
+    decidedAt: schema.leaveRequests.decidedAt,
+    decisionComment: schema.leaveRequests.decisionComment,
+    createdAt: schema.leaveRequests.createdAt,
+    employeeName: sql<string>`btrim(coalesce(${schema.employees.firstName}, '') || ' ' || coalesce(${schema.employees.lastName}, ''))`,
+    leaveTypeName: schema.leaveTypes.name,
+  }).from(schema.leaveRequests)
+    .leftJoin(schema.employees, eq(schema.employees.id, schema.leaveRequests.employeeId))
+    .leftJoin(schema.leaveTypes, eq(schema.leaveTypes.id, schema.leaveRequests.leaveTypeId))
+    .where(and(
+      params.employeeId ? eq(schema.leaveRequests.employeeId, params.employeeId) : undefined,
+      params.status ? eq(schema.leaveRequests.status, params.status) : undefined,
+    )).orderBy(desc(schema.leaveRequests.fromDate));
 }
 
 /**

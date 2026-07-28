@@ -116,7 +116,10 @@ export function peopleRoutes() {
   });
 
   // ── Leave types (PRD §12.2) ──
-  app.get('/leave-types', guard('people.read'), async (c) => c.json({ data: await svc.listLeaveTypes() }));
+  // Readable by anyone signed in: it is the vocabulary of the request form
+  // (names and flags, nothing about a person), and filing leave does not need
+  // people.read. Defining the types still does – people.manage_leave.
+  app.get('/leave-types', async (c) => c.json({ data: await svc.listLeaveTypes() }));
   app.post('/leave-types', guard('people.manage_leave'), async (c) => {
     const body = leaveTypeInputSchema.parse(await c.req.json());
     return c.json({ id: await svc.createLeaveType(body) }, 201);

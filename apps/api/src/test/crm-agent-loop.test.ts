@@ -135,6 +135,8 @@ describe('leave self-service (PRD §12.2)', () => {
   it('files a request without naming yourself, and without people.read', async () => {
     const member = reqAs(users.member!.cookie);
     expect((await json(member.get('/me'))).permissions).not.toContain('people.read');
+    // the form's own vocabulary is readable, or there is nothing to pick
+    expect(((await json(member.get('/leave-types'))).data as any[]).some((lt) => lt.id === leaveTypeId)).toBe(true);
     const res = await member.post('/leave-requests', { leaveTypeId, fromDate: '2026-09-01', toDate: '2026-09-05', reason: 'Trip' });
     expect(res.status).toBe(201);
     expect((await json(res)).employeeId).toBe(memberEmployeeId);
@@ -146,6 +148,12 @@ describe('leave self-service (PRD §12.2)', () => {
     expect(mine).toHaveLength(1);
     expect(mine[0].employeeId).toBe(memberEmployeeId);
     expect((await member.get(`/leave-requests?employeeId=${ulid()}`)).status).toBe(403);
+  });
+
+  it('names whose leave it is and which type – the list is read by those two', async () => {
+    const [row] = (await json(owner.get('/leave-requests'))).data as any[];
+    expect(row.employeeName).toBe('Mem Ber');
+    expect(row.leaveTypeName).toBe('Annual');
   });
 
   it('explains a missing employee card instead of failing validation', async () => {
