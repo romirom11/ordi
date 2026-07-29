@@ -3,6 +3,56 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.16.0
+
+- CRM is a sales workspace. `/crm` opens on Work: overdue, due today,
+  waiting for reply, nurture due and no next action, built from planned
+  activities and lead state, owner-aware, with exact totals and
+  unassigned records included.
+- Leads are separate from the pipeline - an unqualified pursuit with its
+  own lifecycle (new → needs review → ready → waiting for reply → engaged
+  → nurture → converted, plus disqualified and no response) and its
+  structured research. The pipeline holds qualified deals only.
+  Converting keeps company, contact, research, notes, files, history,
+  owner and next action; `demote_deal_to_lead` moves a legacy Lead-stage
+  deal the other way.
+- Sales activities are first-class: planned, completed or cancelled, with
+  type, owner, due date, outcome and context. Completing one records the
+  outcome, moves the lead and schedules the follow-up in one step. Every
+  transition commits with its audit record in a single transaction.
+- Structured research imports with a preview: companies matched by
+  domain, leads deduplicated, exclusions retained with their reason
+  instead of becoming active company records.
+- CRM → Playbooks: reusable message templates with `{{companyName}}`,
+  `{{contactFirstName}}`, `{{contactName}}`, `{{ownerName}}`,
+  `{{leadTitle}}`, and sequences of manual steps that plan the next
+  action. They never send email or LinkedIn messages.
+- Due today means due today where the seller is: the user's timezone
+  travels in the actor context and day boundaries are local and
+  DST-safe.
+- A sales work digest once per local working morning, toggleable in
+  Profile → Notifications, with a run ledger so a quiet morning does not
+  produce a second digest that afternoon.
+- Notification email is durable: consumers enqueue in the same
+  transaction as the change and return, a worker sends with a 1m/5m/30m/
+  2h/12h backoff, an idempotency key collapses a double enqueue, an
+  abandoned claim is reclaimed after five minutes, and notifications
+  carry a dedupe key.
+- MCP can plan a content calendar: `get_project_schema`, `list_tasks`
+  over a due-date window, `get_task` with body, comments and version,
+  `create_task` / `update_task` / `upsert_task` / `add_task_link`.
+  Writes carry the version they read (409 rather than a silent
+  overwrite) and `upsert_task` refuses to replace a post edited by hand
+  unless forced. The API gained `dueFrom`/`dueTo` and a `label` filter
+  that narrows.
+- MCP reaches sales work too: leads, activities, research import,
+  conversion and playbooks, through the same permissions as the UI.
+- A deleted deal no longer blocks deleting the client; the guard counted
+  soft-deleted rows. It names what blocks with counts.
+- Editing a note saves once, not twice. Long KB titles wrap instead of
+  being clipped. Mixed-currency totals no longer sum into one number.
+  Text written through MCP keeps its paragraphs.
+
 ## v1.15.0
 
 - New project is a composed sheet rather than a form with chips bolted on:
