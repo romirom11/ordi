@@ -442,13 +442,13 @@ describe('custom field tools', () => {
     }]);
   });
 
+  // The task side of this (create_task / upsert_task) lives in tasks.test.ts,
+  // where the fake models the project vocabulary those tools resolve against.
   it('create tools pass customFields values through', async () => {
     const posts: Array<{ path: string; body: unknown }> = [];
     const client = await connect(fakeApi({}, posts));
     await client.callTool({ name: 'create_company', arguments: { name: 'Acme', customFields: { nps: 9 } } });
-    await client.callTool({ name: 'create_task', arguments: { projectId: 'p1', title: 'T', customFields: { sprint: 'q3' } } });
     expect(posts[0]!.body).toMatchObject({ name: 'Acme', customFields: { nps: 9 } });
-    expect(posts[1]!.body).toMatchObject({ projectId: 'p1', title: 'T', customFields: { sprint: 'q3' } });
   });
 });
 
