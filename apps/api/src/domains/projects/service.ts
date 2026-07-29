@@ -372,7 +372,8 @@ async function assertSubtaskDepth(parentId: string | null | undefined) {
 
 export async function listTasks(actor: Actor, params: {
   projectId?: string; status?: string; priority?: string; assignee?: string; cycleId?: string;
-  type?: string; label?: string; q?: string; cfFilters?: CustomFieldFilter[]; limit: number;
+  type?: string; labels?: string[]; q?: string; dueFrom?: string; dueTo?: string;
+  cfFilters?: CustomFieldFilter[]; limit: number;
 }) {
   const { db } = getDb();
   let scope: string[];
@@ -387,6 +388,11 @@ export async function listTasks(actor: Actor, params: {
   const cf: SQL[] = [];
   for (const f of params.cfFilters ?? []) cf.push(await buildCustomFieldFilter('tasks', f));
 
+  // Several labels narrow rather than widen: "linkedin" + "case study" means
+  // the tasks carrying both, which is how a plan is read off a board.
+  const byLabel = (params.labels ?? []).map((labelId) =>
+    inArray(tasks.id, db.select({ id: taskLabels.taskId }).from(taskLabels).where(eq(taskLabels.labelId, labelId))));
+
   const rows = await db.select().from(tasks).where(and(
     isNull(tasks.deletedAt),
     inArray(tasks.projectId, scope),
@@ -395,8 +401,12 @@ export async function listTasks(actor: Actor, params: {
     params.cycleId ? eq(tasks.cycleId, params.cycleId) : undefined,
     params.type ? eq(tasks.typeId, params.type) : undefined,
     params.q ? sql`${tasks.title} ilike ${'%' + params.q + '%'}` : undefined,
+    // due_date is a YYYY-MM-DD text column, so the window compares lexically;
+    // tasks with no date fall outside it, as a calendar query means them to.
+    params.dueFrom ? sql`${tasks.dueDate} >= ${params.dueFrom}` : undefined,
+    params.dueTo ? sql`${tasks.dueDate} <= ${params.dueTo}` : undefined,
     params.assignee ? inArray(tasks.id, db.select({ id: taskAssignees.taskId }).from(taskAssignees).where(eq(taskAssignees.userId, params.assignee))) : undefined,
-    params.label ? inArray(tasks.id, db.select({ id: taskLabels.taskId }).from(taskLabels).where(eq(taskLabels.labelId, params.label))) : undefined,
+    ...byLabel,
     ...cf,
   )).orderBy(desc(tasks.createdAt)).limit(params.limit + 1);
 

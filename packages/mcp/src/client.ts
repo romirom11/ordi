@@ -7,6 +7,25 @@ export interface OrdiClientConfig {
   token: string;
 }
 
+/**
+ * A failed API call, with the machine-readable code the API returns
+ * (`not_found`, `forbidden`, `version_conflict`, …) kept intact. The tools turn
+ * that code into the sentence a model can act on: "someone else edited this
+ * record" is a different situation from "this id does not exist", and a
+ * flattened `HTTP 409` told them apart for nobody.
+ */
+export class OrdiApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+    readonly details?: unknown,
+  ) {
+    super(message);
+    this.name = 'OrdiApiError';
+  }
+}
+
 export class OrdiClient {
   constructor(private cfg: OrdiClientConfig) {}
 
@@ -22,8 +41,13 @@ export class OrdiClient {
     const text = await res.text();
     const data = text ? JSON.parse(text) : {};
     if (!res.ok) {
-      const msg = (data as any)?.error?.message ?? `HTTP ${res.status}`;
-      throw new Error(`ordi API error (${res.status}): ${msg}`);
+      const error = ((data as any)?.error ?? {}) as { code?: unknown; message?: unknown; details?: unknown };
+      throw new OrdiApiError(
+        res.status,
+        typeof error.code === 'string' ? error.code : 'http_error',
+        typeof error.message === 'string' ? error.message : `HTTP ${res.status}`,
+        error.details,
+      );
     }
     return data as T;
   }
