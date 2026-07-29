@@ -38,6 +38,29 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   dropdowns. Fixes a side effect of the drift: the New lead dialog
   offered "nurture", which the API always rejected because the form has
   no return-date field.
+- `GET /deals` is bounded and paged (`limit`, `cursor`, default 100, max
+  200). It used to return every deal in the workspace on every request.
+- `GET /companies` honours the `nextCursor` it already returned. Nothing
+  consumed it before, so passing it back replayed the first page - and
+  the MCP `list_companies` tool hands that cursor to the model. Both
+  lists page on the ULID primary key: ids sort by creation time and
+  compare as exact text, where a `createdAt` cursor silently lost the
+  microseconds Postgres keeps and matched no row.
+- `POST /companies/:id/portal` verifies the company exists before minting
+  a token and records the rotation in the company's history. It used to
+  update by id and report a fresh token for a deleted or invented id, with
+  nothing in the audit trail. The token never enters the audit diff.
+- Opening a CRM URL directly without the permission for it shows a plain
+  "no access" page instead of a screen whose every request 403s. The
+  sidebar already hid those sections; the direct URL, a restored tab and
+  a bookmark went straight through. The Pipeline tab is hidden without
+  `deals.read`.
+- CRM internals split up, no behaviour change: `service.ts` was a
+  1100-line pile of companies, contacts, deals, leads, activities and
+  conversion, and is now a re-export surface over `companies.ts`,
+  `deals.ts`, `leads.ts`, `activities.ts` and `common.ts`. Web
+  `crm/shared.tsx` lost its ~470 lines of dictionary to `crm/i18n.ts`.
+  Every `input: any` in the CRM service is typed from its Zod schema.
 
 ## v1.16.0
 

@@ -34,6 +34,7 @@ export function CrmPage({ tab }: { tab?: string }) {
   const active = normalizeTab(tab);
 
   const canWriteCrm = can('crm.write');
+  const canReadDeals = can('deals.read');
   const canWriteDeals = can('deals.write');
 
   const [newClient, setNewClient] = useState(false);
@@ -81,7 +82,9 @@ export function CrmPage({ tab }: { tab?: string }) {
           tabs={[
             { key: 'work', label: t('crm.tabWork'), icon: <ListTodo size={15} /> },
             { key: 'leads', label: t('crm.tabLeads'), icon: <Target size={15} /> },
-            { key: 'deals', label: t('crm.tabPipeline'), icon: <KanbanSquare size={15} /> },
+            ...(canReadDeals
+              ? [{ key: 'deals' as const, label: t('crm.tabPipeline'), icon: <KanbanSquare size={15} /> }]
+              : []),
             { key: 'companies', label: t('crm.tabCompanies'), icon: <Building2 size={15} /> },
             { key: 'playbooks', label: t('crm.tabPlaybooks'), icon: <Workflow size={15} /> },
           ]}
@@ -90,7 +93,7 @@ export function CrmPage({ tab }: { tab?: string }) {
 
       {active === 'work' && <WorkTab />}
       {active === 'leads' && <LeadsTab />}
-      {active === 'deals' && <PipelineTab />}
+      {active === 'deals' && canReadDeals && <PipelineTab />}
       {active === 'companies' && <ClientsTab onNewClient={() => setNewClient(true)} />}
       {active === 'playbooks' && <PlaybooksTab />}
 

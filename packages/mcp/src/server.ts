@@ -53,14 +53,16 @@ export function buildServer(client: OrdiClient): McpServer {
   })) };
 }));
 
-  server.tool('list_companies', 'List CRM companies – the way to obtain companyId for company/finance tools', {
+  server.tool('list_companies', 'List CRM companies – the way to obtain companyId for company/finance tools. Paged: pass the returned nextCursor to continue.', {
   q: z.string().optional().describe('Substring of the company name'),
   status: z.string().optional().describe('e.g. lead | client'), limit: z.number().optional(),
-}, ({ q, status, limit }) => wrap(async () => {
+  cursor: z.string().optional().describe('nextCursor from a previous call'),
+}, ({ q, status, limit, cursor }) => wrap(async () => {
   const qs = new URLSearchParams();
   if (q) qs.set('q', q);
   if (status) qs.set('status', status);
   if (limit) qs.set('limit', String(limit));
+  if (cursor) qs.set('cursor', cursor);
   const res = await client.get<{ data: Record<string, unknown>[]; nextCursor: string | null }>(`/companies${qs.toString() ? `?${qs}` : ''}`);
   return { data: res.data.map((co) => ({
     id: co.id, name: co.name, domain: co.domain, status: co.status,
@@ -136,19 +138,29 @@ export function buildServer(client: OrdiClient): McpServer {
     return { templates, sequences };
   }));
 
-  server.tool('list_deals', 'List deals, filterable by company and by linked project – the way to obtain dealId for move_deal', {
+  server.tool('list_deals', 'List deals, filterable by company and by linked project – the way to obtain dealId for move_deal. Paged: pass the returned nextCursor to continue.', {
   companyId: z.string().optional(),
   projectId: z.string().optional().describe('Filter by linked project id, or the literal "none" for unlinked deals'),
-}, ({ companyId, projectId }) => wrap(async () => {
+  limit: z.number().optional().describe('Rows per page, 1-200, default 100'),
+  cursor: z.string().optional().describe('nextCursor from a previous call'),
+}, ({ companyId, projectId, limit, cursor }) => wrap(async () => {
   const qs = new URLSearchParams();
   if (companyId) qs.set('companyId', companyId);
   if (projectId) qs.set('projectId', projectId);
-  const res = await client.get<{ data: Record<string, unknown>[] }>(`/deals${qs.toString() ? `?${qs}` : ''}`);
-  return { data: res.data.map((d) => ({
-    id: d.id, title: d.title, companyId: d.companyId, projectId: d.projectId, stageId: d.stageId,
-    amount: d.amount, currency: d.currency, expectedCloseDate: d.expectedCloseDate, ownerId: d.ownerId,
-    lostReason: d.lostReason, customFields: d.customFields ?? {},
-  })) };
+  if (limit) qs.set('limit', String(limit));
+  if (cursor) qs.set('cursor', cursor);
+  const res = await client.get<{ data: Record<string, unknown>[]; nextCursor?: string | null }>(
+    `/deals${qs.toString() ? `?${qs}` : ''}`);
+  return {
+    data: res.data.map((d) => ({
+      id: d.id, title: d.title, companyId: d.companyId, projectId: d.projectId, stageId: d.stageId,
+      amount: d.amount, currency: d.currency, expectedCloseDate: d.expectedCloseDate, ownerId: d.ownerId,
+      lostReason: d.lostReason, customFields: d.customFields ?? {},
+    })),
+    // Surfaced rather than dropped: a truncated list that looks complete is worse
+    // than a longer answer.
+    nextCursor: res.nextCursor ?? null,
+  };
 }));
 
   server.tool('get_deal', 'One deal with every field, including customFields – reading a deal never needs a write', { dealId: z.string() },

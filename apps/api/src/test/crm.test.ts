@@ -4,7 +4,7 @@
  * projects, filterable, and clearable.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import { getDb, schema } from '@ordi/db';
+import { getDb, schema, eq } from '@ordi/db';
 import { ulid } from 'ulid';
 import { resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
 
@@ -190,5 +190,73 @@ describe('entity attachments', () => {
   it('rejects unknown entity types', async () => {
     const res = await reqAs(users.owner!.cookie).get('/attachments?entityType=weird&entityId=x');
     expect(res.status).toBe(400);
+  });
+});
+
+describe('bounded lists and portal tokens', () => {
+  it('pages /deals instead of returning the whole pipeline', async () => {
+    const pagedCompanyId = ulid();
+    const { db } = getDb();
+    await db.insert(schema.companies).values({
+      id: pagedCompanyId,
+      name: 'Paged Pipeline',
+      createdBy: users.owner!.userId,
+    });
+    for (const title of ['One', 'Two', 'Three']) {
+      const created = await reqAs(users.owner!.cookie).post('/deals', {
+        companyId: pagedCompanyId, stageId, title,
+      });
+      expect(created.status).toBe(201);
+    }
+
+    const first = await json(reqAs(users.owner!.cookie)
+      .get(`/deals?companyId=${pagedCompanyId}&limit=2`));
+    expect(first.data).toHaveLength(2);
+    expect(first.nextCursor).toBeTruthy();
+
+    const second = await json(reqAs(users.owner!.cookie)
+      .get(`/deals?companyId=${pagedCompanyId}&limit=2&cursor=${encodeURIComponent(first.nextCursor)}`));
+    expect(second.data).toHaveLength(1);
+    expect(second.nextCursor).toBeNull();
+
+    // No row appears on both pages and none goes missing.
+    const seen = [...first.data, ...second.data].map((row: any) => row.id);
+    expect(new Set(seen).size).toBe(3);
+  });
+
+  it('refuses to mint a portal token for a company that does not exist', async () => {
+    const missing = await reqAs(users.owner!.cookie).post(`/companies/${ulid()}/portal`, {});
+    expect(missing.status).toBe(404);
+  });
+
+  it('rotates the portal token and records it in the company history', async () => {
+    const { db } = getDb();
+    const before = await json(reqAs(users.owner!.cookie).get(`/companies/${companyId}`));
+    const rotated = await json(reqAs(users.owner!.cookie)
+      .post(`/companies/${companyId}/portal`, { enabled: true }));
+    expect(rotated.portalToken).toBeTruthy();
+    expect(rotated.portalToken).not.toBe(before.portalToken);
+
+    const after = await json(reqAs(users.owner!.cookie).get(`/companies/${companyId}`));
+    expect(after.portalEnabled).toBe(true);
+
+    const audit = await db.select().from(schema.activityLog)
+      .where(eq(schema.activityLog.entityId, companyId));
+    expect(audit.some((row) => row.action === 'portal_token_rotated')).toBe(true);
+    // The token itself must never land in the audit diff.
+    expect(JSON.stringify(audit)).not.toContain(rotated.portalToken);
+  });
+});
+
+describe('company list paging', () => {
+  it('honours the cursor it hands out instead of replaying page one', async () => {
+    const first = await json(reqAs(users.owner!.cookie).get('/companies?limit=1'));
+    expect(first.data).toHaveLength(1);
+    expect(first.nextCursor).toBeTruthy();
+
+    const second = await json(reqAs(users.owner!.cookie)
+      .get(`/companies?limit=1&cursor=${encodeURIComponent(first.nextCursor)}`));
+    expect(second.data).toHaveLength(1);
+    expect(second.data[0].id).not.toBe(first.data[0].id);
   });
 });

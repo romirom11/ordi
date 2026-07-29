@@ -6,8 +6,8 @@
  */
 import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { PowerOff } from 'lucide-react';
-import type { ModuleKey } from '@ordi/shared';
+import { Lock, PowerOff } from 'lucide-react';
+import type { ModuleKey, Permission } from '@ordi/shared';
 import { api } from '../lib/api';
 import { Button, EmptyState } from './ui';
 import { Link } from '../lib/router';
@@ -19,11 +19,15 @@ extendDict({
     'modules.offTitle': 'This module is turned off',
     'modules.offHint': 'An administrator disabled it for the whole workspace. Existing data is kept and comes back the moment it is switched on again.',
     'modules.offAction': 'Open module settings',
+    'modules.noAccessTitle': 'You do not have access to this section',
+    'modules.noAccessHint': 'Your role is missing the permission this section needs. An administrator can grant it in Settings → Roles.',
   },
   uk: {
     'modules.offTitle': 'Цей модуль вимкнено',
     'modules.offHint': 'Адміністратор вимкнув його для всього воркспейсу. Дані збережено – вони повернуться одразу після повторного увімкнення.',
     'modules.offAction': 'Відкрити налаштування модулів',
+    'modules.noAccessTitle': 'У вас немає доступу до цього розділу',
+    'modules.noAccessHint': 'Вашій ролі не вистачає потрібного дозволу. Адміністратор може видати його в Налаштування → Ролі.',
   },
 });
 
@@ -44,22 +48,45 @@ export function useModules() {
   };
 }
 
-export function ModuleGate({ module, children }: { module: ModuleKey; children: ReactNode }) {
+/**
+ * `perm` closes the same doors for permissions that this gate already closed for
+ * disabled modules. The sidebar hides a section the role cannot read, but the
+ * direct URL, a restored tab and a bookmark went straight through and rendered a
+ * page whose every request then failed with 403.
+ */
+export function ModuleGate({ module, perm, children }: {
+  module: ModuleKey;
+  perm?: Permission;
+  children: ReactNode;
+}) {
   const t = useT();
   const can = useCan();
   const { loading, enabled } = useModules();
   if (loading) return null;
-  if (enabled(module)) return <>{children}</>;
-  return (
-    <div className="page-enter px-6 py-10">
-      <EmptyState
-        icon={<PowerOff size={18} />}
-        title={t('modules.offTitle')}
-        hint={t('modules.offHint')}
-        action={can('settings.manage')
-          ? <Link to="/settings/modules"><Button size="sm" variant="outline">{t('modules.offAction')}</Button></Link>
-          : undefined}
-      />
-    </div>
-  );
+  if (!enabled(module)) {
+    return (
+      <div className="page-enter px-6 py-10">
+        <EmptyState
+          icon={<PowerOff size={18} />}
+          title={t('modules.offTitle')}
+          hint={t('modules.offHint')}
+          action={can('settings.manage')
+            ? <Link to="/settings/modules"><Button size="sm" variant="outline">{t('modules.offAction')}</Button></Link>
+            : undefined}
+        />
+      </div>
+    );
+  }
+  if (perm && !can(perm)) {
+    return (
+      <div className="page-enter px-6 py-10">
+        <EmptyState
+          icon={<Lock size={18} />}
+          title={t('modules.noAccessTitle')}
+          hint={t('modules.noAccessHint')}
+        />
+      </div>
+    );
+  }
+  return <>{children}</>;
 }

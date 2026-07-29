@@ -15,7 +15,7 @@ import { requireAuth, currentActor } from '../../core/auth';
 import { guard, guardAll } from '../../core/rbac';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
-import { page } from '../../lib/http';
+import { decodeCursor, page } from '../../lib/http';
 import * as svc from './service';
 import * as playbooks from './playbooks';
 import { assertSalesWrite } from './sales-access';
@@ -35,9 +35,11 @@ export function crmRoutes() {
     const limit = Number(c.req.query('limit') ?? 50);
     const rows = await svc.listCompanies({
       q: c.req.query('q'), status: c.req.query('status'), ownerId: c.req.query('ownerId'),
-      cfFilters: parseCfFilters(c), limit,
+      cfFilters: parseCfFilters(c),
+      cursor: decodeCursor(c.req.query('cursor')) as { id?: string } | null,
+      limit,
     });
-    return c.json(page(rows, limit, (r) => ({ createdAt: r.createdAt })));
+    return c.json(page(rows, limit, (r) => ({ id: r.id })));
   });
 
   app.post('/companies', guard('crm.write'), async (c) => {
@@ -62,12 +64,8 @@ export function crmRoutes() {
   });
 
   app.post('/companies/:id/portal', guard('crm.write'), async (c) => {
-    const { db } = getDb();
-    const token = ulid();
     const enabled = (await c.req.json().catch(() => ({}))).enabled;
-    await db.update(schema.companies).set({ portalToken: token, ...(enabled !== undefined ? { portalEnabled: enabled } : {}) })
-      .where(eq(schema.companies.id, c.req.param('id')));
-    return c.json({ portalToken: token });
+    return c.json(await svc.rotatePortalToken(currentActor(c), c.req.param('id'), enabled));
   });
 
   // ── Contacts ──
@@ -79,13 +77,8 @@ export function crmRoutes() {
 
   // One contact by id: every other CRM record reads back on its own id, and a
   // caller holding a contactId should not have to know its company to look it up.
-  app.get('/contacts/:id', guard('crm.read'), async (c) => {
-    const { db } = getDb();
-    const [contact] = await db.select().from(schema.contacts)
-      .where(and(eq(schema.contacts.id, c.req.param('id')), isNull(schema.contacts.deletedAt)));
-    if (!contact) throw err.notFound('Contact not found');
-    return c.json(contact);
-  });
+  app.get('/contacts/:id', guard('crm.read'), async (c) =>
+    c.json(await svc.getContact(c.req.param('id'))));
 
   app.post('/contacts', guard('crm.write'), async (c) => {
     const body = contactInputSchema.parse(await c.req.json());
@@ -100,8 +93,7 @@ export function crmRoutes() {
   });
 
   app.delete('/contacts/:id', guard('crm.write'), async (c) => {
-    const { db } = getDb();
-    await db.update(schema.contacts).set({ deletedAt: new Date() }).where(eq(schema.contacts.id, c.req.param('id')));
+    await svc.softDeleteContact(currentActor(c), c.req.param('id'));
     return c.json({ ok: true });
   });
 
@@ -173,34 +165,19 @@ export function crmRoutes() {
 
   // ── Deals ──
   app.get('/deals', guard('deals.read'), async (c) => {
-    const { db } = getDb();
-    const companyId = c.req.query('companyId');
-    // projectId filter: a ulid narrows to that project, the literal 'none' to unlinked deals.
-    const projectId = c.req.query('projectId');
-    const rows = await db.select().from(schema.deals).where(and(
-      isNull(schema.deals.deletedAt),
-      companyId ? eq(schema.deals.companyId, companyId) : undefined,
-      projectId === 'none' ? isNull(schema.deals.projectId)
-        : projectId ? eq(schema.deals.projectId, projectId) : undefined,
-    )).orderBy(desc(schema.deals.createdAt));
-    const activities = await svc.nextSalesActivities({ dealIds: rows.map((row) => row.id) });
-    const nextByDeal = new Map(activities.map((activity) => [activity.dealId, activity]));
-    return c.json({ data: rows.map((row) => ({ ...row, nextActivity: nextByDeal.get(row.id) ?? null })) });
+    const limit = Number(c.req.query('limit') ?? 100);
+    const rows = await svc.listDeals({
+      companyId: c.req.query('companyId'),
+      projectId: c.req.query('projectId'),
+      cursor: decodeCursor(c.req.query('cursor')) as { id?: string } | null,
+      limit,
+    });
+    return c.json(page(rows, limit, (r) => ({ id: r.id })));
   });
 
   app.post('/deals', guard('deals.write'), async (c) => {
     const body = dealInputSchema.parse(await c.req.json());
-    const { db } = getDb();
-    const actor = currentActor(c);
-    if (body.projectId) await svc.assertProjectExists(db, body.projectId);
-    await svc.requirePipelineStage(db, body.stageId);
-    const id = ulid();
-    await db.insert(schema.deals).values({
-      id, companyId: body.companyId, projectId: body.projectId ?? null, title: body.title, stageId: body.stageId,
-      amount: body.amount == null ? null : String(body.amount), currency: body.currency, expectedCloseDate: body.expectedCloseDate ?? null,
-      ownerId: body.ownerId ?? null, customFields: body.customFields ?? {}, createdBy: actor.userId,
-    });
-    await writeActivity(db, { entityType: 'deal', entityId: id, action: 'created', after: body, actorId: actor.userId, actorType: actor.actorType });
+    const id = await svc.createDeal(currentActor(c), body);
     return c.json({ id }, 201);
   });
 
@@ -217,8 +194,7 @@ export function crmRoutes() {
   });
 
   app.delete('/deals/:id', guard('deals.delete'), async (c) => {
-    const { db } = getDb();
-    await db.update(schema.deals).set({ deletedAt: new Date() }).where(eq(schema.deals.id, c.req.param('id')));
+    await svc.softDeleteDeal(currentActor(c), c.req.param('id'));
     return c.json({ ok: true });
   });
 
