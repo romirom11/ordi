@@ -11,7 +11,7 @@ Projects, CRM, knowledge base, time, finance and people – one app, one databas
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/romirom11/ordi)](https://github.com/romirom11/ordi/releases/latest)
 
-[Quick start](#quick-start) · [Why ordi](#why-ordi) · [Features](#features) · [Deploy](#deploy-it-for-real) · [Desktop app](https://github.com/romirom11/ordi/releases/latest) · [Donate](#support-the-project)
+[Website](https://romirom11.github.io/ordi/) · [Quick start](#quick-start) · [Why ordi](#why-ordi) · [Features](#features) · [Deploy](#deploy-it-for-real) · [Desktop app](https://github.com/romirom11/ordi/releases/latest) · [Donate](#support-the-project)
 
 ![Project overview](docs/images/project-overview.png)
 
