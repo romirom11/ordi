@@ -18,7 +18,13 @@ export function textToDoc(text: string): Record<string, unknown> {
   return { type: 'doc', content: paragraphs };
 }
 
-/** tiptap doc (or anything shaped like one) → plain text, block nodes separated by newlines. */
+/**
+ * tiptap doc (or anything shaped like one) → plain text, block nodes separated
+ * by newlines and top-level blocks by a blank line, so that
+ * `docToText(textToDoc(t))` gives `t` back: an agent that reads a body, edits a
+ * sentence and writes it back must not lose the paragraph structure on the way
+ * through. Nested blocks (list items, table cells) stay one line each.
+ */
 export function docToText(doc: unknown): string {
   const lines: string[] = [];
   let current = '';
@@ -26,10 +32,10 @@ export function docToText(doc: unknown): string {
     lines.push(current);
     current = '';
   };
-  const walk = (node: any): void => {
+  const walk = (node: any, depth: number): void => {
     if (!node || typeof node !== 'object') return;
     if (Array.isArray(node)) {
-      for (const child of node) walk(child);
+      for (const child of node) walk(child, depth);
       return;
     }
     if (node.type === 'text' && typeof node.text === 'string') current += node.text;
@@ -37,11 +43,14 @@ export function docToText(doc: unknown): string {
     else if (node.type === 'mention') current += `@${node.attrs?.label ?? node.attrs?.id ?? ''}`;
     if (Array.isArray(node.content)) {
       const block = node.type && node.type !== 'doc' && node.type !== 'text';
-      for (const child of node.content) walk(child);
-      if (block) flush();
+      for (const child of node.content) walk(child, depth + 1);
+      if (block) {
+        flush();
+        if (depth === 1) lines.push('');
+      }
     }
   };
-  walk(doc);
+  walk(doc, 0);
   if (current) flush();
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }

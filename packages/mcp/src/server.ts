@@ -11,48 +11,10 @@ import {
   dateOnlySchema, researchImportSchema, docToText, textToDoc,
 } from '@ordi/shared';
 import { OrdiClient } from './client';
+import { decodeEntities, scrub, text, wrap } from './format';
+import { registerTaskTools } from './tasks';
 
-/**
- * Keys stripped from every tool response before it reaches the model.
- * Optimistic-locking counters and soft-delete markers carry nothing a model
- * can act on, and portalToken is a capability URL secret that must never end
- * up in an agent's context window.
- */
-const NOISE_KEYS = new Set([
-  'version', 'deletedAt', 'deleted_at', 'templateSourceId', 'template_source_id',
-  'portalToken', 'portal_token', 'searchVector', 'search_vector',
-]);
-
-export function scrub(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(scrub);
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-      .filter(([k]) => !NOISE_KEYS.has(k))
-      .map(([k, v]) => [k, scrub(v)]));
-  }
-  return value;
-}
-
-/**
- * Agents frequently paste HTML-escaped text ("Co-founder &amp; CEO") scraped
- * from web pages. Stored verbatim it renders escaped in the UI, so every
- * string argument of the write tools is decoded once at this boundary.
- * Applied recursively to plain objects/arrays; non-strings pass through.
- */
-export function decodeEntities<T>(value: T): T {
-  if (typeof value === 'string') {
-    return value
-      .replace(/&(amp|lt|gt|quot|#0?39|apos|nbsp);/g, (m) => (
-        { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&#039;': "'", '&apos;': "'", '&nbsp;': ' ' }[m] ?? m
-      )) as unknown as T;
-  }
-  if (Array.isArray(value)) return value.map(decodeEntities) as unknown as T;
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-      .map(([k, v]) => [k, decodeEntities(v)])) as unknown as T;
-  }
-  return value;
-}
+export { decodeEntities, scrub };
 
 /**
  * Plain text ⇄ tiptap doc, shared with the API so an agent writes and reads
@@ -71,24 +33,19 @@ export function buildServer(client: OrdiClient): McpServer {
   client.post = (path, body) => rawPost(path, decodeEntities(body));
   client.patch = (path, body) => rawPatch(path, decodeEntities(body));
 
-  function text(data: unknown) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(scrub(data), null, 2) }] };
-}
-  function wrap<T>(fn: () => Promise<T>) {
-  return fn().then(text).catch((e: Error) => ({ isError: true, content: [{ type: 'text' as const, text: e.message }] }));
-}
-
 // ── Read tools ──
   server.tool('search', 'Search companies, projects, tasks, CRM notes, invoices and KB pages by name/title/number. Matches titles, note bodies and indexed text, not arbitrary fields; use list_projects / list_companies / list_notes to enumerate instead of guessing names.', { query: z.string() },
   ({ query }) => wrap(() => client.get(`/search?q=${encodeURIComponent(query)}`)));
 
-  server.tool('list_projects', 'List projects the token owner can access – the way to obtain projectId for the other project tools', {
+  server.tool('list_projects', 'List projects the token owner can access – the way to obtain projectId for the other project tools. Filter by key to look one up by its short code, e.g. CONTENT.', {
   status: z.string().optional().describe('Filter by status, e.g. active'), companyId: z.string().optional(),
-}, ({ status, companyId }) => wrap(async () => {
+  key: z.string().optional().describe('Exact project key, case-insensitive, e.g. CONTENT'),
+}, ({ status, companyId, key }) => wrap(async () => {
   const qs = new URLSearchParams();
   if (status) qs.set('status', status);
   if (companyId) qs.set('companyId', companyId);
   const res = await client.get<{ data: Record<string, unknown>[] }>(`/projects${qs.toString() ? `?${qs}` : ''}`);
+  if (key) res.data = res.data.filter((p) => String(p.key ?? '').toUpperCase() === key.trim().toUpperCase());
   return { data: res.data.map((p) => ({
     id: p.id, key: p.key, name: p.name, status: p.status, priority: p.priority,
     companyId: p.companyId, leadId: p.leadId, startDate: p.startDate, targetDate: p.targetDate,
@@ -296,15 +253,8 @@ export function buildServer(client: OrdiClient): McpServer {
   () => wrap(() => client.get('/people/dashboard')));
 
 // ── Action tools (no delete/cancel) ──
-  server.tool('create_task', 'Create a task in a project', {
-  projectId: z.string(), title: z.string(), priority: z.enum(['none', 'low', 'medium', 'high', 'urgent']).optional(),
-  customFields: z.record(z.string(), z.unknown()).optional().describe('Keyed by custom field key (see list_custom_fields)'),
-}, ({ projectId, title, priority, customFields }) => wrap(() => client.post('/tasks', {
-  projectId, title, priority: priority ?? 'none', assigneeIds: [], labelIds: [],
-  ...(customFields ? { customFields } : {}),
-})));
-
-  server.tool('update_task_status', 'Change a task status', { taskId: z.string(), statusId: z.string() },
+// create_task, update_task, upsert_task and add_task_link live in tasks.ts.
+  server.tool('update_task_status', 'Change a task status (statusId from get_project_schema); update_task changes the status together with the rest of the card', { taskId: z.string(), statusId: z.string() },
   ({ taskId, statusId }) => wrap(() => client.patch(`/tasks/${taskId}`, { statusId })));
 
   server.tool('assign_task', 'Assign users to a task', { taskId: z.string(), assigneeIds: z.array(z.string()) },
@@ -547,6 +497,11 @@ export function buildServer(client: OrdiClient): McpServer {
 
   server.tool('move_applicant', 'Move an applicant to a stage', { applicantId: z.string(), stageId: z.string(), rejectedReason: z.string().optional() },
   ({ applicantId, stageId, rejectedReason }) => wrap(() => client.post(`/applicants/${applicantId}/move`, { stageId, rejectedReason })));
+
+  // Project structure, task cards and the repeatable key-based write, which
+  // need enough of their own machinery (name resolution, fingerprints) to live
+  // beside the catalog rather than in it.
+  registerTaskTools(server, client);
 
   return server;
 }
