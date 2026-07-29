@@ -4,7 +4,7 @@ import { sendEmailNow, type EmailInput } from '../lib/email';
 import { logger } from '../lib/logger';
 
 const RETRY_MS = [60_000, 5 * 60_000, 30 * 60_000, 2 * 3_600_000, 12 * 3_600_000];
-const MAX_ATTEMPTS = RETRY_MS.length;
+const MAX_ATTEMPTS = RETRY_MS.length + 1;
 const STALE_CLAIM_MS = 5 * 60_000;
 
 type EmailDeliveryWriter = Pick<Database, 'insert'>;
@@ -14,8 +14,8 @@ export interface QueuedEmailInput extends Omit<EmailInput, 'attachments'> {
 }
 
 /**
- * Persist an email exactly once. The caller may pass its transaction so the
- * business change and the delivery request commit atomically.
+ * Persist one idempotent delivery request. The caller may pass its transaction
+ * so the business change and the delivery request commit atomically.
  */
 export async function enqueueEmail(
   input: QueuedEmailInput,

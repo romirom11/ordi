@@ -170,6 +170,15 @@ export function buildServer(client: OrdiClient): McpServer {
   return client.get(`/sales-activities${qs.toString() ? `?${qs}` : ''}`);
 }));
 
+  server.tool('list_sales_playbooks', 'List reusable sales message templates and manual-action sequences, including ordered steps and active enrollment counts', {},
+  () => wrap(async () => {
+    const [templates, sequences] = await Promise.all([
+      client.get('/sales-message-templates'),
+      client.get('/sales-sequences'),
+    ]);
+    return { templates, sequences };
+  }));
+
   server.tool('list_deals', 'List deals, filterable by company and by linked project – the way to obtain dealId for move_deal', {
   companyId: z.string().optional(),
   projectId: z.string().optional().describe('Filter by linked project id, or the literal "none" for unlinked deals'),
@@ -435,9 +444,66 @@ export function buildServer(client: OrdiClient): McpServer {
   leadId: z.string().optional(), dealId: z.string().optional(), type: z.enum(SALES_ACTIVITY_TYPES),
   dueAt: z.string().describe('ISO date-time'), channel: z.string().optional(),
   subject: z.string().optional(), context: z.string().optional(), ownerId: z.string().optional(),
+  templateId: z.string().optional().describe('Optional reusable message template; placeholders are rendered by the API'),
 }, (args) => wrap(async () => {
   if ((args.leadId ? 1 : 0) + (args.dealId ? 1 : 0) !== 1) throw new Error('Exactly one of leadId or dealId is required');
   return client.post('/sales-activities', args);
+}));
+
+  server.tool('save_sales_message_template', 'Create or update reusable sales copy. Supported variables: {{companyName}}, {{contactFirstName}}, {{contactName}}, {{ownerName}}, {{leadTitle}}.', {
+  templateId: z.string().optional().describe('Omit to create; provide to update'),
+  name: z.string().optional(), activityType: z.enum(SALES_ACTIVITY_TYPES).optional(),
+  channel: z.string().nullable().optional(), subject: z.string().nullable().optional(),
+  body: z.string().optional(), active: z.boolean().optional(),
+}, ({ templateId, ...body }) => wrap(() => {
+  if (!templateId && (!body.name || !body.activityType || !body.body)) {
+    throw new Error('name, activityType and body are required when creating a template');
+  }
+  return templateId
+    ? client.patch(`/sales-message-templates/${templateId}`, body)
+    : client.post('/sales-message-templates', body);
+}));
+
+  const sequenceStep = z.object({
+    delayDays: z.number().int().min(0).max(3650).optional(),
+    templateId: z.string().nullable().optional(),
+    activityType: z.enum(SALES_ACTIVITY_TYPES).optional(),
+    channel: z.string().nullable().optional(),
+    subject: z.string().nullable().optional(),
+    context: z.string().nullable().optional(),
+  });
+  server.tool('save_sales_sequence', 'Create or update a sequence of manual sales actions. It schedules work but never sends email or LinkedIn messages.', {
+  sequenceId: z.string().optional().describe('Omit to create; provide to update'),
+  name: z.string().optional(), description: z.string().optional(), active: z.boolean().optional(),
+  steps: z.array(sequenceStep).min(1).max(50).optional(),
+}, ({ sequenceId, ...body }) => wrap(() => {
+  if (!sequenceId && (!body.name || !body.steps?.length)) {
+    throw new Error('name and steps are required when creating a sequence');
+  }
+  return sequenceId
+    ? client.patch(`/sales-sequences/${sequenceId}`, body)
+    : client.post('/sales-sequences', body);
+}));
+
+  server.tool('manage_sales_sequence', 'Enroll one lead/deal in a sequence or stop an active enrollment. Enrolling creates the first planned manual action.', {
+  action: z.enum(['enroll', 'stop']),
+  sequenceId: z.string().optional(),
+  enrollmentId: z.string().optional(),
+  leadId: z.string().optional(),
+  dealId: z.string().optional(),
+  contactId: z.string().nullable().optional(),
+  ownerId: z.string().nullable().optional(),
+  startAt: z.string().optional().describe('Optional ISO date-time used as the sequence start'),
+}, ({ action, sequenceId, enrollmentId, ...body }) => wrap(() => {
+  if (action === 'stop') {
+    if (!enrollmentId) throw new Error('enrollmentId is required to stop a sequence');
+    return client.post(`/sales-sequence-enrollments/${enrollmentId}/stop`, {});
+  }
+  if (!sequenceId) throw new Error('sequenceId is required to enroll');
+  if ((body.leadId ? 1 : 0) + (body.dealId ? 1 : 0) !== 1) {
+    throw new Error('Exactly one of leadId or dealId is required');
+  }
+  return client.post(`/sales-sequences/${sequenceId}/enroll`, body);
 }));
 
   server.tool('update_sales_activity', 'Edit a planned sales activity before it is completed or cancelled', {

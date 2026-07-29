@@ -5,7 +5,7 @@
  * /deals (→ pipeline) so old links land on the right tab.
  */
 import { useState } from 'react';
-import { Building2, Download, KanbanSquare, ListTodo, Plus, Target } from 'lucide-react';
+import { Building2, Download, KanbanSquare, ListTodo, Plus, Target, Workflow } from 'lucide-react';
 import { useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { useT } from '../lib/i18n';
@@ -16,13 +16,15 @@ import { WorkTab } from '../components/crm/WorkTab';
 import { LeadsTab } from '../components/crm/LeadsTab';
 import { ResearchImportDialog } from '../components/crm/ResearchImportDialog';
 import { NewClientDialog, NewDealDialog, NewLeadDialog } from '../components/crm/dialogs';
+import { PlaybooksTab } from '../components/crm/PlaybooksTab';
 
-type CrmTab = 'work' | 'leads' | 'deals' | 'companies';
+type CrmTab = 'work' | 'leads' | 'deals' | 'companies' | 'playbooks';
 
 function normalizeTab(tab?: string): CrmTab {
   if (tab === 'deals' || tab === 'pipeline') return 'deals';
   if (tab === 'clients' || tab === 'companies') return 'companies';
   if (tab === 'leads') return 'leads';
+  if (tab === 'playbooks') return 'playbooks';
   return 'work';
 }
 
@@ -50,6 +52,7 @@ export function CrmPage({ tab }: { tab?: string }) {
           active === 'work' ? t('crm.workHint')
             : active === 'leads' ? t('crm.leadsHint')
               : active === 'deals' ? t('deals.subtitle')
+                : active === 'playbooks' ? t('crm.playbooksHint')
                 : t('crm.subtitle')
         }
         actions={
@@ -87,6 +90,7 @@ export function CrmPage({ tab }: { tab?: string }) {
             { key: 'leads', label: t('crm.tabLeads'), icon: <Target size={15} /> },
             { key: 'deals', label: t('crm.tabPipeline'), icon: <KanbanSquare size={15} /> },
             { key: 'companies', label: t('crm.tabCompanies'), icon: <Building2 size={15} /> },
+            { key: 'playbooks', label: t('crm.tabPlaybooks'), icon: <Workflow size={15} /> },
           ]}
         />
       </div>
@@ -95,6 +99,7 @@ export function CrmPage({ tab }: { tab?: string }) {
       {active === 'leads' && <LeadsTab />}
       {active === 'deals' && <PipelineTab />}
       {active === 'companies' && <ClientsTab onNewClient={() => setNewClient(true)} />}
+      {active === 'playbooks' && <PlaybooksTab />}
 
       <NewClientDialog
         open={newClient}

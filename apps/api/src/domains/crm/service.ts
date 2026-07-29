@@ -4,9 +4,17 @@ import type { CustomFieldFilter } from '@ordi/shared';
 import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
-import { emit } from '../../core/events';
+import { publishEvent } from '../../core/events';
 import { assertVersion } from '../../core/locking';
 import { buildCustomFieldFilter, mergeCustomFields } from '../../core/customfields';
+import {
+  advanceSequenceActivity,
+  resolveActivityTemplate,
+  stopActiveDealSequence,
+  stopActiveLeadSequence,
+  stopSequenceForActivity,
+} from './playbooks';
+import { assertSalesWrite } from './sales-access';
 
 type DbReader = Pick<ReturnType<typeof getDb>['db'], 'select'>;
 
@@ -158,25 +166,67 @@ export async function createContact(actor: Actor, input: any) {
 // ── Deals ──
 export async function moveDeal(actor: Actor, id: string, stageId: string, lostReason: string | undefined, version?: number) {
   const { db } = getDb();
-  const [deal] = await db.select().from(schema.deals).where(and(eq(schema.deals.id, id), isNull(schema.deals.deletedAt)));
-  if (!deal) throw err.notFound('Deal not found');
-  assertVersion(deal, version, deal);
-  const [stage] = await db.select().from(schema.dealStages).where(eq(schema.dealStages.id, stageId));
-  if (!stage) throw err.validation('Unknown stage');
-  if (stage.isLost && !lostReason) throw err.domain('A lost reason is required');
-  await db.update(schema.deals).set({ stageId, lostReason: stage.isLost ? lostReason ?? null : null })
-    .where(and(eq(schema.deals.id, id), eq(schema.deals.version, deal.version)));
-  await writeActivity(db, {
-    entityType: 'deal', entityId: id, action: 'stage_changed',
-    before: { stageId: deal.stageId }, after: { stageId }, actorId: actor.userId, actorType: actor.actorType,
+  await db.transaction(async (tx) => {
+    const [deal] = await tx.select().from(schema.deals)
+      .where(and(eq(schema.deals.id, id), isNull(schema.deals.deletedAt)))
+      .for('update');
+    if (!deal) throw err.notFound('Deal not found');
+    assertVersion(deal, version, deal);
+    const [stage] = await tx.select().from(schema.dealStages).where(eq(schema.dealStages.id, stageId));
+    if (!stage) throw err.validation('Unknown stage');
+    if (stage.isLost && !lostReason) throw err.domain('A lost reason is required');
+    const [updated] = await tx.update(schema.deals)
+      .set({ stageId, lostReason: stage.isLost ? lostReason ?? null : null })
+      .where(and(eq(schema.deals.id, id), eq(schema.deals.version, deal.version)))
+      .returning({ id: schema.deals.id });
+    if (!updated) throw err.conflict('The record was modified by someone else', deal);
+    if (stage.isWon || stage.isLost) {
+      await tx.update(schema.salesActivities).set({ status: 'cancelled' }).where(and(
+        eq(schema.salesActivities.dealId, id),
+        eq(schema.salesActivities.status, 'planned'),
+        isNull(schema.salesActivities.deletedAt),
+      ));
+      await stopActiveDealSequence(tx, id);
+    }
+    await writeActivity(tx, {
+      entityType: 'deal', entityId: id, action: 'stage_changed',
+      before: { stageId: deal.stageId }, after: { stageId }, actorId: actor.userId, actorType: actor.actorType,
+    });
+    await publishEvent(tx, {
+      type: 'deal.stage_changed',
+      aggregateType: 'deal',
+      aggregateId: id,
+      payload: { stageId, companyId: deal.companyId },
+      actorId: actor.userId,
+      actorType: actor.actorType,
+    });
+    if (stage.isWon) {
+      await publishEvent(tx, {
+        type: 'deal.won',
+        aggregateType: 'deal',
+        aggregateId: id,
+        payload: {
+          companyId: deal.companyId,
+          title: deal.title,
+          amount: deal.amount,
+          currency: deal.currency,
+          ownerId: deal.ownerId,
+        },
+        actorId: actor.userId,
+        actorType: actor.actorType,
+      });
+    }
+    if (stage.isLost) {
+      await publishEvent(tx, {
+        type: 'deal.lost',
+        aggregateType: 'deal',
+        aggregateId: id,
+        payload: { companyId: deal.companyId, lostReason },
+        actorId: actor.userId,
+        actorType: actor.actorType,
+      });
+    }
   });
-  await emit({ type: 'deal.stage_changed', aggregateType: 'deal', aggregateId: id, payload: { stageId, companyId: deal.companyId }, actorId: actor.userId, actorType: actor.actorType });
-  if (stage.isWon) {
-    await emit({ type: 'deal.won', aggregateType: 'deal', aggregateId: id, payload: { companyId: deal.companyId, title: deal.title, amount: deal.amount, currency: deal.currency, ownerId: deal.ownerId }, actorId: actor.userId, actorType: actor.actorType });
-  }
-  if (stage.isLost) {
-    await emit({ type: 'deal.lost', aggregateType: 'deal', aggregateId: id, payload: { companyId: deal.companyId, lostReason }, actorId: actor.userId, actorType: actor.actorType });
-  }
   return getDeal(id);
 }
 
@@ -437,6 +487,7 @@ export async function updateLead(actor: Actor, id: string, input: any) {
         eq(schema.salesActivities.status, 'planned'),
         isNull(schema.salesActivities.deletedAt),
       ));
+      await stopActiveLeadSequence(tx, id);
     }
     await writeActivity(tx, {
       entityType: 'lead',
@@ -737,6 +788,7 @@ async function activityParent(dbOrTx: DbReader, input: any) {
         contactId,
         ownerId: input.ownerId ?? lead.ownerId,
       },
+      title: lead.title,
       nurture: lead.status === 'nurture'
         ? { status: lead.status, nurtureUntil: lead.nurtureUntil }
         : null,
@@ -747,6 +799,13 @@ async function activityParent(dbOrTx: DbReader, input: any) {
     isNull(schema.deals.deletedAt),
   )).for('update');
   if (!deal) throw err.notFound('Deal not found');
+  const [stage] = await dbOrTx.select({
+    isWon: schema.dealStages.isWon,
+    isLost: schema.dealStages.isLost,
+  }).from(schema.dealStages).where(eq(schema.dealStages.id, deal.stageId));
+  if (stage?.isWon || stage?.isLost) {
+    throw err.domain('Closed deals cannot schedule sales activities');
+  }
   await assertContactCompany(deal.companyId, input.contactId, dbOrTx);
   return {
     parent: {
@@ -756,6 +815,7 @@ async function activityParent(dbOrTx: DbReader, input: any) {
       contactId: input.contactId ?? null,
       ownerId: input.ownerId ?? deal.ownerId,
     },
+    title: deal.title,
     nurture: null,
   };
 }
@@ -763,7 +823,8 @@ async function activityParent(dbOrTx: DbReader, input: any) {
 export async function createSalesActivity(actor: Actor, input: any) {
   const { db } = getDb();
   return db.transaction(async (tx) => {
-    const { parent, nurture } = await activityParent(tx, input);
+    const { parent, nurture, title } = await activityParent(tx, input);
+    assertSalesWrite(actor, parent.dealId);
     const id = ulid();
     if (nurture && parent.leadId) {
       await tx.update(schema.leads).set({
@@ -780,14 +841,13 @@ export async function createSalesActivity(actor: Actor, input: any) {
         actorType: actor.actorType,
       });
     }
+    const copy = await resolveActivityTemplate(tx, { ...parent, title }, input);
     await tx.insert(schema.salesActivities).values({
       id,
       ...parent,
       type: input.type,
       status: 'planned',
-      channel: input.channel ?? null,
-      subject: input.subject ?? null,
-      context: input.context ?? null,
+      ...copy,
       dueAt: new Date(input.dueAt),
       createdBy: actor.userId,
     });
@@ -807,6 +867,7 @@ export async function updateSalesActivity(actor: Actor, id: string, input: any) 
   const { db } = getDb();
   return db.transaction(async (tx) => {
     const before = await salesActivityRecord(tx, id, true);
+    assertSalesWrite(actor, before.dealId);
     assertVersion(before, input.version, before);
     if (before.status !== 'planned') throw err.domain('Only planned activities can be edited');
     const patch: Record<string, unknown> = {};
@@ -844,7 +905,17 @@ export async function completeSalesActivity(actor: Actor, id: string, input: any
       isNull(schema.salesActivities.deletedAt),
     )).for('update');
     if (!before) throw err.notFound('Sales activity not found');
-    if (before.status === 'completed') return { activityId: id, nextActivityId: null };
+    assertSalesWrite(actor, before.dealId);
+    if (before.status === 'completed') {
+      const [next] = before.sequenceEnrollmentId
+        ? await tx.select({ id: schema.salesActivities.id }).from(schema.salesActivities).where(and(
+          eq(schema.salesActivities.sequenceEnrollmentId, before.sequenceEnrollmentId),
+          eq(schema.salesActivities.status, 'planned'),
+          isNull(schema.salesActivities.deletedAt),
+        )).orderBy(asc(schema.salesActivities.dueAt)).limit(1)
+        : [];
+      return { activityId: id, nextActivityId: next?.id ?? null };
+    }
     if (before.status !== 'planned') throw err.domain('Only planned activities can be completed');
     if (!before.leadId && input.leadStatus) throw err.validation('A deal activity cannot change lead status');
     assertVersion(before, input.version, before);
@@ -868,7 +939,10 @@ export async function completeSalesActivity(actor: Actor, id: string, input: any
       }
     }
     let nextActivityId: string | null = null;
-    if (input.nextActivity) {
+    const sequenceNextActivityId = await advanceSequenceActivity(tx, actor, before, input);
+    if (sequenceNextActivityId !== undefined) {
+      nextActivityId = sequenceNextActivityId;
+    } else if (input.nextActivity) {
       nextActivityId = ulid();
       await tx.insert(schema.salesActivities).values({
         id: nextActivityId,
@@ -903,6 +977,7 @@ export async function cancelSalesActivity(actor: Actor, id: string, version?: nu
   const { db } = getDb();
   return db.transaction(async (tx) => {
     const before = await salesActivityRecord(tx, id, true);
+    assertSalesWrite(actor, before.dealId);
     if (before.status === 'cancelled') return;
     if (before.status !== 'planned') throw err.domain('Only planned activities can be cancelled');
     assertVersion(before, version, before);
@@ -910,6 +985,7 @@ export async function cancelSalesActivity(actor: Actor, id: string, version?: nu
       .where(and(eq(schema.salesActivities.id, id), eq(schema.salesActivities.version, before.version)))
       .returning({ id: schema.salesActivities.id });
     if (!cancelled) throw err.conflict('The record was modified by someone else', before);
+    await stopSequenceForActivity(tx, before);
     await writeActivity(tx, {
       entityType: before.leadId ? 'lead' : 'deal',
       entityId: before.leadId ?? before.dealId!,
@@ -979,6 +1055,8 @@ export async function convertLead(actor: Actor, id: string, input: any) {
       eq(schema.attachments.entityId, lead.id),
     ));
     await tx.update(schema.salesActivities).set({ leadId: null, dealId }).where(eq(schema.salesActivities.leadId, lead.id));
+    await tx.update(schema.salesSequenceEnrollments).set({ leadId: null, dealId })
+      .where(eq(schema.salesSequenceEnrollments.leadId, lead.id));
     await writeActivity(tx, {
       entityType: 'lead',
       entityId: lead.id,
@@ -1041,6 +1119,8 @@ export async function demoteDealToLead(actor: Actor, id: string, input: any) {
       eq(schema.attachments.entityId, deal.id),
     ));
     await tx.update(schema.salesActivities).set({ dealId: null, leadId }).where(eq(schema.salesActivities.dealId, deal.id));
+    await tx.update(schema.salesSequenceEnrollments).set({ dealId: null, leadId })
+      .where(eq(schema.salesSequenceEnrollments.dealId, deal.id));
     const [planned] = await tx.select({ id: schema.salesActivities.id }).from(schema.salesActivities).where(and(
       eq(schema.salesActivities.leadId, leadId),
       eq(schema.salesActivities.status, 'planned'),

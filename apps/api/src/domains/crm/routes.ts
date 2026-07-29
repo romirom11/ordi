@@ -6,9 +6,11 @@ import {
   dealStageInputSchema, dealInputSchema, dealUpdateSchema, dealMoveSchema, noteInputSchema,
   leadInputSchema, leadUpdateSchema, researchImportSchema, salesActivityInputSchema,
   salesActivityUpdateSchema, salesActivityCancelSchema, salesActivityCompleteSchema, leadConvertSchema, dealDemoteSchema,
+  salesMessageTemplateInputSchema, salesMessageTemplateUpdateSchema,
+  salesSequenceInputSchema, salesSequenceUpdateSchema, salesSequenceEnrollSchema, salesSequenceStopSchema,
   type CustomFieldFilter,
 } from '@ordi/shared';
-import type { Actor, AppEnv } from '../../context';
+import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { guard, guardAll } from '../../core/rbac';
 import { err } from '../../lib/errors';
@@ -17,6 +19,8 @@ import { assertVersion } from '../../core/locking';
 import { mergeCustomFields } from '../../core/customfields';
 import { page } from '../../lib/http';
 import * as svc from './service';
+import * as playbooks from './playbooks';
+import { assertSalesWrite } from './sales-access';
 
 /** A deal may only link to a live project – the FK allows any id, deleted ones included. */
 async function assertProjectExists(projectId: string): Promise<void> {
@@ -35,13 +39,6 @@ function parseCfFilters(c: any): CustomFieldFilter[] {
 export function crmRoutes() {
   const app = new Hono<AppEnv>();
   app.use('*', requireAuth);
-
-  const assertSalesActivityWrite = (actor: Actor, dealId?: string | null) => {
-    const permission = dealId ? 'deals.write' : 'crm.write';
-    if (actor.readOnly || !actor.access.permissions.has(permission)) {
-      throw err.forbidden(`Missing permission ${permission}`, permission);
-    }
-  };
 
   // ── Companies ──
   app.get('/companies', guard('crm.read'), async (c) => {
@@ -301,10 +298,80 @@ export function crmRoutes() {
     }) });
   });
 
+  // ── Sales playbooks: reusable copy and manual-action sequences ──
+  app.get('/sales-message-templates', guard('crm.read'), async (c) => {
+    return c.json({
+      data: await playbooks.listSalesMessageTemplates(c.req.query('active') !== 'true'),
+    });
+  });
+
+  app.post('/sales-message-templates', guard('crm.write'), async (c) => {
+    const body = salesMessageTemplateInputSchema.parse(await c.req.json());
+    const id = await playbooks.createSalesMessageTemplate(currentActor(c), body);
+    return c.json({ id }, 201);
+  });
+
+  app.patch('/sales-message-templates/:id', guard('crm.write'), async (c) => {
+    const body = salesMessageTemplateUpdateSchema.parse(await c.req.json());
+    return c.json(await playbooks.updateSalesMessageTemplate(
+      currentActor(c),
+      c.req.param('id'),
+      body,
+    ));
+  });
+
+  app.get('/sales-sequences', guard('crm.read'), async (c) => {
+    return c.json({
+      data: await playbooks.listSalesSequences(c.req.query('active') !== 'true'),
+    });
+  });
+
+  app.post('/sales-sequences', guard('crm.write'), async (c) => {
+    const body = salesSequenceInputSchema.parse(await c.req.json());
+    const id = await playbooks.createSalesSequence(currentActor(c), body);
+    return c.json({ id }, 201);
+  });
+
+  app.patch('/sales-sequences/:id', guard('crm.write'), async (c) => {
+    const body = salesSequenceUpdateSchema.parse(await c.req.json());
+    return c.json(await playbooks.updateSalesSequence(currentActor(c), c.req.param('id'), body));
+  });
+
+  app.post('/sales-sequences/:id/enroll', async (c) => {
+    const actor = currentActor(c);
+    const body = salesSequenceEnrollSchema.parse(await c.req.json());
+    assertSalesWrite(actor, body.dealId);
+    return c.json(await playbooks.enrollSalesSequence(actor, c.req.param('id'), body), 201);
+  });
+
+  app.get('/sales-sequence-enrollments', async (c) => {
+    const actor = currentActor(c);
+    const leadId = c.req.query('leadId');
+    const dealId = c.req.query('dealId');
+    if (!leadId && !dealId) throw err.validation('leadId or dealId required');
+    if (leadId && !actor.access.permissions.has('crm.read')) {
+      throw err.forbidden('Missing permission crm.read', 'crm.read');
+    }
+    if (dealId && !actor.access.permissions.has('deals.read')) {
+      throw err.forbidden('Missing permission deals.read', 'deals.read');
+    }
+    return c.json({ data: await playbooks.listSalesSequenceEnrollments({ leadId, dealId }) });
+  });
+
+  app.post('/sales-sequence-enrollments/:id/stop', async (c) => {
+    const actor = currentActor(c);
+    const body = salesSequenceStopSchema.parse(await c.req.json().catch(() => ({})));
+    return c.json(await playbooks.stopSalesSequenceEnrollment(
+      actor,
+      c.req.param('id'),
+      body.version,
+    ));
+  });
+
   app.post('/sales-activities', async (c) => {
     const actor = currentActor(c);
     const body = salesActivityInputSchema.parse(await c.req.json());
-    assertSalesActivityWrite(actor, body.dealId);
+    assertSalesWrite(actor, body.dealId);
     const id = await svc.createSalesActivity(actor, body);
     return c.json({ id }, 201);
   });
@@ -313,7 +380,7 @@ export function crmRoutes() {
     const actor = currentActor(c);
     const body = salesActivityUpdateSchema.parse(await c.req.json());
     const activity = await svc.getSalesActivity(c.req.param('id'));
-    assertSalesActivityWrite(actor, activity.dealId);
+    assertSalesWrite(actor, activity.dealId);
     return c.json(await svc.updateSalesActivity(actor, activity.id, body));
   });
 
@@ -321,7 +388,7 @@ export function crmRoutes() {
     const actor = currentActor(c);
     const body = salesActivityCompleteSchema.parse(await c.req.json().catch(() => ({})));
     const activity = await svc.getSalesActivity(c.req.param('id'));
-    assertSalesActivityWrite(actor, activity.dealId);
+    assertSalesWrite(actor, activity.dealId);
     return c.json(await svc.completeSalesActivity(actor, activity.id, body));
   });
 
@@ -329,7 +396,7 @@ export function crmRoutes() {
     const actor = currentActor(c);
     const body = salesActivityCancelSchema.parse(await c.req.json().catch(() => ({})));
     const activity = await svc.getSalesActivity(c.req.param('id'));
-    assertSalesActivityWrite(actor, activity.dealId);
+    assertSalesWrite(actor, activity.dealId);
     await svc.cancelSalesActivity(actor, activity.id, body.version);
     return c.json({ ok: true });
   });

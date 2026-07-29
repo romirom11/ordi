@@ -172,7 +172,13 @@ export function DealDetailPage({ id }: { id: string }) {
                 </Link>
               </Card>
             )}
-            <SalesActivityPanel dealId={id} canWrite={canWrite} />
+            <SalesActivityPanel
+              dealId={id}
+              companyId={d?.companyId}
+              contactId={sourceLeadQ.data?.contactId}
+              canWrite={canWrite}
+              canSchedule={canWrite && !!stage && !stage.isWon && !stage.isLost}
+            />
             {can('crm.read') && <NotesSection dealId={id} canWrite={can('crm.write')} />}
             <ActivitySection dealId={id} />
           </div>

@@ -60,6 +60,31 @@ interface WorkBucketResult {
   total: number;
 }
 
+export interface SalesWorkSummary {
+  overdue: number;
+  dueToday: number;
+  waitingReply: number;
+  nurtureDue: number;
+  noNextAction: number;
+  total: number;
+}
+
+export function summarizeSalesWork(
+  work: Record<WorkBucket, Pick<WorkBucketResult, 'total'>>,
+): SalesWorkSummary {
+  const summary = {
+    overdue: work.overdue.total,
+    dueToday: work.dueToday.total,
+    waitingReply: work.waitingReply.total,
+    nurtureDue: work.nurtureDue.total,
+    noNextAction: work.noNextAction.total,
+  };
+  return {
+    ...summary,
+    total: Object.values(summary).reduce((sum, count) => sum + count, 0),
+  };
+}
+
 function boundedLimit(value: number | undefined): number {
   return Number.isFinite(value) ? Math.max(1, Math.min(Math.trunc(value!), 200)) : 50;
 }

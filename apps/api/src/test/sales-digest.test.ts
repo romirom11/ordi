@@ -14,11 +14,21 @@ beforeAll(async () => {
   const { db } = getDb();
   const companyId = ulid();
   const leadId = ulid();
+  const [owner] = await db.select({ roleId: schema.users.roleId }).from(schema.users)
+    .where(eq(schema.users.id, users.owner!.userId));
 
   await db.update(schema.users).set({
     timezone: 'Pacific/Kiritimati',
     emailNotificationPrefs: { 'sales.work_digest': true },
   }).where(eq(schema.users.id, users.owner!.userId));
+  await db.insert(schema.users).values({
+    id: ulid(),
+    email: 'sales-agent@test.local',
+    name: 'Sales agent',
+    roleId: owner!.roleId,
+    timezone: 'Pacific/Kiritimati',
+    actorType: 'agent',
+  });
   await db.insert(schema.companies).values({ id: companyId, name: 'Digest Prospect' });
   await db.insert(schema.leads).values({
     id: leadId,

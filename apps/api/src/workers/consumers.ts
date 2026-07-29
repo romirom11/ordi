@@ -14,7 +14,7 @@ import { postSlackMessage } from '../domains/integrations/oauth';
 import { writeActivity } from '../core/activity';
 import { logger } from '../lib/logger';
 import { env } from '../env';
-import { salesWork } from '../domains/crm/work';
+import { salesWork, summarizeSalesWork } from '../domains/crm/work';
 
 export interface Consumer {
   name: string;
@@ -128,15 +128,8 @@ async function liveSalesDigest(userId: string, localDate: string): Promise<Recor
     timezone: user.timezone,
     access: { permissions: permissionSet },
   }, { scope: 'mine', limit: 1 });
-  const summary = {
-    overdue: work.overdue.total,
-    dueToday: work.dueToday.total,
-    waitingReply: work.waitingReply.total,
-    nurtureDue: work.nurtureDue.total,
-    noNextAction: work.noNextAction.total,
-  };
-  const total = Object.values(summary).reduce((sum, count) => sum + count, 0);
-  return total ? { userId, localDate, total, ...summary } : null;
+  const summary = summarizeSalesWork(work);
+  return summary.total ? { userId, localDate, ...summary } : null;
 }
 
 const notifications: Consumer = {

@@ -67,6 +67,38 @@ describe('durable email delivery', () => {
     expect(delivered).toEqual(['Retry me']);
   });
 
+  it('uses every retry delay before dead-lettering a delivery', async () => {
+    await enqueueEmail({
+      idempotencyKey: 'test:dead-letter',
+      to: 'seller@example.com',
+      subject: 'Eventually dead',
+      body: 'Permanent failure',
+    });
+
+    const base = new Date('2026-07-29T00:00:00.000Z');
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      await processEmailDeliveries({
+        now: new Date(base.getTime() + attempt * 86_400_000),
+        send: async () => { throw new Error('permanent smtp failure'); },
+      });
+    }
+
+    const { db } = getDb();
+    const [retrying] = await db.select().from(schema.emailDeliveries)
+      .where(eq(schema.emailDeliveries.idempotencyKey, 'test:dead-letter'));
+    expect(retrying).toMatchObject({ status: 'pending', attempts: 5 });
+
+    const final = await processEmailDeliveries({
+      now: new Date(base.getTime() + 6 * 86_400_000),
+      send: async () => { throw new Error('permanent smtp failure'); },
+    });
+    expect(final).toMatchObject({ claimed: 1, failed: 1, dead: 1 });
+
+    const [dead] = await db.select().from(schema.emailDeliveries)
+      .where(eq(schema.emailDeliveries.idempotencyKey, 'test:dead-letter'));
+    expect(dead).toMatchObject({ status: 'dead', attempts: 6 });
+  });
+
   it('creates one notification and one queued email across an outbox retry', async () => {
     const eventId = await emit({
       type: 'task.assigned',

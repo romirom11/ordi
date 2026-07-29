@@ -1,7 +1,7 @@
 import { getDb, schema, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import { publishEvent } from '../core/events';
-import { salesWork } from '../domains/crm/work';
+import { salesWork, summarizeSalesWork } from '../domains/crm/work';
 import { localDateKey, localHour, safeTimeZone } from '../lib/timezone';
 import { logger } from '../lib/logger';
 
@@ -34,6 +34,7 @@ export async function runSalesWorkDigests(now = new Date()): Promise<SalesDigest
       ) as "canReadDeals"
     from users
     where users.is_active = true
+      and users.actor_type = 'user'
       and exists (
         select 1 from role_permissions
         where role_permissions.role_id = users.role_id
@@ -42,7 +43,7 @@ export async function runSalesWorkDigests(now = new Date()): Promise<SalesDigest
   `) as unknown as DigestUser[];
 
   const eligible = users.filter((user) => {
-    const hour = localHour(now, safeTimeZone(user.timezone));
+    const hour = localHour(now, user.timezone);
     return hour >= 8 && hour < 18;
   });
   let emitted = 0;
@@ -50,22 +51,6 @@ export async function runSalesWorkDigests(now = new Date()): Promise<SalesDigest
   for (const user of eligible) {
     const timeZone = safeTimeZone(user.timezone);
     const localDate = localDateKey(now, timeZone);
-    const work = await salesWork({
-      userId: user.id,
-      timezone: timeZone,
-      access: {
-        permissions: new Set(user.canReadDeals ? ['crm.read', 'deals.read'] : ['crm.read']),
-      },
-    }, { scope: 'mine', limit: 1, now });
-    const summary = {
-      overdue: work.overdue.total,
-      dueToday: work.dueToday.total,
-      waitingReply: work.waitingReply.total,
-      nurtureDue: work.nurtureDue.total,
-      noNextAction: work.noNextAction.total,
-    };
-    const total = Object.values(summary).reduce((sum, count) => sum + count, 0);
-
     const didEmit = await db.transaction(async (tx) => {
       const inserted = await tx.insert(schema.salesDigestRuns).values({
         id: ulid(),
@@ -74,13 +59,23 @@ export async function runSalesWorkDigests(now = new Date()): Promise<SalesDigest
       }).onConflictDoNothing({
         target: [schema.salesDigestRuns.userId, schema.salesDigestRuns.localDate],
       }).returning({ id: schema.salesDigestRuns.id });
-      if (!inserted.length || total === 0) return false;
+      if (!inserted.length) return false;
+
+      const work = await salesWork({
+        userId: user.id,
+        timezone: timeZone,
+        access: {
+          permissions: new Set(user.canReadDeals ? ['crm.read', 'deals.read'] : ['crm.read']),
+        },
+      }, { scope: 'mine', limit: 1, now });
+      const summary = summarizeSalesWork(work);
+      if (summary.total === 0) return false;
 
       await publishEvent(tx, {
         type: 'sales.work_digest_due',
         aggregateType: 'user',
         aggregateId: user.id,
-        payload: { userId: user.id, localDate, total, ...summary },
+        payload: { userId: user.id, localDate, ...summary },
       });
       return true;
     });

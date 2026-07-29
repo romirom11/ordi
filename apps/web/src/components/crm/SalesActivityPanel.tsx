@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, Check, MoreHorizontal, Pencil, Plus, X } from 'lucide-react';
+import { CalendarClock, Check, MoreHorizontal, Pencil, Play, Plus, Workflow, X } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { useT } from '../../lib/i18n';
 import { Button, EmptySection, Input, Select, Spinner, Textarea, fmtDate, fmtRelative } from '../ui';
@@ -10,8 +10,13 @@ import {
   SALES_ACTIVITY_TYPES,
   salesActivityStatusLabel,
   salesActivityTypeLabel,
+  useContacts,
+  useSalesMessageTemplates,
+  useSalesSequenceEnrollments,
+  useSalesSequences,
   useSalesActivities,
   type SalesActivity,
+  type SalesSequenceEnrollment,
 } from './shared';
 import { SectionHeader } from './detail';
 
@@ -29,10 +34,13 @@ function errorText(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
 }
 
-export function SalesActivityPanel({ leadId, dealId, canWrite }: {
+export function SalesActivityPanel({ leadId, dealId, companyId, contactId, canWrite, canSchedule = canWrite }: {
   leadId?: string;
   dealId?: string;
+  companyId?: string | null;
+  contactId?: string | null;
   canWrite: boolean;
+  canSchedule?: boolean;
 }) {
   const t = useT();
   const activitiesQ = useSalesActivities({ leadId, dealId });
@@ -65,17 +73,25 @@ export function SalesActivityPanel({ leadId, dealId, canWrite }: {
         icon={<CalendarClock size={15} />}
         title={t('crm.salesHistory')}
         count={activities.length}
-        action={canWrite ? (
+        action={canSchedule ? (
           <Button size="xs" variant="ghost" onClick={() => setSchedule(true)}>
             <Plus size={13} /> {t('crm.scheduleAction')}
           </Button>
         ) : undefined}
       />
+      {canSchedule && (
+        <SequenceControls
+          leadId={leadId}
+          dealId={dealId}
+          companyId={companyId}
+          contactId={contactId}
+        />
+      )}
       {activities.length === 0 ? (
         <EmptySection
           icon={<CalendarClock size={14} />}
           title={t('crm.noSalesActivity')}
-          action={canWrite ? <Button size="xs" variant="ghost" onClick={() => setSchedule(true)}>{t('common.add')}</Button> : undefined}
+          action={canSchedule ? <Button size="xs" variant="ghost" onClick={() => setSchedule(true)}>{t('common.add')}</Button> : undefined}
         />
       ) : (
         <div className="divide-y divide-border rounded-lg border border-border">
@@ -143,6 +159,158 @@ export function SalesActivityPanel({ leadId, dealId, canWrite }: {
   );
 }
 
+function SequenceControls({ leadId, dealId, companyId, contactId }: {
+  leadId?: string;
+  dealId?: string;
+  companyId?: string | null;
+  contactId?: string | null;
+}) {
+  const t = useT();
+  const qc = useQueryClient();
+  const sequencesQ = useSalesSequences(true);
+  const enrollmentsQ = useSalesSequenceEnrollments({ leadId, dealId });
+  const contactsQ = useContacts(companyId);
+  const active = enrollmentsQ.data?.find((row) => row.status === 'active');
+  const [open, setOpen] = useState(false);
+  const [stop, setStop] = useState<SalesSequenceEnrollment | null>(null);
+  const [sequenceId, setSequenceId] = useState('');
+  const [selectedContactId, setSelectedContactId] = useState(contactId ?? '');
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelectedContactId(contactId ?? '');
+  }, [contactId]);
+  useEffect(() => {
+    if (!sequenceId && sequencesQ.data?.[0]) setSequenceId(sequencesQ.data[0].id);
+  }, [sequenceId, sequencesQ.data]);
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['sales-sequence-enrollments'] });
+    qc.invalidateQueries({ queryKey: ['sales-sequences'] });
+    qc.invalidateQueries({ queryKey: ['sales-activities'] });
+    qc.invalidateQueries({ queryKey: ['sales-work'] });
+    qc.invalidateQueries({ queryKey: ['leads'] });
+  };
+  const start = useMutation({
+    mutationFn: () => api.post(`/sales-sequences/${sequenceId}/enroll`, {
+      leadId,
+      dealId,
+      contactId: selectedContactId || undefined,
+    }),
+    onSuccess: () => {
+      refresh();
+      setOpen(false);
+      setError(null);
+      toast(t('crm.sequenceStarted'));
+    },
+    onError: (cause) => setError(errorText(cause, t('common.error'))),
+  });
+  const stopMutation = useMutation({
+    mutationFn: (enrollment: SalesSequenceEnrollment) =>
+      api.post(`/sales-sequence-enrollments/${enrollment.id}/stop`, {
+        version: enrollment.version,
+      }),
+    onSuccess: () => {
+      refresh();
+      setStop(null);
+      toast(t('crm.sequenceStopped'));
+    },
+    onError: (cause) => toast.error(errorText(cause, t('common.error'))),
+  });
+
+  return (
+    <>
+      {active ? (
+        <div className="mb-3 flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/[0.04] px-3 py-2">
+          <Workflow size={14} className="shrink-0 text-primary" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[13px] font-medium">{active.sequenceName}</p>
+            <p className="text-[11px] text-muted-foreground">
+              {t('crm.sequenceStep').replace('{current}', String(active.currentStepPosition))}
+            </p>
+          </div>
+          <Button size="xs" variant="ghost" onClick={() => setStop(active)}>
+            <X size={12} /> {t('crm.stopSequence')}
+          </Button>
+        </div>
+      ) : (
+        <div className="mb-3">
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={() => setOpen(true)}
+            disabled={!sequencesQ.data?.length}
+          >
+            <Play size={12} /> {t('crm.startSequence')}
+          </Button>
+        </div>
+      )}
+
+      <Dialog
+        open={open}
+        onClose={() => { setOpen(false); setError(null); }}
+        title={t('crm.startSequence')}
+        width={420}
+      >
+        <form
+          className="space-y-3 px-4 pb-4 pt-1"
+          onSubmit={(event) => { event.preventDefault(); start.mutate(); }}
+        >
+          <Field label={t('crm.sequence')}>
+            <Select
+              required
+              className="w-full"
+              value={sequenceId}
+              onChange={(event) => setSequenceId(event.target.value)}
+            >
+              {(sequencesQ.data ?? []).map((sequence) => (
+                <option key={sequence.id} value={sequence.id}>
+                  {sequence.name} · {t('crm.stepsCount').replace('{count}', String(sequence.steps.length))}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          {!!contactsQ.data?.length && (
+            <Field label={t('crm.contact')}>
+              <Select
+                className="w-full"
+                value={selectedContactId}
+                onChange={(event) => setSelectedContactId(event.target.value)}
+              >
+                <option value="">{t('crm.noContact')}</option>
+                {contactsQ.data.map((contact) => (
+                  <option key={contact.id} value={contact.id}>
+                    {[contact.firstName, contact.lastName].filter(Boolean).join(' ')}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
+          {error && <p className="text-[13px] text-destructive">{error}</p>}
+          <div className="flex justify-end gap-2">
+            <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button type="submit" size="sm" disabled={start.isPending || !sequenceId}>
+              {start.isPending ? <Spinner /> : t('crm.startSequence')}
+            </Button>
+          </div>
+        </form>
+      </Dialog>
+      <ConfirmDialog
+        open={!!stop}
+        onClose={() => setStop(null)}
+        onConfirm={() => { if (stop) stopMutation.mutate(stop); }}
+        title={t('crm.stopSequence')}
+        body={t('crm.stopSequenceBody')}
+        confirmLabel={t('crm.stopSequence')}
+        cancelLabel={t('common.cancel')}
+        pending={stopMutation.isPending}
+      />
+    </>
+  );
+}
+
 export function ScheduleActivityDialog({ open, onClose, leadId, dealId }: {
   open: boolean;
   onClose: () => void;
@@ -151,6 +319,8 @@ export function ScheduleActivityDialog({ open, onClose, leadId, dealId }: {
 }) {
   const t = useT();
   const qc = useQueryClient();
+  const templatesQ = useSalesMessageTemplates(true);
+  const [templateId, setTemplateId] = useState('');
   const [type, setType] = useState('follow_up');
   const [dueAt, setDueAt] = useState(() => toLocalInput(new Date(Date.now() + 86_400_000)));
   const [channel, setChannel] = useState('');
@@ -159,6 +329,7 @@ export function ScheduleActivityDialog({ open, onClose, leadId, dealId }: {
   const [error, setError] = useState<string | null>(null);
 
   const reset = () => {
+    setTemplateId('');
     setType('follow_up');
     setDueAt(toLocalInput(new Date(Date.now() + 86_400_000)));
     setChannel('');
@@ -171,6 +342,7 @@ export function ScheduleActivityDialog({ open, onClose, leadId, dealId }: {
       leadId,
       dealId,
       type,
+      templateId: templateId || undefined,
       dueAt: new Date(dueAt).toISOString(),
       channel: channel.trim() || undefined,
       subject: subject.trim() || undefined,
@@ -196,6 +368,29 @@ export function ScheduleActivityDialog({ open, onClose, leadId, dealId }: {
   return (
     <Dialog open={open} onClose={() => { reset(); onClose(); }} title={t('crm.scheduleAction')} width={440}>
       <form onSubmit={submit} className="space-y-3 px-4 pb-4 pt-1">
+        {!!templatesQ.data?.length && (
+          <Field label={t('crm.messageTemplate')}>
+            <Select
+              className="w-full"
+              value={templateId}
+              onChange={(event) => {
+                const id = event.target.value;
+                setTemplateId(id);
+                const template = templatesQ.data?.find((row) => row.id === id);
+                if (!template) return;
+                setType(template.activityType);
+                setChannel(template.channel ?? '');
+                setSubject(template.subject ?? '');
+                setContext(template.body);
+              }}
+            >
+              <option value="">{t('crm.noTemplate')}</option>
+              {templatesQ.data.map((template) => (
+                <option key={template.id} value={template.id}>{template.name}</option>
+              ))}
+            </Select>
+          </Field>
+        )}
         <Field label={t('crm.activityType')}>
           <Select className="w-full" value={type} onChange={(event) => setType(event.target.value)}>
             {SALES_ACTIVITY_TYPES.map((value) => <option key={value} value={value}>{salesActivityTypeLabel(t, value)}</option>)}
@@ -238,6 +433,7 @@ export function CompleteActivityDialog({ activity, onClose }: {
   const [nurtureUntil, setNurtureUntil] = useState(() => toDateInput(new Date(Date.now() + 30 * 86_400_000)));
   const [error, setError] = useState<string | null>(null);
   const isLead = !!activity?.leadId;
+  const inSequence = !!activity?.sequenceEnrollmentId;
   const followUpDisabled = isLead && (
     leadStatus === 'nurture' || leadStatus === 'disqualified' || leadStatus === 'no_response'
   );
@@ -255,12 +451,12 @@ export function CompleteActivityDialog({ activity, onClose }: {
     version: activity?.version,
     leadStatus: isLead ? leadStatus : undefined,
     nurtureUntil: isLead && leadStatus === 'nurture' ? nurtureUntil : undefined,
-    nextActivity: followUp && dueAt ? {
+    nextActivity: !inSequence && followUp && dueAt ? {
       type: leadStatus === 'nurture' ? 'nurture' : 'follow_up',
       channel: activity?.channel ?? undefined,
       dueAt: new Date(dueAt).toISOString(),
     } : undefined,
-  }), [activity, dueAt, followUp, isLead, leadStatus, nurtureUntil, outcome]);
+  }), [activity, dueAt, followUp, inSequence, isLead, leadStatus, nurtureUntil, outcome]);
 
   const mutation = useMutation({
     mutationFn: () => api.post(`/sales-activities/${activity!.id}/complete`, body),
@@ -303,16 +499,24 @@ export function CompleteActivityDialog({ activity, onClose }: {
             <Input required type="date" value={nurtureUntil} onChange={(event) => setNurtureUntil(event.target.value)} />
           </Field>
         )}
-        <label className="flex items-center gap-2 text-[13px]">
-          <input
-            type="checkbox"
-            checked={followUp}
-            disabled={followUpDisabled}
-            onChange={(event) => setFollowUp(event.target.checked)}
-          />
-          {t('crm.followUp')}
-        </label>
-        {followUp && <Input required type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />}
+        {inSequence ? (
+          <p className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-[13px] text-muted-foreground">
+            {t('crm.sequencePlansNext')}
+          </p>
+        ) : (
+          <>
+            <label className="flex items-center gap-2 text-[13px]">
+              <input
+                type="checkbox"
+                checked={followUp}
+                disabled={followUpDisabled}
+                onChange={(event) => setFollowUp(event.target.checked)}
+              />
+              {t('crm.followUp')}
+            </label>
+            {followUp && <Input required type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />}
+          </>
+        )}
         {error && <p className="text-[13px] text-destructive">{error}</p>}
         <div className="flex justify-end gap-2">
           <Button type="button" size="sm" variant="ghost" onClick={close}>{t('common.cancel')}</Button>
