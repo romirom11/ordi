@@ -23,6 +23,7 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "check:query-shapes": "node scripts/check-query-shapes.mjs",
+    "site:build": "node scripts/build-site.mjs",
     "test": "turbo run test",
     "db:generate": "pnpm --filter @ordi/db generate",
     "db:migrate": "pnpm --filter @ordi/db migrate",

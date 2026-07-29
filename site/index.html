@@ -1,0 +1,861 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ordi – the operations system for small agencies and product teams</title>
+    <meta
+      name="description"
+      content="Projects, CRM, knowledge base, time, finance and people in one self-hosted app. A deal becomes a project, its hours become an invoice, the invoice posts to a real ledger. AGPL-3.0, one Postgres database."
+    />
+    <link rel="canonical" href="https://romirom11.github.io/ordi/" />
+    <meta name="theme-color" content="#0e0f11" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="ordi" />
+    <meta property="og:title" content="ordi – the operations system for small agencies and product teams" />
+    <meta
+      property="og:description"
+      content="Projects, CRM, knowledge base, time, finance and people – one app, one database, one API. Self-hosted and AGPL-licensed."
+    />
+    <meta property="og:url" content="https://romirom11.github.io/ordi/" />
+    <meta property="og:image" content="https://romirom11.github.io/ordi/images/project-overview.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="ordi – the operations system for small agencies and product teams" />
+    <meta
+      name="twitter:description"
+      content="Projects, CRM, knowledge base, time, finance and people – one app, one database, one API. Self-hosted and AGPL-licensed."
+    />
+    <meta name="twitter:image" content="https://romirom11.github.io/ordi/images/project-overview.png" />
+
+    <!-- Same mark as apps/web/index.html and the desktop app icon. -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23283b6b'/%3E%3Ccircle cx='16' cy='16' r='7.5' fill='none' stroke='white' stroke-width='4.2'/%3E%3C/svg%3E"
+    />
+    <link rel="apple-touch-icon" href="images/logo.png" />
+    <link rel="stylesheet" href="styles.css" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "ordi",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Docker, Linux, macOS, Windows",
+        "description": "Self-hosted operations system for small agencies and product teams: projects, CRM, knowledge base, time tracking, finance and HR on one Postgres database.",
+        "url": "https://romirom11.github.io/ordi/",
+        "license": "https://www.gnu.org/licenses/agpl-3.0.html",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="header" id="header">
+      <div class="container header__inner">
+        <a class="brand" href="#top" aria-label="ordi – home">
+          <svg viewBox="0 0 32 32" aria-hidden="true">
+            <rect width="32" height="32" rx="7" fill="#283b6b" />
+            <circle cx="16" cy="16" r="7.5" fill="none" stroke="#fff" stroke-width="4.2" />
+          </svg>
+          ordi
+        </a>
+
+        <button
+          class="nav-toggle"
+          type="button"
+          aria-expanded="false"
+          aria-controls="nav"
+          aria-label="Toggle navigation"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z" />
+          </svg>
+        </button>
+
+        <nav class="nav" id="nav">
+          <a href="#features">Features</a>
+          <a href="#compare">Why ordi</a>
+          <a href="#start">Quick start</a>
+          <a href="#stack">How it is built</a>
+          <a href="https://github.com/romirom11/ordi/releases/latest">Download</a>
+          <a class="btn btn--ghost nav__cta" href="https://github.com/romirom11/ordi">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.8 0-1.3.5-2.3 1.2-3.2-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0C17.6 4.7 18.6 5 18.6 5c.6 1.6.2 2.8.1 3.1.8.9 1.2 1.9 1.2 3.2 0 4.5-2.7 5.5-5.3 5.8.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5Z"
+              />
+            </svg>
+            GitHub
+          </a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <!-- ── Hero ─────────────────────────────────────────── -->
+      <section class="hero" id="top">
+        <div class="container">
+          <p class="eyebrow"><b>AGPL-3.0</b> Self-hosted. One Postgres. No per-seat pricing.</p>
+          <h1>The operations system for <em>small agencies</em> and product teams</h1>
+          <p class="hero__sub">
+            Projects, CRM, knowledge base, time, finance and people – one app, one database, one
+            API. A deal becomes a project, the project's tracked hours become an invoice, and the
+            invoice posts to a real double-entry ledger.
+          </p>
+
+          <div class="hero__actions">
+            <a class="btn btn--primary" href="#start">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+              Start in one command
+            </a>
+            <a class="btn btn--ghost" href="https://github.com/romirom11/ordi">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.8 0-1.3.5-2.3 1.2-3.2-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0C17.6 4.7 18.6 5 18.6 5c.6 1.6.2 2.8.1 3.1.8.9 1.2 1.9 1.2 3.2 0 4.5-2.7 5.5-5.3 5.8.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5Z"
+                />
+              </svg>
+              Star on GitHub
+            </a>
+            <a class="btn btn--ghost" href="https://github.com/romirom11/ordi/releases/latest">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 16 6 10h4V4h4v6h4l-6 6Zm-7 2h14v2H5v-2Z" />
+              </svg>
+              Desktop app
+            </a>
+          </div>
+
+          <p class="hero__meta">
+            <span>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4Z" /></svg>
+              Docker up in a minute
+            </span>
+            <span>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4Z" /></svg>
+              Your data, your server
+            </span>
+            <span>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4Z" /></svg>
+              macOS, Windows, Linux desktop app
+            </span>
+            <span>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4Z" /></svg>
+              English &amp; Ukrainian
+            </span>
+          </p>
+        </div>
+
+        <div class="container hero__shot">
+          <div class="shot">
+            <div class="shot__bar" aria-hidden="true">
+              <i></i><i></i><i></i>
+              <span>ordi / project overview</span>
+            </div>
+            <img
+              src="images/project-overview.png"
+              alt="ordi project overview: milestones, cycle progress, budget and team on one screen"
+              width="2880"
+              height="1760"
+              fetchpriority="high"
+              decoding="async"
+            />
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Problem ──────────────────────────────────────── -->
+      <section class="section section--tint">
+        <div class="container">
+          <div class="section__head section__head--center">
+            <span class="section__label">The problem</span>
+            <h2>Five subscriptions that never talk to each other</h2>
+            <p class="section__lead">
+              A ten-person agency ends up running on Linear for tasks, a CRM for the pipeline,
+              Notion for documents, a timer app, and something for invoices. The hours logged
+              against a task never reach the invoice. The deal that became a project is retyped by
+              hand. Nobody can answer "did we make money on this client?" without a spreadsheet.
+            </p>
+          </div>
+
+          <div class="problem reveal">
+            <div>
+              <p class="problem__title problem__title--muted">Today</p>
+              <div class="problem__stack">
+                <div class="problem__row problem__row--broken"><b>Task tracker</b> <span>separate bill</span></div>
+                <div class="problem__row problem__row--broken"><b>CRM</b> <span>separate bill</span></div>
+                <div class="problem__row problem__row--broken"><b>Docs</b> <span>separate bill</span></div>
+                <div class="problem__row problem__row--broken"><b>Timer</b> <span>separate bill</span></div>
+                <div class="problem__row problem__row--broken"><b>Invoicing</b> <span>separate bill</span></div>
+              </div>
+              <p class="problem__cap">Five bills, five exports, nothing that knows about the rest.</p>
+            </div>
+
+            <div>
+            <p class="problem__title">With ordi</p>
+            <div class="flow">
+              <div class="flow__step">
+                <i>1</i>
+                <div>Deal won<small>CRM pipeline, weighted forecast</small></div>
+              </div>
+              <div class="flow__link" aria-hidden="true"></div>
+              <div class="flow__step">
+                <i>2</i>
+                <div>Becomes a project<small>Client, budget and name carried over</small></div>
+              </div>
+              <div class="flow__link" aria-hidden="true"></div>
+              <div class="flow__step">
+                <i>3</i>
+                <div>Hours land on tasks<small>Billable rates and cost rates</small></div>
+              </div>
+              <div class="flow__link" aria-hidden="true"></div>
+              <div class="flow__step">
+                <i>4</i>
+                <div>Invoice from time<small>Tax, discounts, branded PDF, payment page</small></div>
+              </div>
+              <div class="flow__link" aria-hidden="true"></div>
+              <div class="flow__step">
+                <i>5</i>
+                <div>Ledger posts itself<small>Margin per project is a query, not an afternoon</small></div>
+              </div>
+            </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Features ─────────────────────────────────────── -->
+      <section class="section" id="features">
+        <div class="container">
+          <div class="section__head">
+            <span class="section__label">Features</span>
+            <h2>One system, end to end</h2>
+            <p class="section__lead">
+              Everything below runs on the same database, with the same permissions and the same
+              API. Modules you do not need can be switched off – run ordi as just a task tracker,
+              or just a CRM.
+            </p>
+          </div>
+
+          <div class="feature reveal">
+            <div class="feature__text">
+              <h3>Projects and tasks</h3>
+              <p>
+                Deliberately modelled on Linear: keyboard-first, fast, opinionated. The difference
+                is that the work connects to money – a task carries hours, the hours carry rates,
+                and the project tells you its margin.
+              </p>
+              <ul class="feature__list">
+                <li>Board, list, calendar, timeline and spreadsheet views</li>
+                <li>Cycles with burn-up, milestones, project updates with health</li>
+                <li>Sub-tasks, dependencies, labels, custom fields</li>
+                <li>Saved views, filters and display options</li>
+              </ul>
+            </div>
+            <div class="shot">
+              <img
+                src="images/project-tasks.png"
+                alt="Task board grouped by status with labels, assignees and estimates"
+                width="2880"
+                height="1760"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+          </div>
+
+          <div class="feature feature--flip reveal">
+            <div class="feature__text">
+              <h3>CRM</h3>
+              <p>
+                Companies, contacts and a drag-and-drop deal pipeline with a weighted forecast. A
+                won deal turns into a project without retyping anything.
+              </p>
+              <ul class="feature__list">
+                <li>Leads before qualification, deals after</li>
+                <li>Sales activities, playbooks, sequences and a work queue</li>
+                <li>Client portal links and public intake forms</li>
+                <li>Email intake over IMAP</li>
+              </ul>
+            </div>
+            <div class="shot">
+              <img
+                src="images/crm-pipeline.png"
+                alt="CRM pipeline with deal columns, values and weighted forecast"
+                width="2880"
+                height="1760"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+          </div>
+
+          <div class="feature reveal">
+            <div class="feature__text">
+              <h3>Finance</h3>
+              <p>
+                Quotes and invoices with tax, discounts, branded localized PDFs and public payment
+                pages. Underneath sits a <b>double-entry ledger</b> – every invoice, payment and
+                expense posts balanced entries, so the books actually balance.
+              </p>
+              <ul class="feature__list">
+                <li>Payments, credit notes, recurring invoices, expenses</li>
+                <li>Receivables aging and overdue reminders</li>
+                <li>Invoice straight from unbilled time</li>
+                <li>Project profitability out of the box</li>
+              </ul>
+            </div>
+            <div class="shot">
+              <img
+                src="images/finance.png"
+                alt="Finance screen with invoices, payment status and ledger totals"
+                width="2880"
+                height="1760"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+          </div>
+
+          <div class="feature feature--flip reveal">
+            <div class="feature__text">
+              <h3>Knowledge base</h3>
+              <p>
+                A Notion-style editor with spaces and per-space permissions – the documentation
+                lives next to the work it describes, not in a fifth subscription.
+              </p>
+              <ul class="feature__list">
+                <li>Nested pages, versions, backlinks</li>
+                <li>Publishing and Markdown export</li>
+                <li>
+                  <code>@</code> to mention people, <code>#</code> to reference tasks, pages,
+                  companies and invoices
+                </li>
+              </ul>
+            </div>
+            <div class="shot">
+              <img
+                src="images/kb.png"
+                alt="Knowledge base page with nested navigation and rich text editor"
+                width="2880"
+                height="1760"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── And the rest ─────────────────────────────────── -->
+      <section class="section section--tint">
+        <div class="container">
+          <div class="section__head">
+            <span class="section__label">And the rest</span>
+            <h2>The parts nobody wants to buy separately</h2>
+          </div>
+
+          <div class="grid">
+            <article class="card reveal">
+              <div class="card__icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16Zm.5-13H11v6l5.2 3.2.8-1.3-4.5-2.7V7Z"
+                  />
+                </svg>
+              </div>
+              <h3>Time</h3>
+              <p>
+                Timers and manual entries against tasks, billable and cost rates, timesheet
+                approval, invoice-from-time.
+              </p>
+            </article>
+
+            <article class="card reveal">
+              <div class="card__icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M16 11a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm-8 1a3 3 0 1 0-3-3 3 3 0 0 0 3 3Zm0 2c-2.7 0-8 1.3-8 4v3h9v-3c0-1.1.5-2.6 1.9-3.7A14 14 0 0 0 8 14Zm8 0c-2.7 0-8 1.3-8 4v3h16v-3c0-2.7-5.3-4-8-4Z"
+                  />
+                </svg>
+              </div>
+              <h3>People</h3>
+              <p>
+                Employee records, org structure, leave with balances, versioned compensation with
+                audited access, recruiting with public careers pages.
+              </p>
+            </article>
+
+            <article class="card reveal">
+              <div class="card__icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3 13h4v8H3v-8Zm7-9h4v17h-4V4Zm7 5h4v12h-4V9Z" />
+                </svg>
+              </div>
+              <h3>Resourcing and dashboards</h3>
+              <p>Capacity planning, team availability and custom dashboard widgets.</p>
+            </article>
+
+            <article class="card reveal">
+              <div class="card__icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z" />
+                </svg>
+              </div>
+              <h3>Realtime</h3>
+              <p>
+                Assignments and mentions arrive over SSE with a toast and a sound. No refresh, no
+                polling.
+              </p>
+            </article>
+
+            <article class="card reveal">
+              <div class="card__icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-6l-4 4v-4H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm3 5h10v2H7V9Zm0-3h10v2H7V6Zm0 6h6v2H7v-2Z"
+                  />
+                </svg>
+              </div>
+              <h3>Modules you can switch off</h3>
+              <p>
+                Not every team needs HR or a ledger. Turn a module off and it disappears from the
+                navigation, the search and the permissions.
+              </p>
+            </article>
+
+            <article class="card reveal">
+              <div class="card__icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M12 1a5 5 0 0 0-5 5v3H6a3 3 0 0 0-3 3v7a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3v-7a3 3 0 0 0-3-3h-1V6a5 5 0 0 0-5-5Zm3 8H9V6a3 3 0 0 1 6 0v3Z"
+                  />
+                </svg>
+              </div>
+              <h3>Permissions that hold</h3>
+              <p>
+                Enforced on every request; the UI only hides things. Audit diffs redact sensitive
+                fields, writes use optimistic locking.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── MCP ──────────────────────────────────────────── -->
+      <section class="section">
+        <div class="container">
+          <div class="feature">
+            <div class="feature__text">
+              <span class="section__label">Built-in MCP server</span>
+              <h3>Point Claude or Cursor at your workspace</h3>
+              <p>
+                ordi ships an MCP server over its own REST API. Connect an agent and it can plan a
+                cycle, log time, move a deal, chase an overdue invoice or draft a knowledge base
+                page – with exactly the permissions of its API token, and nothing more.
+              </p>
+              <ul class="feature__list">
+                <li>OAuth with PKCE, so the client never holds your password</li>
+                <li>Scoped to a token: revoke it and the agent stops</li>
+                <li>Same permission checks as a human on every call</li>
+              </ul>
+            </div>
+            <div class="shot">
+              <img
+                src="images/mcp-consent.png"
+                alt="MCP consent screen asking to authorise a client against an ordi workspace"
+                width="1280"
+                height="720"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Comparison ───────────────────────────────────── -->
+      <section class="section section--tint" id="compare">
+        <div class="container">
+          <div class="section__head">
+            <span class="section__label">Why ordi</span>
+            <h2>Against the tools you are probably paying for</h2>
+          </div>
+
+          <div class="table-scroll reveal">
+            <table>
+              <caption class="sr-only">
+                Feature comparison between ordi, Linear/Jira, Notion/ClickUp and Twenty/Odoo
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Capability</th>
+                  <th scope="col" class="is-ordi">ordi</th>
+                  <th scope="col">Linear / Jira</th>
+                  <th scope="col">Notion / ClickUp</th>
+                  <th scope="col">Twenty / Odoo</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">Tasks with a real issue tracker feel</th>
+                  <td class="is-ordi"><span class="mark mark--yes">Yes</span></td>
+                  <td><span class="mark mark--yes">Yes</span></td>
+                  <td><span class="mark mark--meh">Generic databases</span></td>
+                  <td><span class="mark mark--meh">Basic</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">CRM with a pipeline</th>
+                  <td class="is-ordi"><span class="mark mark--yes">Yes</span></td>
+                  <td><span class="mark mark--no">No</span></td>
+                  <td><span class="mark mark--meh">DIY</span></td>
+                  <td><span class="mark mark--yes">Yes</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Invoices, payments, double-entry ledger</th>
+                  <td class="is-ordi"><span class="mark mark--yes">Yes</span></td>
+                  <td><span class="mark mark--no">No</span></td>
+                  <td><span class="mark mark--no">No</span></td>
+                  <td><span class="mark mark--yes">Yes, heavy</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Time tracking tied to tasks and invoices</th>
+                  <td class="is-ordi"><span class="mark mark--yes">Yes</span></td>
+                  <td><span class="mark mark--no">No</span></td>
+                  <td><span class="mark mark--meh">Add-on</span></td>
+                  <td><span class="mark mark--meh">Module</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Knowledge base with permissions</th>
+                  <td class="is-ordi"><span class="mark mark--yes">Yes</span></td>
+                  <td><span class="mark mark--no">No</span></td>
+                  <td><span class="mark mark--yes">Yes</span></td>
+                  <td><span class="mark mark--no">No</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">HR: people, leave, compensation</th>
+                  <td class="is-ordi"><span class="mark mark--yes">Yes</span></td>
+                  <td><span class="mark mark--no">No</span></td>
+                  <td><span class="mark mark--no">No</span></td>
+                  <td><span class="mark mark--yes">Yes, heavy</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Project profitability out of the box</th>
+                  <td class="is-ordi"><span class="mark mark--yes">Yes</span></td>
+                  <td><span class="mark mark--no">No</span></td>
+                  <td><span class="mark mark--no">No</span></td>
+                  <td><span class="mark mark--meh">Configuration</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Self-hosted, one database</th>
+                  <td class="is-ordi"><span class="mark mark--yes">Yes</span></td>
+                  <td><span class="mark mark--no">No</span></td>
+                  <td><span class="mark mark--no">No</span></td>
+                  <td><span class="mark mark--yes">Yes</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Set up in an afternoon</th>
+                  <td class="is-ordi"><span class="mark mark--yes">Yes</span></td>
+                  <td><span class="mark mark--yes">Yes</span></td>
+                  <td><span class="mark mark--yes">Yes</span></td>
+                  <td><span class="mark mark--no">No</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="callouts">
+            <div class="callout reveal">
+              <b>Against Linear and Jira</b>
+              ordi's task experience is deliberately modelled on Linear: keyboard-first, fast,
+              opinionated. The difference is that the work connects to money.
+            </div>
+            <div class="callout reveal">
+              <b>Against Notion and ClickUp</b>
+              Those give you a toolkit and expect you to build the system. ordi ships the system:
+              real invoices, a real pipeline, real leave balances.
+            </div>
+            <div class="callout reveal">
+              <b>Against Odoo</b>
+              Odoo can do all of this and much more, after an implementation project. ordi targets
+              the team that wants to be running today.
+            </div>
+            <div class="callout reveal">
+              <b>Against Twenty</b>
+              Twenty is a beautiful open-source CRM. ordi is a CRM <i>and</i> the delivery and
+              finance system that follows the sale.
+            </div>
+          </div>
+
+          <p class="not-for-you">
+            <b>Not for you if:</b> you need manufacturing, inventory, payroll runs, or a
+            hundred-seat deployment with SSO and custom workflow engines. ordi is built for teams
+            of roughly 3 to 50 people.
+          </p>
+        </div>
+      </section>
+
+      <!-- ── Quick start ──────────────────────────────────── -->
+      <section class="section" id="start">
+        <div class="container">
+          <div class="section__head">
+            <span class="section__label">Quick start</span>
+            <h2>Requires Docker. Nothing else.</h2>
+          </div>
+
+          <div class="start">
+            <div class="code reveal">
+              <div class="code__head">
+                <span>Terminal</span>
+                <button class="copy" type="button" data-copy="git clone https://github.com/romirom11/ordi.git&#10;cd ordi&#10;docker compose up --build">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1Zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2Zm0 16H8V7h11v14Z" />
+                  </svg>
+                  Copy
+                </button>
+              </div>
+              <pre><code><span class="p">git</span> clone https://github.com/romirom11/ordi.git
+<span class="p">cd</span> ordi
+<span class="p">docker</span> compose up --build
+
+<span class="c"># then open http://localhost:8080</span></code></pre>
+            </div>
+
+            <ol class="steps reveal">
+              <li>
+                <span>1</span>
+                <div>
+                  <b>The setup wizard creates your workspace</b>
+                  One screen: workspace name, owner account, currency and the modules you want.
+                </div>
+              </li>
+              <li>
+                <span>2</span>
+                <div>
+                  <b>Or start from the demo seed</b>
+                  <code>pnpm db:seed</code> builds a full demo agency – clients, a live project with
+                  a sprint, invoices with ledger entries, logged time and a knowledge base – so you
+                  can judge the product in a minute rather than staring at empty states.
+                </div>
+              </li>
+              <li>
+                <span>3</span>
+                <div>
+                  <b>Deploy it for real</b>
+                  <a href="https://github.com/romirom11/ordi/blob/master/docs/deployment.md">docs/deployment.md</a>
+                  covers docker-compose or Dokploy with TLS, SMTP, S3-compatible storage, backups
+                  and health checks;
+                  <a href="https://github.com/romirom11/ordi/blob/master/docs/operations.md">docs/operations.md</a>
+                  covers PITR targets, monitoring and the restore runbook.
+                </div>
+              </li>
+              <li>
+                <span>4</span>
+                <div>
+                  <b>Install the desktop app</b>
+                  macOS, Windows and Linux, with native notifications, a global quick-add shortcut
+                  and signed auto-updates. It connects to your instance – enter your URL on first
+                  launch.
+                </div>
+              </li>
+            </ol>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Stack ────────────────────────────────────────── -->
+      <section class="section section--tint" id="stack">
+        <div class="container">
+          <div class="section__head">
+            <span class="section__label">How it is built</span>
+            <h2>Boring where it counts</h2>
+            <p class="section__lead">
+              No Redis, no message broker, no microservices. One Postgres database does the data,
+              the search and the job queue.
+            </p>
+          </div>
+
+          <dl class="stack reveal">
+            <div><dt>Database</dt><dd>PostgreSQL 16 – JSONB, full-text search, triggers</dd></div>
+            <div><dt>API</dt><dd>Hono on Node 22, TypeScript, Zod-validated, OpenAPI</dd></div>
+            <div><dt>ORM</dt><dd>Drizzle with SQL migrations</dd></div>
+            <div><dt>Web</dt><dd>React 19, Vite, TanStack Query, Tailwind</dd></div>
+            <div><dt>Queue</dt><dd>pg-boss, on the same Postgres</dd></div>
+            <div><dt>Desktop</dt><dd>Tauri 2</dd></div>
+            <div><dt>Monorepo</dt><dd>pnpm workspaces + Turborepo</dd></div>
+            <div><dt>License</dt><dd>AGPL-3.0-only</dd></div>
+          </dl>
+
+          <pre class="tree reveal"><code><b>apps/api</b>         Hono API – domain modules and background workers
+<b>apps/web</b>         React SPA (also the desktop UI)
+<b>apps/desktop</b>     Tauri shell
+<b>packages/db</b>      Drizzle schema, migrations, triggers
+<b>packages/shared</b>  Zod schemas, permission catalog, pure calculations
+<b>packages/mcp</b>     MCP server over the REST API</code></pre>
+        </div>
+      </section>
+
+      <!-- ── Support ──────────────────────────────────────── -->
+      <section class="section">
+        <div class="container">
+          <div class="section__head">
+            <span class="section__label">Support the project</span>
+            <h2>Free, and staying that way</h2>
+            <p class="section__lead">
+              ordi is AGPL-licensed and built in the open. Nothing here is paywalled and nothing
+              will be – donations fund the time, not a tier. If it saves your team a subscription
+              or two:
+            </p>
+          </div>
+
+          <div class="donate reveal">
+            <code>0x3416baba090f1fb87998f73fe1ae625f38865a64</code>
+            <button class="copy" type="button" data-copy="0x3416baba090f1fb87998f73fe1ae625f38865a64">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1Zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2Zm0 16H8V7h11v14Z" />
+              </svg>
+              Copy address
+            </button>
+          </div>
+          <p class="table-note">
+            Ethereum and any EVM-compatible chain (Arbitrum, Base, Optimism, Polygon, BNB Chain).
+            USDT and USDC on those networks work too – just double-check you are sending on a
+            network this address is used on.
+          </p>
+        </div>
+      </section>
+
+      <!-- ── CTA ──────────────────────────────────────────── -->
+      <section class="cta">
+        <div class="container">
+          <h2>Run your agency on one system</h2>
+          <p>
+            Clone it, bring it up with Docker, and see whether the project you shipped last month
+            actually made money.
+          </p>
+          <div class="hero__actions">
+            <a class="btn btn--primary" href="https://github.com/romirom11/ordi">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.8 0-1.3.5-2.3 1.2-3.2-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0C17.6 4.7 18.6 5 18.6 5c.6 1.6.2 2.8.1 3.1.8.9 1.2 1.9 1.2 3.2 0 4.5-2.7 5.5-5.3 5.8.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5Z"
+                />
+              </svg>
+              Get ordi on GitHub
+            </a>
+            <a class="btn btn--ghost" href="https://github.com/romirom11/ordi/blob/master/docs/deployment.md">
+              Read the deployment guide
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer__inner">
+        <div>
+          <a class="brand" href="#top">
+            <svg viewBox="0 0 32 32" aria-hidden="true">
+              <rect width="32" height="32" rx="7" fill="#283b6b" />
+              <circle cx="16" cy="16" r="7.5" fill="none" stroke="#fff" stroke-width="4.2" />
+            </svg>
+            ordi
+          </a>
+          <small style="display: block; margin-top: 0.5rem">
+            AGPL-3.0. Built in the open for teams of 3 to 50.
+          </small>
+        </div>
+        <nav aria-label="Footer">
+          <a href="https://github.com/romirom11/ordi">Repository</a>
+          <a href="https://github.com/romirom11/ordi/releases/latest">Releases</a>
+          <a href="https://github.com/romirom11/ordi/blob/master/docs/deployment.md">Deployment</a>
+          <a href="https://github.com/romirom11/ordi/blob/master/docs/architecture-decisions.md">Architecture</a>
+          <a href="https://github.com/romirom11/ordi/blob/master/CONTRIBUTING.md">Contributing</a>
+          <a href="https://github.com/romirom11/ordi/blob/master/SECURITY.md">Security</a>
+        </nav>
+      </div>
+    </footer>
+
+    <script>
+      // Header hairline appears once the page has moved.
+      const header = document.getElementById('header');
+      const onScroll = () => header.setAttribute('data-scrolled', String(window.scrollY > 8));
+      onScroll();
+      addEventListener('scroll', onScroll, { passive: true });
+
+      // Mobile navigation.
+      const nav = document.getElementById('nav');
+      const toggle = document.querySelector('.nav-toggle');
+      toggle.addEventListener('click', () => {
+        const open = nav.getAttribute('data-open') === 'true';
+        nav.setAttribute('data-open', String(!open));
+        toggle.setAttribute('aria-expanded', String(!open));
+      });
+      nav.addEventListener('click', (e) => {
+        if (e.target.closest('a')) {
+          nav.setAttribute('data-open', 'false');
+          toggle.setAttribute('aria-expanded', 'false');
+        }
+      });
+
+      // Copy buttons – clipboard API, with a plain-text fallback for
+      // browsers that refuse it outside a secure context.
+      for (const button of document.querySelectorAll('.copy')) {
+        button.addEventListener('click', async () => {
+          const text = button.dataset.copy;
+          try {
+            await navigator.clipboard.writeText(text);
+          } catch {
+            const area = document.createElement('textarea');
+            area.value = text;
+            area.style.position = 'fixed';
+            area.style.opacity = '0';
+            document.body.append(area);
+            area.select();
+            document.execCommand('copy');
+            area.remove();
+          }
+          const label = button.lastChild;
+          const original = label.textContent;
+          button.dataset.copied = 'true';
+          label.textContent = ' Copied';
+          setTimeout(() => {
+            delete button.dataset.copied;
+            label.textContent = original;
+          }, 1600);
+        });
+      }
+
+      // Reveal on scroll; everything is visible without JS or with
+      // reduced motion, this only softens the entrance.
+      if ('IntersectionObserver' in window) {
+        const observer = new IntersectionObserver(
+          (entries) => {
+            for (const entry of entries) {
+              if (entry.isIntersecting) {
+                entry.target.classList.add('is-visible');
+                observer.unobserve(entry.target);
+              }
+            }
+          },
+          { rootMargin: '0px 0px -10% 0px' },
+        );
+        for (const el of document.querySelectorAll('.reveal')) observer.observe(el);
+      } else {
+        for (const el of document.querySelectorAll('.reveal')) el.classList.add('is-visible');
+      }
+    </script>
+    <noscript>
+      <style>
+        .reveal {
+          opacity: 1;
+          transform: none;
+        }
+        .nav {
+          display: flex;
+        }
+      </style>
+    </noscript>
+  </body>
+</html>
