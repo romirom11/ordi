@@ -37,6 +37,7 @@ export const EVENT_TYPES = [
   'leave.decided',
   'applicant.hired',
   'role.updated',
+  'sales.work_digest_due',
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];
@@ -56,6 +57,7 @@ export const AGGREGATE_TYPES = [
   'applicant',
   'role',
   'comment',
+  'user',
 ] as const;
 
 export type AggregateType = (typeof AGGREGATE_TYPES)[number];

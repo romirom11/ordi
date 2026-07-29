@@ -56,6 +56,7 @@ export interface MeResponse {
     timezone: string;
     locale: 'uk' | 'en';
     dateFormat: DateFormat;
+    emailNotificationPrefs: Record<string, boolean>;
     roleId: string;
     roleName: string;
     isActive: boolean;

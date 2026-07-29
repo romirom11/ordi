@@ -14,6 +14,7 @@ import { postSlackMessage } from '../domains/integrations/oauth';
 import { writeActivity } from '../core/activity';
 import { logger } from '../lib/logger';
 import { env } from '../env';
+import { salesWork } from '../domains/crm/work';
 
 export interface Consumer {
   name: string;
@@ -48,6 +49,12 @@ async function notify(
         status: (payload.statusName as string) ?? '',
         actor: (payload.actorName as string) ?? tr(locale, 'notify.someone'),
         decision: (payload.decision as string) ?? '',
+        total: Number(payload.total ?? 0),
+        overdue: Number(payload.overdue ?? 0),
+        dueToday: Number(payload.dueToday ?? 0),
+        waitingReply: Number(payload.waitingReply ?? 0),
+        nurtureDue: Number(payload.nurtureDue ?? 0),
+        noNextAction: Number(payload.noNextAction ?? 0),
         workspace: branding.workspaceName,
       };
       const known = NOTIFY_KEYS.has(type) ? type : 'generic';
@@ -80,6 +87,7 @@ async function notify(
 const NOTIFY_KEYS = new Set([
   'task.assigned', 'comment.mentioned', 'task.status_changed',
   'invoice.paid', 'quote.accepted', 'leave.requested', 'leave.decided',
+  'sales.work_digest',
 ]);
 
 /** Deep link for a notification, mirroring the Slack consumer's targets. */
@@ -98,9 +106,37 @@ function notificationLink(type: string, payload: Record<string, unknown>): strin
     case 'leave.requested':
     case 'leave.decided':
       return appLink('/people');
+    case 'sales.work_digest':
+      return appLink('/crm/work');
     default:
       return null;
   }
+}
+
+async function liveSalesDigest(userId: string, localDate: string): Promise<Record<string, unknown> | null> {
+  const { db } = getDb();
+  const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId));
+  if (!user?.isActive) return null;
+  const permissions = await db.select({ permission: schema.rolePermissions.permission })
+    .from(schema.rolePermissions)
+    .where(eq(schema.rolePermissions.roleId, user.roleId));
+  const permissionSet = new Set(permissions.map((row) => row.permission));
+  if (!permissionSet.has('crm.read')) return null;
+
+  const work = await salesWork({
+    userId,
+    timezone: user.timezone,
+    access: { permissions: permissionSet },
+  }, { scope: 'mine', limit: 1 });
+  const summary = {
+    overdue: work.overdue.total,
+    dueToday: work.dueToday.total,
+    waitingReply: work.waitingReply.total,
+    nurtureDue: work.nurtureDue.total,
+    noNextAction: work.noNextAction.total,
+  };
+  const total = Object.values(summary).reduce((sum, count) => sum + count, 0);
+  return total ? { userId, localDate, total, ...summary } : null;
 }
 
 const notifications: Consumer = {
@@ -136,6 +172,11 @@ const notifications: Consumer = {
       case 'git.pr_merged':
         await notify(ev.id, p.assigneeIds ?? [], 'task.status_changed', p.ref ?? null, p);
         break;
+      case 'sales.work_digest_due': {
+        const digest = await liveSalesDigest(p.userId, p.localDate);
+        if (digest) await notify(ev.id, [p.userId], 'sales.work_digest', null, digest);
+        break;
+      }
       default:
         break;
     }
@@ -151,6 +192,7 @@ const sse: Consumer = {
       // actorId travels with the payload so clients can skip pings for their own actions.
       data: { aggregateType: ev.aggregateType, aggregateId: ev.aggregateId, actorId: ev.actorId, ...p },
       projectScope: p.projectId ? [p.projectId] : undefined,
+      userScope: ev.type === 'sales.work_digest_due' && p.userId ? [p.userId] : undefined,
     });
   },
 };

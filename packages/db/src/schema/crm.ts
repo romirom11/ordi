@@ -177,6 +177,16 @@ export const salesActivities = pgTable('sales_activities', {
   parentCheck: check('sales_activities_parent_check', sql`(${t.leadId} is null) <> (${t.dealId} is null)`),
 }));
 
+/** Idempotency ledger for one sales-work digest per user and local date. */
+export const salesDigestRuns = pgTable('sales_digest_runs', {
+  id: pk(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  localDate: text('local_date').notNull(),
+  ...timestamps,
+}, (t) => ({
+  userDateIdx: uniqueIndex('sales_digest_runs_user_date_idx').on(t.userId, t.localDate),
+}));
+
 export const notes = pgTable('notes', {
   id: pk(),
   companyId: text('company_id').references(() => companies.id, { onDelete: 'cascade' }),

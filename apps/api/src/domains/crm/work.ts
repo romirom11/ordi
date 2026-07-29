@@ -1,5 +1,5 @@
 import { getDb, sql } from '@ordi/db';
-import type { Actor } from '../../context';
+import { localDateKey, safeTimeZone } from '../../lib/timezone';
 
 type WorkScope = 'mine' | 'all';
 type WorkBucket = 'overdue' | 'dueToday' | 'waitingReply' | 'nurtureDue' | 'noNextAction';
@@ -64,31 +64,15 @@ function boundedLimit(value: number | undefined): number {
   return Number.isFinite(value) ? Math.max(1, Math.min(Math.trunc(value!), 200)) : 50;
 }
 
-function supportedTimeZone(value: string): string {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: value }).format();
-    return value;
-  } catch {
-    return 'UTC';
-  }
-}
-
-function localDateKey(value: Date, timeZone: string): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(value);
-  const year = parts.find((part) => part.type === 'year')!.value;
-  const month = parts.find((part) => part.type === 'month')!.value;
-  const day = parts.find((part) => part.type === 'day')!.value;
-  return `${year}-${month}-${day}`;
+export interface SalesWorkViewer {
+  userId: string;
+  timezone: string;
+  access: { permissions: Set<string> };
 }
 
 export async function salesWork(
-  actor: Actor,
-  params: { scope?: WorkScope; limit?: number } = {},
+  actor: SalesWorkViewer,
+  params: { scope?: WorkScope; limit?: number; now?: Date } = {},
 ) {
   const { db } = getDb();
   const canReadDeals = actor.access.permissions.has('deals.read');
@@ -101,8 +85,8 @@ export async function salesWork(
     nurtureDue: { rows: [], total: 0 },
     noNextAction: { rows: [], total: 0 },
   };
-  const timeZone = supportedTimeZone(actor.timezone);
-  const today = localDateKey(new Date(), timeZone);
+  const timeZone = safeTimeZone(actor.timezone);
+  const today = localDateKey(params.now ?? new Date(), timeZone);
   const rows = await db.execute(sql`
     with work_clock as (
       select

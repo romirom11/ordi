@@ -29,6 +29,7 @@ extendDict({
     'notif.leave.requested': 'Leave request pending',
     'notif.leave.decided': 'Leave request decided',
     'notif.git.pr_merged': 'Pull request merged',
+    'notif.sales.work_digest': 'Your sales work is ready',
   },
   uk: {
     'notif.task.assigned': 'Вам призначено задачу',
@@ -41,6 +42,7 @@ extendDict({
     'notif.leave.requested': 'Запит на відпустку',
     'notif.leave.decided': 'Рішення щодо відпустки',
     'notif.git.pr_merged': 'Пулреквест злито',
+    'notif.sales.work_digest': 'Черга продажів готова',
   },
 });
 
@@ -60,6 +62,7 @@ function notifLink(n: Notif): string | null {
   }
   if (n.type === 'quote.accepted') return '/finance';
   if (n.type.startsWith('leave.')) return '/people';
+  if (n.type === 'sales.work_digest') return '/crm/work';
   return null;
 }
 
