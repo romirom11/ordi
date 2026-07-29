@@ -6,6 +6,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import type { Editor, Range } from '@tiptap/react';
+import { translate } from '../../lib/i18n';
 
 export interface SlashItem {
   title: string;
@@ -58,7 +59,7 @@ export const SlashMenu = forwardRef<SlashMenuRef, SlashMenuProps>(function Slash
   if (items.length === 0) {
     return (
       <div className="ordi-rt-menu">
-        <div className="ordi-rt-menu-empty">No matching blocks</div>
+        <div className="ordi-rt-menu-empty">{translate('editor.noBlocks', 'No matching blocks')}</div>
       </div>
     );
   }

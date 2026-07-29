@@ -9,6 +9,7 @@
  * - new EventSource(...)    -> cannot send Authorization, relative URL only
  * - sessionStorage          -> lost when a deep link relaunches the app
  * - window.open(...)        -> swallowed by the webview, nothing opens at all
+ * - window.prompt/confirm   -> the webview answers null, so the flow dead-ends
  *
  * This fails CI when one of them appears outside its sanctioned home, so the
  * mistake costs a red check instead of a broken desktop release.
@@ -24,6 +25,7 @@ const RULES = [
   { re: /new EventSource\(/, allow: [], hint: 'use the fetch-based reader in lib/sse.ts' },
   { re: /sessionStorage/, allow: [], hint: 'use localStorage with an expiry – sessionStorage does not survive a relaunch' },
   { re: /window\.open\(/, allow: ['lib/desktop.ts'], hint: 'use openExternal() from lib/desktop – the webview drops window.open' },
+  { re: /window\.(prompt|confirm)\(/, allow: [], hint: 'use a Dialog/ConfirmDialog from components/overlays – native JS dialogs return null in the webview' },
 ];
 
 const failures = [];
