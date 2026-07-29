@@ -5,7 +5,7 @@
  * global quick-add shortcut event and ordi:// deep links. Every call is
  * best-effort – a missing plugin must never break the web app.
  */
-import { api, getInstanceUrl, setSessionToken } from './api';
+import { api, appOrigin, getInstanceUrl, setSessionToken } from './api';
 import { sha256Hex as sha256Fallback } from './sha256';
 
 export const isTauri: boolean =
@@ -95,6 +95,70 @@ export async function openInBrowser(url: string): Promise<boolean> {
     } catch { /* fall through to the webview's own opener */ }
   }
   return window.open(url, '_blank') !== null;
+}
+
+/**
+ * Open a URL outside the app window: the real browser on desktop, a new tab on
+ * the web. Always prefer this over a bare window.open – the desktop webview
+ * swallows window.open and the user sees nothing happen at all.
+ */
+export function openExternal(url: string): void {
+  if (isTauri) { void openInBrowser(url); return; }
+  window.open(url, '_blank', 'noopener');
+}
+
+/** An href that names its own scheme; anything else resolves against the app. */
+const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+/** The schemes the operating system owns rather than the app window. */
+const BROWSER_SCHEME = /^(https?|mailto|tel):/i;
+
+/**
+ * Where a clicked link belongs in the browser, or null to leave it to the
+ * webview. An explicit scheme decides on its own – the OS owns http(s), mail
+ * and tel, while ordi://, blob: and friends stay inside the app. A relative
+ * href instead resolves against the shell origin (tauri://localhost, or
+ * http://tauri.localhost on Windows), an address that exists nowhere outside
+ * this window, so a rooted new-tab path – the public invoice, an invoice PDF –
+ * is rebased onto the configured instance, the address that actually opens.
+ * Anything else stays with the router, which owns in-app navigation.
+ */
+function browserUrlFor(a: HTMLAnchorElement): string | null {
+  const raw = (a.getAttribute('href') ?? '').trim();
+  if (!raw || raw.startsWith('#')) return null;
+  if (HAS_SCHEME.test(raw) || raw.startsWith('//')) {
+    return BROWSER_SCHEME.test(a.href) ? a.href : null;
+  }
+  if (a.target !== '_blank' || !raw.startsWith('/')) return null;
+  try {
+    const url = new URL(a.href);
+    return appOrigin() + url.pathname + url.search + url.hash;
+  } catch { return null; }
+}
+
+/**
+ * Send external links to the user's browser (PRD §18). None of the webviews
+ * ordi ships on – WKWebView, WebKitGTK, WebView2 – hand a new-window request
+ * to the system, so inside the desktop shell every target="_blank" anchor is
+ * dead: the click does nothing whatsoever. Delegating from the document covers
+ * links the SPA renders later too (rich text, task bodies, CRM fields), which
+ * is what keeps this from decaying into one forgotten call site per new link.
+ */
+export function installExternalLinkHandler(): () => void {
+  if (!isTauri) return () => {};
+  const onClick = (e: MouseEvent): void => {
+    // A modifier click means the same thing here as a plain one; the webview
+    // has no tabs of its own to open the link in either way.
+    if (e.defaultPrevented || e.button !== 0) return;
+    if (!(e.target instanceof Element)) return;
+    const anchor = e.target.closest('a[href]');
+    if (!(anchor instanceof HTMLAnchorElement)) return;
+    const url = browserUrlFor(anchor);
+    if (!url) return;
+    e.preventDefault();
+    void openInBrowser(url);
+  };
+  document.addEventListener('click', onClick);
+  return () => document.removeEventListener('click', onClick);
 }
 
 const VERIFIER_KEY = 'ordi:desktopAuthVerifier';

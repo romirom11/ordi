@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, Check, Download, FileText, Paperclip, Pin, Trash2, Upload } from 'lucide-react';
 import { api, qs, ApiError } from '../../lib/api';
+import { openExternal } from '../../lib/desktop';
 import { useT } from '../../lib/i18n';
 import { Avatar, Button, Card, EmptySection, IconButton, Skeleton, Spinner, Tooltip, cn, fmtDate } from '../ui';
 import { ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, toast } from '../overlays';
@@ -375,7 +376,7 @@ export function FilesSection({ entityType, entityId, canWrite, variant = 'sectio
   const download = async (f: FileRow) => {
     const res = await api.get<{ url: string }>(`/attachments/${f.id}/url`);
     if (res.url.startsWith('local://')) { toast.error(t('crm.storageNotConfigured')); return; }
-    window.open(res.url, '_blank', 'noopener');
+    openExternal(res.url);
   };
 
   const del = useMutation({

@@ -8,19 +8,17 @@ import { Button, Input, Select, Card, Breadcrumbs, Skeleton, fmtMoney, fmtDate, 
 import { Dialog, ConfirmDialog, toast } from '../components/overlays';
 import { Send, Download, Ban, Plus, ExternalLink, FilePlus2, Eye, Banknote, Landmark } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
-import { isTauri, openInBrowser } from '../lib/desktop';
+import { openExternal } from '../lib/desktop';
 
 /**
  * The PDF endpoint authenticates with the browser cookie. Inside the desktop
- * shell a relative window.open points at tauri://localhost and carries no
- * credential at all, so hand the link to the real browser instead – its
+ * shell a relative URL points at tauri://localhost and carries no credential
+ * at all, so build the instance address and hand it to the real browser – its
  * session exists whenever browser sign-in was used, and the login page is an
  * honest fallback when it was not.
  */
 function openPdf(id: string): void {
-  const path = `/api/v1/invoices/${id}/pdf`;
-  if (isTauri) void openInBrowser(appOrigin() + path);
-  else window.open(path, '_blank');
+  openExternal(`${appOrigin()}/api/v1/invoices/${id}/pdf`);
 }
 import { useWorkspaceSettings } from '../components/finance/workspace';
 import { DateField } from '../components/DatePicker';

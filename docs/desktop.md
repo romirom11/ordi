@@ -63,6 +63,7 @@ Windows/Linux додайте `http://tauri.localhost` в `CORS_ORIGINS` інст
 | Бейдж непрочитаних | `NotificationsBell.tsx` → `setBadge()` | зміна `unread` → `Window.setBadgeCount` (dock/таскбар; трей-іконка і тултіп – з конфігу) |
 | Глобальний хоткей quick-add | Rust `main.rs` + `Shell.tsx` | `Cmd/Ctrl+Shift+O` зареєстрований у Rust (`setup`, best-effort) → показ/фокус вікна + emit `ordi://quick-add` → Shell відкриває модалку швидкого створення задачі |
 | Deep links `ordi://task/KLD-42` | конфіг `deep-link` + `lib/desktop.ts` | плагін емітить `deep-link://new-url` → парсинг `KEY-N` → `GET /search?q=KEY-N` → навігація на задачу |
+| Зовнішні посилання | `lib/desktop.ts` → `installExternalLinkHandler()` | делегований клік на `document` → `plugin:opener\|open_url` у системному браузері; вебв'ю ігнорує `target="_blank"`, тому без цього обробника посилання просто мертві |
 | Автозапуск | плагін `autostart` (Rust) | ініціалізований; вмикання – стандартний viклик плагіна |
 | Автооновлення | плагін `updater` + CI | підписані артефакти з релізів; endpoint і pubkey – у `tauri.conf.json → plugins.updater` |
 
@@ -203,6 +204,12 @@ Tauri 2 не дає веб-шару нічого без capability-файлу, �
 `core:window:allow-set-badge-count` (бейдж), `notification:default`,
 `updater:default`, `process:allow-restart`, `deep-link:default`. Без цього
 файлу нативні сповіщення, бейдж і deep links мовчки не працюють.
+
+Відкриття посилань потребує **двох** записів: `opener:allow-open-url` вмикає
+саму команду, а `opener:allow-default-urls` дає їй scope (`http://*`,
+`https://*`, `mailto:*`, `tel:*`). Сам лише `allow-open-url` залишає scope
+порожнім, і `open_url` відхиляє **будь-яку** адресу з `ForbiddenUrl` – кнопка
+натискається, браузер не відкривається.
 
 ## 7. Статус верифікації
 

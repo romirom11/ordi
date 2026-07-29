@@ -16,6 +16,10 @@ through `apps/web/src/lib/desktop.ts` (via `withGlobalTauri`, no extra npm deps)
 - **Global quick-add shortcut** `Cmd/Ctrl+Shift+O` (registered in Rust): brings
   the window up and opens the task quick-create modal.
 - **Deep links** `ordi://task/KLD-42` → resolved via search → opens the task.
+- **External links** open in the real browser. The webview drops
+  `target="_blank"` instead of asking the OS, so a document-level handler
+  (`installExternalLinkHandler`) routes every outward link through the opener
+  plugin; relative new-tab links are rebased onto the configured instance.
 - **Autostart** plugin and a **signed auto-updater** fed by CI releases.
 
 ## Develop

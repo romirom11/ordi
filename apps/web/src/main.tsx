@@ -23,13 +23,16 @@ import { CareersPage } from './pages/public/Careers';
 import { Spinner, Button, Input, Card } from './components/ui';
 import { BrandMark } from './components/BrandMark';
 import { installErrorReporting } from './lib/sentry';
-import { isTauri } from './lib/desktop';
+import { isTauri, installExternalLinkHandler } from './lib/desktop';
 import { getInstanceUrl, setInstanceUrl } from './lib/api';
 import { useT } from './lib/i18n';
 import { useState } from 'react';
 
 installErrorReporting();
 applyStoredTheme();
+// Desktop only: the webview drops target="_blank" instead of asking the OS,
+// so every external link needs routing to the browser (no-op on the web).
+installExternalLinkHandler();
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },

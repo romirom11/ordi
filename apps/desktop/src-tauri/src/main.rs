@@ -74,6 +74,10 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // Opens links in the user's browser. The capability must grant
+        // `opener:allow-default-urls` next to `opener:allow-open-url`: the
+        // command permission alone leaves the URL scope EMPTY, and open_url
+        // rejects every address it is handed, so nothing ever opens.
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(
