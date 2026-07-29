@@ -138,27 +138,6 @@ export function LeadDetailPage({ id }: { id: string }) {
                   <p className="whitespace-pre-wrap text-[13px] leading-relaxed">{lead.opener}</p>
                 </Card>
               )}
-              {!!lead.secondarySources?.length && (
-                <div className="mt-3">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">{t('crm.sources')}</p>
-                  <div className="grid gap-2 md:grid-cols-2">
-                    {lead.secondarySources.map((source, index) => (
-                      <a
-                        key={`${source.url}:${index}`}
-                        href={source.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="rounded-lg border border-border p-3 transition-colors hover:border-border-strong hover:bg-muted/40"
-                      >
-                        <span className="flex items-center gap-1.5 text-[13px] font-medium">
-                          <ExternalLink size={12} /> {source.title}
-                        </span>
-                        {source.supports && <span className="mt-1 block text-xs text-muted-foreground">{source.supports}</span>}
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              )}
             </section>
 
             {lead.status === 'converted' && lead.convertedDealId ? (

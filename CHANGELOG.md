@@ -3,6 +3,23 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## Unreleased
+
+- Removed the structured research import. It froze one external research
+  tool's JSON shape into the database schema and the public API, and
+  carried a hardcoded list of job-board and company-registry hostnames in
+  the service layer. Gone with it: `POST /leads/import`,
+  `POST /leads/import/preview`, the `import_research` and
+  `preview_research_import` MCP tools, the "Import research" dialog, the
+  `research_batches` table, and the `leads` columns that only ever held
+  import payloads (`research_batch_id`, `dimensions`, `secondary_sources`,
+  `raw_research`).
+- Leads themselves are unchanged. They are created through `POST /leads`,
+  the MCP `create_lead` tool or the New lead dialog, and keep their
+  qualification notes (score, signal, pain signal, evidence, why it fits,
+  why now, source, suggested channel, opener, caution), which stay
+  editable by hand.
+
 ## v1.16.0
 
 - CRM is a sales workspace. `/crm` opens on Work: overdue, due today,

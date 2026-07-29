@@ -5,7 +5,7 @@
  * /deals (→ pipeline) so old links land on the right tab.
  */
 import { useState } from 'react';
-import { Building2, Download, KanbanSquare, ListTodo, Plus, Target, Workflow } from 'lucide-react';
+import { Building2, KanbanSquare, ListTodo, Plus, Target, Workflow } from 'lucide-react';
 import { useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { useT } from '../lib/i18n';
@@ -14,7 +14,6 @@ import { ClientsTab } from '../components/crm/ClientsTab';
 import { PipelineTab } from '../components/crm/PipelineTab';
 import { WorkTab } from '../components/crm/WorkTab';
 import { LeadsTab } from '../components/crm/LeadsTab';
-import { ResearchImportDialog } from '../components/crm/ResearchImportDialog';
 import { NewClientDialog, NewDealDialog, NewLeadDialog } from '../components/crm/dialogs';
 import { PlaybooksTab } from '../components/crm/PlaybooksTab';
 
@@ -40,7 +39,6 @@ export function CrmPage({ tab }: { tab?: string }) {
   const [newClient, setNewClient] = useState(false);
   const [newLead, setNewLead] = useState(false);
   const [newDeal, setNewDeal] = useState(false);
-  const [importResearch, setImportResearch] = useState(false);
 
   const go = (next: CrmTab) => navigate(`/crm/${next}`);
 
@@ -58,14 +56,9 @@ export function CrmPage({ tab }: { tab?: string }) {
         actions={
           <div className="flex items-center gap-2">
             {active === 'leads' && canWriteCrm && (
-              <>
-                <Button variant="outline" size="sm" onClick={() => setImportResearch(true)}>
-                  <Download size={14} /> {t('crm.importResearch')}
-                </Button>
-                <Button size="sm" onClick={() => setNewLead(true)}>
-                  <Plus size={14} /> {t('crm.newLead')}
-                </Button>
-              </>
+              <Button size="sm" onClick={() => setNewLead(true)}>
+                <Plus size={14} /> {t('crm.newLead')}
+              </Button>
             )}
             {active === 'deals' && canWriteDeals && (
               <Button size="sm" onClick={() => setNewDeal(true)}>
@@ -112,11 +105,6 @@ export function CrmPage({ tab }: { tab?: string }) {
         onCreated={(lead) => navigate(`/leads/${lead.id}`)}
       />
       <NewDealDialog open={newDeal} onClose={() => setNewDeal(false)} />
-      <ResearchImportDialog
-        open={importResearch}
-        onClose={() => setImportResearch(false)}
-        onImported={() => navigate('/crm/leads')}
-      />
     </div>
   );
 }

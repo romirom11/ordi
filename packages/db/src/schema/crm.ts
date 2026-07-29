@@ -54,31 +54,10 @@ export const dealStages = pgTable('deal_stages', {
   ...timestamps,
 });
 
-export const researchBatches = pgTable('research_batches', {
-  id: pk(),
-  title: text('title').notNull(),
-  product: text('product'),
-  productUrl: text('product_url'),
-  targetCustomer: text('target_customer'),
-  searchScope: text('search_scope'),
-  generatedAt: text('generated_at'),
-  verdict: text('verdict'),
-  patterns: jsonb('patterns').notNull().default([]),
-  outreachPlan: jsonb('outreach_plan').notNull().default({}),
-  limits: jsonb('limits').notNull().default([]),
-  excludedCandidates: jsonb('excluded_candidates').notNull().default([]),
-  rawPayload: jsonb('raw_payload').notNull(),
-  createdBy: createdBy(),
-  ...timestamps,
-  version: version(),
-  deletedAt: deletedAt(),
-});
-
 export const leads = pgTable('leads', {
   id: pk(),
   companyId: text('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
   contactId: text('contact_id').references(() => contacts.id, { onDelete: 'set null' }),
-  researchBatchId: text('research_batch_id').references(() => researchBatches.id, { onDelete: 'set null' }),
   legacyDealId: text('legacy_deal_id'),
   title: text('title').notNull(),
   product: text('product'),
@@ -97,9 +76,6 @@ export const leads = pgTable('leads', {
   suggestedChannel: text('suggested_channel'),
   opener: text('opener'),
   caution: text('caution'),
-  dimensions: jsonb('dimensions').notNull().default({}),
-  secondarySources: jsonb('secondary_sources').notNull().default([]),
-  rawResearch: jsonb('raw_research').notNull().default({}),
   nurtureUntil: text('nurture_until'),
   disqualifiedReason: text('disqualified_reason'),
   ownerId: text('owner_id').references(() => users.id),
@@ -113,7 +89,6 @@ export const leads = pgTable('leads', {
   contactIdx: index('leads_contact_idx').on(t.contactId),
   ownerIdx: index('leads_owner_idx').on(t.ownerId),
   statusIdx: index('leads_status_idx').on(t.status),
-  batchIdx: index('leads_research_batch_idx').on(t.researchBatchId),
   legacyDealIdx: uniqueIndex('leads_legacy_deal_idx').on(t.legacyDealId),
 }));
 

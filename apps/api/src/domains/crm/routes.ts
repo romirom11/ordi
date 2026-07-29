@@ -4,7 +4,7 @@ import { ulid } from 'ulid';
 import {
   companyInputSchema, companyUpdateSchema, contactInputSchema, contactUpdateSchema,
   dealStageInputSchema, dealInputSchema, dealUpdateSchema, dealMoveSchema, noteInputSchema,
-  leadInputSchema, leadUpdateSchema, researchImportSchema, salesActivityInputSchema,
+  leadInputSchema, leadUpdateSchema, salesActivityInputSchema,
   salesActivityUpdateSchema, salesActivityCancelSchema, salesActivityCompleteSchema, leadConvertSchema,
   salesMessageTemplateInputSchema, salesMessageTemplateUpdateSchema,
   salesSequenceInputSchema, salesSequenceUpdateSchema, salesSequenceEnrollSchema, salesSequenceStopSchema,
@@ -128,7 +128,7 @@ export function crmRoutes() {
     return c.json({ ok: true });
   });
 
-  // ── Leads and research ──
+  // ── Leads ──
   app.get('/leads', guard('crm.read'), async (c) => {
     return c.json({ data: await svc.listLeads({
       q: c.req.query('q'),
@@ -137,16 +137,6 @@ export function crmRoutes() {
       ownerId: c.req.query('ownerId'),
       limit: Number(c.req.query('limit') ?? 100),
     }) });
-  });
-
-  app.post('/leads/import/preview', guard('crm.read'), async (c) => {
-    const body = researchImportSchema.parse(await c.req.json());
-    return c.json(await svc.previewResearchImport(body));
-  });
-
-  app.post('/leads/import', guard('crm.write'), async (c) => {
-    const body = researchImportSchema.parse(await c.req.json());
-    return c.json(await svc.importResearch(currentActor(c), body), 201);
   });
 
   app.post('/leads', guard('crm.write'), async (c) => {

@@ -255,13 +255,9 @@ export async function getDeal(id: string) {
   return deal;
 }
 
-// ── Leads, research and sales work ──
+// ── Leads and sales work ──
 
 const CANCELS_PLANNED_LEAD_STATUSES = new Set(['nurture', 'disqualified', 'no_response']);
-
-function normalized(value: string | null | undefined): string {
-  return (value ?? '').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
-}
 
 export async function requirePipelineStage(dbOrTx: DbReader, stageId: string) {
   const [stage] = await dbOrTx.select().from(schema.dealStages).where(eq(schema.dealStages.id, stageId));
@@ -274,49 +270,6 @@ export async function requirePipelineStage(dbOrTx: DbReader, stageId: string) {
 
 function boundedLimit(value: number | undefined, fallback: number, maximum: number): number {
   return Number.isFinite(value) ? Math.max(1, Math.min(Math.trunc(value!), maximum)) : fallback;
-}
-
-const NON_COMPANY_HOSTS = [
-  'indeed.com',
-  'linkedin.com',
-  'companieshouse.gov.uk',
-  'find-and-update.company-information.service.gov.uk',
-  'heyjobs.co',
-];
-
-function normalizedDomain(value: string | null | undefined): string | null {
-  const raw = value?.trim();
-  if (!raw) return null;
-  try {
-    const url = new URL(raw.includes('://') ? raw : `https://${raw}`);
-    return url.hostname.toLocaleLowerCase().replace(/^www\./, '') || null;
-  } catch {
-    return null;
-  }
-}
-
-function isCompanyHost(host: string): boolean {
-  return !NON_COMPANY_HOSTS.some((blocked) => host === blocked || host.endsWith(`.${blocked}`));
-}
-
-function prospectDomain(prospect: any): string | null {
-  const explicit = normalizedDomain(prospect.domain ?? prospect.company_url);
-  if (explicit) return explicit;
-  const urls = [
-    ...(prospect.secondary_sources ?? []).map((source: any) => source?.url),
-    prospect.source_url,
-  ];
-  for (const value of urls) {
-    const host = normalizedDomain(value);
-    if (host && isCompanyHost(host)) return host;
-  }
-  return null;
-}
-
-function researchCheckedAt(value: string | null | undefined): Date | null {
-  if (!value) return null;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 async function enrichLeads<T extends { companyId: string; contactId: string | null }>(rows: T[]) {
@@ -432,7 +385,6 @@ export async function createLead(actor: Actor, input: any) {
     id,
     companyId: input.companyId,
     contactId: input.contactId ?? null,
-    researchBatchId: input.researchBatchId ?? null,
     title: input.title,
     product: input.product ?? null,
     status: input.status ?? 'new',
@@ -450,9 +402,6 @@ export async function createLead(actor: Actor, input: any) {
     suggestedChannel: input.suggestedChannel ?? null,
     opener: input.opener ?? null,
     caution: input.caution ?? null,
-    dimensions: input.dimensions ?? {},
-    secondarySources: input.secondarySources ?? [],
-    rawResearch: input.rawResearch ?? {},
     nurtureUntil: input.nurtureUntil ?? null,
     disqualifiedReason: input.disqualifiedReason ?? null,
     ownerId: input.ownerId ?? actor.userId,
@@ -487,10 +436,10 @@ export async function updateLead(actor: Actor, id: string, input: any) {
     }
     const patch: Record<string, unknown> = {};
     for (const key of [
-      'companyId', 'contactId', 'researchBatchId', 'title', 'product', 'status', 'score', 'signal',
+      'companyId', 'contactId', 'title', 'product', 'status', 'score', 'signal',
       'painSignal', 'evidence', 'whyFit', 'whyNow', 'sourceTitle', 'sourceUrl', 'sourceType',
-      'signalDate', 'suggestedChannel', 'opener', 'caution', 'dimensions', 'secondarySources',
-      'rawResearch', 'nurtureUntil', 'disqualifiedReason', 'ownerId',
+      'signalDate', 'suggestedChannel', 'opener', 'caution',
+      'nurtureUntil', 'disqualifiedReason', 'ownerId',
     ]) {
       if (input[key] !== undefined) patch[key] = input[key];
     }
@@ -539,196 +488,6 @@ export async function softDeleteLead(actor: Actor, id: string) {
     action: 'deleted',
     actorId: actor.userId,
     actorType: actor.actorType,
-  });
-}
-
-export async function previewResearchImport(payload: any) {
-  const { db } = getDb();
-  const [companies, existingLeads] = await Promise.all([
-    db.select({ id: schema.companies.id, name: schema.companies.name, domain: schema.companies.domain })
-      .from(schema.companies).where(isNull(schema.companies.deletedAt)),
-    db.select({ id: schema.leads.id, companyId: schema.leads.companyId, product: schema.leads.product, title: schema.leads.title })
-      .from(schema.leads).where(isNull(schema.leads.deletedAt)),
-  ]);
-  const companyByName = new Map(companies.map((company) => [normalized(company.name), company]));
-  const companyByDomain = new Map(companies.flatMap((company) => {
-    const domain = normalizedDomain(company.domain);
-    return domain ? [[domain, company] as const] : [];
-  }));
-  const leadIdByKey = new Map(existingLeads.map((lead) => [
-    `${lead.companyId}:${normalized(lead.product || lead.title)}`,
-    lead.id,
-  ]));
-  const newCompanyKeys = new Set<string>();
-  const payloadLeadKeys = new Set<string>();
-  let companiesToCreate = 0;
-  let leadsToCreate = 0;
-  const matches = payload.prospects.map((prospect: any) => {
-    const domain = prospectDomain(prospect);
-    const companyNameKey = normalized(prospect.name);
-    const company = (domain ? companyByDomain.get(domain) : undefined) ?? companyByName.get(companyNameKey);
-    const newCompanyKey = domain ? `domain:${domain}` : `name:${companyNameKey}`;
-    if (!company && !newCompanyKeys.has(newCompanyKey)) {
-      newCompanyKeys.add(newCompanyKey);
-      companiesToCreate += 1;
-    }
-    const companyKey = company?.id ?? `new:${newCompanyKey}`;
-    const leadKey = `${companyKey}:${normalized(payload.product || prospect.name)}`;
-    const duplicateLeadId = company ? leadIdByKey.get(leadKey) : undefined;
-    const duplicateInPayload = payloadLeadKeys.has(leadKey);
-    if (!duplicateLeadId && !duplicateInPayload) {
-      payloadLeadKeys.add(leadKey);
-      leadsToCreate += 1;
-    }
-    return {
-      name: prospect.name,
-      domain,
-      companyId: company?.id ?? null,
-      leadId: duplicateLeadId ?? null,
-      action: duplicateLeadId || duplicateInPayload ? 'skip' : company ? 'create_lead' : 'create_company_and_lead',
-    };
-  });
-  return {
-    prospects: payload.prospects.length,
-    companiesToCreate,
-    leadsToCreate,
-    exclusions: payload.excluded_candidates?.length ?? 0,
-    matches,
-  };
-}
-
-export async function importResearch(actor: Actor, payload: any) {
-  const { db } = getDb();
-  return db.transaction(async (tx) => {
-    const existingBatches = await tx.select().from(schema.researchBatches).where(and(
-      eq(schema.researchBatches.title, payload.title),
-      payload.generated_at ? eq(schema.researchBatches.generatedAt, payload.generated_at) : undefined,
-      isNull(schema.researchBatches.deletedAt),
-    ));
-    const researchBatchId = existingBatches[0]?.id ?? ulid();
-    if (!existingBatches[0]) {
-      await tx.insert(schema.researchBatches).values({
-        id: researchBatchId,
-        title: payload.title,
-        product: payload.product ?? null,
-        productUrl: payload.product_url ?? null,
-        targetCustomer: payload.target_customer ?? null,
-        searchScope: payload.search_scope ?? null,
-        generatedAt: payload.generated_at ?? null,
-        verdict: payload.verdict ?? null,
-        patterns: payload.patterns ?? [],
-        outreachPlan: payload.outreach_plan ?? {},
-        limits: payload.limits ?? [],
-        excludedCandidates: payload.excluded_candidates ?? [],
-        rawPayload: payload,
-        createdBy: actor.userId,
-      });
-    }
-
-    const companyRows = await tx.select().from(schema.companies).where(isNull(schema.companies.deletedAt));
-    const companyIdByName = new Map(companyRows.map((company) => [normalized(company.name), company.id]));
-    const companyIdByDomain = new Map(companyRows.flatMap((company) => {
-      const domain = normalizedDomain(company.domain);
-      return domain ? [[domain, company.id] as const] : [];
-    }));
-    const companyById = new Map(companyRows.map((company) => [company.id, company]));
-    const leadRows = await tx.select().from(schema.leads).where(isNull(schema.leads.deletedAt));
-    const leadIdByKey = new Map(leadRows.map((lead) => [
-      `${lead.companyId}:${normalized(lead.product || lead.title)}`,
-      lead.id,
-    ]));
-    const leadIds: string[] = [];
-    let createdCompanies = 0;
-    let createdLeads = 0;
-
-    for (const prospect of payload.prospects) {
-      const domain = prospectDomain(prospect);
-      let companyId = (domain ? companyIdByDomain.get(domain) : undefined)
-        ?? companyIdByName.get(normalized(prospect.name));
-      if (!companyId) {
-        companyId = ulid();
-        await tx.insert(schema.companies).values({
-          id: companyId,
-          name: prospect.name,
-          domain,
-          status: 'lead',
-          ownerId: actor.userId,
-          createdBy: actor.userId,
-        });
-        companyIdByName.set(normalized(prospect.name), companyId);
-        if (domain) companyIdByDomain.set(domain, companyId);
-        createdCompanies += 1;
-      } else if (domain && !companyById.get(companyId)?.domain) {
-        await tx.update(schema.companies).set({ domain }).where(eq(schema.companies.id, companyId));
-        companyIdByDomain.set(domain, companyId);
-      }
-
-      const key = `${companyId}:${normalized(payload.product || prospect.name)}`;
-      const duplicateLeadId = leadIdByKey.get(key);
-      if (duplicateLeadId) {
-        leadIds.push(duplicateLeadId);
-        continue;
-      }
-
-      const leadId = ulid();
-      await tx.insert(schema.leads).values({
-        id: leadId,
-        companyId,
-        researchBatchId,
-        title: prospect.name,
-        product: payload.product ?? null,
-        status: 'needs_review',
-        score: prospect.score ?? null,
-        signal: [prospect.stage, prospect.type].filter(Boolean).join(' · ') || null,
-        painSignal: prospect.pain_signal ?? null,
-        evidence: prospect.evidence ?? null,
-        whyFit: prospect.why_fit ?? null,
-        whyNow: prospect.why_now ?? null,
-        sourceTitle: prospect.source_title ?? null,
-        sourceUrl: prospect.source_url ?? null,
-        sourceType: prospect.source_type ?? null,
-        signalDate: prospect.signal_date ?? null,
-        sourceCheckedAt: researchCheckedAt(payload.generated_at),
-        suggestedChannel: prospect.suggested_channel ?? null,
-        opener: prospect.opener ?? null,
-        caution: prospect.caution ?? null,
-        dimensions: prospect.dimensions ?? {},
-        secondarySources: prospect.secondary_sources ?? [],
-        rawResearch: prospect,
-        ownerId: actor.userId,
-        createdBy: actor.userId,
-      });
-      await tx.insert(schema.salesActivities).values({
-        id: ulid(),
-        leadId,
-        companyId,
-        type: 'review',
-        status: 'planned',
-        subject: 'Validate signal and choose outreach',
-        dueAt: new Date(),
-        ownerId: actor.userId,
-        createdBy: actor.userId,
-      });
-      await writeActivity(tx, {
-        entityType: 'lead',
-        entityId: leadId,
-        action: 'imported',
-        after: { researchBatchId, sourceUrl: prospect.source_url ?? null },
-        actorId: actor.userId,
-        actorType: actor.actorType,
-      });
-      leadIdByKey.set(key, leadId);
-      leadIds.push(leadId);
-      createdLeads += 1;
-    }
-
-    return {
-      researchBatchId,
-      leadIds,
-      createdCompanies,
-      createdLeads,
-      exclusions: payload.excluded_candidates?.length ?? 0,
-    };
   });
 }
 

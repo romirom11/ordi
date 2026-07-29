@@ -84,47 +84,40 @@ function timezoneBoundaryCase(now: Date): { timeZone: string; dueAt: Date } {
   throw new Error('Could not find a timezone boundary outside the server-local day');
 }
 
-const research = {
-  title: 'kdn.agency — shortlist',
-  product: 'AI workflow pilot',
-  product_url: 'https://kdn.agency',
-  target_customer: 'Small professional services firms',
-  generated_at: '2026-07-27',
-  verdict: 'Two qualified prospects',
-  prospects: [
-    {
-      name: 'Lea Hough & Co LLP',
-      type: 'Partnership · Chartered surveying',
-      stage: 'High intent',
-      score: 97,
-      pain_signal: 'A graduate role owns practice-wide AI adoption.',
-      evidence: 'Current public vacancy.',
-      why_fit: 'Implementation mandate exceeds the role.',
-      why_now: 'The vacancy is active.',
-      source_title: 'Business Development & Marketing Graduate',
-      source_url: 'https://uk.indeed.com/viewjob?jk=lea-hough',
-      source_type: 'Current public listing',
-      signal_date: '2026-07-27',
-      suggested_channel: 'LinkedIn',
-      opener: 'Hi Michael — I saw the AI adoption brief.',
-      caution: 'Revalidate before outreach.',
-      dimensions: { pain_strength: 5, product_fit: 5 },
-      secondary_sources: [{ title: 'Our People', url: 'https://www.leahough.co.uk/our-people/', supports: 'Team structure' }],
-    },
-    {
-      name: 'Joint Inspection Group',
-      stage: 'High intent',
-      score: 95,
-      pain_signal: 'A seven-person team coordinates auditable documents.',
-      source_url: 'https://uk.indeed.com/viewjob?jk=jig',
-      secondary_sources: [{ title: 'JIG Team', url: 'https://www.jig.org/about/company-structure/jig-staff/' }],
-    },
-  ],
-  patterns: [{ title: 'The role arrives first' }],
-  outreach_plan: { first_step: 'Contact manually' },
-  limits: ['Public sources only'],
-  excluded_candidates: [{ name: 'Expired Ltd', reason: 'Signal expired' }],
-};
+/**
+ * Leads are created through the normal API now that the research-JSON import is
+ * gone. Two of them, so the queue tests still have more than one row to sort.
+ */
+const seedLeads = [
+  {
+    title: 'Lea Hough & Co LLP',
+    product: 'AI workflow pilot',
+    status: 'needs_review',
+    score: 97,
+    signal: 'High intent · Partnership',
+    painSignal: 'A graduate role owns practice-wide AI adoption.',
+    evidence: 'Current public vacancy.',
+    whyFit: 'Implementation mandate exceeds the role.',
+    whyNow: 'The vacancy is active.',
+    sourceTitle: 'Business Development & Marketing Graduate',
+    sourceUrl: 'https://www.leahough.co.uk/careers/',
+    sourceType: 'Current public listing',
+    signalDate: '2026-07-27',
+    sourceCheckedAt: '2026-07-27T00:00:00.000Z',
+    suggestedChannel: 'LinkedIn',
+    opener: 'Hi Michael — I saw the AI adoption brief.',
+    caution: 'Revalidate before outreach.',
+  },
+  {
+    title: 'Joint Inspection Group',
+    product: 'AI workflow pilot',
+    status: 'needs_review',
+    score: 95,
+    signal: 'High intent',
+    painSignal: 'A seven-person team coordinates auditable documents.',
+    sourceUrl: 'https://www.jig.org/about/',
+  },
+];
 
 beforeAll(async () => {
   await resetDb();
@@ -140,7 +133,7 @@ beforeAll(async () => {
   ]);
 });
 
-describe('research import and daily work', () => {
+describe('lead intake and daily work', () => {
   let leadId: string;
   let companyId: string;
 
@@ -190,28 +183,15 @@ describe('research import and daily work', () => {
     expect(patch.status).toBe(400);
   });
 
-  it('previews active prospects and retained exclusions without writing data', async () => {
-    const preview = await json(reqAs(users.owner!.cookie).post('/leads/import/preview', research));
-    expect(preview).toMatchObject({ prospects: 2, companiesToCreate: 2, leadsToCreate: 2, exclusions: 1 });
-    expect((await json(reqAs(users.owner!.cookie).get('/leads'))).data).toHaveLength(0);
-  });
-
-  it('does not double-count duplicate prospects in an import preview', async () => {
-    const duplicate = {
-      ...research,
-      title: 'Duplicate preview',
-      prospects: [research.prospects[0], { ...research.prospects[0] }],
-    };
-    const preview = await json(reqAs(users.owner!.cookie).post('/leads/import/preview', duplicate));
-    expect(preview).toMatchObject({ prospects: 2, companiesToCreate: 1, leadsToCreate: 1 });
-    expect(preview.matches.map((match: any) => match.action)).toEqual(['create_company_and_lead', 'skip']);
-  });
-
-  it('imports structured leads idempotently and creates their review actions', async () => {
-    const first = await json(reqAs(users.owner!.cookie).post('/leads/import', research));
-    expect(first).toMatchObject({ createdCompanies: 2, createdLeads: 2, exclusions: 1 });
-    const second = await json(reqAs(users.owner!.cookie).post('/leads/import', research));
-    expect(second).toMatchObject({ createdCompanies: 0, createdLeads: 0, exclusions: 1 });
+  it('stores a lead with its qualification notes and its first review action', async () => {
+    companyId = (await json(reqAs(users.owner!.cookie).post('/companies', {
+      name: 'Lea Hough & Co LLP',
+      domain: 'leahough.co.uk',
+    }))).id;
+    for (const seed of seedLeads) {
+      const created = await reqAs(users.owner!.cookie).post('/leads', { companyId, ...seed });
+      expect(created.status, await created.clone().text()).toBe(201);
+    }
 
     const leads = (await json(reqAs(users.owner!.cookie).get('/leads'))).data;
     expect(leads).toHaveLength(2);
@@ -222,28 +202,28 @@ describe('research import and daily work', () => {
       painSignal: 'A graduate role owns practice-wide AI adoption.',
       opener: 'Hi Michael — I saw the AI adoption brief.',
       sourceCheckedAt: '2026-07-27T00:00:00.000Z',
-      nextActivity: { type: 'review', status: 'planned' },
+      nextActivity: null,
     });
     leadId = lea.id;
-    companyId = lea.companyId;
+
+    const review = await reqAs(users.owner!.cookie).post('/sales-activities', {
+      leadId,
+      type: 'review',
+      subject: 'Validate signal and choose outreach',
+      dueAt: new Date().toISOString(),
+    });
+    expect(review.status).toBe(201);
 
     const activities = (await json(reqAs(users.owner!.cookie).get(`/sales-activities?leadId=${leadId}`))).data;
     expect(activities).toHaveLength(1);
     expect(activities[0]).toMatchObject({ type: 'review', status: 'planned' });
   });
 
-  it('matches company aliases by domain before normalized name', async () => {
-    const preview = await json(reqAs(users.owner!.cookie).post('/leads/import/preview', {
-      ...research,
-      title: 'Domain alias preview',
-      prospects: [{
-        ...research.prospects[0],
-        name: 'Lea Hough and Co',
-        company_url: 'https://leahough.co.uk',
-      }],
-    }));
-    expect(preview).toMatchObject({ companiesToCreate: 0, leadsToCreate: 0 });
-    expect(preview.matches[0]).toMatchObject({ companyId, action: 'skip', domain: 'leahough.co.uk' });
+  it('no longer exposes the research import endpoints', async () => {
+    for (const path of ['/leads/import', '/leads/import/preview']) {
+      const res = await reqAs(users.owner!.cookie).post(path, { title: 'x', prospects: [{ name: 'y' }] });
+      expect(res.status, path).toBe(404);
+    }
   });
 
   it('completes outreach and schedules the follow-up in one command', async () => {
@@ -730,7 +710,7 @@ describe('sales activity data integrity', () => {
 });
 
 describe('lead and deal boundary', () => {
-  it('converts once and preserves notes, files, research and planned work', async () => {
+  it('converts once and preserves notes, files and planned work', async () => {
     const { db } = getDb();
     const leads = (await json(reqAs(users.owner!.cookie).get('/leads?q=Lea%20Hough'))).data;
     const lead = leads[0];

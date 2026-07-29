@@ -144,16 +144,9 @@ export const dateOnlySchema = z.string()
     return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
   }, 'Expected a valid calendar date');
 
-const secondarySourceSchema = z.object({
-  title: z.string(),
-  url: publicHttpUrlSchema,
-  supports: z.string().optional(),
-}).passthrough();
-
 export const leadInputSchema = z.object({
   companyId: idSchema,
   contactId: idSchema.nullable().optional(),
-  researchBatchId: idSchema.nullable().optional(),
   title: z.string().min(1),
   product: z.string().nullable().optional(),
   status: z.enum(WRITABLE_LEAD_STATUSES).default('new'),
@@ -171,9 +164,6 @@ export const leadInputSchema = z.object({
   suggestedChannel: z.string().nullable().optional(),
   opener: z.string().nullable().optional(),
   caution: z.string().nullable().optional(),
-  dimensions: z.record(z.string(), z.number()).optional(),
-  secondarySources: z.array(secondarySourceSchema).optional(),
-  rawResearch: z.record(z.string(), z.unknown()).optional(),
   nurtureUntil: dateOnlySchema.nullable().optional(),
   disqualifiedReason: z.string().nullable().optional(),
   ownerId: idSchema.nullable().optional(),
@@ -319,40 +309,3 @@ export const leadConvertSchema = z.object({
   expectedCloseDate: z.string().nullable().optional(),
   contactId: idSchema.nullable().optional(),
 });
-
-export const researchProspectSchema = z.object({
-  name: z.string().min(1),
-  domain: z.string().optional(),
-  company_url: publicHttpUrlSchema.optional(),
-  type: z.string().optional(),
-  stage: z.string().optional(),
-  score: z.number().int().min(0).max(100).optional(),
-  pain_signal: z.string().optional(),
-  evidence: z.string().optional(),
-  why_fit: z.string().optional(),
-  why_now: z.string().optional(),
-  source_title: z.string().optional(),
-  source_url: publicHttpUrlSchema.optional(),
-  source_type: z.string().optional(),
-  signal_date: z.string().optional(),
-  suggested_channel: z.string().optional(),
-  opener: z.string().optional(),
-  caution: z.string().optional(),
-  dimensions: z.record(z.string(), z.number()).optional(),
-  secondary_sources: z.array(secondarySourceSchema).optional(),
-}).passthrough();
-
-export const researchImportSchema = z.object({
-  title: z.string().min(1),
-  product: z.string().optional(),
-  product_url: publicHttpUrlSchema.optional(),
-  target_customer: z.string().optional(),
-  search_scope: z.string().optional(),
-  generated_at: z.string().optional(),
-  verdict: z.string().optional(),
-  prospects: z.array(researchProspectSchema).min(1),
-  patterns: z.array(z.unknown()).optional(),
-  outreach_plan: z.record(z.string(), z.unknown()).optional(),
-  limits: z.array(z.unknown()).optional(),
-  excluded_candidates: z.array(z.unknown()).optional(),
-}).passthrough();
