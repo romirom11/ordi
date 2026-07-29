@@ -8,7 +8,6 @@ import {
   salesActivityUpdateSchema, salesActivityCancelSchema, salesActivityCompleteSchema, leadConvertSchema,
   salesMessageTemplateInputSchema, salesMessageTemplateUpdateSchema,
   salesSequenceInputSchema, salesSequenceUpdateSchema, salesSequenceEnrollSchema, salesSequenceStopSchema,
-  LEGACY_LEAD_STAGE_NAME,
   type CustomFieldFilter,
 } from '@ordi/shared';
 import type { AppEnv } from '../../context';
@@ -16,20 +15,10 @@ import { requireAuth, currentActor } from '../../core/auth';
 import { guard, guardAll } from '../../core/rbac';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
-import { assertVersion } from '../../core/locking';
-import { mergeCustomFields } from '../../core/customfields';
 import { page } from '../../lib/http';
 import * as svc from './service';
 import * as playbooks from './playbooks';
 import { assertSalesWrite } from './sales-access';
-
-/** A deal may only link to a live project – the FK allows any id, deleted ones included. */
-async function assertProjectExists(projectId: string): Promise<void> {
-  const { db } = getDb();
-  const [p] = await db.select({ id: schema.projects.id }).from(schema.projects)
-    .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
-  if (!p) throw err.validation('Unknown project');
-}
 
 function parseCfFilters(c: any): CustomFieldFilter[] {
   const raw = c.req.query('cf');
@@ -106,19 +95,7 @@ export function crmRoutes() {
 
   app.patch('/contacts/:id', guard('crm.write'), async (c) => {
     const body = contactUpdateSchema.parse(await c.req.json());
-    const { db } = getDb();
-    const [before] = await db.select().from(schema.contacts).where(eq(schema.contacts.id, c.req.param('id')));
-    if (!before) throw err.notFound();
-    assertVersion(before, body.version, before);
-    const patch: Record<string, unknown> = {};
-    for (const k of ['firstName', 'lastName', 'email', 'phone', 'position', 'isPrimary']) {
-      if ((body as any)[k] !== undefined) patch[k] = (body as any)[k];
-    }
-    if (body.customFields !== undefined) patch.customFields = mergeCustomFields(before.customFields, body.customFields);
-    if (patch.isPrimary === true) {
-      await db.update(schema.contacts).set({ isPrimary: false }).where(eq(schema.contacts.companyId, before.companyId));
-    }
-    await db.update(schema.contacts).set(patch).where(and(eq(schema.contacts.id, c.req.param('id')), eq(schema.contacts.version, before.version)));
+    await svc.updateContact(currentActor(c), c.req.param('id'), body);
     return c.json({ ok: true });
   });
 
@@ -166,9 +143,7 @@ export function crmRoutes() {
   app.get('/deal-stages', guard('deals.read'), async (c) => {
     const { db } = getDb();
     return c.json({
-      data: await db.select().from(schema.dealStages)
-        .where(sql`lower(trim(${schema.dealStages.name})) <> ${LEGACY_LEAD_STAGE_NAME}`)
-        .orderBy(schema.dealStages.position),
+      data: await db.select().from(schema.dealStages).orderBy(schema.dealStages.position),
     });
   });
 
@@ -217,7 +192,7 @@ export function crmRoutes() {
     const body = dealInputSchema.parse(await c.req.json());
     const { db } = getDb();
     const actor = currentActor(c);
-    if (body.projectId) await assertProjectExists(body.projectId);
+    if (body.projectId) await svc.assertProjectExists(db, body.projectId);
     await svc.requirePipelineStage(db, body.stageId);
     const id = ulid();
     await db.insert(schema.deals).values({
@@ -233,20 +208,7 @@ export function crmRoutes() {
 
   app.patch('/deals/:id', guard('deals.write'), async (c) => {
     const body = dealUpdateSchema.parse(await c.req.json());
-    const { db } = getDb();
-    const deal = await svc.getDeal(c.req.param('id'));
-    assertVersion(deal, body.version, deal);
-    if (body.projectId) await assertProjectExists(body.projectId);
-    if (body.stageId) await svc.requirePipelineStage(db, body.stageId);
-    const patch: Record<string, unknown> = {};
-    for (const k of ['title', 'amount', 'currency', 'expectedCloseDate', 'ownerId', 'stageId', 'projectId']) {
-      const value = (body as any)[k];
-      if (value === undefined) continue;
-      patch[k] = k === 'amount' && value !== null ? String(value) : value;
-    }
-    if (body.customFields !== undefined) patch.customFields = mergeCustomFields(deal.customFields, body.customFields);
-    await db.update(schema.deals).set(patch).where(and(eq(schema.deals.id, deal.id), eq(schema.deals.version, deal.version)));
-    return c.json(await svc.getDeal(deal.id));
+    return c.json(await svc.updateDeal(currentActor(c), c.req.param('id'), body));
   });
 
   app.post('/deals/:id/move', guard('deals.write'), async (c) => {

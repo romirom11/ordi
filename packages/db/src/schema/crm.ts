@@ -58,7 +58,6 @@ export const leads = pgTable('leads', {
   id: pk(),
   companyId: text('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
   contactId: text('contact_id').references(() => contacts.id, { onDelete: 'set null' }),
-  legacyDealId: text('legacy_deal_id'),
   title: text('title').notNull(),
   product: text('product'),
   status: text('status').notNull().default('new'),
@@ -89,7 +88,6 @@ export const leads = pgTable('leads', {
   contactIdx: index('leads_contact_idx').on(t.contactId),
   ownerIdx: index('leads_owner_idx').on(t.ownerId),
   statusIdx: index('leads_status_idx').on(t.status),
-  legacyDealIdx: uniqueIndex('leads_legacy_deal_idx').on(t.legacyDealId),
 }));
 
 export const deals = pgTable('deals', {

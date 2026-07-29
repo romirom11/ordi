@@ -3,7 +3,7 @@
  * the Clients table, the Pipeline kanban and the Company detail page.
  */
 import { useQuery } from '@tanstack/react-query';
-import { isLegacyLeadStageName } from '@ordi/shared';
+import { WRITABLE_LEAD_STATUSES } from '@ordi/shared';
 import { api, qs } from '../../lib/api';
 import { extendDict, useT } from '../../lib/i18n';
 import { cn } from '../ui';
@@ -468,12 +468,30 @@ extendDict({
   },
 });
 
+/**
+ * Enums the API validates against come from @ordi/shared, so a status added
+ * there shows up in the dropdowns instead of being silently missing. CURRENCIES
+ * is the only local list: it is a picker shortcut, not a contract – the API
+ * accepts any ISO 4217 code.
+ */
+export {
+  COMPANY_STATUSES,
+  LEAD_STATUSES,
+  WRITABLE_LEAD_STATUSES,
+  LEAD_ACTIVITY_OUTCOME_STATUSES,
+  SALES_ACTIVITY_TYPES,
+  type CompanyStatus,
+} from '@ordi/shared';
+
 export const CURRENCIES = ['USD', 'EUR', 'GBP', 'UAH', 'PLN'];
-export const COMPANY_STATUSES = ['lead', 'active', 'paused', 'archived'] as const;
-export const LEAD_STATUSES = ['new', 'needs_review', 'ready', 'waiting_reply', 'engaged', 'nurture', 'converted', 'disqualified', 'no_response'] as const;
-export const LEAD_ACTIVITY_OUTCOME_STATUSES = ['ready', 'waiting_reply', 'engaged', 'nurture', 'disqualified', 'no_response'] as const;
-export const SALES_ACTIVITY_TYPES = ['review', 'outreach', 'follow_up', 'call', 'meeting', 'proposal', 'nurture', 'other'] as const;
-export type CompanyStatus = (typeof COMPANY_STATUSES)[number];
+
+/**
+ * Statuses offered when creating a lead. `nurture` needs a return date the
+ * create form has no field for (the API rejects it without one), and the two
+ * terminal outcomes are recorded by completing an activity, not at creation.
+ */
+export const NEW_LEAD_STATUSES = WRITABLE_LEAD_STATUSES
+  .filter((status) => !['nurture', 'disqualified', 'no_response'].includes(status));
 
 export function salesActivityTypeLabel(t: (key: string, fallback?: string) => string, value: string): string {
   return t(`crm.activityType.${value}`, value.replaceAll('_', ' '));
@@ -546,7 +564,6 @@ export interface Lead {
   disqualifiedReason?: string | null;
   ownerId?: string | null;
   convertedDealId?: string | null;
-  legacyDealId?: string | null;
   nextActivity?: SalesActivity | null;
   createdAt?: string | null;
   version?: number;
@@ -659,9 +676,7 @@ export function useDealStages() {
   return useQuery<Stage[]>({
     queryKey: ['deal-stages'],
     queryFn: () => api.get<{ data: Stage[] }>('/deal-stages').then((r) => r.data),
-    select: (rows) => rows
-      .filter((stage) => !isLegacyLeadStageName(stage.name))
-      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
+    select: (rows) => [...rows].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
     staleTime: 5 * 60_000,
   });
 }

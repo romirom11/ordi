@@ -1,6 +1,6 @@
 import { getDb, schema, eq, and, isNull, desc, asc, sql, inArray, type SQL } from '@ordi/db';
 import { ulid } from 'ulid';
-import { LEGACY_LEAD_STAGE_NAME, isLegacyLeadStageName, type CustomFieldFilter } from '@ordi/shared';
+import { type CustomFieldFilter } from '@ordi/shared';
 import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
@@ -56,18 +56,34 @@ export async function getCompany(id: string) {
   return company;
 }
 
+/**
+ * Read under a row lock and confirm the write landed. The version filter alone
+ * silently matched zero rows when someone else saved between the read and the
+ * write: the caller got 200 plus the other writer's data and believed the edit
+ * had been stored. A stale write is a 409 now, and the audit entry commits with
+ * the update or not at all.
+ */
 export async function updateCompany(actor: Actor, id: string, input: any) {
   const { db } = getDb();
-  const before = await getCompany(id);
-  assertVersion(before, input.version, before);
-  const patch: Record<string, unknown> = {};
-  for (const k of ['name', 'domain', 'status', 'ownerId', 'billingEmail', 'address', 'defaultCurrency', 'paymentTermsDays']) {
-    if (input[k] !== undefined) patch[k] = input[k];
-  }
-  if (input.customFields !== undefined) patch.customFields = mergeCustomFields(before.customFields, input.customFields);
-  await db.update(schema.companies).set(patch).where(and(eq(schema.companies.id, id), eq(schema.companies.version, before.version)));
-  await writeActivity(db, { entityType: 'company', entityId: id, action: 'updated', before, after: patch, actorId: actor.userId, actorType: actor.actorType });
-  return getCompany(id);
+  return db.transaction(async (tx) => {
+    const [before] = await tx.select().from(schema.companies)
+      .where(and(eq(schema.companies.id, id), isNull(schema.companies.deletedAt)))
+      .for('update');
+    if (!before) throw err.notFound('Company not found');
+    assertVersion(before, input.version, before);
+    const patch: Record<string, unknown> = {};
+    for (const k of ['name', 'domain', 'status', 'ownerId', 'billingEmail', 'address', 'defaultCurrency', 'paymentTermsDays']) {
+      if (input[k] !== undefined) patch[k] = input[k];
+    }
+    if (input.customFields !== undefined) patch.customFields = mergeCustomFields(before.customFields, input.customFields);
+    if (!Object.keys(patch).length) return before;
+    const [after] = await tx.update(schema.companies).set(patch)
+      .where(and(eq(schema.companies.id, id), eq(schema.companies.version, before.version)))
+      .returning();
+    if (!after) throw err.conflict('The record was modified by someone else', before);
+    await writeActivity(tx, { entityType: 'company', entityId: id, action: 'updated', before, after: patch, actorId: actor.userId, actorType: actor.actorType });
+    return after;
+  });
 }
 
 /**
@@ -182,7 +198,95 @@ export async function createContact(actor: Actor, input: any) {
   return id;
 }
 
+/**
+ * Same lock-and-confirm shape as updateCompany. Demoting the previous primary
+ * contact now shares the update's transaction – it used to be a separate write
+ * that stuck even when the update itself matched nothing.
+ */
+export async function updateContact(actor: Actor, id: string, input: any) {
+  const { db } = getDb();
+  return db.transaction(async (tx) => {
+    const [before] = await tx.select().from(schema.contacts)
+      .where(and(eq(schema.contacts.id, id), isNull(schema.contacts.deletedAt)))
+      .for('update');
+    if (!before) throw err.notFound('Contact not found');
+    assertVersion(before, input.version, before);
+    const patch: Record<string, unknown> = {};
+    for (const key of ['firstName', 'lastName', 'email', 'phone', 'position', 'isPrimary']) {
+      if (input[key] !== undefined) patch[key] = input[key];
+    }
+    if (input.customFields !== undefined) {
+      patch.customFields = mergeCustomFields(before.customFields, input.customFields);
+    }
+    if (!Object.keys(patch).length) return before;
+    if (patch.isPrimary === true) {
+      await tx.update(schema.contacts).set({ isPrimary: false })
+        .where(eq(schema.contacts.companyId, before.companyId));
+    }
+    const [after] = await tx.update(schema.contacts).set(patch)
+      .where(and(eq(schema.contacts.id, id), eq(schema.contacts.version, before.version)))
+      .returning();
+    if (!after) throw err.conflict('The record was modified by someone else', before);
+    await writeActivity(tx, {
+      entityType: 'contact',
+      entityId: id,
+      action: 'updated',
+      before: { version: before.version },
+      after: { fields: Object.keys(patch) },
+      actorId: actor.userId,
+      actorType: actor.actorType,
+    });
+    return after;
+  });
+}
+
 // ── Deals ──
+
+/** A deal may only link to a live project – the FK allows any id, deleted ones included. */
+export async function assertProjectExists(dbOrTx: DbReader, projectId: string): Promise<void> {
+  const [project] = await dbOrTx.select({ id: schema.projects.id }).from(schema.projects)
+    .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
+  if (!project) throw err.validation('Unknown project');
+}
+
+/** Lock-and-confirm, like updateCompany. moveDeal already worked this way. */
+export async function updateDeal(actor: Actor, id: string, input: any) {
+  const { db } = getDb();
+  return db.transaction(async (tx) => {
+    const [before] = await tx.select().from(schema.deals)
+      .where(and(eq(schema.deals.id, id), isNull(schema.deals.deletedAt)))
+      .for('update');
+    if (!before) throw err.notFound('Deal not found');
+    assertVersion(before, input.version, before);
+    if (input.projectId) await assertProjectExists(tx, input.projectId);
+    if (input.stageId) await requirePipelineStage(tx, input.stageId);
+    const patch: Record<string, unknown> = {};
+    for (const key of ['title', 'amount', 'currency', 'expectedCloseDate', 'ownerId', 'stageId', 'projectId']) {
+      const value = input[key];
+      if (value === undefined) continue;
+      patch[key] = key === 'amount' && value !== null ? String(value) : value;
+    }
+    if (input.customFields !== undefined) {
+      patch.customFields = mergeCustomFields(before.customFields, input.customFields);
+    }
+    if (!Object.keys(patch).length) return before;
+    const [after] = await tx.update(schema.deals).set(patch)
+      .where(and(eq(schema.deals.id, id), eq(schema.deals.version, before.version)))
+      .returning();
+    if (!after) throw err.conflict('The record was modified by someone else', before);
+    await writeActivity(tx, {
+      entityType: 'deal',
+      entityId: id,
+      action: 'updated',
+      before: { version: before.version },
+      after: { fields: Object.keys(patch) },
+      actorId: actor.userId,
+      actorType: actor.actorType,
+    });
+    return after;
+  });
+}
+
 export async function moveDeal(actor: Actor, id: string, stageId: string, lostReason: string | undefined, version?: number) {
   const { db } = getDb();
   await db.transaction(async (tx) => {
@@ -262,9 +366,6 @@ const CANCELS_PLANNED_LEAD_STATUSES = new Set(['nurture', 'disqualified', 'no_re
 export async function requirePipelineStage(dbOrTx: DbReader, stageId: string) {
   const [stage] = await dbOrTx.select().from(schema.dealStages).where(eq(schema.dealStages.id, stageId));
   if (!stage) throw err.validation('Unknown stage');
-  if (isLegacyLeadStageName(stage.name)) {
-    throw err.validation('Leads are managed in the Leads workspace; choose an opportunity stage');
-  }
   return stage;
 }
 
@@ -478,16 +579,30 @@ export async function updateLead(actor: Actor, id: string, input: any) {
   return getLead(id);
 }
 
+/**
+ * Every other way a lead stops being worked – a terminal status, a won or lost
+ * deal – cancels its planned activities and stops its sequence. Deleting one did
+ * not, so the enrollment stayed 'active' for a lead nothing could reach any more:
+ * unstoppable through the UI, and still counted in a sequence's active total.
+ */
 export async function softDeleteLead(actor: Actor, id: string) {
   const { db } = getDb();
-  await getLeadRecord(id);
-  await db.update(schema.leads).set({ deletedAt: new Date() }).where(eq(schema.leads.id, id));
-  await writeActivity(db, {
-    entityType: 'lead',
-    entityId: id,
-    action: 'deleted',
-    actorId: actor.userId,
-    actorType: actor.actorType,
+  await db.transaction(async (tx) => {
+    await getLeadRecord(id, tx, true);
+    await tx.update(schema.leads).set({ deletedAt: new Date() }).where(eq(schema.leads.id, id));
+    await tx.update(schema.salesActivities).set({ status: 'cancelled' }).where(and(
+      eq(schema.salesActivities.leadId, id),
+      eq(schema.salesActivities.status, 'planned'),
+      isNull(schema.salesActivities.deletedAt),
+    ));
+    await stopActiveLeadSequence(tx, id);
+    await writeActivity(tx, {
+      entityType: 'lead',
+      entityId: id,
+      action: 'deleted',
+      actorId: actor.userId,
+      actorType: actor.actorType,
+    });
   });
 }
 
@@ -802,9 +917,8 @@ export async function convertLead(actor: Actor, id: string, input: any) {
       : (await tx.select().from(schema.dealStages).where(and(
         eq(schema.dealStages.isWon, false),
         eq(schema.dealStages.isLost, false),
-        sql`lower(trim(${schema.dealStages.name})) <> ${LEGACY_LEAD_STAGE_NAME}`,
       )).orderBy(asc(schema.dealStages.position)).limit(1))[0];
-    if (!stage || stage.isWon || stage.isLost || isLegacyLeadStageName(stage.name)) {
+    if (!stage || stage.isWon || stage.isLost) {
       throw err.validation('Choose a qualified opportunity stage');
     }
     const [company] = await tx.select().from(schema.companies).where(eq(schema.companies.id, lead.companyId));

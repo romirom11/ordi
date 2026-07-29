@@ -19,6 +19,25 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   qualification notes (score, signal, pain signal, evidence, why it fits,
   why now, source, suggested channel, opener, caution), which stay
   editable by hand.
+- A stale edit to a client, contact or deal now answers 409 instead of
+  reporting success and discarding the change. The version filter alone
+  matched zero rows without anyone noticing, and PATCH returned 200 with
+  the other writer's data. Each update also commits with its audit entry
+  in one transaction, so a rejected contact edit can no longer demote the
+  previous primary contact on its way out.
+- Deleting a lead cancels its planned activities and stops its active
+  sequence, like every other way a lead stops being worked. The
+  enrollment used to stay `active` forever on a lead nothing could reach,
+  and kept counting toward the sequence's active total.
+- A pipeline stage may be named anything again, "Lead" included. The ban
+  was a guard for the one-off 0020 migration that got promoted into
+  permanent validation across the shared schema, the API and the UI. The
+  `leads.legacy_deal_id` marker that migration used is dropped too.
+- Web CRM reads its status and activity-type enums from `@ordi/shared`
+  instead of keeping copies, so an enum added on the server reaches the
+  dropdowns. Fixes a side effect of the drift: the New lead dialog
+  offered "nurture", which the API always rejected because the form has
+  no return-date field.
 
 ## v1.16.0
 

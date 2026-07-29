@@ -9,7 +9,7 @@ import { useT } from '../../lib/i18n';
 import { Button, Input, Select, Spinner } from '../ui';
 import { Dialog, toast } from '../overlays';
 import {
-  CURRENCIES, COMPANY_STATUSES, LEAD_STATUSES, useCompanies, useDealStages,
+  CURRENCIES, COMPANY_STATUSES, NEW_LEAD_STATUSES, useCompanies, useDealStages,
   useProjectsLookup, type Company, type Stage,
 } from './shared';
 
@@ -160,7 +160,7 @@ export function NewLeadDialog({ open, onClose, lockedCompanyId, onCreated }: {
         </Field>
         <Field label={t('common.status')}>
           <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-full">
-            {LEAD_STATUSES.filter((value) => !['converted', 'disqualified', 'no_response'].includes(value)).map((value) => (
+            {NEW_LEAD_STATUSES.map((value) => (
               <option key={value} value={value}>{t(`crm.status.${value}`)}</option>
             ))}
           </Select>

@@ -11,7 +11,7 @@ import {
 } from '../components/ui';
 import { toast } from '../components/overlays';
 import {
-  LEAD_STATUSES, StatusPill, salesActivityTypeLabel,
+  WRITABLE_LEAD_STATUSES, StatusPill, salesActivityTypeLabel,
   useContacts, useDealStages, useLead, useSalesActivities,
 } from '../components/crm/shared';
 import { FilesSection, NotesSection, SectionHeader } from '../components/crm/detail';
@@ -171,8 +171,9 @@ export function LeadDetailPage({ id }: { id: string }) {
               <RailField label={t('common.status')}>
                 {canWrite && lead.status !== 'converted' ? (
                   <Select className="w-full border-0" value={lead.status} onChange={(event) => patch.mutate({ status: event.target.value })}>
-                    {LEAD_STATUSES.filter((status) => (
-                      status !== 'converted' && (status !== 'nurture' || lead.status === 'nurture')
+                    {WRITABLE_LEAD_STATUSES.filter((status) => (
+                      // nurture needs a return date, so it stays available only to a lead already in it
+                      status !== 'nurture' || lead.status === 'nurture'
                     )).map((status) => (
                       <option key={status} value={status}>{t(`crm.status.${status}`)}</option>
                     ))}
