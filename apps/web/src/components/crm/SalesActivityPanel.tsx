@@ -4,6 +4,7 @@ import { CalendarClock, Check, MoreHorizontal, Pencil, Play, Plus, Workflow, X }
 import { api, ApiError } from '../../lib/api';
 import { useT } from '../../lib/i18n';
 import { Button, EmptySection, Input, Select, Spinner, Textarea, fmtDate, fmtRelative } from '../ui';
+import { DateField, DateTimeField } from '../DatePicker';
 import { ConfirmDialog, Dialog, DropdownMenu, MenuItem, toast } from '../overlays';
 import {
   LEAD_ACTIVITY_OUTCOME_STATUSES,
@@ -397,7 +398,7 @@ export function ScheduleActivityDialog({ open, onClose, leadId, dealId }: {
           </Select>
         </Field>
         <Field label={t('crm.dueAt')}>
-          <Input required type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
+          <DateTimeField value={dueAt} onChange={setDueAt} />
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label={t('crm.channel')}>
@@ -413,7 +414,7 @@ export function ScheduleActivityDialog({ open, onClose, leadId, dealId }: {
         {error && <p className="text-[13px] text-destructive">{error}</p>}
         <div className="flex justify-end gap-2">
           <Button type="button" size="sm" variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button type="submit" size="sm" disabled={mutation.isPending}>{mutation.isPending ? <Spinner /> : t('common.save')}</Button>
+          <Button type="submit" size="sm" disabled={mutation.isPending || !dueAt}>{mutation.isPending ? <Spinner /> : t('common.save')}</Button>
         </div>
       </form>
     </Dialog>
@@ -434,9 +435,22 @@ export function CompleteActivityDialog({ activity, onClose }: {
   const [error, setError] = useState<string | null>(null);
   const isLead = !!activity?.leadId;
   const inSequence = !!activity?.sequenceEnrollmentId;
+  const isReviewReady = isLead && activity?.type === 'review' && leadStatus === 'ready';
   const followUpDisabled = isLead && (
     leadStatus === 'nurture' || leadStatus === 'disqualified' || leadStatus === 'no_response'
   );
+
+  useEffect(() => {
+    if (!activity) return;
+    const review = !!activity.leadId && activity.type === 'review';
+    setOutcome('');
+    setLeadStatus(review ? 'ready' : 'waiting_reply');
+    setFollowUp(true);
+    setDueAt(toLocalInput(new Date(Date.now() + (review ? 1 : 5) * 86_400_000)));
+    setNurtureUntil(toDateInput(new Date(Date.now() + 30 * 86_400_000)));
+    setError(null);
+  }, [activity?.id, activity?.leadId, activity?.type]);
+
   const close = () => {
     setOutcome('');
     setLeadStatus('waiting_reply');
@@ -452,11 +466,11 @@ export function CompleteActivityDialog({ activity, onClose }: {
     leadStatus: isLead ? leadStatus : undefined,
     nurtureUntil: isLead && leadStatus === 'nurture' ? nurtureUntil : undefined,
     nextActivity: !inSequence && followUp && dueAt ? {
-      type: leadStatus === 'nurture' ? 'nurture' : 'follow_up',
+      type: leadStatus === 'nurture' ? 'nurture' : isReviewReady ? 'outreach' : 'follow_up',
       channel: activity?.channel ?? undefined,
       dueAt: new Date(dueAt).toISOString(),
     } : undefined,
-  }), [activity, dueAt, followUp, inSequence, isLead, leadStatus, nurtureUntil, outcome]);
+  }), [activity, dueAt, followUp, inSequence, isLead, isReviewReady, leadStatus, nurtureUntil, outcome]);
 
   const mutation = useMutation({
     mutationFn: () => api.post(`/sales-activities/${activity!.id}/complete`, body),
@@ -496,7 +510,7 @@ export function CompleteActivityDialog({ activity, onClose }: {
         )}
         {isLead && leadStatus === 'nurture' && (
           <Field label={t('crm.nurtureUntil')}>
-            <Input required type="date" value={nurtureUntil} onChange={(event) => setNurtureUntil(event.target.value)} />
+            <DateField value={nurtureUntil} onChange={(value) => setNurtureUntil(value ?? nurtureUntil)} clearable={false} />
           </Field>
         )}
         {inSequence ? (
@@ -512,15 +526,19 @@ export function CompleteActivityDialog({ activity, onClose }: {
                 disabled={followUpDisabled}
                 onChange={(event) => setFollowUp(event.target.checked)}
               />
-              {t('crm.followUp')}
+              {isReviewReady ? t('crm.planOutreach') : t('crm.followUp')}
             </label>
-            {followUp && <Input required type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />}
+            {followUp && (
+              <Field label={t('crm.dueAt')}>
+                <DateTimeField value={dueAt} onChange={setDueAt} />
+              </Field>
+            )}
           </>
         )}
         {error && <p className="text-[13px] text-destructive">{error}</p>}
         <div className="flex justify-end gap-2">
           <Button type="button" size="sm" variant="ghost" onClick={close}>{t('common.cancel')}</Button>
-          <Button type="submit" size="sm" disabled={mutation.isPending}>{mutation.isPending ? <Spinner /> : t('crm.completeAction')}</Button>
+          <Button type="submit" size="sm" disabled={mutation.isPending || (followUp && !dueAt)}>{mutation.isPending ? <Spinner /> : t('crm.completeAction')}</Button>
         </div>
       </form>
     </Dialog>
@@ -586,7 +604,7 @@ function EditActivityDialog({ activity, onClose }: {
           </Select>
         </Field>
         <Field label={t('crm.dueAt')}>
-          <Input required type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
+          <DateTimeField value={dueAt} onChange={setDueAt} />
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label={t('crm.channel')}>

@@ -2,13 +2,14 @@
  * The one calendar in the app.
  *
  * `Calendar` is the grid itself; `DateField` is the grid behind a text input
- * that also accepts typing. Everything that used to render a native
- * <input type="date"> goes through here, so the popup looks the same, follows
+ * that also accepts typing. `DateTimeField` pairs that same date control with
+ * a clock input for timestamp-backed values. Everything that used to render a
+ * native date control goes through here, so the popup looks the same, follows
  * the user's date format, and starts the week where their locale does.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { CalendarDays, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Clock3, X } from 'lucide-react';
 import {
   addDays, addMonths, formatDay, formatMonthTitle, isSameDay, parseDay, parseTyped,
   toDayValue, today, weekdayLabels, weekStartsOn,
@@ -24,6 +25,7 @@ extendDict({
     'date.nextMonth': 'Next month',
     'date.open': 'Open calendar',
     'date.placeholder': 'Pick a date',
+    'date.time': 'Time',
   },
   uk: {
     'date.today': 'Сьогодні',
@@ -32,6 +34,7 @@ extendDict({
     'date.nextMonth': 'Наступний місяць',
     'date.open': 'Відкрити календар',
     'date.placeholder': 'Оберіть дату',
+    'date.time': 'Час',
   },
 });
 
@@ -295,5 +298,62 @@ export function DateField({ value, onChange, placeholder, disabled, clearable = 
         document.body,
       )}
     </>
+  );
+}
+
+/**
+ * A required local date-time value (`yyyy-MM-ddTHH:mm`) rendered with the
+ * canonical date picker instead of the browser's locale-dependent combined
+ * control. The caller remains responsible for converting the local value to
+ * an ISO timestamp at the API boundary.
+ */
+export function DateTimeField({ value, onChange, disabled, min, max, className, id }: {
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  min?: string | null;
+  max?: string | null;
+  className?: string;
+  id?: string;
+}) {
+  const t = useT();
+  const day = value.slice(0, 10);
+  const time = value.slice(11, 16);
+
+  return (
+    <div className={cn('grid grid-cols-[minmax(0,1fr)_9rem] gap-2', className)}>
+      <DateField
+        id={id ? `${id}-date` : undefined}
+        value={day}
+        onChange={(nextDay) => {
+          if (nextDay) onChange(`${nextDay}T${time || '09:00'}`);
+        }}
+        disabled={disabled}
+        clearable={false}
+        min={min}
+        max={max}
+      />
+      <div
+        className={cn(
+          'flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[13px]',
+          'transition-colors duration-150 focus-within:border-primary/60',
+          disabled ? 'cursor-not-allowed opacity-60' : 'hover:border-border-strong',
+        )}
+      >
+        <Clock3 size={14} className="shrink-0 text-faint" />
+        <input
+          id={id ? `${id}-time` : undefined}
+          type="time"
+          required
+          value={time}
+          disabled={disabled}
+          aria-label={t('date.time')}
+          onChange={(event) => {
+            if (day && event.target.value) onChange(`${day}T${event.target.value}`);
+          }}
+          className="min-w-0 flex-1 bg-transparent text-foreground outline-none disabled:cursor-not-allowed"
+        />
+      </div>
+    </div>
   );
 }
