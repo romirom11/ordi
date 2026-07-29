@@ -10,7 +10,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Building2, ChevronRight, Plus, Mail, Phone, Star, UserCircle2,
-  FolderKanban, Handshake, Pencil, Receipt, Trash2, ExternalLink,
+  FolderKanban, Handshake, Pencil, Receipt, Target, Trash2, ExternalLink,
 } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
 import { Link, useNavigate } from '../lib/router';
@@ -24,12 +24,12 @@ import { ConfirmDialog, Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator
 import { EntityActivity } from '../components/EntityActivity';
 import { useT } from '../lib/i18n';
 import {
-  COMPANY_STATUSES, CURRENCIES, StatusPill, useDealStages, useUsersLookup,
+  COMPANY_STATUSES, CURRENCIES, StatusPill, useDealStages, useLeads, useUsersLookup,
   type Company, type Contact, type Deal, type Stage,
 } from '../components/crm/shared';
 import { EditableName, FilesSection, NotesSection, SectionHeader } from '../components/crm/detail';
 import { DealRows } from '../components/crm/DealRows';
-import { ContactDialog, NewDealDialog } from '../components/crm/dialogs';
+import { ContactDialog, NewDealDialog, NewLeadDialog } from '../components/crm/dialogs';
 import { NewProjectModal } from './Projects';
 import { useWorkspaceSettings, financeEnabled } from '../components/finance/workspace';
 
@@ -69,6 +69,7 @@ export function CompanyDetailPage({ id }: { id: string }) {
   usePageTitle(c?.name);
 
   const [addingDeal, setAddingDeal] = useState(false);
+  const [addingLead, setAddingLead] = useState(false);
 
   const patch = useMutation({
     mutationFn: (body: Record<string, unknown>) => api.patch<Company>(`/companies/${id}`, { ...body, version: c?.version }),
@@ -98,8 +99,8 @@ export function CompanyDetailPage({ id }: { id: string }) {
           {t('crm.title')}
         </Link>
         <ChevronRight size={12} className="hidden shrink-0 text-faint sm:block" aria-hidden />
-        <Link to="/crm/clients" className="hidden shrink-0 text-[13px] text-muted-foreground transition-colors duration-150 hover:text-foreground sm:block">
-          {t('crm.tabClients')}
+        <Link to="/crm/companies" className="hidden shrink-0 text-[13px] text-muted-foreground transition-colors duration-150 hover:text-foreground sm:block">
+          {t('crm.tabCompanies')}
         </Link>
         <ChevronRight size={12} className="hidden shrink-0 text-faint sm:block" aria-hidden />
 
@@ -121,6 +122,7 @@ export function CompanyDetailPage({ id }: { id: string }) {
       <div className="flex min-h-0 flex-1 flex-col min-[1100px]:flex-row">
         <div className="order-2 min-w-0 flex-1 overflow-auto min-[1100px]:order-1">
           <div className="space-y-7 px-6 py-6">
+            <LeadsSection companyId={id} canWrite={canWrite} onAdd={() => setAddingLead(true)} />
             {can('deals.read') && <DealsSection companyId={id} canWrite={canAddDeal} onAdd={() => setAddingDeal(true)} />}
             <InvoicesSection companyId={id} />
             <ContactsSection companyId={id} canWrite={canWrite} />
@@ -147,7 +149,60 @@ export function CompanyDetailPage({ id }: { id: string }) {
         lockedCompanyId={id}
         onCreated={() => qc.invalidateQueries({ queryKey: dealsKey(id) })}
       />
+      <NewLeadDialog
+        open={addingLead}
+        onClose={() => setAddingLead(false)}
+        lockedCompanyId={id}
+        onCreated={() => qc.invalidateQueries({ queryKey: ['leads'] })}
+      />
     </div>
+  );
+}
+
+/* ─────────────── Leads ─────────────── */
+
+function LeadsSection({ companyId, canWrite, onAdd }: { companyId: string; canWrite: boolean; onAdd: () => void }) {
+  const t = useT();
+  const navigate = useNavigate();
+  const leadsQ = useLeads({ companyId });
+  const leads = leadsQ.data ?? [];
+  return (
+    <section>
+      <SectionHeader
+        icon={<Target size={15} />}
+        title={t('crm.tabLeads')}
+        count={leads.length}
+        action={canWrite && <Button variant="outline" size="xs" onClick={onAdd}><Plus size={13} /> {t('crm.newLead')}</Button>}
+      />
+      {leadsQ.isLoading ? (
+        <div className="space-y-1">{[0, 1].map((key) => <Skeleton key={key} className="h-11 rounded-md" />)}</div>
+      ) : leads.length === 0 ? (
+        <EmptySection
+          icon={<Target size={14} />}
+          title={t('crm.noActivity')}
+          action={canWrite && <Button variant="ghost" size="xs" onClick={onAdd}><Plus size={13} /> {t('crm.newLead')}</Button>}
+        />
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-border">
+          {leads.map((lead, index) => (
+            <button
+              key={lead.id}
+              type="button"
+              onClick={() => navigate(`/leads/${lead.id}`)}
+              className={cn('flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/50', index > 0 && 'border-t border-border')}
+            >
+              <Target size={14} className="shrink-0 text-warning" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] font-medium">{lead.title}</span>
+                <span className="block truncate text-xs text-muted-foreground">{lead.product || lead.signal || '—'}</span>
+              </span>
+              <StatusPill status={lead.status} />
+              <span className="w-8 text-right text-xs tabular-nums text-muted-foreground">{lead.score ?? '—'}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 

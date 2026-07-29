@@ -5,7 +5,11 @@
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { COMPANY_STATUSES, CUSTOM_FIELD_ENTITIES, CUSTOM_FIELD_TYPES, docToText, textToDoc } from '@ordi/shared';
+import {
+  COMPANY_STATUSES, CUSTOM_FIELD_ENTITIES, CUSTOM_FIELD_TYPES, LEAD_STATUSES,
+  LEAD_ACTIVITY_OUTCOME_STATUSES, SALES_ACTIVITY_TYPES, WRITABLE_LEAD_STATUSES,
+  dateOnlySchema, researchImportSchema, docToText, textToDoc,
+} from '@ordi/shared';
 import { OrdiClient } from './client';
 
 /**
@@ -127,6 +131,45 @@ export function buildServer(client: OrdiClient): McpServer {
   server.tool('get_contact', 'One contact with every field, including customFields', { contactId: z.string() },
   ({ contactId }) => wrap(() => client.get(`/contacts/${contactId}`)));
 
+  server.tool('list_leads', 'List researched, unqualified sales leads. Filter by status or company; use get_sales_work for due work.', {
+  q: z.string().optional(), status: z.enum(LEAD_STATUSES).optional(), companyId: z.string().optional(),
+}, ({ q, status, companyId }) => wrap(async () => {
+  const qs = new URLSearchParams();
+  if (q) qs.set('q', q);
+  if (status) qs.set('status', status);
+  if (companyId) qs.set('companyId', companyId);
+  const res = await client.get<{ data: Record<string, unknown>[] }>(`/leads${qs.toString() ? `?${qs}` : ''}`);
+  return { data: res.data.map((lead) => ({
+    id: lead.id, companyId: lead.companyId, companyName: lead.companyName, contactId: lead.contactId,
+    title: lead.title, product: lead.product, status: lead.status, score: lead.score,
+    signal: lead.signal, painSignal: lead.painSignal, whyFit: lead.whyFit, whyNow: lead.whyNow,
+    sourceUrl: lead.sourceUrl, sourceCheckedAt: lead.sourceCheckedAt, suggestedChannel: lead.suggestedChannel,
+    ownerId: lead.ownerId,
+  })) };
+}));
+
+  server.tool('get_lead', 'One lead with structured research, conversion link and custom fields', { leadId: z.string() },
+  ({ leadId }) => wrap(() => client.get(`/leads/${leadId}`)));
+
+  server.tool('get_sales_work', 'Due sales work grouped into overdue, today, waiting for reply, nurture due and no-next-action queues', {
+  scope: z.enum(['mine', 'all']).optional().describe('Defaults to mine; use all for the whole sales team'),
+}, ({ scope }) => wrap(() => client.get(`/sales-work?scope=${scope ?? 'mine'}`)));
+
+  server.tool('list_sales_activities', 'List planned and completed sales activities for a lead, deal or company', {
+  leadId: z.string().optional(), dealId: z.string().optional(), companyId: z.string().optional(),
+  ownerId: z.string().optional(), status: z.enum(['planned', 'completed', 'cancelled']).optional(),
+  limit: z.number().int().min(1).max(200).optional().describe('Defaults to 100'),
+}, ({ leadId, dealId, companyId, ownerId, status, limit }) => wrap(async () => {
+  const qs = new URLSearchParams();
+  if (leadId) qs.set('leadId', leadId);
+  if (dealId) qs.set('dealId', dealId);
+  if (companyId) qs.set('companyId', companyId);
+  if (ownerId) qs.set('ownerId', ownerId);
+  if (status) qs.set('status', status);
+  if (limit) qs.set('limit', String(limit));
+  return client.get(`/sales-activities${qs.toString() ? `?${qs}` : ''}`);
+}));
+
   server.tool('list_deals', 'List deals, filterable by company and by linked project – the way to obtain dealId for move_deal', {
   companyId: z.string().optional(),
   projectId: z.string().optional().describe('Filter by linked project id, or the literal "none" for unlinked deals'),
@@ -151,18 +194,19 @@ export function buildServer(client: OrdiClient): McpServer {
   return { data: res.data.map((u) => ({ id: u.id, name: u.name })) };
 }));
 
-  server.tool('list_notes', 'CRM notes on a company, contact or deal, newest first, bodies rendered as plain text', {
-  companyId: z.string().optional(), contactId: z.string().optional(), dealId: z.string().optional(),
+  server.tool('list_notes', 'CRM notes on a company, contact, lead or deal, newest first, bodies rendered as plain text', {
+  companyId: z.string().optional(), contactId: z.string().optional(), leadId: z.string().optional(), dealId: z.string().optional(),
   limit: z.number().optional().describe('Defaults to 20'),
-}, ({ companyId, contactId, dealId, limit }) => wrap(async () => {
-  if (!companyId && !contactId && !dealId) throw new Error('One of companyId, contactId or dealId is required');
+}, ({ companyId, contactId, leadId, dealId, limit }) => wrap(async () => {
+  if (!companyId && !contactId && !leadId && !dealId) throw new Error('One of companyId, contactId, leadId or dealId is required');
   const qs = new URLSearchParams();
   if (companyId) qs.set('companyId', companyId);
   if (contactId) qs.set('contactId', contactId);
+  if (leadId) qs.set('leadId', leadId);
   if (dealId) qs.set('dealId', dealId);
   const res = await client.get<{ data: Record<string, unknown>[] }>(`/notes?${qs}`);
   return { data: res.data.slice(0, limit ?? 20).map((n) => ({
-    id: n.id, companyId: n.companyId, contactId: n.contactId, dealId: n.dealId,
+    id: n.id, companyId: n.companyId, contactId: n.contactId, leadId: n.leadId, dealId: n.dealId,
     pinned: n.pinned, createdAt: n.createdAt, createdBy: n.createdBy, text: docToText(n.body),
   })) };
 }));
@@ -299,11 +343,11 @@ export function buildServer(client: OrdiClient): McpServer {
   companyId: z.string(), issueDate: z.string(), items: z.array(z.object({ description: z.string(), quantity: z.number(), unitPrice: z.number() })),
 }, ({ companyId, issueDate, items }) => wrap(() => client.post('/quotes', { companyId, issueDate, items })));
 
-  server.tool('create_note', 'Create a CRM note on a company, contact or deal (line breaks are preserved; blank line = new paragraph)', {
-  companyId: z.string().optional(), contactId: z.string().optional(), dealId: z.string().optional(), text: z.string(),
-}, ({ companyId, contactId, dealId, text: body }) => wrap(async () => {
-  if (!companyId && !contactId && !dealId) throw new Error('One of companyId, contactId or dealId is required');
-  return client.post('/notes', { companyId, contactId, dealId, body: textToDoc(body) });
+  server.tool('create_note', 'Create a CRM note on a company, contact, lead or deal (line breaks are preserved; blank line = new paragraph)', {
+  companyId: z.string().optional(), contactId: z.string().optional(), leadId: z.string().optional(), dealId: z.string().optional(), text: z.string(),
+}, ({ companyId, contactId, leadId, dealId, text: body }) => wrap(async () => {
+  if (!companyId && !contactId && !leadId && !dealId) throw new Error('One of companyId, contactId, leadId or dealId is required');
+  return client.post('/notes', { companyId, contactId, leadId, dealId, body: textToDoc(body) });
 }));
 
   server.tool('update_note', 'Rewrite a note (see list_notes for noteId). The text replaces the body, so send the whole note, not a fragment – this is how a card whose facts moved into fields gets trimmed, or a stale one superseded.', {
@@ -356,9 +400,91 @@ export function buildServer(client: OrdiClient): McpServer {
   customFields: z.record(z.string(), z.unknown()).optional().describe('Keyed by custom field key; null clears one'),
 }, ({ contactId, ...patch }) => wrap(() => client.patch(`/contacts/${contactId}`, patch)));
 
+  server.tool('create_lead', 'Create an unqualified sales lead linked to an existing company', {
+  companyId: z.string(), title: z.string(), product: z.string().optional(),
+  contactId: z.string().optional(), status: z.enum(WRITABLE_LEAD_STATUSES).optional(),
+  score: z.number().int().min(0).max(100).optional(), signal: z.string().optional(),
+  painSignal: z.string().optional(), whyFit: z.string().optional(), whyNow: z.string().optional(),
+  evidence: z.string().optional(), sourceUrl: z.string().optional(), opener: z.string().optional(),
+  caution: z.string().optional(), ownerId: z.string().optional(),
+}, (args) => wrap(() => client.post('/leads', args)));
+
+  server.tool('update_lead', 'Update a lead lifecycle or structured research fields', {
+  leadId: z.string(), status: z.enum(WRITABLE_LEAD_STATUSES).optional(), contactId: z.string().nullable().optional(),
+  title: z.string().optional(), product: z.string().optional(), score: z.number().int().min(0).max(100).optional(),
+  signal: z.string().optional(), painSignal: z.string().optional(), evidence: z.string().optional(),
+  whyFit: z.string().optional(), whyNow: z.string().optional(), sourceUrl: z.string().optional(),
+  opener: z.string().optional(), caution: z.string().optional(), nurtureUntil: dateOnlySchema.nullable().optional(),
+  disqualifiedReason: z.string().optional(), ownerId: z.string().optional(),
+}, ({ leadId, ...patch }) => wrap(() => {
+  if (patch.status === 'nurture' && !patch.nurtureUntil) {
+    throw new Error('nurtureUntil is required when status is nurture');
+  }
+  return client.patch(`/leads/${leadId}`, patch);
+}));
+
+  server.tool('preview_research_import', 'Validate and preview a structured B2B research batch without writing data', {
+  payload: researchImportSchema.describe('Research batch with title, product context, prospects and optional exclusions'),
+}, ({ payload }) => wrap(() => client.post('/leads/import/preview', payload)));
+
+  server.tool('import_research', 'Import one structured B2B research batch. Each prospect includes name plus optional domain/company_url, evidence, fit, timing, source, opener, caution, dimensions and secondary_sources. The API matches companies by domain first, deduplicates leads and retains exclusions.', {
+  payload: researchImportSchema.describe('Research batch with title, product context, prospects and optional exclusions'),
+}, ({ payload }) => wrap(() => client.post('/leads/import', payload)));
+
+  server.tool('schedule_sales_activity', 'Schedule the next sales action for exactly one lead or deal', {
+  leadId: z.string().optional(), dealId: z.string().optional(), type: z.enum(SALES_ACTIVITY_TYPES),
+  dueAt: z.string().describe('ISO date-time'), channel: z.string().optional(),
+  subject: z.string().optional(), context: z.string().optional(), ownerId: z.string().optional(),
+}, (args) => wrap(async () => {
+  if ((args.leadId ? 1 : 0) + (args.dealId ? 1 : 0) !== 1) throw new Error('Exactly one of leadId or dealId is required');
+  return client.post('/sales-activities', args);
+}));
+
+  server.tool('update_sales_activity', 'Edit a planned sales activity before it is completed or cancelled', {
+  activityId: z.string(), type: z.enum(SALES_ACTIVITY_TYPES).optional(),
+  dueAt: z.string().describe('ISO date-time').optional(), channel: z.string().nullable().optional(),
+  subject: z.string().nullable().optional(), context: z.string().nullable().optional(),
+  ownerId: z.string().nullable().optional(),
+}, ({ activityId, ...patch }) => wrap(() => client.patch(`/sales-activities/${activityId}`, patch)));
+
+  server.tool('complete_sales_activity', 'Complete a planned sales activity and optionally schedule its follow-up in the same action', {
+  activityId: z.string(), outcome: z.string().optional(), leadStatus: z.enum(LEAD_ACTIVITY_OUTCOME_STATUSES).optional(),
+  nurtureUntil: dateOnlySchema.optional().describe('Required when leadStatus is nurture; independent of follow-up timing'),
+  nextActivity: z.object({
+    type: z.enum(SALES_ACTIVITY_TYPES), dueAt: z.string(), channel: z.string().optional(),
+    subject: z.string().optional(), context: z.string().optional(),
+  }).optional(),
+}, ({ activityId, ...body }) => wrap(async () => {
+  if (body.nextActivity && (
+    body.leadStatus === 'nurture'
+    || body.leadStatus === 'disqualified'
+    || body.leadStatus === 'no_response'
+  )) {
+    throw new Error('Nurture and terminal lead statuses cannot have a follow-up activity');
+  }
+  if (body.leadStatus === 'nurture' && !body.nurtureUntil) {
+    throw new Error('nurtureUntil is required when leadStatus is nurture');
+  }
+  return client.post(`/sales-activities/${activityId}/complete`, body);
+}));
+
+  server.tool('cancel_sales_activity', 'Cancel a planned sales activity that is no longer needed', {
+  activityId: z.string(),
+}, ({ activityId }) => wrap(() => client.post(`/sales-activities/${activityId}/cancel`, {})));
+
+  server.tool('convert_lead', 'Convert an engaged lead into a qualified deal while preserving its history and next action', {
+  leadId: z.string(), stageId: z.string().optional(), title: z.string().optional(),
+  amount: z.number().min(0).optional(), currency: z.string().length(3).optional(),
+  expectedCloseDate: z.string().optional(),
+}, ({ leadId, ...body }) => wrap(() => client.post(`/leads/${leadId}/convert`, body)));
+
+  server.tool('demote_deal_to_lead', 'Move a legacy Lead-stage deal into the Leads workspace without losing notes, files or activities', {
+  dealId: z.string(), product: z.string().optional(),
+}, ({ dealId, ...body }) => wrap(() => client.post(`/deals/${dealId}/demote-to-lead`, body)));
+
   server.tool('update_deal', 'Update a deal – amount, dates, owner, linked project, custom fields. customFields merge by key. Use move_deal to change the stage.', {
   dealId: z.string(),
-  title: z.string().optional(), amount: z.number().min(0).optional(), currency: z.string().length(3).optional(),
+  title: z.string().optional(), amount: z.number().min(0).nullable().optional(), currency: z.string().length(3).optional(),
   expectedCloseDate: z.string().optional().describe('YYYY-MM-DD'), ownerId: z.string().optional(),
   projectId: z.string().optional().describe('Project this deal sells into'),
   customFields: z.record(z.string(), z.unknown()).optional().describe('Keyed by custom field key; null clears one'),

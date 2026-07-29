@@ -4,6 +4,7 @@ import { DashboardPage } from './pages/Dashboard';
 import { MyTasksPage } from './pages/MyTasks';
 import { CompanyDetailPage } from './pages/CompanyDetail';
 import { DealDetailPage } from './pages/DealDetail';
+import { LeadDetailPage } from './pages/LeadDetail';
 import { CrmPage } from './pages/Crm';
 import { ProjectsPage } from './pages/Projects';
 import { ProjectDetailPage } from './pages/ProjectDetail';
@@ -26,8 +27,10 @@ const routes: RouteDef[] = [
   { pattern: '/my-tasks', render: () => <MyTasksPage /> },
   { pattern: '/crm', render: () => <ModuleGate module="crm"><CrmPage /></ModuleGate> },
   { pattern: '/crm/:tab', render: (p) => <ModuleGate module="crm"><CrmPage tab={p.tab} /></ModuleGate> },
-  { pattern: '/companies', render: () => <ModuleGate module="crm"><CrmPage tab="clients" /></ModuleGate> },
+  { pattern: '/companies', render: () => <ModuleGate module="crm"><CrmPage tab="companies" /></ModuleGate> },
   { pattern: '/companies/:id', render: (p) => <ModuleGate module="crm"><CompanyDetailPage id={p.id!} /></ModuleGate> },
+  { pattern: '/leads', render: () => <ModuleGate module="crm"><CrmPage tab="leads" /></ModuleGate> },
+  { pattern: '/leads/:id', render: (p) => <ModuleGate module="crm"><LeadDetailPage id={p.id!} /></ModuleGate> },
   { pattern: '/deals', render: () => <ModuleGate module="crm"><CrmPage tab="deals" /></ModuleGate> },
   { pattern: '/deals/:id', render: (p) => <ModuleGate module="crm"><DealDetailPage id={p.id!} /></ModuleGate> },
   { pattern: '/projects', render: () => <ProjectsPage /> },

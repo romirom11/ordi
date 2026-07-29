@@ -14,7 +14,10 @@ import { useT } from '../../lib/i18n';
 import { Avatar, EmptyState, Skeleton, Tooltip, cn, fmtMoney, fmtDate } from '../ui';
 import { ContextMenu, ConfirmDialog, toast, type ContextMenuEntry } from '../overlays';
 import { LostReasonDialog } from './dialogs';
-import { useAllDeals, useCompanies, useDealStages, useProjectsLookup, useUsersLookup, type Deal, type Stage } from './shared';
+import {
+  useAllDeals, useCompanies, useDealStages, useProjectsLookup,
+  useUsersLookup, salesActivityTypeLabel, type Deal, type Stage,
+} from './shared';
 
 export function PipelineTab() {
   const t = useT();
@@ -36,6 +39,11 @@ export function PipelineTab() {
   const companyMap = useMemo(() => new Map((companiesQ.data ?? []).map((c) => [c.id, c])), [companiesQ.data]);
   const userMap = useMemo(() => new Map((usersQ.data ?? []).map((u) => [u.id, u])), [usersQ.data]);
   const projectMap = useMemo(() => new Map((projectsQ.data ?? []).map((p) => [p.id, p])), [projectsQ.data]);
+  const nextByDeal = useMemo(() => {
+    const map = new Map<string, NonNullable<Deal['nextActivity']>>();
+    for (const deal of allDeals) if (deal.nextActivity) map.set(deal.id, deal.nextActivity);
+    return map;
+  }, [allDeals]);
 
   // Filter by linked project: '' = all, 'none' = unlinked, otherwise a project id.
   // Chips appear only once at least one deal is linked – zero setup, zero noise.
@@ -148,10 +156,24 @@ export function PipelineTab() {
       <div className="min-h-0 flex-1 overflow-x-auto">
       <div className="flex h-full gap-3 p-4">
         {stages.map((stage) => {
-          const list = deals.filter((d) => d.stageId === stage.id);
-          const sum = list.reduce((n, d) => n + Number(d.amount ?? 0), 0);
-          const weighted = sum * (stage.probability / 100);
-          const currency = list[0]?.currency ?? 'USD';
+          const list = deals.filter((d) => d.stageId === stage.id).sort((a, b) => {
+            const aDue = nextByDeal.get(a.id)?.dueAt;
+            const bDue = nextByDeal.get(b.id)?.dueAt;
+            if (!aDue && bDue) return -1;
+            if (aDue && !bDue) return 1;
+            return (aDue ? new Date(aDue).getTime() : 0) - (bDue ? new Date(bDue).getTime() : 0);
+          });
+          const totalsByCurrency = new Map<string, number>();
+          for (const deal of list) {
+            const currency = deal.currency ?? 'USD';
+            totalsByCurrency.set(currency, (totalsByCurrency.get(currency) ?? 0) + Number(deal.amount ?? 0));
+          }
+          if (totalsByCurrency.size === 0) totalsByCurrency.set('USD', 0);
+          const totals = [...totalsByCurrency.entries()].sort(([a], [b]) => a.localeCompare(b));
+          const totalLabel = totals.map(([currency, amount]) => fmtMoney(amount, currency)).join(' · ');
+          const weightedLabel = totals
+            .map(([currency, amount]) => fmtMoney(amount * (stage.probability / 100), currency))
+            .join(' · ');
           const isOver = overStage === stage.id;
           return (
             <div
@@ -178,10 +200,10 @@ export function PipelineTab() {
                   <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">{list.length}</span>
                 </div>
                 <div className="mt-1 flex items-center justify-between text-xs">
-                  <span className="font-semibold tabular-nums">{fmtMoney(sum, currency)}</span>
+                  <span className="truncate font-semibold tabular-nums" title={totalLabel}>{totalLabel}</span>
                   {!stage.isWon && !stage.isLost && (
                     <Tooltip label={t('crm.weightedShort')}>
-                      <span className="tabular-nums text-faint">≈ {fmtMoney(weighted, currency)}</span>
+                      <span className="max-w-28 truncate tabular-nums text-faint" title={weightedLabel}>≈ {weightedLabel}</span>
                     </Tooltip>
                   )}
                 </div>
@@ -200,6 +222,7 @@ export function PipelineTab() {
                   const company = d.companyId ? companyMap.get(d.companyId) : undefined;
                   const owner = d.ownerId ? userMap.get(d.ownerId) : undefined;
                   const project = d.projectId ? projectMap.get(d.projectId) : undefined;
+                  const next = nextByDeal.get(d.id);
                   return (
                     <ContextMenu key={d.id} items={dealMenu(d)}>
                     <div
@@ -227,6 +250,17 @@ export function PipelineTab() {
                           {project.key && <span className="shrink-0 font-mono text-[10px]">{project.key}</span>}
                         </div>
                       )}
+                      <div className={cn(
+                        'mt-2 flex items-center gap-1 text-[11px]',
+                        next?.dueAt && new Date(next.dueAt).getTime() < Date.now() ? 'text-destructive' : 'text-muted-foreground',
+                      )}>
+                        <CalendarClock size={11} />
+                        <span className="truncate">
+                          {next
+                            ? `${next.subject || salesActivityTypeLabel(t, next.type)}${next.dueAt ? ` · ${fmtDate(next.dueAt)}` : ''}`
+                            : t('crm.noNextAction')}
+                        </span>
+                      </div>
                       <div className="mt-2 flex items-center justify-between">
                         <span className="text-[13px] font-semibold tabular-nums">
                           {d.amount != null ? fmtMoney(d.amount, d.currency ?? 'USD') : '–'}

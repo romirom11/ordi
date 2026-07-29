@@ -128,13 +128,18 @@ export function PropRow({ label, children }: { label: string; children: React.Re
   );
 }
 
-/* ─────────────── Notes (company or deal) ─────────────── */
+/* ─────────────── Notes (company, lead or deal) ─────────────── */
 
-export function NotesSection({ companyId, dealId, canWrite }: { companyId?: string; dealId?: string; canWrite: boolean }) {
+export function NotesSection({ companyId, leadId, dealId, canWrite }: {
+  companyId?: string;
+  leadId?: string;
+  dealId?: string;
+  canWrite: boolean;
+}) {
   const t = useT();
   const qc = useQueryClient();
-  const target = companyId ? { companyId } : { dealId };
-  const queryKey = ['notes', companyId ?? dealId];
+  const target = companyId ? { companyId } : leadId ? { leadId } : { dealId };
+  const queryKey = ['notes', companyId ?? leadId ?? dealId];
   const { data, isLoading } = useQuery<Note[]>({
     queryKey,
     queryFn: () => api.get<{ data: Note[] }>(`/notes${qs(target)}`).then((r) => r.data),
@@ -323,7 +328,7 @@ function fmtSize(bytes?: number | null): string {
  * path, PRD §14.5), list with download links, delete with confirm.
  */
 export function FilesSection({ entityType, entityId, canWrite, variant = 'section' }: {
-  entityType: 'company' | 'deal'; entityId: string; canWrite: boolean;
+  entityType: 'company' | 'lead' | 'deal'; entityId: string; canWrite: boolean;
   /** `rail` renders the compact form used in the record's properties rail. */
   variant?: 'section' | 'rail';
 }) {

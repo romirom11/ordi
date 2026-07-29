@@ -18,8 +18,8 @@ const presignSchema = z.object({
 });
 
 /** Which permission covers files hanging off each entity type. */
-const READ_PERM: Record<string, Permission> = { company: 'crm.read', deal: 'deals.read', task: 'projects.read' };
-const WRITE_PERM: Record<string, Permission> = { company: 'crm.write', deal: 'deals.write', task: 'projects.read' };
+const READ_PERM: Record<string, Permission> = { company: 'crm.read', lead: 'crm.read', deal: 'deals.read', task: 'projects.read' };
+const WRITE_PERM: Record<string, Permission> = { company: 'crm.write', lead: 'crm.write', deal: 'deals.write', task: 'projects.read' };
 
 function requireEntityPerm(perms: ReadonlySet<string>, map: Record<string, Permission>, entityType: string): void {
   const needed = map[entityType];

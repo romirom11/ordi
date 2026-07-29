@@ -72,16 +72,16 @@ export function Dialog({ open, onClose, children, width = 480, title, hideClose 
   );
 }
 
-export function ConfirmDialog({ open, onClose, onConfirm, title, body, confirmLabel, danger, pending }: {
+export function ConfirmDialog({ open, onClose, onConfirm, title, body, confirmLabel, cancelLabel, danger, pending }: {
   open: boolean; onClose: () => void; onConfirm: () => void;
-  title: ReactNode; body?: ReactNode; confirmLabel?: string; danger?: boolean; pending?: boolean;
+  title: ReactNode; body?: ReactNode; confirmLabel?: string; cancelLabel?: string; danger?: boolean; pending?: boolean;
 }) {
   return (
     <Dialog open={open} onClose={onClose} title={title} width={400}>
       <div className="px-4 pb-4 pt-2">
         {body && <p className="mb-4 text-[13px] text-muted-foreground">{body}</p>}
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+          <Button variant="ghost" size="sm" onClick={onClose}>{cancelLabel ?? 'Cancel'}</Button>
           <Button variant={danger ? 'destructive' : 'primary'} size="sm" onClick={onConfirm} disabled={pending}>
             {confirmLabel ?? 'Confirm'}
           </Button>

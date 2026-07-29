@@ -8,7 +8,10 @@ import { api, ApiError } from '../../lib/api';
 import { useT } from '../../lib/i18n';
 import { Button, Input, Select, Spinner } from '../ui';
 import { Dialog, toast } from '../overlays';
-import { CURRENCIES, COMPANY_STATUSES, useCompanies, useDealStages, useProjectsLookup, type Company, type Stage } from './shared';
+import {
+  CURRENCIES, COMPANY_STATUSES, LEAD_STATUSES, useCompanies, useDealStages,
+  useProjectsLookup, type Company, type Stage,
+} from './shared';
 
 function errMsg(e: unknown, fallback: string): string {
   return e instanceof ApiError ? e.message : fallback;
@@ -78,6 +81,90 @@ export function NewClientDialog({ open, onClose, onCreated }: {
             </Select>
           </Field>
         </div>
+        {error && <p className="text-[13px] text-destructive">{error}</p>}
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="ghost" size="sm" onClick={() => { reset(); onClose(); }}>{t('common.cancel')}</Button>
+          <Button type="submit" size="sm" disabled={mut.isPending}>{mut.isPending ? <Spinner /> : t('common.create')}</Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+export function NewLeadDialog({ open, onClose, lockedCompanyId, onCreated }: {
+  open: boolean;
+  onClose: () => void;
+  lockedCompanyId?: string;
+  onCreated?: (lead: { id: string }) => void;
+}) {
+  const t = useT();
+  const qc = useQueryClient();
+  const companiesQ = useCompanies();
+  const [companyId, setCompanyId] = useState(lockedCompanyId ?? '');
+  const [title, setTitle] = useState('');
+  const [product, setProduct] = useState('');
+  const [status, setStatus] = useState<string>('new');
+  const [error, setError] = useState<string | null>(null);
+  const effectiveCompany = lockedCompanyId ?? companyId;
+
+  const reset = () => {
+    setCompanyId(lockedCompanyId ?? '');
+    setTitle('');
+    setProduct('');
+    setStatus('new');
+    setError(null);
+  };
+
+  const mut = useMutation({
+    mutationFn: () => api.post<{ id: string }>('/leads', {
+      companyId: effectiveCompany,
+      title: title.trim(),
+      product: product.trim() || undefined,
+      status,
+    }),
+    onSuccess: (lead) => {
+      qc.invalidateQueries({ queryKey: ['leads'] });
+      qc.invalidateQueries({ queryKey: ['sales-work'] });
+      toast(t('crm.leadCreated'));
+      reset();
+      onClose();
+      onCreated?.(lead);
+    },
+    onError: (e) => setError(errMsg(e, t('common.error'))),
+  });
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!effectiveCompany) { setError(t('crm.company') + ' – ' + t('common.select')); return; }
+    if (!title.trim()) { setError(t('common.titleRequired')); return; }
+    mut.mutate();
+  };
+
+  return (
+    <Dialog open={open} onClose={() => { reset(); onClose(); }} title={t('crm.newLead')} width={440}>
+      <form onSubmit={submit} className="space-y-3 px-4 pb-4 pt-1">
+        {!lockedCompanyId && (
+          <Field label={t('crm.company')}>
+            <Select value={companyId} onChange={(e) => setCompanyId(e.target.value)} className="w-full">
+              <option value="">{companiesQ.isLoading ? t('common.loading') : t('common.select')}</option>
+              {(companiesQ.data ?? []).map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
+            </Select>
+          </Field>
+        )}
+        <Field label={t('common.title')}>
+          <Input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Acme — workflow pilot" />
+        </Field>
+        <Field label={t('crm.product')}>
+          <Input value={product} onChange={(e) => setProduct(e.target.value)} placeholder="AI / workflow pilot" />
+        </Field>
+        <Field label={t('common.status')}>
+          <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-full">
+            {LEAD_STATUSES.filter((value) => !['converted', 'disqualified', 'no_response'].includes(value)).map((value) => (
+              <option key={value} value={value}>{t(`crm.status.${value}`)}</option>
+            ))}
+          </Select>
+        </Field>
         {error && <p className="text-[13px] text-destructive">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="ghost" size="sm" onClick={() => { reset(); onClose(); }}>{t('common.cancel')}</Button>

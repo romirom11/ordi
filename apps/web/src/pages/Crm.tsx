@@ -1,23 +1,29 @@
 /**
- * Unified CRM page: Clients (companies) and the deal Pipeline in one place.
+ * Sales workspace: daily Work, unqualified Leads, qualified Pipeline and the
+ * stable Companies directory.
  * Route: /crm and /crm/:tab. Also serves legacy /companies (→ clients) and
  * /deals (→ pipeline) so old links land on the right tab.
  */
 import { useState } from 'react';
-import { Plus, Users, KanbanSquare } from 'lucide-react';
+import { Building2, Download, KanbanSquare, ListTodo, Plus, Target } from 'lucide-react';
 import { useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { useT } from '../lib/i18n';
 import { Button, PageHeader, Tabs } from '../components/ui';
 import { ClientsTab } from '../components/crm/ClientsTab';
 import { PipelineTab } from '../components/crm/PipelineTab';
-import { NewClientDialog, NewDealDialog } from '../components/crm/dialogs';
+import { WorkTab } from '../components/crm/WorkTab';
+import { LeadsTab } from '../components/crm/LeadsTab';
+import { ResearchImportDialog } from '../components/crm/ResearchImportDialog';
+import { NewClientDialog, NewDealDialog, NewLeadDialog } from '../components/crm/dialogs';
 
-type CrmTab = 'clients' | 'deals';
+type CrmTab = 'work' | 'leads' | 'deals' | 'companies';
 
 function normalizeTab(tab?: string): CrmTab {
   if (tab === 'deals' || tab === 'pipeline') return 'deals';
-  return 'clients';
+  if (tab === 'clients' || tab === 'companies') return 'companies';
+  if (tab === 'leads') return 'leads';
+  return 'work';
 }
 
 export function CrmPage({ tab }: { tab?: string }) {
@@ -30,7 +36,9 @@ export function CrmPage({ tab }: { tab?: string }) {
   const canWriteDeals = can('deals.write');
 
   const [newClient, setNewClient] = useState(false);
+  const [newLead, setNewLead] = useState(false);
   const [newDeal, setNewDeal] = useState(false);
+  const [importResearch, setImportResearch] = useState(false);
 
   const go = (next: CrmTab) => navigate(`/crm/${next}`);
 
@@ -38,16 +46,32 @@ export function CrmPage({ tab }: { tab?: string }) {
     <div className="flex min-h-0 flex-1 flex-col">
       <PageHeader
         title={t('crm.title')}
+        subtitle={
+          active === 'work' ? t('crm.workHint')
+            : active === 'leads' ? t('crm.leadsHint')
+              : active === 'deals' ? t('deals.subtitle')
+                : t('crm.subtitle')
+        }
         actions={
           <div className="flex items-center gap-2">
-            {canWriteCrm && (
-              <Button variant="outline" size="sm" onClick={() => setNewClient(true)}>
-                <Plus size={14} /> {t('crm.newClient')}
-              </Button>
+            {active === 'leads' && canWriteCrm && (
+              <>
+                <Button variant="outline" size="sm" onClick={() => setImportResearch(true)}>
+                  <Download size={14} /> {t('crm.importResearch')}
+                </Button>
+                <Button size="sm" onClick={() => setNewLead(true)}>
+                  <Plus size={14} /> {t('crm.newLead')}
+                </Button>
+              </>
             )}
-            {canWriteDeals && (
+            {active === 'deals' && canWriteDeals && (
               <Button size="sm" onClick={() => setNewDeal(true)}>
                 <Plus size={14} /> {t('crm.newDeal')}
+              </Button>
+            )}
+            {active === 'companies' && canWriteCrm && (
+              <Button size="sm" onClick={() => setNewClient(true)}>
+                <Plus size={14} /> {t('crm.newClient')}
               </Button>
             )}
           </div>
@@ -59,22 +83,35 @@ export function CrmPage({ tab }: { tab?: string }) {
           value={active}
           onChange={go}
           tabs={[
-            { key: 'clients', label: t('crm.tabClients'), icon: <Users size={15} /> },
+            { key: 'work', label: t('crm.tabWork'), icon: <ListTodo size={15} /> },
+            { key: 'leads', label: t('crm.tabLeads'), icon: <Target size={15} /> },
             { key: 'deals', label: t('crm.tabPipeline'), icon: <KanbanSquare size={15} /> },
+            { key: 'companies', label: t('crm.tabCompanies'), icon: <Building2 size={15} /> },
           ]}
         />
       </div>
 
-      {active === 'clients'
-        ? <ClientsTab onNewClient={() => setNewClient(true)} />
-        : <PipelineTab />}
+      {active === 'work' && <WorkTab />}
+      {active === 'leads' && <LeadsTab />}
+      {active === 'deals' && <PipelineTab />}
+      {active === 'companies' && <ClientsTab onNewClient={() => setNewClient(true)} />}
 
       <NewClientDialog
         open={newClient}
         onClose={() => setNewClient(false)}
         onCreated={(c) => navigate(`/companies/${c.id}`)}
       />
+      <NewLeadDialog
+        open={newLead}
+        onClose={() => setNewLead(false)}
+        onCreated={(lead) => navigate(`/leads/${lead.id}`)}
+      />
       <NewDealDialog open={newDeal} onClose={() => setNewDeal(false)} />
+      <ResearchImportDialog
+        open={importResearch}
+        onClose={() => setImportResearch(false)}
+        onImported={() => navigate('/crm/leads')}
+      />
     </div>
   );
 }
