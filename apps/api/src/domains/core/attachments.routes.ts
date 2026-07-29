@@ -7,12 +7,25 @@ import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { writeActivity } from '../../core/activity';
 import { presignUpload, presignDownload } from '../../lib/s3';
+import { fileSrc, signUploadKey, verifyUploadKey } from '../../lib/file-tokens';
 import { err } from '../../lib/errors';
 
 const presignSchema = z.object({
   filename: z.string().min(1),
   size: z.number().int().min(1).max(MAX_UPLOAD_BYTES),
   mime: z.string().min(1),
+  entityType: z.string().optional(),
+  entityId: z.string().optional(),
+});
+
+const registerSchema = z.object({
+  fileKey: z.string().min(1),
+  /** The signature /presign returned alongside fileKey. */
+  keyToken: z.string().min(1),
+  filename: z.string().min(1),
+  size: z.number().int().min(1).max(MAX_UPLOAD_BYTES),
+  mime: z.string().min(1),
+  /** Absent for a file embedded in rich text: it belongs to a document, not a record. */
   entityType: z.string().optional(),
   entityId: z.string().optional(),
 });
@@ -51,12 +64,15 @@ export function attachmentsRoutes() {
     if (BLOCKED_FILE_EXTENSIONS.includes(ext)) throw err.domain('File type not allowed');
     const key = `uploads/${ulid()}/${body.filename}`;
     const url = await presignUpload(key, body.mime);
-    return c.json({ uploadUrl: url, fileKey: key });
+    // keyToken is what register demands back, so a caller cannot register a key
+    // this endpoint never issued (lib/file-tokens).
+    return c.json({ uploadUrl: url, fileKey: key, keyToken: signUploadKey(key) });
   });
 
   app.post('/register', async (c) => {
     const actor = currentActor(c);
-    const body = await c.req.json();
+    const body = registerSchema.parse(await c.req.json());
+    if (!verifyUploadKey(body.fileKey, body.keyToken)) throw err.validation('fileKey was not issued by /presign');
     if (body.entityType) requireEntityPerm(actor.access.permissions, WRITE_PERM, body.entityType);
     const { db } = getDb();
     const id = ulid();
@@ -72,7 +88,9 @@ export function attachmentsRoutes() {
         actorId: actor.userId, actorType: actor.actorType,
       });
     }
-    return c.json({ id }, 201);
+    // `src` is what an editor stores in the document: a signed, non-expiring
+    // path that an <img> can fetch with no session at all (lib/file-tokens).
+    return c.json({ id, src: fileSrc(id) }, 201);
   });
 
   app.delete('/:id', async (c) => {
@@ -95,7 +113,10 @@ export function attachmentsRoutes() {
     const { db } = getDb();
     const [att] = await db.select().from(schema.attachments).where(eq(schema.attachments.id, c.req.param('id')));
     if (!att) throw err.notFound();
-    return c.json({ url: await presignDownload(att.fileKey), filename: att.filename, mime: att.mime });
+    return c.json({
+      url: await presignDownload(att.fileKey), src: fileSrc(att.id),
+      filename: att.filename, mime: att.mime,
+    });
   });
 
   return app;

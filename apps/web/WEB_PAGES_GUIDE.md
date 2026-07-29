@@ -63,3 +63,15 @@ from that table, so a new entry appears in all three at once.
 
 Callout tones and the toggle chevron are drawn in CSS (`richtext.css`), not
 stored in the document, so the editor and the renderer cannot disagree.
+
+**Images** upload for real: paste a screenshot, drop a file on the page, or pick
+one from the slash menu's Image dialog (which also still takes a link). All three
+go through `uploadImage` in `lib/uploads`, the single presign → PUT → register
+path the CRM Files section uses too.
+
+What gets stored is the root-relative signed path the API returns
+(`/api/v1/files/<id>/<token>`), never an absolute url — an instance that moves
+domain would otherwise break every image ever embedded. Anything rendering one
+must pass it through `resolveFileSrc()`: on the desktop origin a relative path
+resolves against `tauri://localhost`, which serves the app bundle and knows
+nothing about files.

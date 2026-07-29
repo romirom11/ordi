@@ -8,6 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, Check, Download, FileText, Paperclip, Pin, Trash2, Upload } from 'lucide-react';
 import { api, qs, ApiError } from '../../lib/api';
 import { openExternal } from '../../lib/desktop';
+import { UploadError, uploadAttachment } from '../../lib/uploads';
 import { useT } from '../../lib/i18n';
 import { Avatar, Button, Card, EmptySection, IconButton, Skeleton, Spinner, Tooltip, cn, fmtDate } from '../ui';
 import { ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, toast } from '../overlays';
@@ -349,24 +350,11 @@ export function FilesSection({ entityType, entityId, canWrite, variant = 'sectio
   const upload = async (file: File) => {
     setUploading(true);
     try {
-      const presign = await api.post<{ uploadUrl: string; fileKey: string }>('/attachments/presign', {
-        filename: file.name, size: file.size, mime: file.type || 'application/octet-stream',
-        entityType, entityId,
-      });
-      // Dev without S3 returns a local:// stub – register anyway so the flow
-      // stays demonstrable; production always has real storage (deployment docs).
-      if (!presign.uploadUrl.startsWith('local://')) {
-        const put = await fetch(presign.uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type || 'application/octet-stream' } });
-        if (!put.ok) throw new Error(`Upload failed (${put.status})`);
-      }
-      await api.post('/attachments/register', {
-        entityType, entityId, fileKey: presign.fileKey, filename: file.name, size: file.size,
-        mime: file.type || 'application/octet-stream',
-      });
+      await uploadAttachment(file, { entityType, entityId });
       qc.invalidateQueries({ queryKey });
       toast(t('crm.fileUploaded'));
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('crm.uploadFailed'));
+      toast.error(e instanceof UploadError ? t(e.messageKey) : e instanceof ApiError ? e.message : t('crm.uploadFailed'));
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = '';

@@ -12,6 +12,7 @@ import type { ReactNode } from 'react';
 import { cn } from '../ui';
 import { useEntityRefClick } from './entityRefClick';
 import { lowlight } from './lowlight';
+import { resolveFileSrc } from '../../lib/uploads';
 import './richtext.css';
 
 /** True when the doc has no visible content (text, mentions, rules…). */
@@ -231,7 +232,9 @@ function renderNode(node: any, key: string): ReactNode {
       return (
         <img
           key={key}
-          src={src}
+          // Stored paths are root-relative so the document survives a domain
+          // change; the desktop origin cannot serve them as-is (lib/uploads).
+          src={resolveFileSrc(src)}
           alt={typeof node.attrs?.alt === 'string' ? node.attrs.alt : ''}
           title={typeof node.attrs?.title === 'string' ? node.attrs.title : undefined}
           loading="lazy"

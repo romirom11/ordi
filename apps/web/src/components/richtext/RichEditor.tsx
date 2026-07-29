@@ -25,18 +25,18 @@ import Highlight from '@tiptap/extension-highlight';
 import TextStyle from '@tiptap/extension-text-style';
 import Color from '@tiptap/extension-color';
 import TextAlign from '@tiptap/extension-text-align';
-import Image from '@tiptap/extension-image';
 import Table from '@tiptap/extension-table';
 import TableRow from '@tiptap/extension-table-row';
 import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import {
-  Baseline, Bold, Check, ChevronDown, Code, Highlighter, Italic, Link2,
+  Baseline, Bold, Check, ChevronDown, Code, Highlighter, ImagePlus, Italic, Link2,
   Strikethrough, Trash2, Underline as UnderlineIcon, X,
 } from 'lucide-react';
-import { Button, Input, cn } from '../ui';
-import { Dialog } from '../overlays';
+import { Button, Input, Spinner, cn } from '../ui';
+import { Dialog, toast } from '../overlays';
+import { IMAGE_MIME, uploadErrorKey, uploadImage } from '../../lib/uploads';
 import { extendDict, useT } from '../../lib/i18n';
 import { useEntityRefClick } from './entityRefClick';
 import { mentionSuggestion } from './mention';
@@ -46,6 +46,7 @@ import { Callout } from './extensions/callout';
 import { ToggleBlock } from './extensions/toggle';
 import { BlockGutter } from './BlockGutter';
 import { CODE_LANGUAGES, lowlight } from './lowlight';
+import { ResolvedImage } from './images';
 import {
   ALIGNMENTS, HIGHLIGHTS, TEXT_COLORS, TURN_INTO, applyBlockType, currentBlock,
 } from './blocks';
@@ -82,7 +83,7 @@ extendDict({
     'editor.hint.code': 'Formatted code snippet',
     'editor.hint.table': '3×3 table with a header row',
     'editor.hint.divider': 'Horizontal rule',
-    'editor.hint.image': 'Embed an image by link',
+    'editor.hint.image': 'Upload one, or embed by link',
     'editor.turnInto': 'Turn into',
     'editor.insertBelow': 'Insert block below',
     'editor.blockActions': 'Drag to move, click for actions',
@@ -117,7 +118,15 @@ extendDict({
     'editor.color.purple': 'Purple',
     'editor.color.pink': 'Pink',
     'editor.color.red': 'Red',
-    'editor.imagePrompt': 'Image URL',
+    'editor.imagePrompt': 'https://…',
+    'editor.imageUpload': 'Upload an image',
+    'editor.imageOrLink': 'or link to one',
+    'editor.imageInsert': 'Insert',
+    'editor.imageHint': 'You can also paste a screenshot straight into the page, or drop an image file on it.',
+    'uploads.tooLarge': 'That file is over the 25 MB limit',
+    'uploads.notImage': 'That file is not an image',
+    'uploads.noStorage': 'Object storage is not configured on this instance',
+    'uploads.failed': 'Upload failed',
     'editor.tableRowBefore': 'Row above',
     'editor.tableRowAfter': 'Row below',
     'editor.tableColBefore': 'Column left',
@@ -159,7 +168,7 @@ extendDict({
     'editor.hint.code': 'Форматований фрагмент коду',
     'editor.hint.table': 'Таблиця 3×3 із шапкою',
     'editor.hint.divider': 'Горизонтальна лінія',
-    'editor.hint.image': 'Вставити зображення за посиланням',
+    'editor.hint.image': 'Завантажити або вставити за посиланням',
     'editor.turnInto': 'Перетворити на',
     'editor.insertBelow': 'Вставити блок нижче',
     'editor.blockActions': 'Тягніть, щоб перемістити; клік – дії',
@@ -194,7 +203,15 @@ extendDict({
     'editor.color.purple': 'Фіолетовий',
     'editor.color.pink': 'Рожевий',
     'editor.color.red': 'Червоний',
-    'editor.imagePrompt': 'Посилання на зображення',
+    'editor.imagePrompt': 'https://…',
+    'editor.imageUpload': 'Завантажити зображення',
+    'editor.imageOrLink': 'або вставити посилання',
+    'editor.imageInsert': 'Вставити',
+    'editor.imageHint': 'Також можна вставити скриншот прямо в сторінку або перетягнути файл зображення на неї.',
+    'uploads.tooLarge': 'Файл більший за ліміт 25 МБ',
+    'uploads.notImage': 'Цей файл не є зображенням',
+    'uploads.noStorage': 'На цьому інстансі не налаштоване файлове сховище',
+    'uploads.failed': 'Не вдалося завантажити',
     'editor.tableRowBefore': 'Рядок вище',
     'editor.tableRowAfter': 'Рядок нижче',
     'editor.tableColBefore': 'Стовпець ліворуч',
@@ -209,6 +226,12 @@ extendDict({
     'editor.noBlocks': 'Немає відповідних блоків',
   },
 });
+
+/** Image files carried by a paste or a drop, ignoring everything else. */
+function imageFilesFrom(data: DataTransfer | null): File[] {
+  if (!data) return [];
+  return Array.from(data.files).filter((f) => IMAGE_MIME.test(f.type));
+}
 
 export interface RichEditorProps {
   value: any;
@@ -531,22 +554,53 @@ export function RichEditor({ value, onChange, placeholder, editable = true, comp
   const requestLink = useRef(() => setLinkRequest((n) => n + 1));
 
   /**
-   * Ask for the image url in an app dialog rather than window.prompt: the
-   * desktop webview answers a native prompt with null, so the slash menu's
-   * Image entry would silently do nothing there.
+   * Images: upload a file, or paste a link to one already on the web.
    *
-   * The ref is what lets the extension list stay memoised with no deps – the
-   * extension captures the ref, not this render's setter.
+   * The dialog exists rather than window.prompt because the desktop webview
+   * answers a native prompt with null – the slash menu's Image entry would
+   * silently do nothing there. The ref is what lets the extension list stay
+   * memoised with no deps: the extension captures the ref, not this render's
+   * setter.
    */
   const [imageFor, setImageFor] = useState<Editor | null>(null);
   const [imageUrl, setImageUrl] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const requestImage = useRef((ed: Editor) => { setImageUrl(''); setImageFor(ed); });
 
-  const insertImage = useCallback(() => {
+  /**
+   * Upload and insert at the caret. Shared by the dialog, paste and drop, so a
+   * screenshot lands the same way however it arrives.
+   */
+  const insertUpload = useCallback(async (ed: Editor, file: File, at?: number) => {
+    setUploading(true);
+    try {
+      const up = await uploadImage(file);
+      const chain = ed.chain().focus();
+      if (at !== undefined) chain.insertContentAt(at, { type: 'image', attrs: { src: up.src, alt: file.name } });
+      else chain.setImage({ src: up.src, alt: file.name });
+      chain.run();
+      setImageFor(null);
+    } catch (e) {
+      toast.error(t(uploadErrorKey(e)));
+    } finally {
+      setUploading(false);
+    }
+  }, [t]);
+  // Paste and drop are wired through ProseMirror, which cannot see React state,
+  // so they reach the uploader through a ref that always holds the latest one.
+  const insertUploadRef = useRef(insertUpload);
+  insertUploadRef.current = insertUpload;
+
+  const insertImageUrl = useCallback(() => {
     const url = imageUrl.trim();
     if (imageFor && url) imageFor.chain().focus().setImage({ src: url }).run();
     setImageFor(null);
   }, [imageFor, imageUrl]);
+
+  const pickFile = useCallback((file: File | null | undefined) => {
+    if (file && imageFor) void insertUpload(imageFor, file);
+  }, [imageFor, insertUpload]);
 
   const extensions = useMemo(
     () => [
@@ -564,7 +618,7 @@ export function RichEditor({ value, onChange, placeholder, editable = true, comp
       // Headings and paragraphs only: aligning a list item or a table cell
       // fights the block's own layout.
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
-      Image.configure({ inline: false, allowBase64: false, HTMLAttributes: { class: 'ordi-rt-image' } }),
+      ResolvedImage.configure({ inline: false, allowBase64: false, HTMLAttributes: { class: 'ordi-rt-image' } }),
       Table.configure({ resizable: true, lastColumnResizable: false }),
       TableRow,
       TableHeader,
@@ -595,6 +649,10 @@ export function RichEditor({ value, onChange, placeholder, editable = true, comp
     [],
   );
 
+  // handlePaste/handleDrop are created before `editor` exists, so they reach it
+  // through a ref that is filled in immediately after.
+  const editorRef = useRef<Editor | null>(null);
+
   const editor = useEditor({
     extensions,
     content: value ?? EMPTY_DOC,
@@ -623,11 +681,39 @@ export function RichEditor({ value, onChange, placeholder, editable = true, comp
         }
         return false;
       },
+      /**
+       * Pasting a screenshot is the whole point of image support, and the
+       * clipboard hands it over as a File – returning true here claims the
+       * paste so ProseMirror does not also insert the browser's own
+       * base64 <img>, which would bloat the document instead of uploading.
+       */
+      handlePaste: (view, event) => {
+        const files = imageFilesFrom(event.clipboardData);
+        if (!files.length || !view.editable) return false;
+        event.preventDefault();
+        const ed = editorRef.current;
+        if (ed) files.forEach((f) => void insertUploadRef.current(ed, f));
+        return true;
+      },
+      handleDrop: (view, event, _slice, moved) => {
+        // `moved` means ProseMirror is relocating existing content – the block
+        // drag handle's own drop. Never treat that as a file drop.
+        if (moved || !view.editable) return false;
+        const files = imageFilesFrom((event as DragEvent).dataTransfer);
+        if (!files.length) return false;
+        event.preventDefault();
+        const at = view.posAtCoords({ left: (event as DragEvent).clientX, top: (event as DragEvent).clientY })?.pos;
+        const ed = editorRef.current;
+        if (ed) files.forEach((f) => void insertUploadRef.current(ed, f, at));
+        return true;
+      },
     },
     onUpdate: ({ editor: e }) => {
       onChangeRef.current(e.getJSON());
     },
   });
+
+  editorRef.current = editor;
 
   // Apply external value changes when they differ from the editor content,
   // but never while the user is typing in the editor.
@@ -681,16 +767,30 @@ export function RichEditor({ value, onChange, placeholder, editable = true, comp
       {editor && editable && inTable && <TableToolbar editor={editor} />}
       {editor && editable && inCode && <CodeToolbar editor={editor} />}
       <EditorContent editor={editor} />
-      <Dialog open={!!imageFor} onClose={() => setImageFor(null)} title={t('editor.block.image')} width={420}>
-        <div className="flex items-center gap-2 px-4 pb-4 pt-1">
-          <Input
-            autoFocus
-            value={imageUrl}
-            onChange={(e) => setImageUrl(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); insertImage(); } }}
-            placeholder={t('editor.imagePrompt')}
+      <Dialog open={!!imageFor} onClose={() => { if (!uploading) setImageFor(null); }} title={t('editor.block.image')} width={420}>
+        <div className="space-y-3 px-4 pb-4 pt-1">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => { pickFile(e.target.files?.[0]); e.target.value = ''; }}
           />
-          <Button size="sm" onClick={insertImage} disabled={!imageUrl.trim()}>{t('common.add', 'Add')}</Button>
+          <Button variant="outline" className="w-full" disabled={uploading} onClick={() => fileRef.current?.click()}>
+            {uploading ? <Spinner /> : <ImagePlus size={14} />} {t('editor.imageUpload')}
+          </Button>
+          <p className="text-center text-[11px] text-faint">{t('editor.imageOrLink')}</p>
+          <div className="flex items-center gap-2">
+            <Input
+              value={imageUrl}
+              onChange={(e) => setImageUrl(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); insertImageUrl(); } }}
+              placeholder={t('editor.imagePrompt')}
+              disabled={uploading}
+            />
+            <Button size="sm" onClick={insertImageUrl} disabled={uploading || !imageUrl.trim()}>{t('editor.imageInsert')}</Button>
+          </div>
+          <p className="text-[11px] text-faint">{t('editor.imageHint')}</p>
         </div>
       </Dialog>
     </div>

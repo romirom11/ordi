@@ -147,6 +147,8 @@ const ROWS: Row[] = [
   ['/saved-views', 'get', 'List saved views', null, undefined, 'core'],
   ['/custom-fields', 'get', 'List custom field definitions', null, undefined, 'core'],
   ['/attachments/presign', 'post', 'Presign an attachment upload', null, 'free', 'core'],
+  ['/attachments/register', 'post', 'Register an uploaded file (returns a signed embeddable src)', null, 'free', 'core'],
+  ['/files/{id}/{token}', 'get', 'Fetch a file by its signed link (no session required)', null, undefined, 'core'],
   ['/dashboard', 'get', 'Personal dashboard', null, undefined, 'core'],
   ['/webhooks', 'get', 'List webhook subscriptions', 'integrations.manage', undefined, 'integrations'],
   ['/webhooks', 'post', 'Create webhook subscription', 'integrations.manage', 'WebhookSubscriptionInput', 'integrations'],
