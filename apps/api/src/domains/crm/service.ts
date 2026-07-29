@@ -67,6 +67,13 @@ export async function updateCompany(actor: Actor, id: string, input: any) {
  * records pointing at something the app no longer shows anywhere – an invoice
  * with no client is a bookkeeping problem, not a tidy-up. Refuse, and point at
  * archiving, which is what "we stopped working with them" actually means.
+ *
+ * Every count ignores soft-deleted rows: a record the user already deleted is
+ * not a dependency, and counting it made the client undeletable forever with
+ * nothing on screen to explain why (demoting a deal to a lead soft-deletes the
+ * deal, so that dead end was easy to reach). The message names what actually
+ * blocks, with counts – "leads, deals, projects or invoices" left the user
+ * hunting through four lists that all looked empty.
  */
 export async function softDeleteCompany(actor: Actor, id: string) {
   const { db } = getDb();
@@ -76,7 +83,7 @@ export async function softDeleteCompany(actor: Actor, id: string) {
     select
       (select count(*)::int from invoices where company_id = ${id} and deleted_at is null) as invoices,
       (select count(*)::int from projects where company_id = ${id} and deleted_at is null) as projects,
-      (select count(*)::int from deals where company_id = ${id}) as deals,
+      (select count(*)::int from deals where company_id = ${id} and deleted_at is null) as deals,
       (select count(*)::int from leads where company_id = ${id} and deleted_at is null) as leads
   `) as unknown as { invoices: number; projects: number; deals: number; leads: number }[];
   const invoices = Number(rows[0]?.invoices ?? 0);
@@ -84,8 +91,20 @@ export async function softDeleteCompany(actor: Actor, id: string) {
   const deals = Number(rows[0]?.deals ?? 0);
   const leads = Number(rows[0]?.leads ?? 0);
 
-  if (invoices > 0 || projects > 0 || deals > 0 || leads > 0) {
-    throw err.domain('Cannot delete a company that still has leads, deals, projects or invoices. Archive it instead.', {
+  const blockers: string[] = [];
+  for (const [count, one, many] of [
+    [leads, 'lead', 'leads'],
+    [deals, 'deal', 'deals'],
+    [projects, 'project', 'projects'],
+    [invoices, 'invoice', 'invoices'],
+  ] as const) {
+    if (count > 0) blockers.push(`${count} ${count === 1 ? one : many}`);
+  }
+  if (blockers.length) {
+    const what = blockers.length > 1
+      ? `${blockers.slice(0, -1).join(', ')} and ${blockers[blockers.length - 1]}`
+      : blockers[0];
+    throw err.domain(`Cannot delete a company that still has ${what}. Delete those first, or archive the company instead.`, {
       invoices, projects, deals, leads,
     });
   }

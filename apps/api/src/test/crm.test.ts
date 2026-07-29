@@ -117,6 +117,61 @@ describe('project ↔ company link via PATCH', () => {
   });
 });
 
+/**
+ * A client is undeletable while live records still point at it – but only live
+ * ones. Deleting a deal, or demoting it back to a lead (which soft-deletes the
+ * deal), used to leave a ghost the guard still counted, so the client could
+ * never be deleted and nothing on screen said why.
+ */
+describe('company deletion dependencies', () => {
+  const owner = () => reqAs(users.owner!.cookie);
+  let clientId: string;
+  let dealId: string;
+
+  beforeAll(async () => {
+    clientId = (await json(owner().post('/companies', { name: 'Lea Hough & Co LLP' }))).id;
+  });
+
+  it('names what blocks the delete, with counts', async () => {
+    dealId = (await json(owner().post('/deals', { companyId: clientId, stageId, title: 'Survey work' }))).id;
+
+    const res = await owner().del(`/companies/${clientId}`);
+    expect(res.status).toBe(422);
+    const body = await json(res);
+    expect(body.error.message).toContain('1 deal');
+    expect(body.error.details).toMatchObject({ deals: 1, leads: 0, projects: 0, invoices: 0 });
+  });
+
+  it('lists every blocker, not a fixed sentence', async () => {
+    await owner().post('/leads', { companyId: clientId, title: 'Retrofit survey' });
+    const body = await json(owner().del(`/companies/${clientId}`));
+    expect(body.error.message).toContain('1 lead and 1 deal');
+  });
+
+  it('a deleted deal and lead stop blocking – the client deletes cleanly', async () => {
+    const leads = await json(owner().get(`/leads?companyId=${clientId}`));
+    for (const lead of leads.data) expect((await owner().del(`/leads/${lead.id}`)).status).toBe(200);
+    expect((await owner().del(`/deals/${dealId}`)).status).toBe(200);
+
+    expect((await owner().del(`/companies/${clientId}`)).status).toBe(200);
+    expect((await owner().get(`/companies/${clientId}`)).status).toBe(404);
+  });
+
+  it('a deal demoted to a lead leaves no ghost behind', async () => {
+    const id = (await json(owner().post('/companies', { name: 'Demote Ltd' }))).id;
+    const deal = (await json(owner().post('/deals', { companyId: id, stageId, title: 'Legacy pipeline row' }))).id;
+    const { leadId } = await json(owner().post(`/deals/${deal}/demote-to-lead`, {}));
+
+    // The lead is the live record now; the demoted deal is gone, not a blocker.
+    const blocked = await json(owner().del(`/companies/${id}`));
+    expect(blocked.error.message).toContain('1 lead');
+    expect(blocked.error.details.deals).toBe(0);
+
+    expect((await owner().del(`/leads/${leadId}`)).status).toBe(200);
+    expect((await owner().del(`/companies/${id}`)).status).toBe(200);
+  });
+});
+
 describe('entity attachments', () => {
   let fileId: string;
 
