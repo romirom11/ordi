@@ -670,15 +670,27 @@ export function fmtDate(d?: string | null): string {
   return formatDay(d, { compact: true }) || '–';
 }
 
+/**
+ * Compact relative time. A past instant reads bare ("2d" = two days ago); a
+ * future one is prefixed ("in 2d").
+ *
+ * The sign check is not cosmetic. This formatter was written for activity feeds,
+ * then reused for the due date of planned sales work – and for any future
+ * timestamp `diff` is negative, so `min < 1` matched and everything collapsed to
+ * "now". In the Work queue a follow-up due next week and one due this minute
+ * looked identical, which is the one distinction that queue exists to make.
+ */
 export function fmtRelative(d?: string | null): string {
   if (!d) return '';
   const diff = Date.now() - new Date(d).getTime();
-  const min = Math.round(diff / 60_000);
+  const ahead = diff < 0;
+  const min = Math.round(Math.abs(diff) / 60_000);
+  const signed = (value: string) => (ahead ? `in ${value}` : value);
   if (min < 1) return 'now';
-  if (min < 60) return `${min}m`;
+  if (min < 60) return signed(`${min}m`);
   const h = Math.round(min / 60);
-  if (h < 24) return `${h}h`;
+  if (h < 24) return signed(`${h}h`);
   const days = Math.round(h / 24);
-  if (days < 30) return `${days}d`;
+  if (days < 30) return signed(`${days}d`);
   return fmtDate(d);
 }

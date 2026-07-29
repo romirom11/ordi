@@ -77,16 +77,24 @@ export function ModuleGate({ module, perm, children }: {
       </div>
     );
   }
-  if (perm && !can(perm)) {
-    return (
-      <div className="page-enter px-6 py-10">
-        <EmptyState
-          icon={<Lock size={18} />}
-          title={t('modules.noAccessTitle')}
-          hint={t('modules.noAccessHint')}
-        />
-      </div>
-    );
-  }
+  if (perm && !can(perm)) return <NoAccessNotice />;
   return <>{children}</>;
+}
+
+/**
+ * The same wall the route gate raises, for a surface that is reachable with the
+ * page's own permission but holds something narrower – the Pipeline tab under
+ * /crm/:tab, which passes crm.read and then needs deals.read of its own.
+ */
+export function NoAccessNotice() {
+  const t = useT();
+  return (
+    <div className="page-enter px-6 py-10">
+      <EmptyState
+        icon={<Lock size={18} />}
+        title={t('modules.noAccessTitle')}
+        hint={t('modules.noAccessHint')}
+      />
+    </div>
+  );
 }

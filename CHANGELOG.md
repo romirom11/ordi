@@ -61,6 +61,20 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   `deals.ts`, `leads.ts`, `activities.ts` and `common.ts`. Web
   `crm/shared.tsx` lost its ~470 lines of dictionary to `crm/i18n.ts`.
   Every `input: any` in the CRM service is typed from its Zod schema.
+- Planned work no longer reads "now". `fmtRelative` measured
+  `now - timestamp`, so every future instant went negative, matched the
+  under-a-minute branch and rendered as "now" - in the Work queue, the
+  Leads table, the lead page's next-action card and the sales history. A
+  follow-up due next week and one due this minute looked identical, which
+  is the one distinction that queue exists to make. Future instants read
+  "in 5d" now; past ones are unchanged.
+- The Pipeline tab is behind `deals.read` on the URL as well as in the tab
+  bar. `/crm/deals` matches the `/crm/:tab` route, so it passed the
+  route's `crm.read` check and rendered the pipeline shell - subtitle
+  included - to a role that cannot read a deal. It shows the no-access
+  notice instead. The New deal dialog is only mounted with `deals.write`,
+  since its queries ran whether or not it was open and 403'd on every CRM
+  visit for such a role.
 
 ## v1.16.0
 
