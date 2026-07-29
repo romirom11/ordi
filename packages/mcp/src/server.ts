@@ -440,6 +440,13 @@ export function buildServer(client: OrdiClient): McpServer {
   return client.post('/sales-activities', args);
 }));
 
+  server.tool('update_sales_activity', 'Edit a planned sales activity before it is completed or cancelled', {
+  activityId: z.string(), type: z.enum(SALES_ACTIVITY_TYPES).optional(),
+  dueAt: z.string().describe('ISO date-time').optional(), channel: z.string().nullable().optional(),
+  subject: z.string().nullable().optional(), context: z.string().nullable().optional(),
+  ownerId: z.string().nullable().optional(),
+}, ({ activityId, ...patch }) => wrap(() => client.patch(`/sales-activities/${activityId}`, patch)));
+
   server.tool('complete_sales_activity', 'Complete a planned sales activity and optionally schedule its follow-up in the same action', {
   activityId: z.string(), outcome: z.string().optional(), leadStatus: z.enum(LEAD_ACTIVITY_OUTCOME_STATUSES).optional(),
   nurtureUntil: dateOnlySchema.optional().describe('Required when leadStatus is nurture; independent of follow-up timing'),
@@ -460,6 +467,10 @@ export function buildServer(client: OrdiClient): McpServer {
   }
   return client.post(`/sales-activities/${activityId}/complete`, body);
 }));
+
+  server.tool('cancel_sales_activity', 'Cancel a planned sales activity that is no longer needed', {
+  activityId: z.string(),
+}, ({ activityId }) => wrap(() => client.post(`/sales-activities/${activityId}/cancel`, {})));
 
   server.tool('convert_lead', 'Convert an engaged lead into a qualified deal while preserving its history and next action', {
   leadId: z.string(), stageId: z.string().optional(), title: z.string().optional(),

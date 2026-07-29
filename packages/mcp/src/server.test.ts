@@ -9,7 +9,11 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { buildServer, decodeEntities, scrub, textToDoc } from './server';
 import { OrdiClient } from './client';
 
-function fakeApi(routes: Record<string, unknown>, posts: Array<{ path: string; body: unknown }> = []): OrdiClient {
+function fakeApi(
+  routes: Record<string, unknown>,
+  posts: Array<{ path: string; body: unknown }> = [],
+  patches: Array<{ path: string; body: unknown }> = [],
+): OrdiClient {
   const client = new OrdiClient({ baseUrl: 'http://test', token: 't' });
   client.get = async <T>(path: string): Promise<T> => {
     const key = Object.keys(routes).find((r) => path.startsWith(r));
@@ -19,6 +23,10 @@ function fakeApi(routes: Record<string, unknown>, posts: Array<{ path: string; b
   client.post = async <T>(path: string, body?: unknown): Promise<T> => {
     posts.push({ path, body });
     return { id: 'new-id' } as T;
+  };
+  client.patch = async <T>(path: string, body?: unknown): Promise<T> => {
+    patches.push({ path, body });
+    return { id: 'updated-id' } as T;
   };
   return client;
 }
@@ -170,7 +178,7 @@ describe('sales workspace tools', () => {
     for (const name of [
       'list_leads', 'get_lead', 'get_sales_work', 'list_sales_activities',
       'create_lead', 'update_lead', 'preview_research_import', 'import_research', 'schedule_sales_activity',
-      'complete_sales_activity', 'convert_lead', 'demote_deal_to_lead',
+      'update_sales_activity', 'complete_sales_activity', 'cancel_sales_activity', 'convert_lead', 'demote_deal_to_lead',
     ]) expect(names).toContain(name);
   });
 
@@ -206,6 +214,38 @@ describe('sales workspace tools', () => {
       { path: '/sales-activities/a1/complete', body: { outcome: 'Replied', leadStatus: 'engaged' } },
       { path: '/leads/l1/convert', body: { stageId: 'qualified' } },
     ]);
+  });
+
+  it('edits and cancels planned activities through the API contracts', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const patches: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({}, posts, patches));
+    await client.callTool({
+      name: 'update_sales_activity',
+      arguments: {
+        activityId: 'a1',
+        type: 'meeting',
+        dueAt: '2026-07-30T10:00:00Z',
+        subject: 'Discovery call',
+      },
+    });
+    await client.callTool({
+      name: 'cancel_sales_activity',
+      arguments: { activityId: 'a2' },
+    });
+
+    expect(patches).toEqual([{
+      path: '/sales-activities/a1',
+      body: {
+        type: 'meeting',
+        dueAt: '2026-07-30T10:00:00Z',
+        subject: 'Discovery call',
+      },
+    }]);
+    expect(posts).toEqual([{
+      path: '/sales-activities/a2/cancel',
+      body: {},
+    }]);
   });
 
   it('previews research without committing it', async () => {

@@ -1,10 +1,10 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, Check, Plus } from 'lucide-react';
+import { CalendarClock, Check, MoreHorizontal, Pencil, Plus, X } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { useT } from '../../lib/i18n';
 import { Button, EmptySection, Input, Select, Spinner, Textarea, fmtDate, fmtRelative } from '../ui';
-import { Dialog, toast } from '../overlays';
+import { ConfirmDialog, Dialog, DropdownMenu, MenuItem, toast } from '../overlays';
 import {
   LEAD_ACTIVITY_OUTCOME_STATUSES,
   SALES_ACTIVITY_TYPES,
@@ -38,7 +38,26 @@ export function SalesActivityPanel({ leadId, dealId, canWrite }: {
   const activitiesQ = useSalesActivities({ leadId, dealId });
   const [schedule, setSchedule] = useState(false);
   const [complete, setComplete] = useState<SalesActivity | null>(null);
+  const [edit, setEdit] = useState<SalesActivity | null>(null);
+  const [cancel, setCancel] = useState<SalesActivity | null>(null);
   const activities = activitiesQ.data ?? [];
+  const qc = useQueryClient();
+  const cancelMutation = useMutation({
+    mutationFn: (activity: SalesActivity) => api.post(`/sales-activities/${activity.id}/cancel`, {
+      version: activity.version,
+    }),
+    onSuccess: (_, activity) => {
+      qc.invalidateQueries({ queryKey: ['sales-activities'] });
+      qc.invalidateQueries({ queryKey: ['sales-work'] });
+      if (activity.leadId) {
+        qc.invalidateQueries({ queryKey: ['leads'] });
+        qc.invalidateQueries({ queryKey: ['lead', activity.leadId] });
+      }
+      setCancel(null);
+      toast(t('crm.activityCancelled'));
+    },
+    onError: (error) => toast.error(errorText(error, t('common.error'))),
+  });
 
   return (
     <section>
@@ -82,16 +101,44 @@ export function SalesActivityPanel({ leadId, dealId, canWrite }: {
                 </p>
               </div>
               {canWrite && activity.status === 'planned' && (
-                <Button size="xs" variant="ghost" onClick={() => setComplete(activity)}>
-                  <Check size={13} /> {t('crm.completeAction')}
-                </Button>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button size="xs" variant="ghost" onClick={() => setComplete(activity)}>
+                    <Check size={13} /> {t('crm.completeAction')}
+                  </Button>
+                  <DropdownMenu
+                    align="end"
+                    trigger={(
+                      <Button size="xs" variant="ghost" aria-label={t('common.actions')}>
+                        <MoreHorizontal size={14} />
+                      </Button>
+                    )}
+                  >
+                    <MenuItem icon={<Pencil size={13} />} onSelect={() => setEdit(activity)}>
+                      {t('common.edit')}
+                    </MenuItem>
+                    <MenuItem icon={<X size={13} />} danger onSelect={() => setCancel(activity)}>
+                      {t('crm.cancelAction')}
+                    </MenuItem>
+                  </DropdownMenu>
+                </div>
               )}
             </div>
           ))}
         </div>
       )}
       <ScheduleActivityDialog open={schedule} onClose={() => setSchedule(false)} leadId={leadId} dealId={dealId} />
+      <EditActivityDialog activity={edit} onClose={() => setEdit(null)} />
       <CompleteActivityDialog activity={complete} onClose={() => setComplete(null)} />
+      <ConfirmDialog
+        open={!!cancel}
+        onClose={() => setCancel(null)}
+        onConfirm={() => { if (cancel) cancelMutation.mutate(cancel); }}
+        title={t('crm.cancelAction')}
+        body={t('crm.cancelActionBody')}
+        confirmLabel={t('crm.cancelAction')}
+        cancelLabel={t('common.cancel')}
+        pending={cancelMutation.isPending}
+      />
     </section>
   );
 }
@@ -270,6 +317,90 @@ export function CompleteActivityDialog({ activity, onClose }: {
         <div className="flex justify-end gap-2">
           <Button type="button" size="sm" variant="ghost" onClick={close}>{t('common.cancel')}</Button>
           <Button type="submit" size="sm" disabled={mutation.isPending}>{mutation.isPending ? <Spinner /> : t('crm.completeAction')}</Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+function EditActivityDialog({ activity, onClose }: {
+  activity: SalesActivity | null;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const qc = useQueryClient();
+  const [type, setType] = useState('follow_up');
+  const [dueAt, setDueAt] = useState('');
+  const [channel, setChannel] = useState('');
+  const [subject, setSubject] = useState('');
+  const [context, setContext] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!activity) return;
+    setType(activity.type);
+    setDueAt(activity.dueAt ? toLocalInput(new Date(activity.dueAt)) : '');
+    setChannel(activity.channel ?? '');
+    setSubject(activity.subject ?? '');
+    setContext(activity.context ?? '');
+    setError(null);
+  }, [activity]);
+
+  const mutation = useMutation({
+    mutationFn: () => api.patch(`/sales-activities/${activity!.id}`, {
+      type,
+      dueAt: new Date(dueAt).toISOString(),
+      channel: channel.trim() || null,
+      subject: subject.trim() || null,
+      context: context.trim() || null,
+      version: activity?.version,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sales-activities'] });
+      qc.invalidateQueries({ queryKey: ['sales-work'] });
+      if (activity?.leadId) {
+        qc.invalidateQueries({ queryKey: ['leads'] });
+        qc.invalidateQueries({ queryKey: ['lead', activity.leadId] });
+      }
+      toast(t('crm.activityUpdated'));
+      onClose();
+    },
+    onError: (error) => setError(errorText(error, t('common.error'))),
+  });
+
+  return (
+    <Dialog open={!!activity} onClose={onClose} title={t('crm.editAction')} width={440}>
+      <form
+        onSubmit={(event) => { event.preventDefault(); mutation.mutate(); }}
+        className="space-y-3 px-4 pb-4 pt-1"
+      >
+        <Field label={t('crm.activityType')}>
+          <Select className="w-full" value={type} onChange={(event) => setType(event.target.value)}>
+            {SALES_ACTIVITY_TYPES.map((value) => (
+              <option key={value} value={value}>{salesActivityTypeLabel(t, value)}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label={t('crm.dueAt')}>
+          <Input required type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={t('crm.channel')}>
+            <Input value={channel} onChange={(event) => setChannel(event.target.value)} />
+          </Field>
+          <Field label={t('common.title')}>
+            <Input value={subject} onChange={(event) => setSubject(event.target.value)} />
+          </Field>
+        </div>
+        <Field label={t('crm.context')}>
+          <Textarea rows={3} value={context} onChange={(event) => setContext(event.target.value)} />
+        </Field>
+        {error && <p className="text-[13px] text-destructive">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <Button type="button" size="sm" variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button type="submit" size="sm" disabled={mutation.isPending || !dueAt}>
+            {mutation.isPending ? <Spinner /> : t('common.save')}
+          </Button>
         </div>
       </form>
     </Dialog>

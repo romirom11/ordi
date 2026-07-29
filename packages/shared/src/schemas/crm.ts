@@ -187,6 +187,10 @@ export const salesActivityUpdateSchema = z.object({
   version: z.number().int().optional(),
 });
 
+export const salesActivityCancelSchema = z.object({
+  version: z.number().int().optional(),
+});
+
 export const salesActivityCompleteSchema = z.object({
   outcome: z.string().nullable().optional(),
   context: z.string().nullable().optional(),

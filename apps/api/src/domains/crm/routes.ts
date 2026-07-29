@@ -5,7 +5,7 @@ import {
   companyInputSchema, companyUpdateSchema, contactInputSchema, contactUpdateSchema,
   dealStageInputSchema, dealInputSchema, dealUpdateSchema, dealMoveSchema, noteInputSchema,
   leadInputSchema, leadUpdateSchema, researchImportSchema, salesActivityInputSchema,
-  salesActivityUpdateSchema, salesActivityCompleteSchema, leadConvertSchema, dealDemoteSchema,
+  salesActivityUpdateSchema, salesActivityCancelSchema, salesActivityCompleteSchema, leadConvertSchema, dealDemoteSchema,
   type CustomFieldFilter,
 } from '@ordi/shared';
 import type { Actor, AppEnv } from '../../context';
@@ -327,7 +327,7 @@ export function crmRoutes() {
 
   app.post('/sales-activities/:id/cancel', async (c) => {
     const actor = currentActor(c);
-    const body = await c.req.json().catch(() => ({}));
+    const body = salesActivityCancelSchema.parse(await c.req.json().catch(() => ({})));
     const activity = await svc.getSalesActivity(c.req.param('id'));
     assertSalesActivityWrite(actor, activity.dealId);
     await svc.cancelSalesActivity(actor, activity.id, body.version);

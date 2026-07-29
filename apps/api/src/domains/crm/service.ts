@@ -707,10 +707,15 @@ export async function nextSalesActivities(params: { leadIds?: string[]; dealIds?
 
 export async function getSalesActivity(id: string) {
   const { db } = getDb();
-  const [activity] = await db.select().from(schema.salesActivities).where(and(
+  return salesActivityRecord(db, id);
+}
+
+async function salesActivityRecord(dbOrTx: DbReader, id: string, lock = false) {
+  const query = dbOrTx.select().from(schema.salesActivities).where(and(
     eq(schema.salesActivities.id, id),
     isNull(schema.salesActivities.deletedAt),
   ));
+  const [activity] = lock ? await query.for('update') : await query;
   if (!activity) throw err.notFound('Sales activity not found');
   return activity;
 }
@@ -800,33 +805,35 @@ export async function createSalesActivity(actor: Actor, input: any) {
 
 export async function updateSalesActivity(actor: Actor, id: string, input: any) {
   const { db } = getDb();
-  const [before] = await db.select().from(schema.salesActivities).where(and(
-    eq(schema.salesActivities.id, id),
-    isNull(schema.salesActivities.deletedAt),
-  ));
-  if (!before) throw err.notFound('Sales activity not found');
-  assertVersion(before, input.version, before);
-  if (before.status !== 'planned') throw err.domain('Only planned activities can be edited');
-  const patch: Record<string, unknown> = {};
-  for (const key of ['type', 'channel', 'subject', 'context', 'ownerId']) {
-    if (input[key] !== undefined) patch[key] = input[key];
-  }
-  if (input.dueAt !== undefined) patch.dueAt = new Date(input.dueAt);
-  await db.update(schema.salesActivities).set(patch)
-    .where(and(eq(schema.salesActivities.id, id), eq(schema.salesActivities.version, before.version)));
-  await writeActivity(db, {
-    entityType: before.leadId ? 'lead' : 'deal',
-    entityId: before.leadId ?? before.dealId!,
-    action: 'sales_activity_updated',
-    before: { activityId: id, ...before },
-    after: { activityId: id, ...patch },
-    actorId: actor.userId,
-    actorType: actor.actorType,
+  return db.transaction(async (tx) => {
+    const before = await salesActivityRecord(tx, id, true);
+    assertVersion(before, input.version, before);
+    if (before.status !== 'planned') throw err.domain('Only planned activities can be edited');
+    const patch: Record<string, unknown> = {};
+    for (const key of ['type', 'channel', 'subject', 'context', 'ownerId']) {
+      if (input[key] !== undefined) patch[key] = input[key];
+    }
+    if (input.dueAt !== undefined) patch.dueAt = new Date(input.dueAt);
+    if (!Object.keys(patch).length) return before;
+
+    const [after] = await tx.update(schema.salesActivities).set(patch)
+      .where(and(eq(schema.salesActivities.id, id), eq(schema.salesActivities.version, before.version)))
+      .returning();
+    if (!after) throw err.conflict('The record was modified by someone else', before);
+    const auditBefore = Object.fromEntries(
+      Object.keys(patch).map((key) => [key, before[key as keyof typeof before]]),
+    );
+    await writeActivity(tx, {
+      entityType: before.leadId ? 'lead' : 'deal',
+      entityId: before.leadId ?? before.dealId!,
+      action: 'sales_activity_updated',
+      before: { activityId: id, ...auditBefore },
+      after: { activityId: id, ...patch },
+      actorId: actor.userId,
+      actorType: actor.actorType,
+    });
+    return after;
   });
-  return (await listSalesActivities({
-    leadId: before.leadId ?? undefined,
-    dealId: before.dealId ?? undefined,
-  })).find((row) => row.id === id);
 }
 
 export async function completeSalesActivity(actor: Actor, id: string, input: any) {
@@ -894,23 +901,24 @@ export async function completeSalesActivity(actor: Actor, id: string, input: any
 
 export async function cancelSalesActivity(actor: Actor, id: string, version?: number) {
   const { db } = getDb();
-  const [before] = await db.select().from(schema.salesActivities).where(and(
-    eq(schema.salesActivities.id, id),
-    isNull(schema.salesActivities.deletedAt),
-  ));
-  if (!before) throw err.notFound('Sales activity not found');
-  if (before.status === 'cancelled') return;
-  if (before.status !== 'planned') throw err.domain('Only planned activities can be cancelled');
-  assertVersion(before, version, before);
-  await db.update(schema.salesActivities).set({ status: 'cancelled' })
-    .where(and(eq(schema.salesActivities.id, id), eq(schema.salesActivities.version, before.version)));
-  await writeActivity(db, {
-    entityType: before.leadId ? 'lead' : 'deal',
-    entityId: before.leadId ?? before.dealId!,
-    action: 'sales_activity_cancelled',
-    after: { activityId: id },
-    actorId: actor.userId,
-    actorType: actor.actorType,
+  return db.transaction(async (tx) => {
+    const before = await salesActivityRecord(tx, id, true);
+    if (before.status === 'cancelled') return;
+    if (before.status !== 'planned') throw err.domain('Only planned activities can be cancelled');
+    assertVersion(before, version, before);
+    const [cancelled] = await tx.update(schema.salesActivities).set({ status: 'cancelled' })
+      .where(and(eq(schema.salesActivities.id, id), eq(schema.salesActivities.version, before.version)))
+      .returning({ id: schema.salesActivities.id });
+    if (!cancelled) throw err.conflict('The record was modified by someone else', before);
+    await writeActivity(tx, {
+      entityType: before.leadId ? 'lead' : 'deal',
+      entityId: before.leadId ?? before.dealId!,
+      action: 'sales_activity_cancelled',
+      before: { activityId: id, status: before.status },
+      after: { activityId: id, status: 'cancelled' },
+      actorId: actor.userId,
+      actorType: actor.actorType,
+    });
   });
 }
 

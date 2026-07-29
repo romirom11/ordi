@@ -427,6 +427,166 @@ describe('research import and daily work', () => {
 });
 
 describe('sales activity data integrity', () => {
+  it('edits and cancels planned activities with optimistic locking and audit history', async () => {
+    const { db } = getDb();
+    const companyId = ulid();
+    await db.insert(schema.companies).values({
+      id: companyId,
+      name: 'Activity Lifecycle',
+      createdBy: users.owner!.userId,
+    });
+    const lead = await json(reqAs(users.owner!.cookie).post('/leads', {
+      companyId,
+      title: 'Activity lifecycle lead',
+      status: 'ready',
+    }));
+    const editId = (await json(reqAs(users.owner!.cookie).post('/sales-activities', {
+      leadId: lead.id,
+      type: 'follow_up',
+      dueAt: new Date(Date.now() + 86_400_000).toISOString(),
+    }))).id;
+    const cancelId = (await json(reqAs(users.owner!.cookie).post('/sales-activities', {
+      leadId: lead.id,
+      type: 'call',
+      dueAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+    }))).id;
+    const before = (await json(reqAs(users.owner!.cookie)
+      .get(`/sales-activities?leadId=${lead.id}`))).data;
+    const editBefore = before.find((activity: any) => activity.id === editId);
+    const cancelBefore = before.find((activity: any) => activity.id === cancelId);
+    const dueAt = new Date(Date.now() + 3 * 86_400_000).toISOString();
+
+    const edited = await json(reqAs(users.owner!.cookie).patch(`/sales-activities/${editId}`, {
+      type: 'meeting',
+      subject: 'Discovery call',
+      dueAt,
+      version: editBefore.version,
+    }));
+    expect(edited).toMatchObject({
+      id: editId,
+      type: 'meeting',
+      subject: 'Discovery call',
+      status: 'planned',
+      version: editBefore.version + 1,
+    });
+    const stale = await reqAs(users.owner!.cookie).patch(`/sales-activities/${editId}`, {
+      subject: 'Stale edit',
+      version: editBefore.version,
+    });
+    expect(stale.status).toBe(409);
+
+    const cancelled = await reqAs(users.owner!.cookie).post(`/sales-activities/${cancelId}/cancel`, {
+      version: cancelBefore.version,
+    });
+    expect(cancelled.status).toBe(200);
+    const invalidVersion = await reqAs(users.owner!.cookie).post(`/sales-activities/${editId}/cancel`, {
+      version: 'wrong',
+    });
+    expect(invalidVersion.status).toBe(400);
+
+    const after = (await json(reqAs(users.owner!.cookie)
+      .get(`/sales-activities?leadId=${lead.id}`))).data;
+    expect(after.find((activity: any) => activity.id === cancelId).status).toBe('cancelled');
+    const audit = await db.select().from(schema.activityLog).where(eq(schema.activityLog.entityId, lead.id));
+    expect(audit.filter((row) => row.action === 'sales_activity_updated')).toHaveLength(1);
+    expect(audit.filter((row) => row.action === 'sales_activity_cancelled')).toHaveLength(1);
+  });
+
+  it('rolls back an activity edit when its audit write fails', async () => {
+    const { db } = getDb();
+    const companyId = ulid();
+    await db.insert(schema.companies).values({
+      id: companyId,
+      name: 'Atomic Activity Edit',
+      createdBy: users.owner!.userId,
+    });
+    const lead = await json(reqAs(users.owner!.cookie).post('/leads', {
+      companyId,
+      title: 'Atomic edit lead',
+      status: 'ready',
+    }));
+    const created = await json(reqAs(users.owner!.cookie).post('/sales-activities', {
+      leadId: lead.id,
+      type: 'follow_up',
+      dueAt: new Date(Date.now() + 86_400_000).toISOString(),
+    }));
+    const before = (await json(reqAs(users.owner!.cookie)
+      .get(`/sales-activities?leadId=${lead.id}`))).data[0];
+
+    await db.execute(sql.raw(`
+      alter table activity_log
+      add constraint activity_log_test_no_sales_activity_updated
+      check (action <> 'sales_activity_updated') not valid
+    `));
+    try {
+      const response = await reqAs(users.owner!.cookie).patch(`/sales-activities/${created.id}`, {
+        subject: 'Rejected atomic edit',
+        version: before.version,
+      });
+      expect(response.status).toBe(500);
+
+      const after = (await json(reqAs(users.owner!.cookie)
+        .get(`/sales-activities?leadId=${lead.id}`))).data[0];
+      expect(after).toMatchObject({
+        id: created.id,
+        subject: null,
+        version: before.version,
+      });
+    } finally {
+      await db.execute(sql.raw(`
+        alter table activity_log
+        drop constraint if exists activity_log_test_no_sales_activity_updated
+      `));
+    }
+  });
+
+  it('rolls back an activity cancellation when its audit write fails', async () => {
+    const { db } = getDb();
+    const companyId = ulid();
+    await db.insert(schema.companies).values({
+      id: companyId,
+      name: 'Atomic Activity Cancel',
+      createdBy: users.owner!.userId,
+    });
+    const lead = await json(reqAs(users.owner!.cookie).post('/leads', {
+      companyId,
+      title: 'Atomic cancel lead',
+      status: 'ready',
+    }));
+    const created = await json(reqAs(users.owner!.cookie).post('/sales-activities', {
+      leadId: lead.id,
+      type: 'follow_up',
+      dueAt: new Date(Date.now() + 86_400_000).toISOString(),
+    }));
+    const before = (await json(reqAs(users.owner!.cookie)
+      .get(`/sales-activities?leadId=${lead.id}`))).data[0];
+
+    await db.execute(sql.raw(`
+      alter table activity_log
+      add constraint activity_log_test_no_sales_activity_cancelled
+      check (action <> 'sales_activity_cancelled') not valid
+    `));
+    try {
+      const response = await reqAs(users.owner!.cookie).post(`/sales-activities/${created.id}/cancel`, {
+        version: before.version,
+      });
+      expect(response.status).toBe(500);
+
+      const after = (await json(reqAs(users.owner!.cookie)
+        .get(`/sales-activities?leadId=${lead.id}`))).data[0];
+      expect(after).toMatchObject({
+        id: created.id,
+        status: 'planned',
+        version: before.version,
+      });
+    } finally {
+      await db.execute(sql.raw(`
+        alter table activity_log
+        drop constraint if exists activity_log_test_no_sales_activity_cancelled
+      `));
+    }
+  });
+
   it('rolls back a lead transition when cancelling its activities fails', async () => {
     const { db } = getDb();
     const companyId = ulid();
