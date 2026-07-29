@@ -34,7 +34,7 @@ beforeAll(async () => {
     name: 'Northwind', domain: 'northwind.io', status: 'lead',
     customFields: { icp_fit: 'high', source: 'referral' },
   }))).id;
-  stageId = (await json(owner.post('/deal-stages', { name: 'Lead', position: 0, probability: 10 }))).id;
+  stageId = (await json(owner.post('/deal-stages', { name: 'Qualified', position: 0, probability: 30 }))).id;
   lostStageId = (await json(owner.post('/deal-stages', { name: 'Lost', position: 90, probability: 0, isLost: true }))).id;
   dealId = (await json(owner.post('/deals', {
     companyId, title: 'Platform build', stageId, amount: 12000, customFields: { lost_reason_code: null },

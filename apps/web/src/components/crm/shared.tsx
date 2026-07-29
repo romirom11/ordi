@@ -3,6 +3,7 @@
  * the Clients table, the Pipeline kanban and the Company detail page.
  */
 import { useQuery } from '@tanstack/react-query';
+import { isLegacyLeadStageName } from '@ordi/shared';
 import { api, qs } from '../../lib/api';
 import { extendDict, useT } from '../../lib/i18n';
 import { cn } from '../ui';
@@ -356,8 +357,6 @@ extendDict({
     'crm.openSource': 'Open source',
     'crm.convertToDeal': 'Convert to deal',
     'crm.converted': 'Lead converted',
-    'crm.demoteToLead': 'Move to leads',
-    'crm.demoted': 'Deal moved to leads',
     'crm.importPaste': 'Paste the research JSON',
     'crm.previewImport': 'Preview import',
     'crm.confirmImport': 'Import leads',
@@ -379,8 +378,6 @@ extendDict({
     'crm.status.disqualified': 'Disqualified',
     'crm.status.no_response': 'No response',
     'crm.unknownValue': 'Value unknown',
-    'crm.legacyLeadDeal': 'Legacy pipeline lead',
-    'crm.legacyLeadDealHint': 'This record predates the Leads workspace. Keep it as a qualified deal or move it to Leads.',
     'crm.qualifiedFromLead': 'Qualified from a researched lead',
     'crm.viewResearch': 'View original research',
     'crm.convertedHistoryMoved': 'Sales history, notes and files continue on the qualified deal.',
@@ -466,8 +463,6 @@ extendDict({
     'crm.openSource': 'Відкрити джерело',
     'crm.convertToDeal': 'Створити угоду',
     'crm.converted': 'Лід конвертовано',
-    'crm.demoteToLead': 'Перенести в ліди',
-    'crm.demoted': 'Угоду перенесено в ліди',
     'crm.importPaste': 'Вставте JSON з ресерчем',
     'crm.previewImport': 'Перевірити імпорт',
     'crm.confirmImport': 'Імпортувати ліди',
@@ -489,8 +484,6 @@ extendDict({
     'crm.status.disqualified': 'Не підходить',
     'crm.status.no_response': 'Без відповіді',
     'crm.unknownValue': 'Сума невідома',
-    'crm.legacyLeadDeal': 'Старий лід у пайплайні',
-    'crm.legacyLeadDealHint': 'Цей запис створено до нового розділу «Ліди». Залиште як кваліфіковану угоду або перенесіть у ліди.',
     'crm.qualifiedFromLead': 'Кваліфіковано з дослідженого ліда',
     'crm.viewResearch': 'Відкрити початковий ресерч',
     'crm.convertedHistoryMoved': 'Історія продажу, нотатки й файли продовжуються у кваліфікованій угоді.',
@@ -690,7 +683,9 @@ export function useDealStages() {
   return useQuery<Stage[]>({
     queryKey: ['deal-stages'],
     queryFn: () => api.get<{ data: Stage[] }>('/deal-stages').then((r) => r.data),
-    select: (rows) => rows.slice().sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
+    select: (rows) => rows
+      .filter((stage) => !isLegacyLeadStageName(stage.name))
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
     staleTime: 5 * 60_000,
   });
 }

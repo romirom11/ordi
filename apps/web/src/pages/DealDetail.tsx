@@ -11,7 +11,7 @@ import {
   ExternalLink as ExternalLinkIcon, FolderKanban, Handshake, Target, UserCircle2,
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
-import { Link, useNavigate } from '../lib/router';
+import { Link } from '../lib/router';
 import { useCan, useMe } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import { useT } from '../lib/i18n';
@@ -37,7 +37,6 @@ interface ActivityRow { id: string; action?: string; actorId?: string | null; cr
 export function DealDetailPage({ id }: { id: string }) {
   const t = useT();
   const qc = useQueryClient();
-  const navigate = useNavigate();
   const can = useCan();
   const canWrite = can('deals.write');
 
@@ -62,18 +61,6 @@ export function DealDetailPage({ id }: { id: string }) {
   const project = d?.projectId ? (projectsQ.data ?? []).find((p) => p.id === d.projectId) : undefined;
 
   const [lostFor, setLostFor] = useState<string | null>(null);
-
-  const demote = useMutation({
-    mutationFn: () => api.post<{ leadId: string }>(`/deals/${id}/demote-to-lead`, {}),
-    onSuccess: (result) => {
-      qc.invalidateQueries({ queryKey: ['deals'] });
-      qc.invalidateQueries({ queryKey: ['leads'] });
-      qc.invalidateQueries({ queryKey: ['sales-work'] });
-      toast(t('crm.demoted'));
-      navigate(`/leads/${result.leadId}`);
-    },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.error')),
-  });
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['deal', id] });
@@ -137,19 +124,6 @@ export function DealDetailPage({ id }: { id: string }) {
       <div className="flex min-h-0 flex-1 flex-col min-[1100px]:flex-row">
         <div className="order-2 min-w-0 flex-1 overflow-auto min-[1100px]:order-1">
           <div className="space-y-7 px-6 py-6">
-            {stage?.name.toLowerCase() === 'lead' && !d?.sourceLeadId && (
-              <Card className="flex items-start gap-3 border-warning/30 bg-warning/5 p-4">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium">{t('crm.legacyLeadDeal')}</p>
-                  <p className="mt-0.5 text-[13px] text-muted-foreground">{t('crm.legacyLeadDealHint')}</p>
-                </div>
-                {canWrite && can('crm.write') && (
-                  <Button size="sm" variant="outline" onClick={() => demote.mutate()} disabled={demote.isPending}>
-                    {t('crm.demoteToLead')}
-                  </Button>
-                )}
-              </Card>
-            )}
             {sourceLeadQ.data && (
               <Card className="flex items-start gap-3 border-primary/20 p-4">
                 <Target size={17} className="mt-0.5 shrink-0 text-warning" />

@@ -51,11 +51,10 @@ export async function seedBaseline(db: Db, workspaceName = 'ordi'): Promise<{ ro
   const existingStages = await db.select().from(schema.dealStages);
   if (!existingStages.length) {
     const stages = [
-      { name: 'Lead', position: 0, probability: 10, isWon: false, isLost: false },
-      { name: 'Qualified', position: 1, probability: 30, isWon: false, isLost: false },
-      { name: 'Proposal', position: 2, probability: 60, isWon: false, isLost: false },
-      { name: 'Won', position: 3, probability: 100, isWon: true, isLost: false },
-      { name: 'Lost', position: 4, probability: 0, isWon: false, isLost: true },
+      { name: 'Qualified', position: 0, probability: 30, isWon: false, isLost: false },
+      { name: 'Proposal', position: 1, probability: 60, isWon: false, isLost: false },
+      { name: 'Won', position: 2, probability: 100, isWon: true, isLost: false },
+      { name: 'Lost', position: 3, probability: 0, isWon: false, isLost: true },
     ];
     await db.insert(schema.dealStages).values(stages.map((s) => ({ id: ulid(), ...s })));
   }

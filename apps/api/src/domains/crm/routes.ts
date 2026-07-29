@@ -5,9 +5,10 @@ import {
   companyInputSchema, companyUpdateSchema, contactInputSchema, contactUpdateSchema,
   dealStageInputSchema, dealInputSchema, dealUpdateSchema, dealMoveSchema, noteInputSchema,
   leadInputSchema, leadUpdateSchema, researchImportSchema, salesActivityInputSchema,
-  salesActivityUpdateSchema, salesActivityCancelSchema, salesActivityCompleteSchema, leadConvertSchema, dealDemoteSchema,
+  salesActivityUpdateSchema, salesActivityCancelSchema, salesActivityCompleteSchema, leadConvertSchema,
   salesMessageTemplateInputSchema, salesMessageTemplateUpdateSchema,
   salesSequenceInputSchema, salesSequenceUpdateSchema, salesSequenceEnrollSchema, salesSequenceStopSchema,
+  LEGACY_LEAD_STAGE_NAME,
   type CustomFieldFilter,
 } from '@ordi/shared';
 import type { AppEnv } from '../../context';
@@ -174,7 +175,11 @@ export function crmRoutes() {
   // ── Deal stages (config) ──
   app.get('/deal-stages', guard('deals.read'), async (c) => {
     const { db } = getDb();
-    return c.json({ data: await db.select().from(schema.dealStages).orderBy(schema.dealStages.position) });
+    return c.json({
+      data: await db.select().from(schema.dealStages)
+        .where(sql`lower(trim(${schema.dealStages.name})) <> ${LEGACY_LEAD_STAGE_NAME}`)
+        .orderBy(schema.dealStages.position),
+    });
   });
 
   app.post('/deal-stages', guard('settings.manage'), async (c) => {
@@ -223,6 +228,7 @@ export function crmRoutes() {
     const { db } = getDb();
     const actor = currentActor(c);
     if (body.projectId) await assertProjectExists(body.projectId);
+    await svc.requirePipelineStage(db, body.stageId);
     const id = ulid();
     await db.insert(schema.deals).values({
       id, companyId: body.companyId, projectId: body.projectId ?? null, title: body.title, stageId: body.stageId,
@@ -241,6 +247,7 @@ export function crmRoutes() {
     const deal = await svc.getDeal(c.req.param('id'));
     assertVersion(deal, body.version, deal);
     if (body.projectId) await assertProjectExists(body.projectId);
+    if (body.stageId) await svc.requirePipelineStage(db, body.stageId);
     const patch: Record<string, unknown> = {};
     for (const k of ['title', 'amount', 'currency', 'expectedCloseDate', 'ownerId', 'stageId', 'projectId']) {
       const value = (body as any)[k];
@@ -255,11 +262,6 @@ export function crmRoutes() {
   app.post('/deals/:id/move', guard('deals.write'), async (c) => {
     const body = dealMoveSchema.parse(await c.req.json());
     return c.json(await svc.moveDeal(currentActor(c), c.req.param('id'), body.stageId, body.lostReason, body.version));
-  });
-
-  app.post('/deals/:id/demote-to-lead', guardAll('crm.write', 'deals.write'), async (c) => {
-    const body = dealDemoteSchema.parse(await c.req.json().catch(() => ({})));
-    return c.json(await svc.demoteDealToLead(currentActor(c), c.req.param('id'), body));
   });
 
   app.delete('/deals/:id', guard('deals.delete'), async (c) => {

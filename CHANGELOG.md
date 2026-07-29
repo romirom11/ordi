@@ -14,8 +14,8 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   → nurture → converted, plus disqualified and no response) and its
   structured research. The pipeline holds qualified deals only.
   Converting keeps company, contact, research, notes, files, history,
-  owner and next action; `demote_deal_to_lead` moves a legacy Lead-stage
-  deal the other way.
+  owner and next action. The legacy Lead deal stage is removed; existing
+  unqualified rows migrate into Leads for review without losing context.
 - Sales activities are first-class: planned, completed or cancelled, with
   type, owner, due date, outcome and context. Completing one records the
   outcome, moves the lead and schedules the follow-up in one step. Every

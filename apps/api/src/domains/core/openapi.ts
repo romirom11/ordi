@@ -165,7 +165,6 @@ const ROWS: Row[] = [
   ['/leads/{id}/convert', 'post', 'Convert engaged lead to deal', 'crm.write + deals.write', 'free', 'crm'],
   ...crud('deals', 'crm', 'deals', 'DealInput', { create: 'deals.write' }),
   ['/deals/{id}/move', 'post', 'Move deal to another stage', 'deals.write', 'free', 'crm'],
-  ['/deals/{id}/demote-to-lead', 'post', 'Move legacy Lead-stage deal to leads', 'crm.write + deals.write', 'free', 'crm'],
   ['/deal-stages', 'get', 'List deal stages', 'deals.read', undefined, 'crm'],
   ['/sales-work', 'get', 'Due sales work queues', 'crm.read', undefined, 'crm'],
   ['/sales-activities', 'get', 'List sales activities', 'crm.read or deals.read', undefined, 'crm'],

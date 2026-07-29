@@ -2,6 +2,12 @@ import { z } from 'zod';
 import { idSchema, customFieldsSchema, richTextSchema } from './common';
 import { COMPANY_STATUSES } from '../constants';
 
+export const LEGACY_LEAD_STAGE_NAME = 'lead';
+
+export function isLegacyLeadStageName(name: string): boolean {
+  return name.trim().toLowerCase() === LEGACY_LEAD_STAGE_NAME;
+}
+
 export const companyInputSchema = z.object({
   name: z.string().min(1),
   domain: z.string().nullable().optional(),
@@ -27,8 +33,13 @@ export const contactInputSchema = z.object({
 });
 export const contactUpdateSchema = contactInputSchema.partial().extend({ version: z.number().int().optional() });
 
+const pipelineStageNameSchema = z.string().trim().min(1).refine(
+  (name) => !isLegacyLeadStageName(name),
+  'Leads are managed in the Leads workspace; choose an opportunity stage',
+);
+
 export const dealStageInputSchema = z.object({
-  name: z.string().min(1),
+  name: pipelineStageNameSchema,
   position: z.number().default(0),
   probability: z.number().min(0).max(100).default(0),
   isWon: z.boolean().default(false),
@@ -307,12 +318,6 @@ export const leadConvertSchema = z.object({
   currency: z.string().length(3).optional(),
   expectedCloseDate: z.string().nullable().optional(),
   contactId: idSchema.nullable().optional(),
-});
-
-export const dealDemoteSchema = z.object({
-  title: z.string().min(1).optional(),
-  product: z.string().nullable().optional(),
-  status: z.enum(WRITABLE_LEAD_STATUSES).default('needs_review'),
 });
 
 export const researchProspectSchema = z.object({

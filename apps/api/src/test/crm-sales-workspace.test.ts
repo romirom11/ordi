@@ -144,6 +144,52 @@ describe('research import and daily work', () => {
   let leadId: string;
   let companyId: string;
 
+  it('keeps the legacy Lead stage out of the qualified pipeline', async () => {
+    const stages = (await json(reqAs(users.owner!.cookie).get('/deal-stages'))).data;
+    expect(stages.some((stage: any) => stage.name.trim().toLowerCase() === 'lead')).toBe(false);
+
+    const recreate = await reqAs(users.owner!.cookie).post('/deal-stages', {
+      name: ' Lead ',
+      position: 0,
+      probability: 10,
+    });
+    expect(recreate.status).toBe(400);
+  });
+
+  it('rejects creating or moving an opportunity into a legacy Lead stage', async () => {
+    const { db } = getDb();
+    const pipelineCompanyId = ulid();
+    await db.insert(schema.companies).values({
+      id: pipelineCompanyId,
+      name: 'Qualified Pipeline Ltd',
+      createdBy: users.owner!.userId,
+    });
+
+    const direct = await reqAs(users.owner!.cookie).post('/deals', {
+      companyId: pipelineCompanyId,
+      title: 'Not qualified',
+      stageId: legacyLeadStageId,
+    });
+    expect(direct.status).toBe(400);
+
+    const qualified = await json(reqAs(users.owner!.cookie).post('/deals', {
+      companyId: pipelineCompanyId,
+      title: 'Qualified opportunity',
+      stageId: qualifiedStageId,
+    }));
+    const move = await reqAs(users.owner!.cookie).post(`/deals/${qualified.id}/move`, {
+      stageId: legacyLeadStageId,
+    });
+    expect(move.status).toBe(400);
+
+    const current = await json(reqAs(users.owner!.cookie).get(`/deals/${qualified.id}`));
+    const patch = await reqAs(users.owner!.cookie).patch(`/deals/${qualified.id}`, {
+      stageId: legacyLeadStageId,
+      version: current.version,
+    });
+    expect(patch.status).toBe(400);
+  });
+
   it('previews active prospects and retained exclusions without writing data', async () => {
     const preview = await json(reqAs(users.owner!.cookie).post('/leads/import/preview', research));
     expect(preview).toMatchObject({ prospects: 2, companiesToCreate: 2, leadsToCreate: 2, exclusions: 1 });
@@ -741,32 +787,4 @@ describe('lead and deal boundary', () => {
     expect(listedDeal.nextActivity).toMatchObject({ dealId: deal.id, status: 'planned' });
   });
 
-  it('demotes a legacy Lead-stage deal without losing its note', async () => {
-    const { db } = getDb();
-    const companyId = ulid();
-    const dealId = ulid();
-    await db.insert(schema.companies).values({ id: companyId, name: 'Legacy Prospect', createdBy: users.owner!.userId });
-    await db.insert(schema.deals).values({
-      id: dealId,
-      companyId,
-      stageId: legacyLeadStageId,
-      title: 'Legacy speculative deal',
-      amount: '9000',
-      currency: 'GBP',
-      createdBy: users.owner!.userId,
-    });
-    await reqAs(users.owner!.cookie).post('/notes', {
-      dealId,
-      body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Original research' }] }] },
-    });
-
-    const result = await json(reqAs(users.owner!.cookie).post(`/deals/${dealId}/demote-to-lead`, {}));
-    const lead = await json(reqAs(users.owner!.cookie).get(`/leads/${result.leadId}`));
-    expect(lead).toMatchObject({ legacyDealId: dealId, title: 'Legacy speculative deal', status: 'needs_review' });
-    expect((await reqAs(users.owner!.cookie).get(`/deals/${dealId}`)).status).toBe(404);
-    expect((await json(reqAs(users.owner!.cookie).get(`/notes?leadId=${lead.id}`))).data).toHaveLength(1);
-
-    const [rawDeal] = await db.select().from(schema.deals).where(eq(schema.deals.id, dealId));
-    expect(rawDeal?.deletedAt).not.toBeNull();
-  });
 });

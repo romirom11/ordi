@@ -494,10 +494,6 @@ export function buildServer(client: OrdiClient): McpServer {
   expectedCloseDate: z.string().optional(),
 }, ({ leadId, ...body }) => wrap(() => client.post(`/leads/${leadId}/convert`, body)));
 
-  server.tool('demote_deal_to_lead', 'Move a legacy Lead-stage deal into the Leads workspace without losing notes, files or activities', {
-  dealId: z.string(), product: z.string().optional(),
-}, ({ dealId, ...body }) => wrap(() => client.post(`/deals/${dealId}/demote-to-lead`, body)));
-
   server.tool('update_deal', 'Update a deal – amount, dates, owner, linked project, custom fields. customFields merge by key. Use move_deal to change the stage.', {
   dealId: z.string(),
   title: z.string().optional(), amount: z.number().min(0).nullable().optional(), currency: z.string().length(3).optional(),

@@ -22,7 +22,7 @@ beforeAll(async () => {
   await db.insert(schema.companies).values({ id: companyId, name: 'Kdn Agency', createdBy: users.owner!.userId });
 
   stageId = ulid();
-  await db.insert(schema.dealStages).values({ id: stageId, name: 'Lead', position: 0 });
+  await db.insert(schema.dealStages).values({ id: stageId, name: 'Qualified', position: 0 });
 
   const typeId = ulid();
   await db.insert(schema.projectTypes).values({ id: typeId, name: 'Product' });
@@ -157,19 +157,6 @@ describe('company deletion dependencies', () => {
     expect((await owner().get(`/companies/${clientId}`)).status).toBe(404);
   });
 
-  it('a deal demoted to a lead leaves no ghost behind', async () => {
-    const id = (await json(owner().post('/companies', { name: 'Demote Ltd' }))).id;
-    const deal = (await json(owner().post('/deals', { companyId: id, stageId, title: 'Legacy pipeline row' }))).id;
-    const { leadId } = await json(owner().post(`/deals/${deal}/demote-to-lead`, {}));
-
-    // The lead is the live record now; the demoted deal is gone, not a blocker.
-    const blocked = await json(owner().del(`/companies/${id}`));
-    expect(blocked.error.message).toContain('1 lead');
-    expect(blocked.error.details.deals).toBe(0);
-
-    expect((await owner().del(`/leads/${leadId}`)).status).toBe(200);
-    expect((await owner().del(`/companies/${id}`)).status).toBe(200);
-  });
 });
 
 describe('entity attachments', () => {

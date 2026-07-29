@@ -140,11 +140,11 @@ describe('CRM create/list tools', () => {
 
   it('list_deal_stages returns id + won/lost flags for stage discovery', async () => {
     const client = await connect(fakeApi({ '/deal-stages': { data: [
-      { id: 's1', name: 'Lead', position: 0, probability: 10, isWon: false, isLost: false, createdAt: 'x' },
+      { id: 's1', name: 'Qualified', position: 0, probability: 30, isWon: false, isLost: false, createdAt: 'x' },
     ] } }));
     const res = await client.callTool({ name: 'list_deal_stages', arguments: {} });
     const body = JSON.parse((res.content as any)[0].text);
-    expect(body.data).toEqual([{ id: 's1', name: 'Lead', position: 0, probability: 10, isWon: false, isLost: false }]);
+    expect(body.data).toEqual([{ id: 's1', name: 'Qualified', position: 0, probability: 30, isWon: false, isLost: false }]);
   });
 
   it('create_company / create_contact / create_deal POST to the CRM endpoints', async () => {
@@ -178,7 +178,7 @@ describe('sales workspace tools', () => {
     for (const name of [
       'list_leads', 'get_lead', 'get_sales_work', 'list_sales_activities',
       'create_lead', 'update_lead', 'preview_research_import', 'import_research', 'schedule_sales_activity',
-      'update_sales_activity', 'complete_sales_activity', 'cancel_sales_activity', 'convert_lead', 'demote_deal_to_lead',
+      'update_sales_activity', 'complete_sales_activity', 'cancel_sales_activity', 'convert_lead',
       'list_sales_playbooks', 'save_sales_message_template', 'save_sales_sequence', 'manage_sales_sequence',
     ]) expect(names).toContain(name);
   });

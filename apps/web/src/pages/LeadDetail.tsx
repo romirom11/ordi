@@ -32,7 +32,7 @@ export function LeadDetailPage({ id }: { id: string }) {
   const canConvert = canWrite && can('deals.write');
   const next = activitiesQ.data?.[0];
   const firstQualifiedStage = useMemo(
-    () => (stagesQ.data ?? []).find((stage) => !stage.isWon && !stage.isLost && stage.name.toLowerCase() !== 'lead'),
+    () => (stagesQ.data ?? []).find((stage) => !stage.isWon && !stage.isLost),
     [stagesQ.data],
   );
 

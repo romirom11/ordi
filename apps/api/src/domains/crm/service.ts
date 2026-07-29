@@ -1,6 +1,6 @@
 import { getDb, schema, eq, and, isNull, desc, asc, sql, inArray, type SQL } from '@ordi/db';
 import { ulid } from 'ulid';
-import type { CustomFieldFilter } from '@ordi/shared';
+import { LEGACY_LEAD_STAGE_NAME, isLegacyLeadStageName, type CustomFieldFilter } from '@ordi/shared';
 import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
@@ -191,8 +191,7 @@ export async function moveDeal(actor: Actor, id: string, stageId: string, lostRe
       .for('update');
     if (!deal) throw err.notFound('Deal not found');
     assertVersion(deal, version, deal);
-    const [stage] = await tx.select().from(schema.dealStages).where(eq(schema.dealStages.id, stageId));
-    if (!stage) throw err.validation('Unknown stage');
+    const stage = await requirePipelineStage(tx, stageId);
     if (stage.isLost && !lostReason) throw err.domain('A lost reason is required');
     const [updated] = await tx.update(schema.deals)
       .set({ stageId, lostReason: stage.isLost ? lostReason ?? null : null })
@@ -262,6 +261,15 @@ const CANCELS_PLANNED_LEAD_STATUSES = new Set(['nurture', 'disqualified', 'no_re
 
 function normalized(value: string | null | undefined): string {
   return (value ?? '').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
+}
+
+export async function requirePipelineStage(dbOrTx: DbReader, stageId: string) {
+  const [stage] = await dbOrTx.select().from(schema.dealStages).where(eq(schema.dealStages.id, stageId));
+  if (!stage) throw err.validation('Unknown stage');
+  if (isLegacyLeadStageName(stage.name)) {
+    throw err.validation('Leads are managed in the Leads workspace; choose an opportunity stage');
+  }
+  return stage;
 }
 
 function boundedLimit(value: number | undefined, fallback: number, maximum: number): number {
@@ -1031,13 +1039,13 @@ export async function convertLead(actor: Actor, id: string, input: any) {
     if (lead.status !== 'engaged') throw err.domain('Lead must be engaged before conversion');
 
     const stage = input.stageId
-      ? (await tx.select().from(schema.dealStages).where(eq(schema.dealStages.id, input.stageId)))[0]
+      ? await requirePipelineStage(tx, input.stageId)
       : (await tx.select().from(schema.dealStages).where(and(
         eq(schema.dealStages.isWon, false),
         eq(schema.dealStages.isLost, false),
-        sql`lower(${schema.dealStages.name}) <> 'lead'`,
+        sql`lower(trim(${schema.dealStages.name})) <> ${LEGACY_LEAD_STAGE_NAME}`,
       )).orderBy(asc(schema.dealStages.position)).limit(1))[0];
-    if (!stage || stage.isWon || stage.isLost || normalized(stage.name) === 'lead') {
+    if (!stage || stage.isWon || stage.isLost || isLegacyLeadStageName(stage.name)) {
       throw err.validation('Choose a qualified opportunity stage');
     }
     const [company] = await tx.select().from(schema.companies).where(eq(schema.companies.id, lead.companyId));
@@ -1098,83 +1106,3 @@ export async function convertLead(actor: Actor, id: string, input: any) {
 }
 
 export { salesWork } from './work';
-
-export async function demoteDealToLead(actor: Actor, id: string, input: any) {
-  const { db } = getDb();
-  return db.transaction(async (tx) => {
-    const [deal] = await tx.select().from(schema.deals).where(and(
-      eq(schema.deals.id, id),
-      isNull(schema.deals.deletedAt),
-    )).for('update');
-    if (!deal) throw err.notFound('Deal not found');
-    const [existing] = await tx.select({ id: schema.leads.id }).from(schema.leads)
-      .where(and(eq(schema.leads.legacyDealId, id), isNull(schema.leads.deletedAt)));
-    if (existing) return { leadId: existing.id, alreadyDemoted: true };
-    const [stage] = await tx.select().from(schema.dealStages).where(eq(schema.dealStages.id, deal.stageId));
-    if (!stage || normalized(stage.name) !== 'lead') throw err.domain('Only a legacy Lead-stage deal can be demoted');
-    if (deal.sourceLeadId) throw err.domain('A converted lead deal cannot be demoted as a legacy deal');
-    const leadId = ulid();
-    await tx.insert(schema.leads).values({
-      id: leadId,
-      companyId: deal.companyId,
-      legacyDealId: deal.id,
-      title: input.title ?? deal.title,
-      product: input.product ?? null,
-      status: input.status ?? 'needs_review',
-      ownerId: deal.ownerId,
-      rawResearch: {
-        legacyDeal: {
-          amount: deal.amount,
-          currency: deal.currency,
-          expectedCloseDate: deal.expectedCloseDate,
-          customFields: deal.customFields,
-        },
-      },
-      createdBy: actor.userId,
-    });
-    await tx.update(schema.notes).set({ dealId: null, leadId }).where(eq(schema.notes.dealId, deal.id));
-    await tx.update(schema.attachments).set({ entityType: 'lead', entityId: leadId }).where(and(
-      eq(schema.attachments.entityType, 'deal'),
-      eq(schema.attachments.entityId, deal.id),
-    ));
-    await tx.update(schema.salesActivities).set({ dealId: null, leadId }).where(eq(schema.salesActivities.dealId, deal.id));
-    await tx.update(schema.salesSequenceEnrollments).set({ dealId: null, leadId })
-      .where(eq(schema.salesSequenceEnrollments.dealId, deal.id));
-    const [planned] = await tx.select({ id: schema.salesActivities.id }).from(schema.salesActivities).where(and(
-      eq(schema.salesActivities.leadId, leadId),
-      eq(schema.salesActivities.status, 'planned'),
-      isNull(schema.salesActivities.deletedAt),
-    )).limit(1);
-    if (!planned) {
-      await tx.insert(schema.salesActivities).values({
-        id: ulid(),
-        leadId,
-        companyId: deal.companyId,
-        type: 'review',
-        status: 'planned',
-        subject: 'Review legacy pipeline record',
-        dueAt: new Date(),
-        ownerId: deal.ownerId ?? actor.userId,
-        createdBy: actor.userId,
-      });
-    }
-    await tx.update(schema.deals).set({ deletedAt: new Date() }).where(eq(schema.deals.id, deal.id));
-    await writeActivity(tx, {
-      entityType: 'deal',
-      entityId: deal.id,
-      action: 'demoted_to_lead',
-      after: { leadId },
-      actorId: actor.userId,
-      actorType: actor.actorType,
-    });
-    await writeActivity(tx, {
-      entityType: 'lead',
-      entityId: leadId,
-      action: 'created_from_deal',
-      after: { legacyDealId: deal.id },
-      actorId: actor.userId,
-      actorType: actor.actorType,
-    });
-    return { leadId, alreadyDemoted: false };
-  });
-}
