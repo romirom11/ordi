@@ -23,9 +23,26 @@
 
 | Фіча | Де |
 |---|---|
-| CRM sales workspace: Work-черга, окремі leads до кваліфікації, імпорт research JSON, наступні дії та конверсія lead → deal | `feat/crm-sales-workspace` |
+| — | — |
 
 ## Готово
+
+### v1.16.0
+
+- CRM sales workspace: Work-черга (overdue / сьогодні / чекаємо відповідь /
+  nurture / без наступної дії), окремі leads до кваліфікації, sales-активності
+  як першокласні записи, прев'ю та імпорт research JSON, конверсія lead → deal
+  зі збереженням історії
+  ([PR #37](https://github.com/romirom11/ordi/pull/37)).
+- Playbooks: шаблони повідомлень зі змінними та послідовності ручних кроків —
+  планують наступну дію, але нічого не надсилають; ранковий дайджест роботи в
+  таймзоні продавця; надійна доставка пошти через чергу з ретраями
+  ([PR #40](https://github.com/romirom11/ordi/pull/40)).
+- MCP: контент-календар з ordi — `get_project_schema`, `list_tasks` по вікну
+  дат, `get_task` з тілом і коментарями, `create_task` / `update_task` /
+  `upsert_task` / `add_task_link`, оптимістичні блокування версією та
+  `externalKey` замість дублів
+  ([PR #39](https://github.com/romirom11/ordi/pull/39)).
 
 ### v1.11.0
 
