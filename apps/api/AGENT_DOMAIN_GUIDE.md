@@ -62,7 +62,7 @@ You are implementing ONE domain module inside `apps/api/src/domains/<domain>/`.
 - `import { page } from '../../lib/http'` → `page(rows, limit, (r) => ({ createdAt: r.createdAt }))` (query rows with `.limit(limit+1)`).
 
 ### Email / S3 / crypto
-- `import { queueEmail } from '../../lib/email'`; `import { presignUpload, presignDownload } from '../../lib/s3'`; `import { encrypt, decrypt, hmacSha256, generateToken } from '../../lib/crypto'`.
+- `import { sendEmailNow } from '../../lib/email'`; background mail uses `enqueueEmail` from `workers/email-delivery`; `import { presignUpload, presignDownload } from '../../lib/s3'`; `import { encrypt, decrypt, hmacSha256, generateToken } from '../../lib/crypto'`.
 
 ## Rules
 1. Export exactly the function name given in your task: e.g. `export function projectsRoutes() { const app = new Hono<AppEnv>(); ... return app; }`.

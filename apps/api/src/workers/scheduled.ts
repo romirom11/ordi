@@ -7,9 +7,9 @@ import { ulid } from 'ulid';
 import { computeDocumentTotals } from '@ordi/shared';
 import { emit } from '../core/events';
 import { postExpense } from '../domains/finance/ledger.service';
-import { queueEmail } from '../lib/email';
 import { appLink, asLocale, loadBranding, renderEmail, tr } from '../lib/email-templates';
 import { logger } from '../lib/logger';
+import { enqueueEmail, type QueuedEmailInput } from './email-delivery';
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -157,6 +157,7 @@ export async function runReminders(): Promise<void> {
         .where(and(eq(schema.reminderLog.invoiceId, inv.id), eq(schema.reminderLog.ruleId, rule.id)));
       if (already) continue;
       const [company] = await db.select().from(schema.companies).where(eq(schema.companies.id, inv.companyId));
+      let email: QueuedEmailInput | null = null;
       if (company?.billingEmail) {
         const branding = await loadBranding();
         const locale = asLocale(inv.language);
@@ -175,16 +176,22 @@ export async function runReminders(): Promise<void> {
           cta: { label: tr(locale, 'reminder.cta'), url: appLink(`/i/${inv.publicToken}`) },
           note: tr(locale, 'reminder.thanks'),
         });
-        await queueEmail({
+        email = {
+          idempotencyKey: `invoice-reminder:${inv.id}:${rule.id}`,
           to: company.billingEmail,
           subject: tr(locale, overdue ? 'reminder.subjectOverdue' : 'reminder.subject', vars),
           body: rendered.text,
           html: rendered.html,
-        });
+        };
       }
-      // Logged only after a successful send, so a failed reminder is retried
-      // on the next run instead of being silently marked as delivered.
-      await db.insert(schema.reminderLog).values({ id: ulid(), invoiceId: inv.id, ruleId: rule.id }).onConflictDoNothing();
+      // The reminder and its durable delivery request either both commit or
+      // neither does; SMTP retries no longer block this scheduler.
+      await db.transaction(async (tx) => {
+        if (email) await enqueueEmail(email, tx);
+        await tx.insert(schema.reminderLog)
+          .values({ id: ulid(), invoiceId: inv.id, ruleId: rule.id })
+          .onConflictDoNothing();
+      });
     }
     if (inv.dueDate < today() && inv.status !== 'paid') {
       await emit({ type: 'invoice.overdue', aggregateType: 'invoice', aggregateId: inv.id, payload: { ref: inv.number } });

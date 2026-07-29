@@ -10,12 +10,15 @@ import { startRelay } from './relay';
 import { logConsumers } from './consumers';
 import { runAllDailyJobs } from './scheduled';
 import { pollIntakeMailboxes } from './imap';
+import { startEmailDeliveryWorker } from './email-delivery';
 
 let boss: PgBoss | null = null;
+let stopEmailDelivery: (() => void) | null = null;
 
 export async function startWorkers(): Promise<void> {
   logConsumers();
   startRelay();
+  stopEmailDelivery = startEmailDeliveryWorker();
 
   try {
     boss = new PgBoss({ connectionString: env.databaseUrl, schema: 'pgboss' });
@@ -44,5 +47,7 @@ export async function startWorkers(): Promise<void> {
 }
 
 export async function stopWorkers(): Promise<void> {
+  stopEmailDelivery?.();
+  stopEmailDelivery = null;
   if (boss) await boss.stop();
 }

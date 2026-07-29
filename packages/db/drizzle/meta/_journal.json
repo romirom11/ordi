@@ -120,6 +120,13 @@
       "when": 1785262189397,
       "tag": "0016_pink_kree",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1785321158985,
+      "tag": "0017_flashy_clea",
+      "breakpoints": true
     }
   ]
 }

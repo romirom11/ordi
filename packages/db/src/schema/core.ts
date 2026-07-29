@@ -170,6 +170,7 @@ export const notifications = pgTable('notifications', {
   id: pk(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   type: text('type').notNull(),
+  dedupeKey: text('dedupe_key'),
   entityRef: text('entity_ref'),
   payload: jsonb('payload').notNull().default({}),
   readAt: timestamp('read_at', { withTimezone: true }),
@@ -177,6 +178,26 @@ export const notifications = pgTable('notifications', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
   userIdx: index('notifications_user_idx').on(t.userId, t.readAt),
+  dedupeIdx: uniqueIndex('notifications_dedupe_idx').on(t.dedupeKey),
+}));
+
+/** Durable SMTP work; event consumers enqueue and return without doing network I/O. */
+export const emailDeliveries = pgTable('email_deliveries', {
+  id: pk(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  to: text('to').notNull(),
+  subject: text('subject').notNull(),
+  body: text('body').notNull(),
+  html: text('html'),
+  status: text('status').notNull().default('pending'), // pending | sending | sent | dead
+  attempts: integer('attempts').notNull().default(0),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+  sentAt: timestamp('sent_at', { withTimezone: true }),
+  lastError: text('last_error'),
+  ...timestamps,
+}, (t) => ({
+  idempotencyIdx: uniqueIndex('email_deliveries_idempotency_idx').on(t.idempotencyKey),
+  dueIdx: index('email_deliveries_due_idx').on(t.status, t.nextAttemptAt),
 }));
 
 /** Outbox (PRD §3.3): events written in the same tx as data. */

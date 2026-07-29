@@ -7,7 +7,7 @@ import { getDb, schema, eq, and, desc } from '@ordi/db';
 import { ulid } from 'ulid';
 import type { DomainEvent } from '@ordi/shared';
 import { broadcaster } from '../core/events';
-import { queueEmail } from '../lib/email';
+import { enqueueEmail, type QueuedEmailInput } from './email-delivery';
 import { appLink, asLocale, loadBranding, renderEmail, tr, type Branding } from '../lib/email-templates';
 import { hmacSha256, decrypt } from '../lib/crypto';
 import { postSlackMessage } from '../domains/integrations/oauth';
@@ -20,47 +20,59 @@ export interface Consumer {
   handle: (ev: DomainEvent) => Promise<void>;
 }
 
-async function notify(userIds: string[], type: string, entityRef: string | null, payload: Record<string, unknown>): Promise<void> {
+async function notify(
+  eventId: string,
+  userIds: string[],
+  type: string,
+  entityRef: string | null,
+  payload: Record<string, unknown>,
+): Promise<void> {
   if (!userIds.length) return;
   const { db } = getDb();
   const unique = [...new Set(userIds)].filter(Boolean);
   let branding: Branding | null = null;
 
   for (const userId of unique) {
-    await db.insert(schema.notifications).values({
-      id: ulid(), userId, type, entityRef, payload,
-    });
-    // email dubbing per user prefs
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId));
+    if (!user) continue;
     const prefs = (user?.emailNotificationPrefs as Record<string, boolean>) ?? {};
-    if (!user || prefs[type] === false || prefs.__all === false) continue;
+    const dedupeKey = `${eventId}:notifications:${userId}:${type}`;
+    let email: QueuedEmailInput | null = null;
 
-    branding ??= await loadBranding();
-    const locale = asLocale(user.locale);
-    const vars = {
-      ref: (payload.ref as string) ?? entityRef ?? '',
-      title: (payload.title as string) ?? '',
-      status: (payload.statusName as string) ?? '',
-      actor: (payload.actorName as string) ?? tr(locale, 'notify.someone'),
-      decision: (payload.decision as string) ?? '',
-      workspace: branding.workspaceName,
-    };
-    const known = NOTIFY_KEYS.has(type) ? type : 'generic';
-    const link = notificationLink(type, payload);
-    const { html, text } = renderEmail({
-      locale,
-      branding,
-      heading: tr(locale, `notify.${known}.heading`, vars),
-      paragraphs: [tr(locale, `notify.${known}.body`, vars)],
-      cta: link ? { label: tr(locale, 'notify.cta'), url: link } : undefined,
-    });
-    // Let failures reach the relay so it retries and eventually dead-letters,
-    // exactly like the Slack consumer – silence used to hide broken delivery.
-    await queueEmail({
-      to: user.email,
-      subject: tr(locale, `notify.${known}.subject`, vars),
-      body: text,
-      html,
+    if (prefs[type] !== false && prefs.__all !== false) {
+      branding ??= await loadBranding();
+      const locale = asLocale(user.locale);
+      const vars = {
+        ref: (payload.ref as string) ?? entityRef ?? '',
+        title: (payload.title as string) ?? '',
+        status: (payload.statusName as string) ?? '',
+        actor: (payload.actorName as string) ?? tr(locale, 'notify.someone'),
+        decision: (payload.decision as string) ?? '',
+        workspace: branding.workspaceName,
+      };
+      const known = NOTIFY_KEYS.has(type) ? type : 'generic';
+      const link = notificationLink(type, payload);
+      const { html, text } = renderEmail({
+        locale,
+        branding,
+        heading: tr(locale, `notify.${known}.heading`, vars),
+        paragraphs: [tr(locale, `notify.${known}.body`, vars)],
+        cta: link ? { label: tr(locale, 'notify.cta'), url: link } : undefined,
+      });
+      email = {
+        idempotencyKey: `${eventId}:email:${userId}:${type}`,
+        to: user.email,
+        subject: tr(locale, `notify.${known}.subject`, vars),
+        body: text,
+        html,
+      };
+    }
+
+    await db.transaction(async (tx) => {
+      await tx.insert(schema.notifications).values({
+        id: ulid(), userId, type, dedupeKey, entityRef, payload,
+      }).onConflictDoNothing({ target: schema.notifications.dedupeKey });
+      if (email) await enqueueEmail(email, tx);
     });
   }
 }
@@ -97,32 +109,32 @@ const notifications: Consumer = {
     const p = ev.payload as any;
     switch (ev.type) {
       case 'task.assigned':
-        await notify(p.assigneeIds ?? [], 'task.assigned', p.ref ?? null, p);
+        await notify(ev.id, p.assigneeIds ?? [], 'task.assigned', p.ref ?? null, p);
         break;
       case 'comment.mentioned':
-        await notify(p.mentions ?? [], 'comment.mentioned', p.ref ?? null, p);
+        await notify(ev.id, p.mentions ?? [], 'comment.mentioned', p.ref ?? null, p);
         break;
       case 'task.status_changed':
-        await notify([...(p.assigneeIds ?? []), p.createdBy].filter(Boolean), 'task.status_changed', p.ref ?? null, p);
+        await notify(ev.id, [...(p.assigneeIds ?? []), p.createdBy].filter(Boolean), 'task.status_changed', p.ref ?? null, p);
         break;
       case 'page.mentioned':
-        await notify(p.mentions ?? [], 'comment.mentioned', p.ref ?? null, p);
+        await notify(ev.id, p.mentions ?? [], 'comment.mentioned', p.ref ?? null, p);
         break;
       case 'payment.recorded':
       case 'invoice.paid':
-        await notify([p.createdBy].filter(Boolean), 'invoice.paid', p.ref ?? null, p);
+        await notify(ev.id, [p.createdBy].filter(Boolean), 'invoice.paid', p.ref ?? null, p);
         break;
       case 'quote.accepted':
-        await notify([p.ownerId, p.createdBy].filter(Boolean), 'quote.accepted', p.ref ?? null, p);
+        await notify(ev.id, [p.ownerId, p.createdBy].filter(Boolean), 'quote.accepted', p.ref ?? null, p);
         break;
       case 'leave.requested':
-        await notify([p.approverId].filter(Boolean), 'leave.requested', ev.aggregateId, p);
+        await notify(ev.id, [p.approverId].filter(Boolean), 'leave.requested', ev.aggregateId, p);
         break;
       case 'leave.decided':
-        await notify([p.employeeUserId].filter(Boolean), 'leave.decided', ev.aggregateId, p);
+        await notify(ev.id, [p.employeeUserId].filter(Boolean), 'leave.decided', ev.aggregateId, p);
         break;
       case 'git.pr_merged':
-        await notify(p.assigneeIds ?? [], 'task.status_changed', p.ref ?? null, p);
+        await notify(ev.id, p.assigneeIds ?? [], 'task.status_changed', p.ref ?? null, p);
         break;
       default:
         break;

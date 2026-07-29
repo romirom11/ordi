@@ -18,7 +18,7 @@ import { assertProject, accessibleProjectIds } from '../../core/access';
 import { buildCustomFieldFilter, mergeCustomFields } from '../../core/customfields';
 import { extractMentions } from '../kb/service';
 import { encrypt, generateToken } from '../../lib/crypto';
-import { queueEmail } from '../../lib/email';
+import { sendEmailNow } from '../../lib/email';
 import { asLocale, loadBranding, renderEmail, tr } from '../../lib/email-templates';
 import { page } from '../../lib/http';
 
@@ -970,5 +970,5 @@ async function sendIntakeMail(to: string, kind: 'intakeAccepted' | 'intakeDeclin
     heading: tr(locale, `${kind}.heading`),
     paragraphs,
   });
-  await queueEmail({ to, subject: tr(locale, `${kind}.subject`), body: rendered.text, html: rendered.html });
+  await sendEmailNow({ to, subject: tr(locale, `${kind}.subject`), body: rendered.text, html: rendered.html });
 }
