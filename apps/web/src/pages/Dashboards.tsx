@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../lib/api';
-import { useNavigate } from '../lib/router';
+import { useNavigate, useOpen } from '../lib/router';
 import {
   Button, Input, Select, Card, Badge, IconButton, PageHeader, EmptyState, Skeleton, Spinner, ProgressBar, cn,
 } from '../components/ui';
@@ -91,6 +91,7 @@ function DashboardListView() {
   const t = useT();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const open = useOpen();
   const list = useQuery({
     queryKey: ['dashboards'],
     queryFn: () => api.get<{ data: DashboardSummary[] }>('/dashboards'),
@@ -165,7 +166,8 @@ function DashboardListView() {
                 key={d.id}
                 className="row-enter text-left"
                 style={{ ['--i' as string]: Math.min(i, 10) }}
-                onClick={() => navigate('/dashboards/' + d.id)}
+                onClick={(e) => open('/dashboards/' + d.id, e)}
+                onAuxClick={(e) => open('/dashboards/' + d.id, e)}
               >
                 <Card className="flex h-28 flex-col justify-between p-4 transition-colors duration-150 hover:border-border-strong hover:bg-muted/40">
                   <div className="flex items-center gap-2.5">

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Search, Target } from 'lucide-react';
-import { useNavigate } from '../../lib/router';
+import { useNavigate, useOpen } from '../../lib/router';
 import { useT } from '../../lib/i18n';
 import { EmptyState, Input, Select, Skeleton, fmtRelative } from '../ui';
 import {
@@ -11,6 +11,7 @@ import {
 export function LeadsTab() {
   const t = useT();
   const navigate = useNavigate();
+  const open = useOpen();
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const leadsQ = useLeads({ q, status });
@@ -46,14 +47,16 @@ export function LeadsTab() {
               <span>{t('crm.score')}</span>
               <span>{t('crm.nextAction')}</span>
             </div>
-            {leads.map((lead) => {
+            {leads.map((lead, i) => {
               const next = lead.nextActivity;
               return (
                 <button
                   key={lead.id}
                   type="button"
-                  onClick={() => navigate(`/leads/${lead.id}`)}
-                  className="grid w-full grid-cols-[minmax(220px,2fr)_minmax(160px,1.3fr)_120px_90px_minmax(180px,1.2fr)] items-center border-b border-border px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
+                  onClick={(e) => open(`/leads/${lead.id}`, e)}
+                  onAuxClick={(e) => open(`/leads/${lead.id}`, e)}
+                  style={{ ['--i' as string]: Math.min(i, 10) }}
+                  className="row-enter grid w-full grid-cols-[minmax(220px,2fr)_minmax(160px,1.3fr)_120px_90px_minmax(180px,1.2fr)] items-center border-b border-border px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
                 >
                   <span className="min-w-0">
                     <span className="block truncate text-[13px] font-medium">{lead.title}</span>

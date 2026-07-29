@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { AlertCircle, CalendarClock, Check, Clock3, Inbox, PauseCircle } from 'lucide-react';
-import { useNavigate } from '../../lib/router';
+import { useNavigate, useOpen } from '../../lib/router';
 import { useCan } from '../../lib/auth';
 import { useT } from '../../lib/i18n';
 import { Button, EmptyState, Select, Skeleton, fmtRelative } from '../ui';
@@ -55,9 +55,10 @@ export function WorkTab() {
               <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] tabular-nums">{group.total}</span>
             </div>
             <div className="divide-y divide-border rounded-lg border border-border bg-card">
-              {group.rows.map((row) => (
+              {group.rows.map((row, i) => (
                 <WorkRow
                   key={`${row.entityType}:${row.id}`}
+                  index={i}
                   row={row}
                   canWrite={row.entityType === 'lead' ? can('crm.write') : can('deals.write')}
                   onComplete={() => row.nextActivity && setComplete(row.nextActivity)}
@@ -79,18 +80,24 @@ export function WorkTab() {
   );
 }
 
-function WorkRow({ row, canWrite, onComplete, onSchedule }: {
+function WorkRow({ row, index, canWrite, onComplete, onSchedule }: {
   row: SalesWorkItem;
+  /** Row position, for the staggered entrance. */
+  index: number;
   canWrite: boolean;
   onComplete: () => void;
   onSchedule: () => void;
 }) {
   const t = useT();
   const navigate = useNavigate();
+  const open = useOpen();
   const href = row.entityType === 'lead' ? `/leads/${row.id}` : `/deals/${row.id}`;
   return (
-    <div className="flex items-center transition-colors hover:bg-muted/50">
-      <button type="button" onClick={() => navigate(href)} className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left">
+    <div
+      style={{ ['--i' as string]: Math.min(index, 10) }}
+      className="row-enter flex items-center transition-colors hover:bg-muted/50"
+    >
+      <button type="button" onClick={(e) => open(href, e)} onAuxClick={(e) => open(href, e)} className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left">
         <span className={`h-2 w-2 shrink-0 rounded-full ${row.entityType === 'lead' ? 'bg-warning' : 'bg-primary'}`} />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">

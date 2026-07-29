@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Search, Building2, ExternalLink, Copy, CircleDot, Trash2 } from 'lucide-react';
-import { useNavigate } from '../../lib/router';
+import { useNavigate, useOpen } from '../../lib/router';
 import { useTabs } from '../../lib/tabs';
 import { useCan } from '../../lib/auth';
 import { appOrigin, api, ApiError } from '../../lib/api';
@@ -45,6 +45,7 @@ function rollupDeals(deals: Deal[], stages: Stage[]): Map<string, Rollup> {
 export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
   const t = useT();
   const navigate = useNavigate();
+  const open = useOpen();
   const tabs = useTabs();
   const can = useCan();
   const qc = useQueryClient();
@@ -193,7 +194,8 @@ export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
                 return (
                   <ContextMenu key={c.id} items={buildMenu(c)}>
                   <div
-                    onClick={() => navigate(`/companies/${c.id}`)}
+                    onClick={(e) => open(`/companies/${c.id}`, e)}
+                    onAuxClick={(e) => open(`/companies/${c.id}`, e)}
                     style={{ ['--i' as string]: Math.min(i, 10) }}
                     className={cn(
                       'row-enter group grid cursor-pointer grid-cols-[20px_minmax(0,1fr)_130px_170px_40px] items-center gap-3 rounded-md px-3 py-2 transition-colors duration-150 hover:bg-muted',

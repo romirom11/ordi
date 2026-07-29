@@ -158,6 +158,10 @@ body {
   20% { transform: translateX(-6px); } 40% { transform: translateX(6px); }
   60% { transform: translateX(-4px); } 80% { transform: translateX(4px); }
 }
+@keyframes reveal-in {
+  from { opacity: 0; transform: translateY(var(--distance-small)); }
+  to { opacity: 1; transform: translateY(0); }
+}
 @keyframes check-draw { to { stroke-dashoffset: 0; } }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes progress-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
@@ -166,6 +170,9 @@ body {
 .page-enter { animation: fade-in-up var(--duration-fast) var(--ease-smooth-out) both; }
 .anim-fade-in { animation: fade-in var(--duration-fast) var(--ease-smooth-out) both; }
 .anim-pop-in { animation: pop-in var(--duration-fast) var(--ease-smooth-out) both; }
+/* Content arriving in place of a skeleton (components/ui Reveal). Shorter throw
+   than .page-enter: the frame around it is already on screen and settled. */
+.reveal-in { animation: reveal-in var(--duration-fast) var(--ease-smooth-out) both; }
 /* Staggered list rows: set --i per row */
 .row-enter {
   animation: fade-in-up var(--duration-slow) var(--ease-smooth-out) both;

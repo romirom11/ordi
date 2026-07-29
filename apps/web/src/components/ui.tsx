@@ -349,6 +349,32 @@ export function Skeleton({ className }: { className?: string }) {
   return <div className={cn('skeleton', className)} />;
 }
 
+/**
+ * Fade + rise content in the moment it stops being a skeleton.
+ *
+ * The route entrance (Shell's .page-enter) fires while a page is still loading,
+ * so the real data lands afterwards with no transition of its own – that snap
+ * is what reads as a jolt even on a page that "has an animation". Pass
+ * `when={!isLoading}` and the block animates exactly once, when it becomes
+ * real; a later background refetch is latched out so nothing flickers.
+ *
+ * Give it a `key` instead (tabs, switched views) to replay on every remount.
+ */
+export function Reveal({ when = true, className, children, style }: {
+  when?: boolean;
+  className?: string;
+  children: ReactNode;
+  style?: CSSProperties;
+}) {
+  const revealed = useRef(false);
+  if (when) revealed.current = true;
+  return (
+    <div className={cn(revealed.current && 'reveal-in', className)} style={style}>
+      {children}
+    </div>
+  );
+}
+
 /* ───────────────────────── Avatars ───────────────────────── */
 
 const AVATAR_HUES = [211, 262, 330, 16, 42, 152, 190, 280, 100];

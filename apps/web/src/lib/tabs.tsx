@@ -35,9 +35,13 @@ export interface TabsApi {
   /** Open a fresh tab at '/'. */
   newTab: () => void;
   closeTab: (id: string) => void;
+  /** Put the most recently closed tab back where it was (⌘⇧T). */
+  reopenClosed: () => void;
   activateTab: (id: string) => void;
   /** Switch to the next (+1) / previous (-1) tab, cycling. */
   activateDelta: (delta: number) => void;
+  /** Jump to the nth tab, 1-based; n beyond the end lands on the last one. */
+  activateIndex: (n: number) => void;
   /** Drag-reorder: move `id` to the slot currently held by `targetId`. */
   reorderTabs: (id: string, targetId: string) => void;
   setActiveTitle: (title: string) => void;
@@ -50,6 +54,8 @@ export interface TabsApi {
 const STORAGE_KEY = 'ordi:tabs';
 /** Cap the per-tab stack so long sessions cannot grow localStorage without bound. */
 const MAX_HISTORY = 50;
+/** How many closed tabs ⌘⇧T can walk back through. Session-only, never persisted. */
+const MAX_CLOSED = 10;
 const TabsContext = createContext<TabsApi | null>(null);
 
 let seq = 0;
@@ -117,6 +123,8 @@ export function TabsProvider({ children }: { children: ReactNode }) {
 
   const stateRef = useRef(state);
   stateRef.current = state;
+  /** Closed tabs, newest first, with the slot each one occupied. */
+  const closedRef = useRef<{ tab: TabItem; at: number }[]>([]);
 
   // Browser-like semantics: any normal navigation rewrites the ACTIVE tab.
   // This runs during render (render-phase state update) so it settles BEFORE
@@ -159,6 +167,9 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     const s = stateRef.current;
     const idx = s.tabs.findIndex((t) => t.id === id);
     if (idx < 0) return;
+    const closed = s.tabs[idx]!;
+    // Remember where it sat so ⌘⇧T restores the strip, not just the url.
+    closedRef.current = [{ tab: closed, at: idx }, ...closedRef.current].slice(0, MAX_CLOSED);
     const rest = s.tabs.filter((t) => t.id !== id);
     if (rest.length === 0) {
       // Closing the last tab leaves a single tab at '/'.
@@ -176,12 +187,33 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     }
   }, [navigate]);
 
+  const reopenClosed = useCallback(() => {
+    const entry = closedRef.current[0];
+    if (!entry) return;
+    closedRef.current = closedRef.current.slice(1);
+    // A fresh id: the old one may still be alive if the tab was duplicated.
+    const tab: TabItem = { ...entry.tab, id: newId() };
+    setState((s) => {
+      const tabs = [...s.tabs];
+      tabs.splice(Math.min(entry.at, tabs.length), 0, tab);
+      return { tabs, activeId: tab.id };
+    });
+    if (tab.url !== currentUrl()) navigate(tab.url);
+  }, [navigate]);
+
   const activateDelta = useCallback((delta: number) => {
     const s = stateRef.current;
     if (s.tabs.length < 2) return;
     const idx = s.tabs.findIndex((t) => t.id === s.activeId);
     const next = s.tabs[(idx + delta + s.tabs.length) % s.tabs.length];
     if (next) activateTab(next.id);
+  }, [activateTab]);
+
+  const activateIndex = useCallback((n: number) => {
+    const s = stateRef.current;
+    // Browser convention: the highest digit means "last tab", not "ninth".
+    const tab = n >= 9 ? s.tabs[s.tabs.length - 1] : s.tabs[n - 1];
+    if (tab) activateTab(tab.id);
   }, [activateTab]);
 
   const reorderTabs = useCallback((id: string, targetId: string) => {
@@ -223,11 +255,12 @@ export function TabsProvider({ children }: { children: ReactNode }) {
   const api = useMemo<TabsApi>(() => ({
     tabs: state.tabs,
     activeId: state.activeId,
-    openInNewTab, newTab, closeTab, activateTab, activateDelta, reorderTabs, setActiveTitle, go,
+    openInNewTab, newTab, closeTab, reopenClosed, activateTab, activateDelta, activateIndex,
+    reorderTabs, setActiveTitle, go,
     canGoBack: !!activeTab && activeTab.pos > 0,
     canGoForward: !!activeTab && activeTab.pos < activeTab.history.length - 1,
-  }), [state.tabs, state.activeId, openInNewTab, newTab, closeTab, activateTab, activateDelta,
-    reorderTabs, setActiveTitle, go, activeTab]);
+  }), [state.tabs, state.activeId, openInNewTab, newTab, closeTab, reopenClosed, activateTab,
+    activateDelta, activateIndex, reorderTabs, setActiveTitle, go, activeTab]);
 
   return (
     <TabsContext.Provider value={api}>

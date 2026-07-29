@@ -7,7 +7,7 @@ import { useState } from 'react';
 import { CornerDownLeft, Plus, Trash2 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../../lib/api';
-import { useNavigate } from '../../lib/router';
+import { useNavigate, useOpen } from '../../lib/router';
 import { ProgressRing, StatusIcon, Tooltip, cn } from '../ui';
 import { toast } from '../overlays';
 import { useT, extendDict } from '../../lib/i18n';
@@ -32,6 +32,7 @@ export function SubtaskList({ taskId, projectId, projectKey, statuses }: {
   const t = useT();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const open = useOpen();
   const [draft, setDraft] = useState('');
 
   const subtasksQ = useQuery({
@@ -105,7 +106,8 @@ export function SubtaskList({ taskId, projectId, projectKey, statuses }: {
                 i > 0 && 'border-t border-border',
               )}
               style={{ ['--i' as string]: Math.min(i, 10) }}
-              onClick={() => navigate(`/projects/${projectId}/tasks/${sub.id}`)}
+              onClick={(e) => open(`/projects/${projectId}/tasks/${sub.id}`, e)}
+              onAuxClick={(e) => open(`/projects/${projectId}/tasks/${sub.id}`, e)}
             >
               <button
                 aria-label={st?.name}

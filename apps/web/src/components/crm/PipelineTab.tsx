@@ -7,7 +7,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, ExternalLink, ArrowRightLeft, FolderKanban, Trash2 } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
-import { useNavigate } from '../../lib/router';
+import { useNavigate, useOpen } from '../../lib/router';
 import { useTabs } from '../../lib/tabs';
 import { useCan } from '../../lib/auth';
 import { useT } from '../../lib/i18n';
@@ -23,6 +23,7 @@ export function PipelineTab() {
   const t = useT();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const open = useOpen();
   const tabs = useTabs();
   const can = useCan();
   const canDelete = can('deals.delete');
@@ -229,7 +230,8 @@ export function PipelineTab() {
                       draggable
                       onDragStart={(e) => { setDraggingId(d.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', d.id); }}
                       onDragEnd={() => { setDraggingId(null); setOverStage(null); }}
-                      onClick={() => navigate(`/deals/${d.id}`)}
+                      onClick={(e) => open(`/deals/${d.id}`, e)}
+                      onAuxClick={(e) => open(`/deals/${d.id}`, e)}
                       className={cn(
                         'anim-fade-in group cursor-grab rounded-lg border border-border bg-card p-2.5 shadow-sm transition-all duration-150',
                         'hover:border-border-strong hover:shadow-pop active:cursor-grabbing',

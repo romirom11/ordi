@@ -34,7 +34,8 @@ export function DealRows({ deals, stages, users, companyNames }: {
           <Link
             key={d.id}
             to={`/deals/${d.id}`}
-            className={cn('flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/50', i > 0 && 'border-t border-border')}
+            style={{ ['--i' as string]: Math.min(i, 10) }}
+            className={cn('row-enter flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/50', i > 0 && 'border-t border-border')}
           >
             <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{d.title}</span>
             {client && (
