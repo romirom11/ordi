@@ -108,6 +108,15 @@ export const SALES_ACTIVITY_TYPES = [
   'other',
 ] as const;
 
+export const SALES_SEQUENCE_STATUSES = ['active', 'completed', 'stopped'] as const;
+export const SALES_TEMPLATE_VARIABLES = [
+  'companyName',
+  'contactFirstName',
+  'contactName',
+  'ownerName',
+  'leadTitle',
+] as const;
+
 const publicHttpUrlSchema = z.string().url().refine((value) => {
   try {
     const protocol = new URL(value).protocol;
@@ -171,10 +180,68 @@ export const salesActivityInputSchema = z.object({
   context: z.string().nullable().optional(),
   dueAt: z.string().datetime({ offset: true }),
   ownerId: idSchema.nullable().optional(),
+  templateId: idSchema.nullable().optional(),
 }).superRefine((value, ctx) => {
   if ((value.leadId ? 1 : 0) + (value.dealId ? 1 : 0) !== 1) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Exactly one of leadId or dealId is required' });
   }
+});
+
+export const salesMessageTemplateInputSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  activityType: z.enum(SALES_ACTIVITY_TYPES),
+  channel: z.string().trim().max(80).nullable().optional(),
+  subject: z.string().max(500).nullable().optional(),
+  body: z.string().min(1).max(20_000),
+  active: z.boolean().default(true),
+});
+
+export const salesMessageTemplateUpdateSchema = salesMessageTemplateInputSchema.partial().extend({
+  version: z.number().int().optional(),
+});
+
+export const salesSequenceStepInputSchema = z.object({
+  delayDays: z.number().int().min(0).max(3_650).default(0),
+  templateId: idSchema.nullable().optional(),
+  activityType: z.enum(SALES_ACTIVITY_TYPES).optional(),
+  channel: z.string().trim().max(80).nullable().optional(),
+  subject: z.string().max(500).nullable().optional(),
+  context: z.string().max(20_000).nullable().optional(),
+}).superRefine((value, ctx) => {
+  if (!value.templateId && !value.activityType) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['activityType'],
+      message: 'An activity type or template is required',
+    });
+  }
+});
+
+export const salesSequenceInputSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  description: z.string().max(2_000).default(''),
+  active: z.boolean().default(true),
+  steps: z.array(salesSequenceStepInputSchema).min(1).max(50),
+});
+
+export const salesSequenceUpdateSchema = salesSequenceInputSchema.partial().extend({
+  version: z.number().int().optional(),
+});
+
+export const salesSequenceEnrollSchema = z.object({
+  leadId: idSchema.optional(),
+  dealId: idSchema.optional(),
+  contactId: idSchema.nullable().optional(),
+  ownerId: idSchema.nullable().optional(),
+  startAt: z.string().datetime({ offset: true }).optional(),
+}).superRefine((value, ctx) => {
+  if ((value.leadId ? 1 : 0) + (value.dealId ? 1 : 0) !== 1) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Exactly one of leadId or dealId is required' });
+  }
+});
+
+export const salesSequenceStopSchema = z.object({
+  version: z.number().int().optional(),
 });
 
 export const salesActivityUpdateSchema = z.object({

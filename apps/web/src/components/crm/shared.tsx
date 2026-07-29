@@ -323,6 +323,18 @@ extendDict({
     'crm.outcome': 'Outcome',
     'crm.context': 'Context',
     'crm.followUp': 'Schedule follow-up',
+    'crm.messageTemplate': 'Message template',
+    'crm.noTemplate': 'No template',
+    'crm.sequencePlansNext': 'The sequence will plan the next manual action automatically.',
+    'crm.startSequence': 'Start sequence',
+    'crm.stopSequence': 'Stop sequence',
+    'crm.stopSequenceBody': 'Stop this sequence and cancel its planned action?',
+    'crm.sequence': 'Sequence',
+    'crm.sequenceStep': 'Step {current}',
+    'crm.stepsCount': '{count} steps',
+    'crm.sequenceStarted': 'Sequence started',
+    'crm.sequenceStopped': 'Sequence stopped',
+    'crm.contact': 'Contact',
     'crm.nurtureUntil': 'Return to lead on',
     'crm.salesHistory': 'Sales history',
     'crm.noSalesActivity': 'No sales activity yet.',
@@ -420,6 +432,18 @@ extendDict({
     'crm.outcome': 'Результат',
     'crm.context': 'Контекст',
     'crm.followUp': 'Запланувати фолоу-ап',
+    'crm.messageTemplate': 'Шаблон повідомлення',
+    'crm.noTemplate': 'Без шаблону',
+    'crm.sequencePlansNext': 'Послідовність сама запланує наступну ручну дію.',
+    'crm.startSequence': 'Запустити послідовність',
+    'crm.stopSequence': 'Зупинити послідовність',
+    'crm.stopSequenceBody': 'Зупинити послідовність і скасувати заплановану дію?',
+    'crm.sequence': 'Послідовність',
+    'crm.sequenceStep': 'Крок {current}',
+    'crm.stepsCount': 'Кроків: {count}',
+    'crm.sequenceStarted': 'Послідовність запущено',
+    'crm.sequenceStopped': 'Послідовність зупинено',
+    'crm.contact': 'Контакт',
     'crm.nurtureUntil': 'Повернутися до ліда',
     'crm.salesHistory': 'Історія продажу',
     'crm.noSalesActivity': 'Дій з продажу ще немає.',
@@ -572,8 +596,57 @@ export interface SalesActivity {
   dueAt?: string | null;
   completedAt?: string | null;
   ownerId?: string | null;
+  messageTemplateId?: string | null;
+  sequenceEnrollmentId?: string | null;
+  sequenceStepId?: string | null;
   createdAt?: string;
   version?: number;
+}
+
+export interface SalesMessageTemplate {
+  id: string;
+  name: string;
+  activityType: string;
+  channel?: string | null;
+  subject?: string | null;
+  body: string;
+  active: boolean;
+  version: number;
+}
+
+export interface SalesSequenceStep {
+  id: string;
+  sequenceId: string;
+  templateId?: string | null;
+  position: number;
+  delayDays: number;
+  activityType: string;
+  channel?: string | null;
+  subject?: string | null;
+  context?: string | null;
+}
+
+export interface SalesSequence {
+  id: string;
+  name: string;
+  description: string;
+  active: boolean;
+  activeEnrollments: number;
+  enrollmentCount: number;
+  steps: SalesSequenceStep[];
+  version: number;
+}
+
+export interface SalesSequenceEnrollment {
+  id: string;
+  sequenceId: string;
+  sequenceName: string;
+  leadId?: string | null;
+  dealId?: string | null;
+  status: 'active' | 'completed' | 'stopped';
+  currentStepPosition: number;
+  ownerId?: string | null;
+  version: number;
 }
 
 export interface SalesWorkItem {
@@ -661,6 +734,34 @@ export function useSalesActivities(params: {
   return useQuery<SalesActivity[]>({
     queryKey: ['sales-activities', params],
     queryFn: () => api.get<{ data: SalesActivity[] }>(`/sales-activities${qs(params)}`).then((r) => r.data),
+  });
+}
+
+export function useSalesMessageTemplates(activeOnly = false) {
+  return useQuery<SalesMessageTemplate[]>({
+    queryKey: ['sales-message-templates', { activeOnly }],
+    queryFn: () => api.get<{ data: SalesMessageTemplate[] }>(
+      `/sales-message-templates${qs({ active: activeOnly || undefined })}`,
+    ).then((response) => response.data),
+  });
+}
+
+export function useSalesSequences(activeOnly = false) {
+  return useQuery<SalesSequence[]>({
+    queryKey: ['sales-sequences', { activeOnly }],
+    queryFn: () => api.get<{ data: SalesSequence[] }>(
+      `/sales-sequences${qs({ active: activeOnly || undefined })}`,
+    ).then((response) => response.data),
+  });
+}
+
+export function useSalesSequenceEnrollments(params: { leadId?: string; dealId?: string }) {
+  return useQuery<SalesSequenceEnrollment[]>({
+    queryKey: ['sales-sequence-enrollments', params],
+    queryFn: () => api.get<{ data: SalesSequenceEnrollment[] }>(
+      `/sales-sequence-enrollments${qs(params)}`,
+    ).then((response) => response.data),
+    enabled: !!params.leadId || !!params.dealId,
   });
 }
 

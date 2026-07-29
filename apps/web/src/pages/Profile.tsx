@@ -63,6 +63,7 @@ const NOTIFICATION_TYPES: { type: string; label: string }[] = [
   { type: 'quote.accepted', label: 'profile.notifQuoteAccepted' },
   { type: 'leave.requested', label: 'profile.notifLeaveRequested' },
   { type: 'leave.decided', label: 'profile.notifLeaveDecided' },
+  { type: 'sales.work_digest', label: 'profile.notifSalesDigest' },
 ];
 
 export function ProfilePage() {
@@ -268,7 +269,7 @@ function NotificationsSection() {
   const t = useT();
   const me = useMe();
   const qc = useQueryClient();
-  const stored = ((me.user as unknown as Record<string, unknown>).emailNotificationPrefs ?? (me as unknown as Record<string, unknown>).emailNotificationPrefs ?? {}) as Record<string, boolean>;
+  const stored = me.user.emailNotificationPrefs;
   const [prefs, setPrefs] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {};
     for (const { type } of NOTIFICATION_TYPES) initial[type] = stored[type] ?? true;

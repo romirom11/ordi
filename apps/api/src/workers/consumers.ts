@@ -7,60 +7,79 @@ import { getDb, schema, eq, and, desc } from '@ordi/db';
 import { ulid } from 'ulid';
 import type { DomainEvent } from '@ordi/shared';
 import { broadcaster } from '../core/events';
-import { queueEmail } from '../lib/email';
+import { enqueueEmail, type QueuedEmailInput } from './email-delivery';
 import { appLink, asLocale, loadBranding, renderEmail, tr, type Branding } from '../lib/email-templates';
 import { hmacSha256, decrypt } from '../lib/crypto';
 import { postSlackMessage } from '../domains/integrations/oauth';
 import { writeActivity } from '../core/activity';
 import { logger } from '../lib/logger';
 import { env } from '../env';
+import { salesWork, summarizeSalesWork } from '../domains/crm/work';
 
 export interface Consumer {
   name: string;
   handle: (ev: DomainEvent) => Promise<void>;
 }
 
-async function notify(userIds: string[], type: string, entityRef: string | null, payload: Record<string, unknown>): Promise<void> {
+async function notify(
+  eventId: string,
+  userIds: string[],
+  type: string,
+  entityRef: string | null,
+  payload: Record<string, unknown>,
+): Promise<void> {
   if (!userIds.length) return;
   const { db } = getDb();
   const unique = [...new Set(userIds)].filter(Boolean);
   let branding: Branding | null = null;
 
   for (const userId of unique) {
-    await db.insert(schema.notifications).values({
-      id: ulid(), userId, type, entityRef, payload,
-    });
-    // email dubbing per user prefs
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId));
+    if (!user) continue;
     const prefs = (user?.emailNotificationPrefs as Record<string, boolean>) ?? {};
-    if (!user || prefs[type] === false || prefs.__all === false) continue;
+    const dedupeKey = `${eventId}:notifications:${userId}:${type}`;
+    let email: QueuedEmailInput | null = null;
 
-    branding ??= await loadBranding();
-    const locale = asLocale(user.locale);
-    const vars = {
-      ref: (payload.ref as string) ?? entityRef ?? '',
-      title: (payload.title as string) ?? '',
-      status: (payload.statusName as string) ?? '',
-      actor: (payload.actorName as string) ?? tr(locale, 'notify.someone'),
-      decision: (payload.decision as string) ?? '',
-      workspace: branding.workspaceName,
-    };
-    const known = NOTIFY_KEYS.has(type) ? type : 'generic';
-    const link = notificationLink(type, payload);
-    const { html, text } = renderEmail({
-      locale,
-      branding,
-      heading: tr(locale, `notify.${known}.heading`, vars),
-      paragraphs: [tr(locale, `notify.${known}.body`, vars)],
-      cta: link ? { label: tr(locale, 'notify.cta'), url: link } : undefined,
-    });
-    // Let failures reach the relay so it retries and eventually dead-letters,
-    // exactly like the Slack consumer – silence used to hide broken delivery.
-    await queueEmail({
-      to: user.email,
-      subject: tr(locale, `notify.${known}.subject`, vars),
-      body: text,
-      html,
+    if (prefs[type] !== false && prefs.__all !== false) {
+      branding ??= await loadBranding();
+      const locale = asLocale(user.locale);
+      const vars = {
+        ref: (payload.ref as string) ?? entityRef ?? '',
+        title: (payload.title as string) ?? '',
+        status: (payload.statusName as string) ?? '',
+        actor: (payload.actorName as string) ?? tr(locale, 'notify.someone'),
+        decision: (payload.decision as string) ?? '',
+        total: Number(payload.total ?? 0),
+        overdue: Number(payload.overdue ?? 0),
+        dueToday: Number(payload.dueToday ?? 0),
+        waitingReply: Number(payload.waitingReply ?? 0),
+        nurtureDue: Number(payload.nurtureDue ?? 0),
+        noNextAction: Number(payload.noNextAction ?? 0),
+        workspace: branding.workspaceName,
+      };
+      const known = NOTIFY_KEYS.has(type) ? type : 'generic';
+      const link = notificationLink(type, payload);
+      const { html, text } = renderEmail({
+        locale,
+        branding,
+        heading: tr(locale, `notify.${known}.heading`, vars),
+        paragraphs: [tr(locale, `notify.${known}.body`, vars)],
+        cta: link ? { label: tr(locale, 'notify.cta'), url: link } : undefined,
+      });
+      email = {
+        idempotencyKey: `${eventId}:email:${userId}:${type}`,
+        to: user.email,
+        subject: tr(locale, `notify.${known}.subject`, vars),
+        body: text,
+        html,
+      };
+    }
+
+    await db.transaction(async (tx) => {
+      await tx.insert(schema.notifications).values({
+        id: ulid(), userId, type, dedupeKey, entityRef, payload,
+      }).onConflictDoNothing({ target: schema.notifications.dedupeKey });
+      if (email) await enqueueEmail(email, tx);
     });
   }
 }
@@ -68,6 +87,7 @@ async function notify(userIds: string[], type: string, entityRef: string | null,
 const NOTIFY_KEYS = new Set([
   'task.assigned', 'comment.mentioned', 'task.status_changed',
   'invoice.paid', 'quote.accepted', 'leave.requested', 'leave.decided',
+  'sales.work_digest',
 ]);
 
 /** Deep link for a notification, mirroring the Slack consumer's targets. */
@@ -86,9 +106,30 @@ function notificationLink(type: string, payload: Record<string, unknown>): strin
     case 'leave.requested':
     case 'leave.decided':
       return appLink('/people');
+    case 'sales.work_digest':
+      return appLink('/crm/work');
     default:
       return null;
   }
+}
+
+async function liveSalesDigest(userId: string, localDate: string): Promise<Record<string, unknown> | null> {
+  const { db } = getDb();
+  const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId));
+  if (!user?.isActive) return null;
+  const permissions = await db.select({ permission: schema.rolePermissions.permission })
+    .from(schema.rolePermissions)
+    .where(eq(schema.rolePermissions.roleId, user.roleId));
+  const permissionSet = new Set(permissions.map((row) => row.permission));
+  if (!permissionSet.has('crm.read')) return null;
+
+  const work = await salesWork({
+    userId,
+    timezone: user.timezone,
+    access: { permissions: permissionSet },
+  }, { scope: 'mine', limit: 1 });
+  const summary = summarizeSalesWork(work);
+  return summary.total ? { userId, localDate, ...summary } : null;
 }
 
 const notifications: Consumer = {
@@ -97,33 +138,38 @@ const notifications: Consumer = {
     const p = ev.payload as any;
     switch (ev.type) {
       case 'task.assigned':
-        await notify(p.assigneeIds ?? [], 'task.assigned', p.ref ?? null, p);
+        await notify(ev.id, p.assigneeIds ?? [], 'task.assigned', p.ref ?? null, p);
         break;
       case 'comment.mentioned':
-        await notify(p.mentions ?? [], 'comment.mentioned', p.ref ?? null, p);
+        await notify(ev.id, p.mentions ?? [], 'comment.mentioned', p.ref ?? null, p);
         break;
       case 'task.status_changed':
-        await notify([...(p.assigneeIds ?? []), p.createdBy].filter(Boolean), 'task.status_changed', p.ref ?? null, p);
+        await notify(ev.id, [...(p.assigneeIds ?? []), p.createdBy].filter(Boolean), 'task.status_changed', p.ref ?? null, p);
         break;
       case 'page.mentioned':
-        await notify(p.mentions ?? [], 'comment.mentioned', p.ref ?? null, p);
+        await notify(ev.id, p.mentions ?? [], 'comment.mentioned', p.ref ?? null, p);
         break;
       case 'payment.recorded':
       case 'invoice.paid':
-        await notify([p.createdBy].filter(Boolean), 'invoice.paid', p.ref ?? null, p);
+        await notify(ev.id, [p.createdBy].filter(Boolean), 'invoice.paid', p.ref ?? null, p);
         break;
       case 'quote.accepted':
-        await notify([p.ownerId, p.createdBy].filter(Boolean), 'quote.accepted', p.ref ?? null, p);
+        await notify(ev.id, [p.ownerId, p.createdBy].filter(Boolean), 'quote.accepted', p.ref ?? null, p);
         break;
       case 'leave.requested':
-        await notify([p.approverId].filter(Boolean), 'leave.requested', ev.aggregateId, p);
+        await notify(ev.id, [p.approverId].filter(Boolean), 'leave.requested', ev.aggregateId, p);
         break;
       case 'leave.decided':
-        await notify([p.employeeUserId].filter(Boolean), 'leave.decided', ev.aggregateId, p);
+        await notify(ev.id, [p.employeeUserId].filter(Boolean), 'leave.decided', ev.aggregateId, p);
         break;
       case 'git.pr_merged':
-        await notify(p.assigneeIds ?? [], 'task.status_changed', p.ref ?? null, p);
+        await notify(ev.id, p.assigneeIds ?? [], 'task.status_changed', p.ref ?? null, p);
         break;
+      case 'sales.work_digest_due': {
+        const digest = await liveSalesDigest(p.userId, p.localDate);
+        if (digest) await notify(ev.id, [p.userId], 'sales.work_digest', null, digest);
+        break;
+      }
       default:
         break;
     }
@@ -139,6 +185,7 @@ const sse: Consumer = {
       // actorId travels with the payload so clients can skip pings for their own actions.
       data: { aggregateType: ev.aggregateType, aggregateId: ev.aggregateId, actorId: ev.actorId, ...p },
       projectScope: p.projectId ? [p.projectId] : undefined,
+      userScope: ev.type === 'sales.work_digest_due' && p.userId ? [p.userId] : undefined,
     });
   },
 };

@@ -147,6 +147,73 @@ export const deals = pgTable('deals', {
   sourceLeadIdx: uniqueIndex('deals_source_lead_idx').on(t.sourceLeadId),
 }));
 
+export const salesMessageTemplates = pgTable('sales_message_templates', {
+  id: pk(),
+  name: text('name').notNull(),
+  activityType: text('activity_type').notNull(),
+  channel: text('channel'),
+  subject: text('subject'),
+  body: text('body').notNull(),
+  active: boolean('active').notNull().default(true),
+  createdBy: createdBy(),
+  ...timestamps,
+  version: version(),
+  deletedAt: deletedAt(),
+}, (t) => ({
+  activeIdx: index('sales_message_templates_active_idx').on(t.active, t.name),
+}));
+
+export const salesSequences = pgTable('sales_sequences', {
+  id: pk(),
+  name: text('name').notNull(),
+  description: text('description').notNull().default(''),
+  active: boolean('active').notNull().default(true),
+  createdBy: createdBy(),
+  ...timestamps,
+  version: version(),
+  deletedAt: deletedAt(),
+}, (t) => ({
+  activeIdx: index('sales_sequences_active_idx').on(t.active, t.name),
+}));
+
+export const salesSequenceSteps = pgTable('sales_sequence_steps', {
+  id: pk(),
+  sequenceId: text('sequence_id').notNull().references(() => salesSequences.id, { onDelete: 'cascade' }),
+  templateId: text('template_id').references(() => salesMessageTemplates.id, { onDelete: 'set null' }),
+  position: integer('position').notNull(),
+  delayDays: integer('delay_days').notNull().default(0),
+  activityType: text('activity_type').notNull(),
+  channel: text('channel'),
+  subject: text('subject'),
+  context: text('context'),
+  ...timestamps,
+}, (t) => ({
+  sequencePositionIdx: uniqueIndex('sales_sequence_steps_position_idx').on(t.sequenceId, t.position),
+}));
+
+export const salesSequenceEnrollments = pgTable('sales_sequence_enrollments', {
+  id: pk(),
+  sequenceId: text('sequence_id').notNull().references(() => salesSequences.id),
+  leadId: text('lead_id').references(() => leads.id, { onDelete: 'cascade' }),
+  dealId: text('deal_id').references(() => deals.id, { onDelete: 'cascade' }),
+  status: text('status').notNull().default('active'), // active | completed | stopped
+  currentStepPosition: integer('current_step_position').notNull().default(0),
+  ownerId: text('owner_id').references(() => users.id),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  stoppedAt: timestamp('stopped_at', { withTimezone: true }),
+  createdBy: createdBy(),
+  ...timestamps,
+  version: version(),
+}, (t) => ({
+  sequenceIdx: index('sales_sequence_enrollments_sequence_idx').on(t.sequenceId, t.status),
+  activeLeadIdx: uniqueIndex('sales_sequence_enrollments_active_lead_idx')
+    .on(t.leadId).where(sql`${t.status} = 'active' and ${t.leadId} is not null`),
+  activeDealIdx: uniqueIndex('sales_sequence_enrollments_active_deal_idx')
+    .on(t.dealId).where(sql`${t.status} = 'active' and ${t.dealId} is not null`),
+  parentCheck: check('sales_sequence_enrollments_parent_check', sql`(${t.leadId} is null) <> (${t.dealId} is null)`),
+}));
+
 export const salesActivities = pgTable('sales_activities', {
   id: pk(),
   leadId: text('lead_id').references(() => leads.id, { onDelete: 'cascade' }),
@@ -162,6 +229,9 @@ export const salesActivities = pgTable('sales_activities', {
   dueAt: timestamp('due_at', { withTimezone: true }).notNull(),
   completedAt: timestamp('completed_at', { withTimezone: true }),
   ownerId: text('owner_id').references(() => users.id),
+  messageTemplateId: text('message_template_id').references(() => salesMessageTemplates.id, { onDelete: 'set null' }),
+  sequenceEnrollmentId: text('sequence_enrollment_id').references(() => salesSequenceEnrollments.id, { onDelete: 'set null' }),
+  sequenceStepId: text('sequence_step_id').references(() => salesSequenceSteps.id, { onDelete: 'set null' }),
   createdBy: createdBy(),
   ...timestamps,
   version: version(),
@@ -171,10 +241,21 @@ export const salesActivities = pgTable('sales_activities', {
   dealIdx: index('sales_activities_deal_idx').on(t.dealId),
   companyIdx: index('sales_activities_company_idx').on(t.companyId),
   ownerIdx: index('sales_activities_owner_idx').on(t.ownerId),
+  enrollmentIdx: index('sales_activities_enrollment_idx').on(t.sequenceEnrollmentId),
   dueIdx: index('sales_activities_due_idx').on(t.status, t.dueAt),
   leadDueIdx: index('sales_activities_lead_due_idx').on(t.leadId, t.status, t.dueAt),
   dealDueIdx: index('sales_activities_deal_due_idx').on(t.dealId, t.status, t.dueAt),
   parentCheck: check('sales_activities_parent_check', sql`(${t.leadId} is null) <> (${t.dealId} is null)`),
+}));
+
+/** Idempotency ledger for one sales-work digest per user and local date. */
+export const salesDigestRuns = pgTable('sales_digest_runs', {
+  id: pk(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  localDate: text('local_date').notNull(),
+  ...timestamps,
+}, (t) => ({
+  userDateIdx: uniqueIndex('sales_digest_runs_user_date_idx').on(t.userId, t.localDate),
 }));
 
 export const notes = pgTable('notes', {

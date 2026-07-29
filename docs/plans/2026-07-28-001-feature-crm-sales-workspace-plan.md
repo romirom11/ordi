@@ -37,7 +37,7 @@ The current CRM stores companies, contacts, deals, notes, files, and audit activ
 - **Separate leads from deals** (session-settled: user-approved — chosen over treating every researched company as a deal: unverified prospects must not inflate or clutter the opportunity pipeline). Governs R3, R4, R11.
 - **Make Work the default CRM surface** (session-settled: user-approved — chosen over opening on companies or the kanban: the primary user need is deciding what to do today). Governs R1, R6, R7.
 - **Use first-class sales activities** (session-settled: user-approved — chosen over custom next-step fields and large notes: planned and completed actions need dates, outcomes, and history). Governs R5-R7.
-- **Keep v1 manual-assisted** (session-settled: user-approved — chosen over automated sequences and channel integrations: reliable organization creates the immediate value without turning ordi into a marketing automation suite). Governs R17.
+- **Keep outreach execution manual-assisted** (session-settled: user-approved — reusable templates and sequences may plan the next human action, but they never send email or LinkedIn messages; chosen over channel automation so ordi remains an operational CRM rather than a marketing automation suite). Governs R17, R20.
 - **Evolve CRM additively.** Existing company, contact, deal, note, project, invoice, permission, and audit behavior remains compatible. Governs R15, R16, R18.
 
 ### Actors
@@ -88,7 +88,7 @@ The current CRM stores companies, contacts, deals, notes, files, and audit activ
 
 **v1 operating boundary**
 
-- R20. v1 must assist manual outreach with copy/open/log controls and follow-up scheduling, but must not send messages or automate outreach sequences.
+- R20. v1 must assist manual outreach with reusable copy, logging, follow-up scheduling, and sequences of manual actions, but must never send outreach automatically.
 
 ### Key Flows
 
@@ -157,7 +157,7 @@ flowchart TB
 
 - Gmail or Outlook synchronization.
 - LinkedIn or email sending integrations.
-- Automated outreach sequences and templates beyond copy/log assistance.
+- Automated message sending, channel-connected campaigns, or sequences that execute outreach without a human action.
 - Advanced funnel analytics and forecasting reports.
 - Automated scoring, enrichment, and source revalidation.
 

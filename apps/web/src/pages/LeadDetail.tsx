@@ -173,7 +173,12 @@ export function LeadDetailPage({ id }: { id: string }) {
               </Card>
             ) : (
               <>
-                <SalesActivityPanel leadId={id} canWrite={canWrite} />
+                <SalesActivityPanel
+                  leadId={id}
+                  companyId={lead.companyId}
+                  contactId={lead.contactId}
+                  canWrite={canWrite}
+                />
                 <NotesSection leadId={id} canWrite={canWrite} />
               </>
             )}

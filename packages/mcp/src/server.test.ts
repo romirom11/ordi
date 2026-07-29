@@ -179,6 +179,7 @@ describe('sales workspace tools', () => {
       'list_leads', 'get_lead', 'get_sales_work', 'list_sales_activities',
       'create_lead', 'update_lead', 'preview_research_import', 'import_research', 'schedule_sales_activity',
       'update_sales_activity', 'complete_sales_activity', 'cancel_sales_activity', 'convert_lead', 'demote_deal_to_lead',
+      'list_sales_playbooks', 'save_sales_message_template', 'save_sales_sequence', 'manage_sales_sequence',
     ]) expect(names).toContain(name);
   });
 
@@ -246,6 +247,73 @@ describe('sales workspace tools', () => {
       path: '/sales-activities/a2/cancel',
       body: {},
     }]);
+  });
+
+  it('manages sales playbooks and sequence enrollments through compact tools', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const patches: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({
+      '/sales-message-templates': { data: [{ id: 'tm1', name: 'Opener' }] },
+      '/sales-sequences': { data: [{ id: 'sq1', name: 'Outbound' }] },
+    }, posts, patches));
+
+    const listed = await client.callTool({ name: 'list_sales_playbooks', arguments: {} });
+    const listBody = JSON.parse((listed.content as any)[0].text);
+    expect(listBody.templates.data[0].id).toBe('tm1');
+    expect(listBody.sequences.data[0].id).toBe('sq1');
+
+    await client.callTool({
+      name: 'save_sales_message_template',
+      arguments: {
+        name: 'Opener',
+        activityType: 'outreach',
+        channel: 'linkedin',
+        body: 'Hi {{contactFirstName}}',
+      },
+    });
+    await client.callTool({
+      name: 'save_sales_sequence',
+      arguments: {
+        name: 'Outbound',
+        steps: [{ templateId: 'tm1', delayDays: 0 }],
+      },
+    });
+    await client.callTool({
+      name: 'manage_sales_sequence',
+      arguments: { action: 'enroll', sequenceId: 'sq1', leadId: 'l1' },
+    });
+    await client.callTool({
+      name: 'manage_sales_sequence',
+      arguments: { action: 'stop', enrollmentId: 'en1' },
+    });
+
+    expect(posts).toEqual([
+      {
+        path: '/sales-message-templates',
+        body: {
+          name: 'Opener',
+          activityType: 'outreach',
+          channel: 'linkedin',
+          body: 'Hi {{contactFirstName}}',
+        },
+      },
+      {
+        path: '/sales-sequences',
+        body: {
+          name: 'Outbound',
+          steps: [{ templateId: 'tm1', delayDays: 0 }],
+        },
+      },
+      {
+        path: '/sales-sequences/sq1/enroll',
+        body: { leadId: 'l1' },
+      },
+      {
+        path: '/sales-sequence-enrollments/en1/stop',
+        body: {},
+      },
+    ]);
+    expect(patches).toEqual([]);
   });
 
   it('previews research without committing it', async () => {

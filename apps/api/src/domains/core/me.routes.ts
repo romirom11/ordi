@@ -22,6 +22,7 @@ export function meRoutes() {
         id: actor.userId, email: actor.email, name: actor.name,
         avatar: user?.avatar ?? null, timezone: user?.timezone ?? 'UTC',
         locale: actor.locale, dateFormat: user?.dateFormat ?? 'auto',
+        emailNotificationPrefs: user?.emailNotificationPrefs ?? {},
         roleId: actor.roleId, roleName: actor.roleName,
         isActive: user?.isActive ?? true,
       },

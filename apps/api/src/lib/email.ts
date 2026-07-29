@@ -2,8 +2,8 @@
  * Email sending (PRD §14.3, §11.3) via Nodemailer + SMTP. Settings come from
  * the workspace (Settings → Integrations) or, as a fallback, SMTP_URL in the
  * server env. With neither configured, emails are logged instead of sent.
- * Delivery of documents/reminders is enqueued through pg-boss by the caller;
- * this is the transport.
+ * This module is the synchronous SMTP transport. Background delivery must go
+ * through the durable email-delivery worker.
  */
 import nodemailer, { type Transporter } from 'nodemailer';
 import { logger } from './logger';
@@ -47,7 +47,7 @@ export interface EmailInput {
   attachments?: { filename: string; content: Buffer; contentType?: string }[];
 }
 
-export async function queueEmail(input: EmailInput): Promise<void> {
+export async function sendEmailNow(input: EmailInput): Promise<void> {
   const t = await getTransport();
   if (!t) {
     logger.info({ to: input.to, subject: input.subject }, '[email:dev] not sent (no SMTP configured)');
@@ -77,7 +77,7 @@ export async function trySendEmail(input: EmailInput): Promise<{ sent: boolean; 
   try {
     const t = await getTransport();
     if (!t) return { sent: false, error: 'not_configured' };
-    await queueEmail(input);
+    await sendEmailNow(input);
     return { sent: true };
   } catch (e) {
     const error = e instanceof Error ? e : new Error(String(e));

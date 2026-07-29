@@ -18,7 +18,7 @@ import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { emit } from '../../core/events';
 import { assertVersion } from '../../core/locking';
-import { queueEmail } from '../../lib/email';
+import { sendEmailNow } from '../../lib/email';
 import { asLocale, loadBranding, renderEmail, tr, type EmailLocale } from '../../lib/email-templates';
 import { nextNumber } from '../../workers/scheduled';
 import { env } from '../../env';
@@ -262,7 +262,7 @@ export async function sendInvoice(actor: Actor, id: string, opts: { to?: string;
       cta: { label: tr(locale, 'invoice.cta'), url: link },
       note: tr(locale, 'invoice.attached'),
     });
-    await queueEmail({
+    await sendEmailNow({
       to,
       subject: opts.subject ?? tr(locale, 'invoice.subject', vars),
       body: rendered.text,
@@ -610,7 +610,7 @@ export async function sendQuote(actor: Actor, id: string, opts: { to?: string; s
       cta: { label: tr(locale, 'quote.cta'), url: link },
       note: tr(locale, 'quote.attached'),
     });
-    await queueEmail({
+    await sendEmailNow({
       to,
       subject: opts.subject ?? tr(locale, 'quote.subject', vars),
       body: rendered.text,
