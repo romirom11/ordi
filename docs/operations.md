@@ -43,10 +43,13 @@ wal-g backup-push "$PGDATA"
 wal-g delete retain FULL 14 --confirm   # keep 14 daily bases
 ```
 
-The `events`, `processed_events` and dead-letter tables live in the same DB, so
-an event committed before a crash survives restore exactly once (outbox +
-processed_events dedup) – no separate queue backup is needed (pg-boss schema
-`pgboss` is also inside the same PITR perimeter).
+The `events`, `processed_events`, dead-letter, `email_deliveries` and
+`sales_digest_runs` tables live in the same DB. An event, queued email or digest
+claim committed before a crash therefore remains inside the same PITR perimeter;
+no separate queue backup is needed (the pg-boss schema `pgboss` is covered too).
+Outbox consumers and enqueue operations are idempotent. SMTP itself is
+at-least-once: a crash after provider acceptance but before the row is marked
+`sent` can produce a duplicate retry.
 
 ## 3. Restore procedure (rehearse quarterly, measure RTO)
 
@@ -90,11 +93,17 @@ Alert on:
 - **Dead-letter depth**: `SELECT count(*) FROM dead_letter_events WHERE attempts >= 5 AND replayed_at IS NULL;` > 0 for 15 min.
 - **WAL archiving lag**: `SELECT last_archived_time FROM pg_stat_archiver;` older than 10 minutes.
 - **Outbox lag**: `SELECT count(*) FROM events WHERE published_at IS NULL AND occurred_at < now() - interval '5 minutes';` > 0.
+- **Email dead letters**: `SELECT count(*) FROM email_deliveries WHERE status = 'dead';` > 0 for 15 min.
+- **Email queue lag**: `SELECT count(*) FROM email_deliveries WHERE status = 'pending' AND next_attempt_at < now() - interval '5 minutes';` grows for 15 min.
+- **Stale email claims**: `SELECT count(*) FROM email_deliveries WHERE status = 'sending' AND updated_at < now() - interval '5 minutes';` > 0 across two checks. The worker should reclaim these automatically.
+- **Sales digest scheduler**: `SELECT max(created_at) FROM sales_digest_runs;` is older than 30 hours while active human users with `crm.read` exist. The ledger records empty mornings, so no row usually means the scheduler did not run.
 - Disk usage on the DB volume > 80%.
 
 Errors: set `SENTRY_DSN` (API) and `VITE_SENTRY_DSN` (web build) – the built-in
 lightweight reporter posts exceptions to Sentry without extra dependencies.
 Logs are pino JSON on stdout with `request_id` – ship via Dokploy log driver.
+Alert specifically on repeated `email delivery tick failed`, `email delivery
+dead-lettered`, `sales digest failed` and `initial sales digest failed` messages.
 
 ## 6. Secrets
 

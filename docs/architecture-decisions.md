@@ -96,8 +96,17 @@ makes the invariants directly testable.
     pg-boss doesn't give strict per-aggregate ordering, and the single-threaded
     relay processing in `occurred_at` order yields correct ordering trivially at
     this scale. **pg-boss is used for scheduled cron jobs** (recurring
-    tasks/invoices, reminders, burndown snapshots, quote expiry) with an interval
-    fallback if pg-boss is unavailable. All jobs are idempotent.
+    tasks/invoices, reminders, burndown snapshots, quote expiry and timezone-aware
+    sales digests) with an interval fallback if pg-boss is unavailable. All jobs
+    are idempotent.
+- **Durable notification email** is a second, narrower queue:
+  `email_deliveries`. The notification consumer commits the in-app notification
+  and an idempotent delivery row in one transaction, then returns without network
+  I/O. A worker claims due rows with `FOR UPDATE SKIP LOCKED`, recovers abandoned
+  `sending` claims after five minutes, and retries at 1m, 5m, 30m, 2h and 12h
+  before `dead`. This allows multiple API replicas to drain the queue safely.
+  SMTP delivery remains at-least-once across the external boundary: a crash after
+  provider acceptance but before the `sent` update may produce a duplicate retry.
 - **SSE** `/api/v1/stream` filters messages by the subscriber's accessible
   projects / user id (`core/events.ts` broadcaster). The `EventBroadcaster`
   abstraction is where a Redis pub/sub fan-out would slot in for multi-replica.
@@ -111,8 +120,11 @@ makes the invariants directly testable.
   template), else a dependency-free minimal PDF writer, so the endpoint always
   returns a valid PDF even without Typst installed.
 - **Email** (`lib/email.ts`): Nodemailer + SMTP; without SMTP configured it logs
-  (dev) instead of sending. **S3** (`lib/s3.ts`): presigned upload/download;
-  without an endpoint it returns a `local://` stub so uploads degrade gracefully.
+  (dev) instead of sending. User-initiated document sends stay synchronous because
+  the user needs an immediate result; event-driven notifications and reminders
+  use `email_deliveries` so SMTP latency never blocks the outbox relay. **S3**
+  (`lib/s3.ts`): presigned upload/download; without an endpoint it returns a
+  `local://` stub so uploads degrade gracefully.
 - **Git credentials** are encrypted at rest with AES-256-GCM (`lib/crypto.ts`).
   Secrets/tokens are never returned by any endpoint and never enter the audit
   diff (redaction serializer excludes them entirely).
@@ -137,6 +149,10 @@ intake/careers pages, git webhooks) live in a dedicated `public` module.
 
 ## 9. Deliberate scope calls for this build
 
+- CRM playbooks are planners, not channel automation. A sequence advances only
+  when its current manual sales activity is completed; it may render approved
+  template copy and schedule the next action, but never sends email or LinkedIn
+  messages itself.
 - The full desktop (Tauri) shell is scaffolded (config + guide) rather than
   producing native binaries in CI here; it wraps `apps/web` unchanged per §18.
 - IMAP intake polling and the S3/SMTP/Typst integrations are wired behind

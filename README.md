@@ -84,9 +84,10 @@ sub-tasks, dependencies, labels, custom fields.
 <tr><td width="50%">
 
 ### CRM
-Companies, contacts, a drag-and-drop deal pipeline with weighted forecast, client
-portal links, public intake forms and email intake over IMAP. A won deal turns into
-a project without retyping anything.
+Research leads, companies and contacts, a daily Work queue, first-class sales
+activities, reusable message templates and manual follow-up sequences. Qualified
+opportunities move into a drag-and-drop deal pipeline with weighted forecast, and
+a won deal turns into a project without retyping anything.
 
 </td><td width="50%">
 
