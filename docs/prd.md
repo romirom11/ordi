@@ -351,7 +351,7 @@ CRUD у межах компанії; is_primary (дефолтний отриму
 - Lead належить компанії, може мати запропонований контакт і owner, зберігає product/service pursuit та нотатки кваліфікації: signal, evidence, fit, timing, score, джерела й дату перевірки, suggested channel, opener і caution. Заводиться вручну через UI, REST або MCP.
 - Статуси lead: `new`, `needs_review`, `ready`, `waiting_reply`, `engaged`, `nurture`, `converted`, `disqualified`, `no_response`. `nurture` вимагає валідну дату повернення `YYYY-MM-DD`; планування нової активності атомарно повертає lead у `ready`.
 - Sales activity належить рівно одному lead або deal і має тип, status `planned|completed|cancelled`, канал, тему/context, owner, обовʼязковий `due_at`, outcome та звʼязки з template/sequence. Complete може змінити lead status і створити наступну активність в одній транзакції.
-- `/crm` відкриває Work: `overdue`, `dueToday`, `waitingReply`, `nurtureDue`, `noNextAction`. Межі «сьогодні» рахуються у timezone користувача. Дефолтний scope — власні та ніким не призначені записи; team scope явний. Кожен bucket повертає точний total незалежно від ліміту рядків.
+- `/crm` відкриває Work: `overdue`, `dueToday`, `upcoming`, `waitingReply`, `nurtureDue`, `noNextAction` — саме в такому порядку, бо це порядок робочого дня. `upcoming` тримає записи із запланованою наступною дією пізніше сьогодні: без нього повністю розпланований тиждень показував порожню чергу. Дію на рядку визначає bucket: завершити прострочене й сьогоднішнє, запланувати нерозплановане, решту лише читати. Ранковий дайджест шле тільки те, що потребує дії (`overdue + dueToday + nurtureDue + noNextAction`). Межі «сьогодні» рахуються у timezone користувача. Дефолтний scope — власні та ніким не призначені записи; team scope явний. Кожен bucket повертає точний total незалежно від ліміту рядків.
 - Конверсія lead → deal і зворотна демоція legacy Lead-stage deal виконуються транзакційно та переносять notes, files, activities, active sequence і source links без втрати історії.
 
 ### 7.5. Угоди (пайплайн)
@@ -607,7 +607,7 @@ departments (name, parent_id), positions (title), employees (user_id?, first/las
 | `people.recruit` | Вакансії, кандидати, інтервʼю, найм |
 | `finance.read_costs` | Агреговані costs/ЗП-звіти й собівартість (у домені finance, бо це гроші) |
 
-Системні ролі оновлюються: Owner/Admin – все. Нова преднастроєна роль **HR** (people.* повністю крім read_compensation, яку дають вибірково). Роль **Finance** отримує `finance.read_costs` (бачить агреговані витрати на ЗП, але не обовʼязково поіменні ставки: read_compensation видається окремо). Member/guest – жодних people.*: розділ People відсутній у навігації.
+Системні ролі оновлюються: Owner/Admin – все. Преднастроєна роль **Sales** покриває sales workspace: `crm.*`, `deals.read/write`, плюс read-only на проєкти та фінанси (продавцю потрібно бачити, що доставляється і що оплачено, але не змінювати ні того, ні іншого). Нова преднастроєна роль **HR** (people.* повністю крім read_compensation, яку дають вибірково). Роль **Finance** отримує `finance.read_costs` (бачить агреговані витрати на ЗП, але не обовʼязково поіменні ставки: read_compensation видається окремо). Member/guest – жодних people.*: розділ People відсутній у навігації.
 
 Кожен доступ до compensation і read_sensitive додатково пишеться в audit (хто дивився ЗП).
 
