@@ -3,8 +3,56 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
-## Unreleased
+## v1.17.0
 
+- The rich text editor is finished. Task bodies, KB pages and project
+  descriptions had bold, italic, strike, code, three heading levels and a
+  ten-item slash menu; they now have underline, text colour and highlight,
+  alignment, tables with row and column tools, callouts in four tones,
+  collapsible toggles, code blocks with syntax highlighting across 17
+  languages, and images. A hover gutter inserts a block below, drags to
+  reorder, and opens turn into / move / duplicate / delete. Blocks are
+  declared once in `richtext/blocks.ts`, so the slash menu, the bubble
+  toolbar and the block handle can no longer drift apart the way they had.
+  `RichBody` was a second renderer with its own switch statement that had
+  never learned tables, colour or highlighting; it is a pass-through to
+  `RichText` now.
+- Images can be pasted, dropped or picked, not only linked by url. A
+  document stores a signed, non-expiring path
+  (`/api/v1/files/<id>/<token>`, an HMAC under `AUTH_SECRET`) rather than a
+  presigned storage url that expires within the hour and rots the document
+  holding it - the model invoices, quotes and client portals already use.
+  The path is stored root-relative, so moving the instance to another
+  domain does not break every image ever embedded. Whoever holds such a
+  link can fetch the file, and rotating `AUTH_SECRET` invalidates every
+  issued one. `/attachments/presign` now signs the key it issues and
+  `/attachments/register` refuses a key without a matching signature:
+  registering an arbitrary key was a way to mint a public link to any
+  object in the bucket, an invoice PDF included.
+- Cmd/Ctrl-click and middle-click open a list row in a second tab. Project,
+  task, lead, deal, client, invoice, employee, dashboard and subtask rows
+  were plain click handlers calling `navigate()`, which swallows the
+  modifier, so the context menu was the only way to open anything beside
+  what you were already reading.
+- The keyboard scheme is one table with a help sheet on `Shift+?`, instead
+  of three scattered listeners nothing documented. New: `Cmd+T`,
+  `Cmd+Shift+T` to reopen the last closed tab, `Cmd+1`…`9`, and `Cmd+[` /
+  `Cmd+]` for history. The G chord reaches 11 destinations.
+- Page entrances replay on every navigation and reset their own scroll.
+  They only ever keyed off the first path segment, so opening a project
+  from the project list animated nothing and kept the previous scroll
+  position.
+- External links work in the desktop app. Two independent silent failures:
+  the capability granted `opener:allow-open-url` with no url scope, which
+  rejects every call, and nothing routed links to the opener anyway - all
+  three webviews drop a new-window request instead of handing it to the
+  OS. A delegated handler now covers links the SPA renders later too;
+  http(s), mailto and tel go to the browser, while `ordi://`, `blob:` and
+  in-app router links stay put.
+- Sales activity dates go through the shared date picker and its separate
+  time control, so they honour the user's date preferences. Completing a
+  research review readies the lead and schedules the first outreach,
+  instead of recording that a reply is already pending.
 - Removed the structured research import. It froze one external research
   tool's JSON shape into the database schema and the public API, and
   carried a hardcoded list of job-board and company-registry hostnames in
@@ -29,10 +77,13 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   sequence, like every other way a lead stops being worked. The
   enrollment used to stay `active` forever on a lead nothing could reach,
   and kept counting toward the sequence's active total.
-- A pipeline stage may be named anything again, "Lead" included. The ban
-  was a guard for the one-off 0020 migration that got promoted into
-  permanent validation across the shared schema, the API and the UI. The
-  `leads.legacy_deal_id` marker that migration used is dropped too.
+- Unqualified prospects live in the Leads workspace only. The pipeline's
+  legacy "Lead" stage is migrated away without losing sales context, and
+  the demotion flow that stage needed is gone from the UI, the API and
+  MCP. A stage may still be *named* "Lead": the ban that shipped beside
+  that migration was a one-off guard promoted into permanent validation
+  across the shared schema, the API and the UI. The `leads.legacy_deal_id`
+  marker the migration used is dropped too.
 - Web CRM reads its status and activity-type enums from `@ordi/shared`
   instead of keeping copies, so an enum added on the server reaches the
   dropdowns. Fixes a side effect of the drift: the New lead dialog
@@ -137,6 +188,12 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   email retry-backoff case stepped forward from a hard-coded
   `2026-07-29`, so it stopped claiming on the first tick once the wall
   clock passed it.
+- ordi has a landing page at
+  [romirom11.github.io/ordi](https://romirom11.github.io/ordi). The README
+  was the only place the project explained itself, and it only reaches
+  people who already found the repository. Hand-written HTML and CSS with
+  the design tokens copied from the app, so the site and the product look
+  like the same thing.
 
 ## v1.16.0
 
