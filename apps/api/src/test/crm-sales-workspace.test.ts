@@ -286,6 +286,27 @@ describe('lead intake and daily work', () => {
     expect(bounded.noNextAction.total).toBeGreaterThan(1);
   });
 
+  it('keeps work booked beyond today visible instead of dropping it', async () => {
+    const booked = await json(reqAs(users.owner!.cookie).post('/leads', {
+      companyId,
+      title: 'Booked ahead',
+      status: 'ready',
+    }));
+    await reqAs(users.owner!.cookie).post('/sales-activities', {
+      leadId: booked.id,
+      type: 'outreach',
+      dueAt: new Date(Date.now() + 3 * 86_400_000).toISOString(),
+    });
+
+    const work = await json(reqAs(users.owner!.cookie).get('/sales-work'));
+    // A lead with its next step planned belongs in `upcoming` – it used to match
+    // no bucket at all and vanish from the queue entirely.
+    expect(work.upcoming.rows.some((row: any) => row.id === booked.id)).toBe(true);
+    expect(work.noNextAction.rows.some((row: any) => row.id === booked.id)).toBe(false);
+    expect(Object.values(work).flatMap((bucket: any) => bucket.rows)
+      .filter((row: any) => row.id === booked.id)).toHaveLength(1);
+  });
+
   it('snoozes nurture independently and returns it only on the chosen date', async () => {
     const nurtureLead = await json(reqAs(users.owner!.cookie).post('/leads', {
       companyId,

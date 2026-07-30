@@ -59,6 +59,55 @@ export async function seedBaseline(db: Db, workspaceName = 'ordi'): Promise<{ ro
     await db.insert(schema.dealStages).values(stages.map((s) => ({ id: ulid(), ...s })));
   }
 
+  /**
+   * A starter playbook. The workspace shipped with none, so the Playbooks tab
+   * opened empty on a feature whose whole point is reusable copy – a seller had
+   * to invent the format before getting any value from it. These are ordinary
+   * records: rename, rewrite or deactivate them like any other.
+   */
+  const existingTemplates = await db.select().from(schema.salesMessageTemplates);
+  if (!existingTemplates.length) {
+    const templates = [
+      {
+        name: 'First touch',
+        activityType: 'outreach',
+        channel: 'Email',
+        subject: '{{companyName}} — a quick thought',
+        body: 'Hi {{contactFirstName}},\n\nI noticed {{companyName}} is working on something we help with, and I had one concrete idea rather than a pitch.\n\nWorth fifteen minutes?\n\n{{ownerName}}',
+      },
+      {
+        name: 'Follow-up, no reply',
+        activityType: 'follow_up',
+        channel: 'Email',
+        subject: 'Re: {{companyName}}',
+        body: 'Hi {{contactFirstName}},\n\nFloating this back to the top of your inbox in case it slipped. Happy to close the loop either way.\n\n{{ownerName}}',
+      },
+      {
+        name: 'Break-up',
+        activityType: 'follow_up',
+        channel: 'Email',
+        subject: 'Closing the loop on {{leadTitle}}',
+        body: 'Hi {{contactFirstName}},\n\nI have not heard back, so I will assume the timing is wrong and stop here. If that changes, my door is open.\n\n{{ownerName}}',
+      },
+    ];
+    const templateIds = templates.map(() => ulid());
+    await db.insert(schema.salesMessageTemplates).values(
+      templates.map((template, index) => ({ id: templateIds[index]!, ...template })),
+    );
+
+    const sequenceId = ulid();
+    await db.insert(schema.salesSequences).values({
+      id: sequenceId,
+      name: 'Standard outreach',
+      description: 'First touch, then two follow-ups. Every step is a manual action – nothing is sent for you.',
+    });
+    await db.insert(schema.salesSequenceSteps).values([
+      { id: ulid(), sequenceId, position: 1, delayDays: 0, templateId: templateIds[0]!, activityType: 'outreach', channel: 'Email' },
+      { id: ulid(), sequenceId, position: 2, delayDays: 4, templateId: templateIds[1]!, activityType: 'follow_up', channel: 'Email' },
+      { id: ulid(), sequenceId, position: 3, delayDays: 7, templateId: templateIds[2]!, activityType: 'follow_up', channel: 'Email' },
+    ]);
+  }
+
   // Applicant stages
   const existingApp = await db.select().from(schema.applicantStages);
   if (!existingApp.length) {

@@ -46,7 +46,6 @@ const CONTACT_UPDATE_FIELDS = [
  * `list_companies` tool hands it straight to the model) looped on the same rows.
  * The cursor is honoured now, on the same key as /deals.
  *
-
  * Paged on the primary key. Ids are ULIDs (see pk() in the db schema), so they
  * sort lexicographically by creation time – newest-first is `id desc`, and the
  * cursor compares as exact text.
@@ -83,7 +82,9 @@ export async function createCompany(actor: Actor, input: CompanyInput) {
   const portalToken = ulid();
   await db.insert(schema.companies).values({
     id, name: input.name, domain: input.domain ?? null, status: input.status ?? 'lead',
-    ownerId: input.ownerId ?? null, billingEmail: input.billingEmail ?? null, address: input.address ?? null,
+    // Whoever adds a client owns it until someone says otherwise – an unowned
+    // record is one nobody is accountable for, and createLead already does this.
+    ownerId: input.ownerId ?? actor.userId, billingEmail: input.billingEmail ?? null, address: input.address ?? null,
     defaultCurrency: input.defaultCurrency ?? 'USD', paymentTermsDays: input.paymentTermsDays ?? 14,
     portalToken, customFields: input.customFields ?? {}, createdBy: actor.userId,
   });

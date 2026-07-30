@@ -75,7 +75,13 @@ describe('durable email delivery', () => {
       body: 'Permanent failure',
     });
 
-    const base = new Date('2026-07-29T00:00:00.000Z');
+    const { db } = getDb();
+    // Step forward from the row's own schedule, not a hard-coded date. With a
+    // literal base the first tick stopped claiming the moment the wall clock
+    // passed it, so this test was set to start failing on a calendar day.
+    const [queued] = await db.select().from(schema.emailDeliveries)
+      .where(eq(schema.emailDeliveries.idempotencyKey, 'test:dead-letter'));
+    const base = queued!.nextAttemptAt;
     for (let attempt = 1; attempt <= 5; attempt++) {
       await processEmailDeliveries({
         now: new Date(base.getTime() + attempt * 86_400_000),
@@ -83,7 +89,6 @@ describe('durable email delivery', () => {
       });
     }
 
-    const { db } = getDb();
     const [retrying] = await db.select().from(schema.emailDeliveries)
       .where(eq(schema.emailDeliveries.idempotencyKey, 'test:dead-letter'));
     expect(retrying).toMatchObject({ status: 'pending', attempts: 5 });

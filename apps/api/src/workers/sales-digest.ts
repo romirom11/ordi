@@ -69,7 +69,8 @@ export async function runSalesWorkDigests(now = new Date()): Promise<SalesDigest
         },
       }, { scope: 'mine', limit: 1, now });
       const summary = summarizeSalesWork(work);
-      if (summary.total === 0) return false;
+      // Booked-ahead and waiting-for-reply are a healthy pipeline, not a to-do.
+      if (summary.actionable === 0) return false;
 
       await publishEvent(tx, {
         type: 'sales.work_digest_due',

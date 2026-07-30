@@ -190,13 +190,15 @@ export interface SalesWorkItem {
   nextActivity?: SalesActivity | null;
 }
 
-export interface SalesWork {
-  overdue: { rows: SalesWorkItem[]; total: number };
-  dueToday: { rows: SalesWorkItem[]; total: number };
-  waitingReply: { rows: SalesWorkItem[]; total: number };
-  nurtureDue: { rows: SalesWorkItem[]; total: number };
-  noNextAction: { rows: SalesWorkItem[]; total: number };
-}
+export type SalesWorkBucket =
+  | 'overdue'
+  | 'dueToday'
+  | 'upcoming'
+  | 'waitingReply'
+  | 'nurtureDue'
+  | 'noNextAction';
+
+export type SalesWork = Record<SalesWorkBucket, { rows: SalesWorkItem[]; total: number }>;
 
 export interface ProjectLite { id: string; name: string; key?: string | null }
 

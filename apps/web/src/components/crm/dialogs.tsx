@@ -91,6 +91,8 @@ export function NewClientDialog({ open, onClose, onCreated }: {
   );
 }
 
+const NEW_COMPANY = '__new__';
+
 export function NewLeadDialog({ open, onClose, lockedCompanyId, onCreated }: {
   open: boolean;
   onClose: () => void;
@@ -101,14 +103,18 @@ export function NewLeadDialog({ open, onClose, lockedCompanyId, onCreated }: {
   const qc = useQueryClient();
   const companiesQ = useCompanies();
   const [companyId, setCompanyId] = useState(lockedCompanyId ?? '');
+  const [newCompanyName, setNewCompanyName] = useState('');
   const [title, setTitle] = useState('');
   const [product, setProduct] = useState('');
   const [status, setStatus] = useState<string>('new');
   const [error, setError] = useState<string | null>(null);
+  /** Sentinel option: the prospect is not in the workspace yet. */
+  const creatingCompany = !lockedCompanyId && companyId === NEW_COMPANY;
   const effectiveCompany = lockedCompanyId ?? companyId;
 
   const reset = () => {
     setCompanyId(lockedCompanyId ?? '');
+    setNewCompanyName('');
     setTitle('');
     setProduct('');
     setStatus('new');
@@ -116,14 +122,29 @@ export function NewLeadDialog({ open, onClose, lockedCompanyId, onCreated }: {
   };
 
   const mut = useMutation({
-    mutationFn: () => api.post<{ id: string }>('/leads', {
-      companyId: effectiveCompany,
-      title: title.trim(),
-      product: product.trim() || undefined,
-      status,
-    }),
+    /**
+     * A lead almost always arrives before its company does, and the form used to
+     * dead-end there: pick from a list, or cancel and go build the company on
+     * another tab. Creating it inline keeps the one action a seller performs
+     * most often to a single pass.
+     */
+    mutationFn: async () => {
+      const targetCompany = creatingCompany
+        ? (await api.post<{ id: string }>('/companies', {
+          name: newCompanyName.trim(),
+          status: 'lead',
+        })).id
+        : effectiveCompany;
+      return api.post<{ id: string }>('/leads', {
+        companyId: targetCompany,
+        title: title.trim(),
+        product: product.trim() || undefined,
+        status,
+      });
+    },
     onSuccess: (lead) => {
       qc.invalidateQueries({ queryKey: ['leads'] });
+      qc.invalidateQueries({ queryKey: ['companies'] });
       qc.invalidateQueries({ queryKey: ['sales-work'] });
       toast(t('crm.leadCreated'));
       reset();
@@ -137,6 +158,7 @@ export function NewLeadDialog({ open, onClose, lockedCompanyId, onCreated }: {
     e.preventDefault();
     setError(null);
     if (!effectiveCompany) { setError(t('crm.company') + ' – ' + t('common.select')); return; }
+    if (creatingCompany && !newCompanyName.trim()) { setError(t('crm.companyNameRequired')); return; }
     if (!title.trim()) { setError(t('common.titleRequired')); return; }
     mut.mutate();
   };
@@ -148,8 +170,19 @@ export function NewLeadDialog({ open, onClose, lockedCompanyId, onCreated }: {
           <Field label={t('crm.company')}>
             <Select value={companyId} onChange={(e) => setCompanyId(e.target.value)} className="w-full">
               <option value="">{companiesQ.isLoading ? t('common.loading') : t('common.select')}</option>
+              <option value={NEW_COMPANY}>{t('crm.newCompanyOption')}</option>
               {(companiesQ.data ?? []).map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
             </Select>
+          </Field>
+        )}
+        {creatingCompany && (
+          <Field label={t('crm.companyName')}>
+            <Input
+              autoFocus
+              value={newCompanyName}
+              onChange={(e) => setNewCompanyName(e.target.value)}
+              placeholder="Northwind Traders"
+            />
           </Field>
         )}
         <Field label={t('common.title')}>

@@ -1,11 +1,14 @@
-import { useState } from 'react';
-import { AlertCircle, CalendarClock, Check, Clock3, Inbox, PauseCircle } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import { AlertCircle, CalendarClock, CalendarDays, Check, Clock3, Inbox, PauseCircle } from 'lucide-react';
 import { useNavigate } from '../../lib/router';
 import { useCan } from '../../lib/auth';
 import { useT } from '../../lib/i18n';
 import { Button, EmptyState, Select, Skeleton, fmtRelative } from '../ui';
 import { CompleteActivityDialog, ScheduleActivityDialog } from './SalesActivityPanel';
-import { salesActivityTypeLabel, useSalesWork, type SalesActivity, type SalesWorkItem } from './shared';
+import {
+  salesActivityTypeLabel, useSalesWork,
+  type SalesActivity, type SalesWorkBucket, type SalesWorkItem,
+} from './shared';
 
 export function WorkTab() {
   const t = useT();
@@ -23,29 +26,44 @@ export function WorkTab() {
   if (!work) return <EmptyState title={t('common.error')} />;
   const total = Object.values(work).reduce((sum, bucket) => sum + bucket.total, 0);
 
-  const groups = [
-    { key: 'overdue', title: t('crm.queue.overdue'), ...work.overdue, icon: <AlertCircle size={15} className="text-destructive" /> },
-    { key: 'today', title: t('crm.queue.today'), ...work.dueToday, icon: <Clock3 size={15} className="text-warning" /> },
-    { key: 'waiting', title: t('crm.queue.waiting'), ...work.waitingReply, icon: <Inbox size={15} className="text-primary" /> },
-    { key: 'nurture', title: t('crm.queue.nurture'), ...work.nurtureDue, icon: <PauseCircle size={15} className="text-muted-foreground" /> },
-    { key: 'none', title: t('crm.queue.noAction'), ...work.noNextAction, icon: <CalendarClock size={15} className="text-faint" /> },
+  /**
+   * Read top to bottom, this is the order the day is worked: what slipped, what
+   * is due, what is booked, what is out of your hands, what comes back today,
+   * what nobody has planned at all.
+   *
+   * `action` is what the row's button offers. Only the first two buckets are
+   * work you can finish right now – offering "Complete" on a follow-up that is
+   * five days out (which the waiting-for-reply rows did) invites closing work
+   * that has not happened.
+   */
+  const groups: Array<{
+    key: SalesWorkBucket;
+    title: string;
+    icon: ReactNode;
+    action: 'complete' | 'schedule' | 'none';
+    rows: SalesWorkItem[];
+    total: number;
+  }> = [
+    { key: 'overdue', title: t('crm.queue.overdue'), icon: <AlertCircle size={15} className="text-destructive" />, action: 'complete', ...work.overdue },
+    { key: 'dueToday', title: t('crm.queue.today'), icon: <Clock3 size={15} className="text-warning" />, action: 'complete', ...work.dueToday },
+    { key: 'upcoming', title: t('crm.queue.upcoming'), icon: <CalendarDays size={15} className="text-muted-foreground" />, action: 'none', ...work.upcoming },
+    { key: 'waitingReply', title: t('crm.queue.waiting'), icon: <Inbox size={15} className="text-primary" />, action: 'none', ...work.waitingReply },
+    { key: 'nurtureDue', title: t('crm.queue.nurture'), icon: <PauseCircle size={15} className="text-muted-foreground" />, action: 'schedule', ...work.nurtureDue },
+    { key: 'noNextAction', title: t('crm.queue.noAction'), icon: <CalendarClock size={15} className="text-faint" />, action: 'schedule', ...work.noNextAction },
   ];
 
   return (
     <div className="flex-1 overflow-auto p-6">
       <div className="mx-auto max-w-5xl space-y-6">
         <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-base font-semibold">{t('crm.workTitle')}</h2>
-            <p className="text-[13px] text-muted-foreground">{t('crm.workHint')}</p>
-          </div>
+          <h2 className="text-base font-semibold">{t('crm.workTitle')}</h2>
           <Select value={scope} onChange={(event) => setScope(event.target.value as 'mine' | 'all')}>
             <option value="mine">{t('crm.workMine')}</option>
             <option value="all">{t('crm.workTeam')}</option>
           </Select>
         </div>
         {total === 0 && (
-          <EmptyState icon={<Check size={20} />} title={t('crm.allCaughtUp')} hint={t('crm.workHint')} />
+          <EmptyState icon={<Check size={20} />} title={t('crm.allCaughtUp')} hint={t('crm.allCaughtUpHint')} />
         )}
         {groups.filter((group) => group.rows.length > 0).map((group) => (
           <section key={group.key}>
@@ -59,6 +77,7 @@ export function WorkTab() {
                 <WorkRow
                   key={`${row.entityType}:${row.id}`}
                   row={row}
+                  action={group.action}
                   canWrite={row.entityType === 'lead' ? can('crm.write') : can('deals.write')}
                   onComplete={() => row.nextActivity && setComplete(row.nextActivity)}
                   onSchedule={() => setSchedule(row)}
@@ -79,8 +98,9 @@ export function WorkTab() {
   );
 }
 
-function WorkRow({ row, canWrite, onComplete, onSchedule }: {
+function WorkRow({ row, action, canWrite, onComplete, onSchedule }: {
   row: SalesWorkItem;
+  action: 'complete' | 'schedule' | 'none';
   canWrite: boolean;
   onComplete: () => void;
   onSchedule: () => void;
@@ -107,14 +127,14 @@ function WorkRow({ row, canWrite, onComplete, onSchedule }: {
         </div>
         {row.nextActivity?.dueAt && <span className="hidden shrink-0 text-xs text-muted-foreground sm:block">{fmtRelative(row.nextActivity.dueAt)}</span>}
       </button>
-      {canWrite && (
-        <Button
-          size="xs"
-          variant="outline"
-          className="mr-3 shrink-0"
-          onClick={() => row.nextActivity ? onComplete() : onSchedule()}
-        >
-          {row.nextActivity ? <><Check size={12} /> {t('crm.completeAction')}</> : <><CalendarClock size={12} /> {t('crm.scheduleAction')}</>}
+      {canWrite && action === 'complete' && row.nextActivity && (
+        <Button size="xs" variant="outline" className="mr-3 shrink-0" onClick={onComplete}>
+          <Check size={12} /> {t('crm.completeAction')}
+        </Button>
+      )}
+      {canWrite && action === 'schedule' && (
+        <Button size="xs" variant="outline" className="mr-3 shrink-0" onClick={onSchedule}>
+          <CalendarClock size={12} /> {t('crm.scheduleAction')}
         </Button>
       )}
     </div>

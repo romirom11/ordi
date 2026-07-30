@@ -45,7 +45,6 @@ export async function assertProjectExists(dbOrTx: DbReader, projectId: string): 
  * the next page even if a caller wanted one. Returns limit + 1 rows so the
  * route's `page()` can mint the cursor.
  *
-
  * Paged on the primary key. Ids are ULIDs (see pk() in the db schema), so they
  * sort lexicographically by creation time – newest-first is `id desc`, and the
  * cursor compares as exact text.

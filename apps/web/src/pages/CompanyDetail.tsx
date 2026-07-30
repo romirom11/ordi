@@ -27,7 +27,9 @@ import {
   COMPANY_STATUSES, CURRENCIES, StatusPill, useDealStages, useLeads, useUsersLookup,
   type Company, type Contact, type Deal, type Stage,
 } from '../components/crm/shared';
-import { EditableName, FilesSection, NotesSection, SectionHeader } from '../components/crm/detail';
+import {
+  EditableName, FilesSection, NotesSection, OwnerRailValue, SectionHeader,
+} from '../components/crm/detail';
 import { DealRows } from '../components/crm/DealRows';
 import { ContactDialog, NewDealDialog, NewLeadDialog } from '../components/crm/dialogs';
 import { NewProjectModal } from './Projects';
@@ -585,34 +587,12 @@ function CompanyRail({ company, loading, editable, users, onPatch }: {
           )}
         </RailField>
         <RailField label={t('crm.owner')}>
-          {editable ? (
-            <DropdownMenu
-              align="start"
-              className="w-full"
-              width={220}
-              trigger={
-                <RailChip empty={!owner} caret>
-                  {owner
-                    ? <><Avatar name={owner.name} src={owner.avatar} size={18} /><span className="truncate">{owner.name}</span></>
-                    : <><UserCircle2 size={16} className="text-faint" /><span className="truncate">{t('crm.noOwner')}</span></>}
-                </RailChip>
-              }
-            >
-              <MenuLabel>{t('crm.changeOwner')}</MenuLabel>
-              {users.map((u) => (
-                <MenuItem key={u.id} checked={u.id === company.ownerId} onSelect={() => u.id !== company.ownerId && onPatch({ ownerId: u.id })}>
-                  <span className="flex items-center gap-2">
-                    <Avatar name={u.name} src={u.avatar} size={18} />
-                    <span className="flex-1 truncate">{u.name}</span>
-                  </span>
-                </MenuItem>
-              ))}
-            </DropdownMenu>
-          ) : (
-            <RailChip empty={!owner} disabled>
-              {owner ? <><Avatar name={owner.name} src={owner.avatar} size={18} /><span className="truncate">{owner.name}</span></> : t('crm.noOwner')}
-            </RailChip>
-          )}
+          <OwnerRailValue
+            ownerId={company.ownerId}
+            users={users}
+            editable={editable}
+            onPick={(ownerId) => onPatch({ ownerId })}
+          />
         </RailField>
         <RailField label={t('crm.colDomain')}>
           {/* Editing is the primary act; opening the site is a hover affordance,

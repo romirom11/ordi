@@ -2,7 +2,23 @@ import { getDb, sql } from '@ordi/db';
 import { localDateKey, safeTimeZone } from '../../lib/timezone';
 
 type WorkScope = 'mine' | 'all';
-type WorkBucket = 'overdue' | 'dueToday' | 'waitingReply' | 'nurtureDue' | 'noNextAction';
+/**
+ * Order matters: it is the order a seller works the queue, and the CASE below
+ * assigns the first arm that matches.
+ *
+ * `upcoming` was missing, and its absence turned the queue upside down. A lead
+ * with work booked for tomorrow fell through every arm and vanished from the
+ * page, while a lead in `waitingReply` - the one state that explicitly needs
+ * nothing from you - was always shown. A seller whose week was fully planned saw
+ * "no sales work needs attention".
+ */
+type WorkBucket =
+  | 'overdue'
+  | 'dueToday'
+  | 'upcoming'
+  | 'waitingReply'
+  | 'nurtureDue'
+  | 'noNextAction';
 
 interface WorkQueryRow {
   bucket: WorkBucket;
@@ -63,10 +79,18 @@ interface WorkBucketResult {
 export interface SalesWorkSummary {
   overdue: number;
   dueToday: number;
+  upcoming: number;
   waitingReply: number;
   nurtureDue: number;
   noNextAction: number;
+  /** Everything the queue holds, context included. */
   total: number;
+  /**
+   * The part a seller can act on this morning. `waitingReply` and `upcoming`
+   * are deliberately excluded: they describe a pipeline that is behaving, and a
+   * digest that fires for them would arrive on days with nothing to do.
+   */
+  actionable: number;
 }
 
 export function summarizeSalesWork(
@@ -75,6 +99,7 @@ export function summarizeSalesWork(
   const summary = {
     overdue: work.overdue.total,
     dueToday: work.dueToday.total,
+    upcoming: work.upcoming.total,
     waitingReply: work.waitingReply.total,
     nurtureDue: work.nurtureDue.total,
     noNextAction: work.noNextAction.total,
@@ -82,6 +107,7 @@ export function summarizeSalesWork(
   return {
     ...summary,
     total: Object.values(summary).reduce((sum, count) => sum + count, 0),
+    actionable: summary.overdue + summary.dueToday + summary.nurtureDue + summary.noNextAction,
   };
 }
 
@@ -106,6 +132,7 @@ export async function salesWork(
   const work: Record<WorkBucket, WorkBucketResult> = {
     overdue: { rows: [], total: 0 },
     dueToday: { rows: [], total: 0 },
+    upcoming: { rows: [], total: 0 },
     waitingReply: { rows: [], total: 0 },
     nurtureDue: { rows: [], total: 0 },
     noNextAction: { rows: [], total: 0 },
@@ -147,7 +174,8 @@ export async function salesWork(
           when l.status = 'nurture' then
             case when l.nurture_until is not null and l.nurture_until <= work_clock.today::text then 'nurtureDue' end
           when l.status = 'waiting_reply' then 'waitingReply'
-          when a.id is null then 'noNextAction'
+          when a.id is not null then 'upcoming'
+          else 'noNextAction'
         end as bucket
       from leads l
       join companies c on c.id = l.company_id and c.deleted_at is null
@@ -191,7 +219,8 @@ export async function salesWork(
         case
           when a.due_at < work_clock.day_start then 'overdue'
           when a.due_at < work_clock.next_day_start then 'dueToday'
-          when a.id is null then 'noNextAction'
+          when a.id is not null then 'upcoming'
+          else 'noNextAction'
         end as bucket
       from deals d
       join companies c on c.id = d.company_id and c.deleted_at is null

@@ -75,6 +75,46 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   notice instead. The New deal dialog is only mounted with `deals.write`,
   since its queries ran whether or not it was open and 403'd on every CRM
   visit for such a role.
+- A lead is fillable again. Pain signal, why it fits, why now, evidence,
+  caution, the opening message, product, score, signal, source, source
+  link, suggested channel and the title are all editable in place on the
+  lead page, and the owner is pickable. Those fields only ever had an
+  importer to fill them, so after it was removed the page showed a dozen
+  boxes a seller could read and never write.
+- The Work queue keeps what is booked ahead. A lead whose next step was
+  planned for tomorrow matched no bucket and disappeared from the page,
+  while `waiting for reply` - the one state that needs nothing from you -
+  was always shown, with a button offering to complete work days early.
+  There is a `Booked ahead` bucket now, and the row's action follows its
+  bucket: finish overdue and due-today work, plan the unplanned, leave
+  the rest to read. The morning digest fires on the actionable part only,
+  so a fully-planned week no longer produces a daily email.
+- A new lead can be logged in one pass. The company picker offers
+  "+ New company…", so the usual case - a prospect that is not in the
+  workspace yet - no longer means cancelling out to the Companies tab and
+  starting over.
+- New preset role: Sales. The whole CRM plus read-only sight of projects
+  and finance. Until now the only preset that covered the sales workspace
+  was Manager, which also grants project write and the right to issue and
+  send invoices.
+- Playbooks ship with a starter: three message templates and a
+  three-step outreach sequence, seeded like deal stages and editable like
+  any other record. The tab used to open empty on a feature about
+  reusable copy.
+- Scheduling an activity defaults to Outreach on a record with no history
+  instead of Follow-up, and can be assigned to a specific owner.
+- Whoever creates a company owns it, the way creating a lead already
+  worked.
+- Naming: the Companies tab says "company" throughout - the list holds
+  prospects as well as clients. The company status `lead` is labelled
+  "Prospect", so the word no longer names both a company status and the
+  separate Leads workspace beside it.
+- The Work tab printed the same sentence three times at once - page
+  subtitle, section subtitle and empty-state hint.
+- Fixed a test that was set to start failing on a calendar date: the
+  email retry-backoff case stepped forward from a hard-coded
+  `2026-07-29`, so it stopped claiming on the first tick once the wall
+  clock passed it.
 
 ## v1.16.0
 

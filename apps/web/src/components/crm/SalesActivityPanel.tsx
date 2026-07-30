@@ -13,6 +13,7 @@ import {
   salesActivityTypeLabel,
   useContacts,
   useSalesMessageTemplates,
+  useUsersLookup,
   useSalesSequenceEnrollments,
   useSalesSequences,
   useSalesActivities,
@@ -143,7 +144,13 @@ export function SalesActivityPanel({ leadId, dealId, companyId, contactId, canWr
           ))}
         </div>
       )}
-      <ScheduleActivityDialog open={schedule} onClose={() => setSchedule(false)} leadId={leadId} dealId={dealId} />
+      <ScheduleActivityDialog
+        open={schedule}
+        onClose={() => setSchedule(false)}
+        leadId={leadId}
+        dealId={dealId}
+        defaultType={activities.some((activity) => activity.status === 'completed') ? 'follow_up' : 'outreach'}
+      />
       <EditActivityDialog activity={edit} onClose={() => setEdit(null)} />
       <CompleteActivityDialog activity={complete} onClose={() => setComplete(null)} />
       <ConfirmDialog
@@ -312,17 +319,21 @@ function SequenceControls({ leadId, dealId, companyId, contactId }: {
   );
 }
 
-export function ScheduleActivityDialog({ open, onClose, leadId, dealId }: {
+export function ScheduleActivityDialog({ open, onClose, leadId, dealId, defaultType = 'follow_up' }: {
   open: boolean;
   onClose: () => void;
   leadId?: string;
   dealId?: string;
+  /** `outreach` on a record with no history – nothing has happened to follow up on. */
+  defaultType?: string;
 }) {
   const t = useT();
   const qc = useQueryClient();
   const templatesQ = useSalesMessageTemplates(true);
+  const usersQ = useUsersLookup();
   const [templateId, setTemplateId] = useState('');
-  const [type, setType] = useState('follow_up');
+  const [type, setType] = useState(defaultType);
+  const [ownerId, setOwnerId] = useState('');
   const [dueAt, setDueAt] = useState(() => toLocalInput(new Date(Date.now() + 86_400_000)));
   const [channel, setChannel] = useState('');
   const [subject, setSubject] = useState('');
@@ -331,19 +342,24 @@ export function ScheduleActivityDialog({ open, onClose, leadId, dealId }: {
 
   const reset = () => {
     setTemplateId('');
-    setType('follow_up');
+    setType(defaultType);
+    setOwnerId('');
     setDueAt(toLocalInput(new Date(Date.now() + 86_400_000)));
     setChannel('');
     setSubject('');
     setContext('');
     setError(null);
   };
+  // The dialog is mounted before it is opened, so pick up the caller's default
+  // when it changes rather than only on first mount.
+  useEffect(() => { if (!open) setType(defaultType); }, [defaultType, open]);
   const mutation = useMutation({
     mutationFn: () => api.post('/sales-activities', {
       leadId,
       dealId,
       type,
       templateId: templateId || undefined,
+      ownerId: ownerId || undefined,
       dueAt: new Date(dueAt).toISOString(),
       channel: channel.trim() || undefined,
       subject: subject.trim() || undefined,
@@ -397,9 +413,19 @@ export function ScheduleActivityDialog({ open, onClose, leadId, dealId }: {
             {SALES_ACTIVITY_TYPES.map((value) => <option key={value} value={value}>{salesActivityTypeLabel(t, value)}</option>)}
           </Select>
         </Field>
-        <Field label={t('crm.dueAt')}>
-          <DateTimeField value={dueAt} onChange={setDueAt} />
-        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={t('crm.dueAt')}>
+            <DateTimeField value={dueAt} onChange={setDueAt} />
+          </Field>
+          <Field label={t('crm.owner')}>
+            <Select className="w-full" value={ownerId} onChange={(event) => setOwnerId(event.target.value)}>
+              <option value="">{t('crm.ownerDefault')}</option>
+              {(usersQ.data ?? []).map((user) => (
+                <option key={user.id} value={user.id}>{user.name}</option>
+              ))}
+            </Select>
+          </Field>
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <Field label={t('crm.channel')}>
             <Input value={channel} onChange={(event) => setChannel(event.target.value)} placeholder="LinkedIn" />
