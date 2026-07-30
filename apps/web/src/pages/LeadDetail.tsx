@@ -15,8 +15,7 @@ import {
   useContacts, useDealStages, useLead, useSalesActivities, useUsersLookup,
 } from '../components/crm/shared';
 import {
-  EditableName, EditableText, EditableValue, FilesSection, NotesSection,
-  OwnerRailValue, SectionHeader,
+  EditableName, FilesSection, InlineEdit, NotesSection, OwnerRailValue, SectionHeader,
 } from '../components/crm/detail';
 import { SalesActivityPanel } from '../components/crm/SalesActivityPanel';
 import { ContactDialog } from '../components/crm/dialogs';
@@ -154,14 +153,14 @@ export function LeadDetailPage({ id }: { id: string }) {
                   <AlertTriangle size={15} className="mt-1.5 shrink-0 text-warning" />
                   <div className="min-w-0 flex-1">
                     <p className="px-2 text-[13px] font-medium">{t('crm.caution')}</p>
-                    <EditableText value={lead.caution} editable={editable} rows={2} placeholder={t('crm.cautionHint')} onSave={(caution) => patch.mutate({ caution })} />
+                    <InlineEdit multiline value={lead.caution} editable={editable} rows={2} placeholder={t('crm.cautionHint')} onSave={(caution) => patch.mutate({ caution })} />
                   </div>
                 </div>
               )}
               {(editable || lead.opener) && (
                 <Card className="mt-3 p-3">
                   <p className="mb-1 px-2 text-xs font-semibold uppercase tracking-wide text-faint">{t('crm.opener')}</p>
-                  <EditableText value={lead.opener} editable={editable} rows={4} placeholder={t('crm.openerHint')} onSave={(opener) => patch.mutate({ opener })} />
+                  <InlineEdit multiline value={lead.opener} editable={editable} rows={4} placeholder={t('crm.openerHint')} onSave={(opener) => patch.mutate({ opener })} />
                 </Card>
               )}
             </section>
@@ -246,22 +245,22 @@ export function LeadDetailPage({ id }: { id: string }) {
                 />
               </RailField>
               <RailField label={t('crm.product')}>
-                <EditableValue value={lead.product} editable={editable} placeholder={t('crm.productHint')} onSave={(product) => patch.mutate({ product })} />
+                <InlineEdit value={lead.product} editable={editable} placeholder={t('crm.productHint')} onSave={(product) => patch.mutate({ product })} />
               </RailField>
               <RailField label={t('crm.score')}>
-                <EditableValue value={lead.score} editable={editable} inputType="number" placeholder={t('crm.scoreHint')} onSave={(score) => patch.mutate({ score: score === null ? null : Number(score) })} />
+                <InlineEdit value={lead.score} editable={editable} inputType="number" placeholder={t('crm.scoreHint')} onSave={(score) => patch.mutate({ score: score === null ? null : Number(score) })} />
               </RailField>
               <RailField label={t('crm.signal')}>
-                <EditableValue value={lead.signal} editable={editable} placeholder={t('crm.signalHint')} onSave={(signal) => patch.mutate({ signal })} />
+                <InlineEdit value={lead.signal} editable={editable} placeholder={t('crm.signalHint')} onSave={(signal) => patch.mutate({ signal })} />
               </RailField>
               <RailField label={t('crm.source')}>
-                <EditableValue value={lead.sourceTitle} editable={editable} placeholder={t('crm.sourceHint')} onSave={(sourceTitle) => patch.mutate({ sourceTitle })} />
+                <InlineEdit value={lead.sourceTitle} editable={editable} placeholder={t('crm.sourceHint')} onSave={(sourceTitle) => patch.mutate({ sourceTitle })} />
               </RailField>
               <RailField label={t('crm.sourceLink')}>
-                <EditableValue value={lead.sourceUrl} editable={editable} inputType="url" placeholder="https://…" onSave={(sourceUrl) => patch.mutate({ sourceUrl })} />
+                <InlineEdit value={lead.sourceUrl} editable={editable} inputType="url" placeholder="https://…" onSave={(sourceUrl) => patch.mutate({ sourceUrl })} />
               </RailField>
               <RailField label={t('crm.suggestedChannel')}>
-                <EditableValue value={lead.suggestedChannel} editable={editable} placeholder={t('crm.suggestedChannelHint')} onSave={(suggestedChannel) => patch.mutate({ suggestedChannel })} />
+                <InlineEdit value={lead.suggestedChannel} editable={editable} placeholder={t('crm.suggestedChannelHint')} onSave={(suggestedChannel) => patch.mutate({ suggestedChannel })} />
               </RailField>
               {lead.sourceCheckedAt && (
                 <RailField label={t('crm.sourceChecked')}><RailChip disabled>{fmtDate(lead.sourceCheckedAt)}</RailChip></RailField>
@@ -295,7 +294,7 @@ function QualificationCard({ title, hint, value, editable, onSave }: {
   return (
     <Card className="p-3">
       <p className="mb-1 px-2 text-xs font-semibold uppercase tracking-wide text-faint">{title}</p>
-      <EditableText value={value} editable={editable} placeholder={hint} onSave={onSave} />
+      <InlineEdit multiline value={value} editable={editable} placeholder={hint} onSave={onSave} />
     </Card>
   );
 }

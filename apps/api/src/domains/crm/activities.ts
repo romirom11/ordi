@@ -10,7 +10,7 @@ import type { z } from 'zod';
 import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
-import { assertVersion } from '../../core/locking';
+import { assertUpdated, assertVersion } from '../../core/locking';
 import {
   advanceSequenceActivity,
   resolveActivityTemplate,
@@ -21,6 +21,7 @@ import {
   assertContactCompany,
   boundedLimit,
   CANCELS_PLANNED_LEAD_STATUSES,
+  pickDefined,
   type DbReader,
 } from './common';
 
@@ -204,17 +205,14 @@ export async function updateSalesActivity(actor: Actor, id: string, input: Sales
     assertSalesWrite(actor, before.dealId);
     assertVersion(before, input.version, before);
     if (before.status !== 'planned') throw err.domain('Only planned activities can be edited');
-    const patch: Record<string, unknown> = {};
-    for (const key of ACTIVITY_UPDATE_FIELDS) {
-      if (input[key] !== undefined) patch[key] = input[key];
-    }
+    const patch = pickDefined(input, ACTIVITY_UPDATE_FIELDS);
     if (input.dueAt !== undefined) patch.dueAt = new Date(input.dueAt);
     if (!Object.keys(patch).length) return before;
 
     const [after] = await tx.update(schema.salesActivities).set(patch)
       .where(and(eq(schema.salesActivities.id, id), eq(schema.salesActivities.version, before.version)))
       .returning();
-    if (!after) throw err.conflict('The record was modified by someone else', before);
+    assertUpdated(after, before);
     const auditBefore = Object.fromEntries(
       Object.keys(patch).map((key) => [key, before[key as keyof typeof before]]),
     );
@@ -318,7 +316,7 @@ export async function cancelSalesActivity(actor: Actor, id: string, version?: nu
     const [cancelled] = await tx.update(schema.salesActivities).set({ status: 'cancelled' })
       .where(and(eq(schema.salesActivities.id, id), eq(schema.salesActivities.version, before.version)))
       .returning({ id: schema.salesActivities.id });
-    if (!cancelled) throw err.conflict('The record was modified by someone else', before);
+    assertUpdated(cancelled, before);
     await stopSequenceForActivity(tx, before);
     await writeActivity(tx, {
       entityType: before.leadId ? 'lead' : 'deal',

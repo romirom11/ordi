@@ -5,7 +5,7 @@ import { useT } from '../../lib/i18n';
 import { Avatar, EmptyState, Input, Select, Skeleton, fmtRelative } from '../ui';
 import {
   LEAD_STATUSES, StatusPill, salesActivityTypeLabel,
-  useLeads, useUsersLookup,
+  useLeads, useUserMap,
 } from './shared';
 
 export function LeadsTab() {
@@ -14,11 +14,10 @@ export function LeadsTab() {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const leadsQ = useLeads({ q, status });
-  const usersQ = useUsersLookup();
-  const leads = leadsQ.data ?? [];
   // Who is on the hook for each lead – the table had no way to tell, so a team
   // could not see whose pipeline was whose without opening every record.
-  const userById = new Map((usersQ.data ?? []).map((user) => [user.id, user]));
+  const userById = useUserMap();
+  const leads = leadsQ.data ?? [];
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

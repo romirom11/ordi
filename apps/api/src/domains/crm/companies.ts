@@ -11,8 +11,9 @@ import type {
 import type { z } from 'zod';
 import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
+import { pickDefined } from './common';
 import { writeActivity } from '../../core/activity';
-import { assertVersion } from '../../core/locking';
+import { assertUpdated, assertVersion } from '../../core/locking';
 import { buildCustomFieldFilter, mergeCustomFields } from '../../core/customfields';
 
 type CompanyInput = z.infer<typeof companyInputSchema>;
@@ -40,20 +41,7 @@ const CONTACT_UPDATE_FIELDS = [
   'isPrimary',
 ] as const satisfies readonly (keyof ContactUpdate)[];
 
-/**
- * The route already returned a `nextCursor` here, but nothing ever consumed it:
- * passing it back replayed page one, so any caller that trusted it (the MCP
- * `list_companies` tool hands it straight to the model) looped on the same rows.
- * The cursor is honoured now, on the same key as /deals.
- *
- * Paged on the primary key. Ids are ULIDs (see pk() in the db schema), so they
- * sort lexicographically by creation time – newest-first is `id desc`, and the
- * cursor compares as exact text.
- *
- * Paging on createdAt does not work here: Postgres timestamptz keeps
- * microseconds, drizzle hands back a millisecond-precision JS Date, and the
- * truncated value round-tripped through the cursor matches no row at all.
- */
+/** Cursor-paged on `id desc`; see `idPage` in lib/http for why the key is the id. */
 export async function listCompanies(params: {
   q?: string;
   status?: string;
@@ -63,6 +51,7 @@ export async function listCompanies(params: {
   limit: number;
 }) {
   const { db } = getDb();
+  const { limit } = params;
   const cf: SQL[] = [];
   for (const f of params.cfFilters ?? []) cf.push(await buildCustomFieldFilter('companies', f));
   const rows = await db.select().from(schema.companies).where(and(
@@ -72,7 +61,7 @@ export async function listCompanies(params: {
     params.q ? sql`${schema.companies.name} ilike ${'%' + params.q + '%'}` : undefined,
     params.cursor?.id ? lte(schema.companies.id, params.cursor.id) : undefined,
     ...cf,
-  )).orderBy(desc(schema.companies.id)).limit(params.limit + 1);
+  )).orderBy(desc(schema.companies.id)).limit(limit + 1);
   return rows;
 }
 
@@ -115,16 +104,13 @@ export async function updateCompany(actor: Actor, id: string, input: CompanyUpda
       .for('update');
     if (!before) throw err.notFound('Company not found');
     assertVersion(before, input.version, before);
-    const patch: Record<string, unknown> = {};
-    for (const key of COMPANY_UPDATE_FIELDS) {
-      if (input[key] !== undefined) patch[key] = input[key];
-    }
+    const patch = pickDefined(input, COMPANY_UPDATE_FIELDS);
     if (input.customFields !== undefined) patch.customFields = mergeCustomFields(before.customFields, input.customFields);
     if (!Object.keys(patch).length) return before;
     const [after] = await tx.update(schema.companies).set(patch)
       .where(and(eq(schema.companies.id, id), eq(schema.companies.version, before.version)))
       .returning();
-    if (!after) throw err.conflict('The record was modified by someone else', before);
+    assertUpdated(after, before);
     await writeActivity(tx, { entityType: 'company', entityId: id, action: 'updated', before, after: patch, actorId: actor.userId, actorType: actor.actorType });
     return after;
   });
@@ -298,10 +284,7 @@ export async function updateContact(actor: Actor, id: string, input: ContactUpda
       .for('update');
     if (!before) throw err.notFound('Contact not found');
     assertVersion(before, input.version, before);
-    const patch: Record<string, unknown> = {};
-    for (const key of CONTACT_UPDATE_FIELDS) {
-      if (input[key] !== undefined) patch[key] = input[key];
-    }
+    const patch = pickDefined(input, CONTACT_UPDATE_FIELDS);
     if (input.customFields !== undefined) {
       patch.customFields = mergeCustomFields(before.customFields, input.customFields);
     }
@@ -313,7 +296,7 @@ export async function updateContact(actor: Actor, id: string, input: ContactUpda
     const [after] = await tx.update(schema.contacts).set(patch)
       .where(and(eq(schema.contacts.id, id), eq(schema.contacts.version, before.version)))
       .returning();
-    if (!after) throw err.conflict('The record was modified by someone else', before);
+    assertUpdated(after, before);
     await writeActivity(tx, {
       entityType: 'contact',
       entityId: id,

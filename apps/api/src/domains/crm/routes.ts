@@ -15,7 +15,7 @@ import { requireAuth, currentActor } from '../../core/auth';
 import { guard, guardAll } from '../../core/rbac';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
-import { decodeCursor, page } from '../../lib/http';
+import { idPage, pageById } from '../../lib/http';
 import * as svc from './service';
 import * as playbooks from './playbooks';
 import { assertSalesWrite } from './sales-access';
@@ -32,14 +32,12 @@ export function crmRoutes() {
 
   // ── Companies ──
   app.get('/companies', guard('crm.read'), async (c) => {
-    const limit = Number(c.req.query('limit') ?? 50);
+    const { limit, cursor } = idPage(c, 50, 200);
     const rows = await svc.listCompanies({
       q: c.req.query('q'), status: c.req.query('status'), ownerId: c.req.query('ownerId'),
-      cfFilters: parseCfFilters(c),
-      cursor: decodeCursor(c.req.query('cursor')) as { id?: string } | null,
-      limit,
+      cfFilters: parseCfFilters(c), cursor, limit,
     });
-    return c.json(page(rows, limit, (r) => ({ id: r.id })));
+    return c.json(pageById(rows, limit));
   });
 
   app.post('/companies', guard('crm.write'), async (c) => {
@@ -165,14 +163,13 @@ export function crmRoutes() {
 
   // ── Deals ──
   app.get('/deals', guard('deals.read'), async (c) => {
-    const limit = Number(c.req.query('limit') ?? 100);
+    const { limit, cursor } = idPage(c, 100, 200);
     const rows = await svc.listDeals({
       companyId: c.req.query('companyId'),
       projectId: c.req.query('projectId'),
-      cursor: decodeCursor(c.req.query('cursor')) as { id?: string } | null,
-      limit,
+      cursor, limit,
     });
-    return c.json(page(rows, limit, (r) => ({ id: r.id })));
+    return c.json(pageById(rows, limit));
   });
 
   app.post('/deals', guard('deals.write'), async (c) => {

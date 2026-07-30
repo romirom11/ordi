@@ -7,10 +7,10 @@ import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { publishEvent } from '../../core/events';
-import { assertVersion } from '../../core/locking';
+import { assertUpdated, assertVersion } from '../../core/locking';
 import { mergeCustomFields } from '../../core/customfields';
 import { stopActiveDealSequence } from './playbooks';
-import { boundedLimit, type DbReader } from './common';
+import { boundedLimit, pickDefined, type DbReader } from './common';
 import { nextSalesActivities } from './activities';
 
 type DealInput = z.infer<typeof dealInputSchema>;
@@ -39,29 +39,16 @@ export async function assertProjectExists(dbOrTx: DbReader, projectId: string): 
   if (!project) throw err.validation('Unknown project');
 }
 
-/**
- * Bounded and cursor-paged. This used to return every deal in the workspace on
- * every call: fine at demo size, a cliff at real size, and with no way to ask for
- * the next page even if a caller wanted one. Returns limit + 1 rows so the
- * route's `page()` can mint the cursor.
- *
- * Paged on the primary key. Ids are ULIDs (see pk() in the db schema), so they
- * sort lexicographically by creation time – newest-first is `id desc`, and the
- * cursor compares as exact text.
- *
- * Paging on createdAt does not work here: Postgres timestamptz keeps
- * microseconds, drizzle hands back a millisecond-precision JS Date, and the
- * truncated value round-tripped through the cursor matches no row at all.
- */
+/** Cursor-paged on `id desc`; see `idPage` in lib/http for why the key is the id. */
 export async function listDeals(params: {
   companyId?: string;
   /** A ulid narrows to that project, the literal 'none' to unlinked deals. */
   projectId?: string;
   cursor?: { id?: string } | null;
-  limit?: number;
+  limit: number;
 }) {
   const { db } = getDb();
-  const limit = boundedLimit(params.limit, 100, 200);
+  const { limit } = params;
   // `page()` pops the (limit + 1)-th row and encodes *that* as nextCursor, so the
   // cursor names the first row of the next page: resume at it, not after it.
   const rows = await db.select().from(schema.deals).where(and(
@@ -110,12 +97,9 @@ export async function updateDeal(actor: Actor, id: string, input: DealUpdate) {
     assertVersion(before, input.version, before);
     if (input.projectId) await assertProjectExists(tx, input.projectId);
     if (input.stageId) await requirePipelineStage(tx, input.stageId);
-    const patch: Record<string, unknown> = {};
-    for (const key of DEAL_UPDATE_FIELDS) {
-      const value = input[key];
-      if (value === undefined) continue;
-      patch[key] = key === 'amount' && value !== null ? String(value) : value;
-    }
+    const patch = pickDefined(input, DEAL_UPDATE_FIELDS);
+    // money() is a numeric column; drizzle wants it as a string.
+    if (patch.amount != null) patch.amount = String(patch.amount);
     if (input.customFields !== undefined) {
       patch.customFields = mergeCustomFields(before.customFields, input.customFields);
     }
@@ -123,7 +107,7 @@ export async function updateDeal(actor: Actor, id: string, input: DealUpdate) {
     const [after] = await tx.update(schema.deals).set(patch)
       .where(and(eq(schema.deals.id, id), eq(schema.deals.version, before.version)))
       .returning();
-    if (!after) throw err.conflict('The record was modified by someone else', before);
+    assertUpdated(after, before);
     await writeActivity(tx, {
       entityType: 'deal',
       entityId: id,
@@ -151,7 +135,7 @@ export async function moveDeal(actor: Actor, id: string, stageId: string, lostRe
       .set({ stageId, lostReason: stage.isLost ? lostReason ?? null : null })
       .where(and(eq(schema.deals.id, id), eq(schema.deals.version, deal.version)))
       .returning({ id: schema.deals.id });
-    if (!updated) throw err.conflict('The record was modified by someone else', deal);
+    assertUpdated(updated, deal);
     if (stage.isWon || stage.isLost) {
       await tx.update(schema.salesActivities).set({ status: 'cancelled' }).where(and(
         eq(schema.salesActivities.dealId, id),

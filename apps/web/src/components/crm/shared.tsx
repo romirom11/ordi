@@ -22,7 +22,6 @@ export {
   WRITABLE_LEAD_STATUSES,
   LEAD_ACTIVITY_OUTCOME_STATUSES,
   SALES_ACTIVITY_TYPES,
-  type CompanyStatus,
 } from '@ordi/shared';
 
 export const CURRENCIES = ['USD', 'EUR', 'GBP', 'UAH', 'PLN'];
@@ -225,10 +224,16 @@ export function useDealStages() {
   });
 }
 
+/**
+ * The kanban's deals. `/deals` is bounded (200 max), and the client has no
+ * page-following, so `truncated` says out loud when there are more rather than
+ * letting the board look complete while it is not.
+ */
 export function useAllDeals() {
-  return useQuery<Deal[]>({
+  return useQuery<{ deals: Deal[]; truncated: boolean }>({
     queryKey: ['deals'],
-    queryFn: () => api.get<{ data: Deal[] }>('/deals').then((r) => r.data),
+    queryFn: () => api.get<{ data: Deal[]; nextCursor: string | null }>('/deals?limit=200')
+      .then((r) => ({ deals: r.data, truncated: !!r.nextCursor })),
   });
 }
 
@@ -311,7 +316,7 @@ export function useCompanies(q = '', status = '') {
   });
 }
 
-export { useUsersLookup } from '../../lib/queries';
+export { useUsersLookup, useUserMap } from '../../lib/queries';
 
 export function StatusPill({ status, className }: { status: string; className?: string }) {
   const t = useT();

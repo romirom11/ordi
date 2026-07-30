@@ -98,13 +98,15 @@ export function WorkTab() {
           </section>
         ))}
       </div>
-      <CompleteActivityDialog activity={complete} onClose={() => setComplete(null)} />
-      <ScheduleActivityDialog
-        open={!!schedule}
-        onClose={() => setSchedule(null)}
-        leadId={schedule?.entityType === 'lead' ? schedule.id : undefined}
-        dealId={schedule?.entityType === 'deal' ? schedule.id : undefined}
-      />
+      {complete && <CompleteActivityDialog activity={complete} onClose={() => setComplete(null)} />}
+      {schedule && (
+        <ScheduleActivityDialog
+          open
+          onClose={() => setSchedule(null)}
+          leadId={schedule.entityType === 'lead' ? schedule.id : undefined}
+          dealId={schedule.entityType === 'deal' ? schedule.id : undefined}
+        />
+      )}
     </div>
   );
 }

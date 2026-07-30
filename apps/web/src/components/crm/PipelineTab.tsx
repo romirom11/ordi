@@ -16,7 +16,7 @@ import { ContextMenu, ConfirmDialog, toast, type ContextMenuEntry } from '../ove
 import { LostReasonDialog } from './dialogs';
 import {
   useAllDeals, useCompanies, useDealStages, useProjectsLookup,
-  useUsersLookup, salesActivityTypeLabel, type Deal, type Stage,
+  useUserMap, salesActivityTypeLabel, type Deal, type Stage,
 } from './shared';
 
 export function PipelineTab() {
@@ -31,13 +31,12 @@ export function PipelineTab() {
   const stagesQ = useDealStages();
   const dealsQ = useAllDeals();
   const companiesQ = useCompanies();
-  const usersQ = useUsersLookup();
   const projectsQ = useProjectsLookup();
 
   const stages = stagesQ.data ?? [];
-  const allDeals = dealsQ.data ?? [];
+  const allDeals = dealsQ.data?.deals ?? [];
   const companyMap = useMemo(() => new Map((companiesQ.data ?? []).map((c) => [c.id, c])), [companiesQ.data]);
-  const userMap = useMemo(() => new Map((usersQ.data ?? []).map((u) => [u.id, u])), [usersQ.data]);
+  const userMap = useUserMap();
   const projectMap = useMemo(() => new Map((projectsQ.data ?? []).map((p) => [p.id, p])), [projectsQ.data]);
   const nextByDeal = useMemo(() => {
     const map = new Map<string, NonNullable<Deal['nextActivity']>>();
@@ -133,6 +132,10 @@ export function PipelineTab() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {/* A board that silently stops at the cap looks complete when it is not. */}
+      {dealsQ.data?.truncated && (
+        <p className="px-4 pt-3 text-xs text-warning">{t('crm.pipelineTruncated')}</p>
+      )}
       {linkedProjectIds.length > 0 && (
         <div className="flex flex-wrap items-center gap-1 px-4 pt-3">
           {[

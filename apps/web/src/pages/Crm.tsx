@@ -20,14 +20,6 @@ import { NoAccessNotice } from '../components/ModuleGate';
 
 type CrmTab = 'work' | 'leads' | 'deals' | 'companies' | 'playbooks';
 
-/**
- * Permission a tab needs beyond the crm.read the route already checked. The
- * route pattern is /crm/:tab, so /crm/deals passes that check on crm.read and
- * would otherwise render the pipeline shell - subtitle and all - to someone who
- * cannot read a single deal.
- */
-const TAB_PERMISSION: Partial<Record<CrmTab, 'deals.read'>> = { deals: 'deals.read' };
-
 function normalizeTab(tab?: string): CrmTab {
   if (tab === 'deals' || tab === 'pipeline') return 'deals';
   if (tab === 'clients' || tab === 'companies') return 'companies';
@@ -50,9 +42,6 @@ export function CrmPage({ tab }: { tab?: string }) {
   const [newLead, setNewLead] = useState(false);
   const [newDeal, setNewDeal] = useState(false);
 
-  const required = TAB_PERMISSION[active];
-  const blocked = !!required && !can(required);
-
   const go = (next: CrmTab) => navigate(`/crm/${next}`);
 
   return (
@@ -62,7 +51,7 @@ export function CrmPage({ tab }: { tab?: string }) {
         subtitle={
           active === 'work' ? t('crm.workHint')
             : active === 'leads' ? t('crm.leadsHint')
-              : active === 'deals' ? (blocked ? '' : t('deals.subtitle'))
+              : active === 'deals' ? (canReadDeals ? t('deals.subtitle') : '')
                 : active === 'playbooks' ? t('crm.playbooksHint')
                 : t('crm.subtitle')
         }
@@ -103,27 +92,36 @@ export function CrmPage({ tab }: { tab?: string }) {
         />
       </div>
 
-      {blocked ? <NoAccessNotice /> : (
-        <>
-          {active === 'work' && <WorkTab />}
-          {active === 'leads' && <LeadsTab />}
-          {active === 'deals' && <PipelineTab />}
-          {active === 'companies' && <ClientsTab onNewClient={() => setNewClient(true)} />}
-          {active === 'playbooks' && <PlaybooksTab />}
-        </>
-      )}
+      {active === 'work' && <WorkTab />}
+      {active === 'leads' && <LeadsTab />}
+      {/*
+        * The route is /crm/:tab, so /crm/deals clears the route's crm.read check
+        * and would otherwise render the pipeline to a role that cannot read one.
+        */}
+      {active === 'deals' && (canReadDeals ? <PipelineTab /> : <NoAccessNotice />)}
+      {active === 'companies' && <ClientsTab onNewClient={() => setNewClient(true)} />}
+      {active === 'playbooks' && <PlaybooksTab />}
 
-      <NewClientDialog
-        open={newClient}
-        onClose={() => setNewClient(false)}
-        onCreated={(c) => navigate(`/companies/${c.id}`)}
-      />
-      <NewLeadDialog
-        open={newLead}
-        onClose={() => setNewLead(false)}
-        onCreated={(lead) => navigate(`/leads/${lead.id}`)}
-      />
-      {canWriteDeals && <NewDealDialog open={newDeal} onClose={() => setNewDeal(false)} />}
+      {/*
+        * Mounted only while open: each of these runs its own lookups
+        * (companies, deal stages, projects) the moment it mounts, so keeping
+        * them alive pulled those payloads on every CRM tab that never shows them.
+        */}
+      {newClient && (
+        <NewClientDialog
+          open
+          onClose={() => setNewClient(false)}
+          onCreated={(c) => navigate(`/companies/${c.id}`)}
+        />
+      )}
+      {newLead && (
+        <NewLeadDialog
+          open
+          onClose={() => setNewLead(false)}
+          onCreated={(lead) => navigate(`/leads/${lead.id}`)}
+        />
+      )}
+      {canWriteDeals && newDeal && <NewDealDialog open onClose={() => setNewDeal(false)} />}
     </div>
   );
 }

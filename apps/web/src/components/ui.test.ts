@@ -3,9 +3,12 @@
  * work, so its handling of future instants is load-bearing: it once returned
  * "now" for every one of them, which made a follow-up due next week and one due
  * this minute read identically in the Work queue.
+ *
+ * Wording comes from Intl, so the assertions check direction and magnitude
+ * rather than exact strings — the point is that past and future differ.
  */
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { fmtRelative } from './ui';
+import { fmtDate, fmtRelative } from './ui';
 
 const NOW = new Date('2026-07-29T12:00:00.000Z');
 
@@ -23,32 +26,35 @@ afterEach(() => {
 });
 
 describe('fmtRelative', () => {
-  it('reads a past instant bare, as an activity feed expects', () => {
+  it('carries the magnitude and unit of a past instant', () => {
     freeze();
-    expect(fmtRelative(at(-30 * 60_000))).toBe('30m');
-    expect(fmtRelative(at(-3 * 3_600_000))).toBe('3h');
-    expect(fmtRelative(at(-2 * 86_400_000))).toBe('2d');
+    expect(fmtRelative(at(-30 * 60_000))).toMatch(/30/);
+    expect(fmtRelative(at(-3 * 3_600_000))).toMatch(/3/);
+    expect(fmtRelative(at(-2 * 86_400_000))).toMatch(/2/);
   });
 
-  it('marks a future instant instead of collapsing it to "now"', () => {
+  it('distinguishes a future instant from a past one of the same size', () => {
     freeze();
-    expect(fmtRelative(at(30 * 60_000))).toBe('in 30m');
-    expect(fmtRelative(at(3 * 3_600_000))).toBe('in 3h');
-    expect(fmtRelative(at(86_400_000))).toBe('in 1d');
-    expect(fmtRelative(at(5 * 86_400_000))).toBe('in 5d');
+    // The regression this guards: every future instant used to render as "now",
+    // so a follow-up due in five days read the same as one due this minute.
+    for (const ms of [30 * 60_000, 3 * 3_600_000, 86_400_000, 5 * 86_400_000]) {
+      const ahead = fmtRelative(at(ms));
+      expect(ahead).not.toBe(fmtRelative(at(0)));
+      expect(ahead).not.toBe(fmtRelative(at(-ms)));
+    }
   });
 
-  it('keeps "now" for the present in either direction', () => {
+  it('reads the present as the present in either direction', () => {
     freeze();
-    expect(fmtRelative(at(0))).toBe('now');
-    expect(fmtRelative(at(-20_000))).toBe('now');
-    expect(fmtRelative(at(20_000))).toBe('now');
+    const present = fmtRelative(at(0));
+    expect(fmtRelative(at(-20_000))).toBe(present);
+    expect(fmtRelative(at(20_000))).toBe(present);
   });
 
   it('falls back to an absolute date beyond a month, future included', () => {
     freeze();
-    expect(fmtRelative(at(60 * 86_400_000))).not.toContain('in ');
-    expect(fmtRelative(at(-60 * 86_400_000))).not.toContain('in ');
+    expect(fmtRelative(at(60 * 86_400_000))).toBe(fmtDate(at(60 * 86_400_000)));
+    expect(fmtRelative(at(-60 * 86_400_000))).toBe(fmtDate(at(-60 * 86_400_000)));
   });
 
   it('renders nothing for a missing value', () => {

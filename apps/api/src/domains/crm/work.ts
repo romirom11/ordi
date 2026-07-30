@@ -1,5 +1,6 @@
 import { getDb, sql } from '@ordi/db';
 import { localDateKey, safeTimeZone } from '../../lib/timezone';
+import { boundedLimit } from './common';
 
 type WorkScope = 'mine' | 'all';
 /**
@@ -111,23 +112,44 @@ export function summarizeSalesWork(
   };
 }
 
-function boundedLimit(value: number | undefined): number {
-  return Number.isFinite(value) ? Math.max(1, Math.min(Math.trunc(value!), 200)) : 50;
-}
-
 export interface SalesWorkViewer {
   userId: string;
   timezone: string;
   access: { permissions: Set<string> };
 }
 
+/**
+ * Bucket counts without the rows.
+ *
+ * The morning digest and the dashboard tile want six integers, and the full
+ * query pays for a `row_number()` over every open lead and deal to produce them
+ * – which the `upcoming` bucket made materially wider, since a healthy pipeline
+ * is mostly work that is merely booked. Aggregating skips the window functions
+ * and the 21-column projection entirely.
+ */
+export async function salesWorkCounts(
+  actor: SalesWorkViewer,
+  params: { scope?: WorkScope; now?: Date } = {},
+): Promise<SalesWorkSummary> {
+  const totals = await queryWork(actor, params, null);
+  return summarizeSalesWork(totals as Record<WorkBucket, { total: number }>);
+}
+
 export async function salesWork(
   actor: SalesWorkViewer,
   params: { scope?: WorkScope; limit?: number; now?: Date } = {},
 ) {
+  return queryWork(actor, params, boundedLimit(params.limit, 50, 200));
+}
+
+/** `limit === null` returns bucket totals only; otherwise rows up to the limit. */
+async function queryWork(
+  actor: SalesWorkViewer,
+  params: { scope?: WorkScope; now?: Date },
+  limit: number | null,
+) {
   const { db } = getDb();
   const canReadDeals = actor.access.permissions.has('deals.read');
-  const limit = boundedLimit(params.limit);
   const mineOnly = params.scope !== 'all';
   const work: Record<WorkBucket, WorkBucketResult> = {
     overdue: { rows: [], total: 0 },
@@ -240,18 +262,25 @@ export async function salesWork(
           ? sql`(coalesce(a.owner_id, d.owner_id) = ${actor.userId} or coalesce(a.owner_id, d.owner_id) is null)`
           : sql`true`}
     ),
-    ranked as (
+    combined as (
+      select * from lead_work
+      union all
+      select * from deal_work
+    )
+    ${limit === null ? sql`
+      select bucket, count(*)::int as "bucketTotal"
+      from combined
+      where bucket is not null
+      group by bucket
+    ` : sql`
+    , ranked as (
       select combined.*,
              row_number() over (
                partition by bucket
                order by activity_due_at nulls last, nurture_until nulls last, id
              ) as queue_rank,
              count(*) over (partition by bucket)::int as bucket_total
-      from (
-        select * from lead_work
-        union all
-        select * from deal_work
-      ) combined
+      from combined
       where bucket is not null
     )
     select
@@ -280,8 +309,12 @@ export async function salesWork(
     from ranked
     where queue_rank <= ${limit}
     order by bucket, queue_rank
+    `}
   `) as unknown as WorkQueryRow[];
   for (const row of rows) {
+    if (!(row.bucket in work)) continue;
+    work[row.bucket].total = Number(row.bucketTotal);
+    if (limit === null) continue;
     const item: WorkItem = {
       entityType: row.entityType,
       id: row.id,
@@ -307,10 +340,7 @@ export async function salesWork(
         version: row.activityVersion!,
       } : null,
     };
-    if (row.bucket in work) {
-      work[row.bucket].total = Number(row.bucketTotal);
-      work[row.bucket].rows.push(item);
-    }
+    work[row.bucket].rows.push(item);
   }
   return work;
 }

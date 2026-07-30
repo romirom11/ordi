@@ -9,12 +9,7 @@ import { writeActivity } from '../../core/activity';
 import { assertVersion } from '../../core/locking';
 import { mergeCustomFields } from '../../core/customfields';
 import { stopActiveLeadSequence } from './playbooks';
-import {
-  assertCompanyExists,
-  assertContactCompany,
-  CANCELS_PLANNED_LEAD_STATUSES,
-  type DbReader,
-} from './common';
+import { CANCELS_PLANNED_LEAD_STATUSES, assertCompanyExists, assertContactCompany, pickDefined, type DbReader } from './common';
 import { nextSalesActivities } from './activities';
 import { requirePipelineStage } from './deals';
 
@@ -173,10 +168,7 @@ export async function updateLead(actor: Actor, id: string, input: LeadUpdate) {
     if (input.companyId !== undefined || input.contactId !== undefined) {
       await assertLeadContact(nextCompanyId, nextContactId, tx);
     }
-    const patch: Record<string, unknown> = {};
-    for (const key of LEAD_UPDATE_FIELDS) {
-      if (input[key] !== undefined) patch[key] = input[key];
-    }
+    const patch = pickDefined(input, LEAD_UPDATE_FIELDS);
     if (input.status && input.status !== 'nurture' && input.nurtureUntil === undefined) {
       patch.nurtureUntil = null;
     }
@@ -264,14 +256,7 @@ export async function convertLead(actor: Actor, id: string, input: LeadConvert) 
     const [company] = await tx.select().from(schema.companies).where(eq(schema.companies.id, lead.companyId));
     if (!company) throw err.notFound('Company not found');
     const contactId = input.contactId === undefined ? lead.contactId : input.contactId;
-    if (contactId) {
-      const [contact] = await tx.select({ id: schema.contacts.id }).from(schema.contacts).where(and(
-        eq(schema.contacts.id, contactId),
-        eq(schema.contacts.companyId, lead.companyId),
-        isNull(schema.contacts.deletedAt),
-      ));
-      if (!contact) throw err.validation('Contact does not belong to the company');
-    }
+    await assertContactCompany(lead.companyId, contactId, tx);
     const dealId = ulid();
     await tx.insert(schema.deals).values({
       id: dealId,

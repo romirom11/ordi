@@ -67,18 +67,32 @@ export function EditableName({ value, editable, size = 'lg', onSave }: {
   );
 }
 
-/* ─────────────── Inline editable value + text ─────────────── */
+/* ─────────────── Inline editable value ─────────────── */
 
 /**
- * Click-to-edit for a single-line property in the rail. Unlike EditableName an
- * empty value is meaningful: it clears the field, so `onSave` receives null.
+ * Click-to-edit for one field, in the two shapes the CRM detail pages need:
+ * a rail chip for a single-line property, and a prose block for a written note.
+ *
+ * One component rather than three. The company rail, the lead rail and the
+ * lead's qualification cards were each doing this with their own copy — same
+ * state machine, same commit rule, different look and different keyboard, so
+ * two rails in one product behaved differently and every fix had to be made
+ * more than once.
+ *
+ * An empty value is meaningful: it clears the field, so `onSave` gets null.
+ * `display` lets a field read as prose ("14 days") while editing the raw value.
  */
-export function EditableValue({ value, editable, placeholder, inputType = 'text', onSave }: {
+export function InlineEdit({
+  value, editable, placeholder, onSave, multiline, rows = 3, inputType = 'text', display,
+}: {
   value?: string | number | null;
   editable: boolean;
-  placeholder?: string;
-  inputType?: 'text' | 'number' | 'url';
+  placeholder: string;
   onSave: (value: string | null) => void;
+  multiline?: boolean;
+  rows?: number;
+  inputType?: 'text' | 'email' | 'number' | 'url';
+  display?: string;
 }) {
   const text = value == null || value === '' ? '' : String(value);
   const [editing, setEditing] = useState(false);
@@ -90,66 +104,16 @@ export function EditableValue({ value, editable, placeholder, inputType = 'text'
     const next = draft.trim();
     if (next !== text) onSave(next || null);
   };
-
-  if (editing && editable) {
-    return (
-      <input
-        autoFocus
-        type={inputType}
-        value={draft}
-        placeholder={placeholder}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') commit();
-          if (event.key === 'Escape') { setDraft(text); setEditing(false); }
-        }}
-        className="min-h-7 w-full rounded-md border border-primary/40 bg-transparent px-1.5 py-1 text-[13px] outline-none focus:ring-2 focus:ring-ring/25"
-      />
-    );
-  }
-  return (
-    <button
-      type="button"
-      disabled={!editable}
-      onClick={() => setEditing(true)}
-      className={cn(
-        'flex min-h-7 w-full items-center rounded-md px-1.5 py-1 text-left text-[13px] transition-colors',
-        editable ? 'cursor-pointer hover:bg-muted' : 'cursor-default',
-        !text && 'text-faint',
-      )}
-    >
-      {text || (editable ? placeholder ?? '—' : '—')}
-    </button>
-  );
-}
-
-/**
- * Click-to-edit for a multi-line note. The qualification write-up on a lead is
- * the reason this exists: those fields were only ever filled by an importer, so
- * once it was removed they had no way in at all and the page showed six boxes a
- * seller could read but never write.
- */
-export function EditableText({ value, editable, placeholder, rows = 3, onSave }: {
-  value?: string | null;
-  editable: boolean;
-  placeholder?: string;
-  rows?: number;
-  onSave: (value: string | null) => void;
-}) {
-  const text = value ?? '';
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(text);
-  useEffect(() => { setDraft(text); }, [text]);
-
-  const commit = () => {
-    setEditing(false);
-    const next = draft.trim();
-    if (next !== text) onSave(next || null);
+  // Escape always reverts. Enter commits a single line; in a note it breaks the
+  // line instead, so there Cmd/Ctrl+Enter is the commit.
+  const onKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === 'Escape') { setDraft(text); setEditing(false); return; }
+    if (event.key !== 'Enter') return;
+    if (!multiline || event.metaKey || event.ctrlKey) commit();
   };
 
   if (editing && editable) {
-    return (
+    return multiline ? (
       <textarea
         autoFocus
         rows={rows}
@@ -157,27 +121,55 @@ export function EditableText({ value, editable, placeholder, rows = 3, onSave }:
         placeholder={placeholder}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={commit}
-        // Enter breaks the line; Cmd/Ctrl+Enter saves, Escape reverts.
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) commit();
-          if (event.key === 'Escape') { setDraft(text); setEditing(false); }
-        }}
+        onKeyDown={onKeyDown}
         className="w-full resize-y rounded-md border border-primary/40 bg-transparent px-2 py-1.5 text-[13px] leading-relaxed outline-none focus:ring-2 focus:ring-ring/25"
+      />
+    ) : (
+      <input
+        autoFocus
+        type={inputType}
+        value={draft}
+        placeholder={placeholder}
+        onFocus={(event) => event.target.select()}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={onKeyDown}
+        className={cn(
+          'min-h-7 w-full rounded-md border border-primary/40 bg-transparent px-1.5 py-1 text-[13px] outline-none focus:ring-2 focus:ring-ring/25',
+          inputType === 'number' && 'tabular-nums',
+        )}
       />
     );
   }
+
+  if (multiline) {
+    return (
+      <button
+        type="button"
+        disabled={!editable}
+        onClick={() => setEditing(true)}
+        className={cn(
+          'block w-full whitespace-pre-wrap rounded-md px-2 py-1.5 text-left text-[13px] leading-relaxed transition-colors',
+          editable ? 'cursor-text hover:bg-muted' : 'cursor-default',
+          text ? 'text-muted-foreground' : 'text-faint',
+        )}
+      >
+        {text || (editable ? placeholder : '—')}
+      </button>
+    );
+  }
+
+  const chip = (
+    <RailChip empty={!text} disabled={!editable}>
+      <span className={cn('truncate', inputType === 'number' && 'tabular-nums')}>
+        {(text && (display ?? text)) || (editable ? placeholder : '—')}
+      </span>
+    </RailChip>
+  );
+  if (!editable) return chip;
   return (
-    <button
-      type="button"
-      disabled={!editable}
-      onClick={() => setEditing(true)}
-      className={cn(
-        'block w-full whitespace-pre-wrap rounded-md px-2 py-1.5 text-left text-[13px] leading-relaxed transition-colors',
-        editable ? 'cursor-text hover:bg-muted' : 'cursor-default',
-        text ? 'text-muted-foreground' : 'text-faint',
-      )}
-    >
-      {text || (editable ? placeholder ?? '—' : '—')}
+    <button type="button" className="block w-full text-left" onClick={() => setEditing(true)}>
+      {chip}
     </button>
   );
 }

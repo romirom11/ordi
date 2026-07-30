@@ -11,7 +11,6 @@ import { useMe, useCan } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import { Card, Kbd, PageHeader, Skeleton, EmptyState, PriorityIcon, ProgressBar, fmtMoney, fmtDate, fmtRelative, cn } from '../components/ui';
 import { extendDict, useT } from '../lib/i18n';
-import type { SalesWork } from '../components/crm/shared';
 
 extendDict({
   en: {
@@ -366,6 +365,8 @@ interface DashboardData {
   dealsByStage?: DealStageRow[];
   recentActivity?: ActivityItem[];
   projectCount?: number;
+  /** Present only with crm.read; bucket counts from the CRM work queue. */
+  salesWork?: { overdue: number; dueToday: number };
 }
 
 /* ───────────────────────── Helpers ───────────────────────── */
@@ -427,22 +428,10 @@ function activityText(a: ActivityItem, t: (k: string, fallback?: string) => stri
 export function DashboardPage() {
   const t = useT();
   const me = useMe();
-  const can = useCan();
   const navigate = useNavigate();
   // Tab/window title should say "Dashboard", not the greeting headline.
   // (Runs after PageHeader's registration, so this one wins.)
   usePageTitle(t('nav.dashboard'));
-
-  /**
-   * A seller's day does not live in `my open tasks` – that counts project work.
-   * Their overdue outreach and today's calls were nowhere on this page, so the
-   * dashboard said "all caught up" to someone with a queue waiting in the CRM.
-   */
-  const salesWorkQ = useQuery<SalesWork>({
-    queryKey: ['sales-work', 'mine'],
-    queryFn: () => api.get<SalesWork>('/sales-work?scope=mine&limit=1'),
-    enabled: can('crm.read'),
-  });
 
   const dash = useQuery<DashboardData>({
     queryKey: ['dashboard'],
@@ -493,15 +482,17 @@ export function DashboardPage() {
   const maxDealAmount = Math.max(1, ...dealsByStage.map((d) => Number(d.amount ?? 0)));
 
   const activity = dash.data?.recentActivity ?? [];
-  const salesOverdue = salesWorkQ.data?.overdue.total ?? 0;
-  const salesDueToday = salesWorkQ.data?.dueToday.total ?? 0;
+  // Gated server-side like every other widget on this response.
+  const salesWork = dash.data?.salesWork;
+  const salesOverdue = salesWork?.overdue ?? 0;
+  const salesDueToday = salesWork?.dueToday ?? 0;
 
 
   const stats: { key: string; icon: ReactNode; label: string; value: string; accent?: boolean; onClick: () => void }[] = [
     { key: 'myTasks', icon: <ListTodo size={14} />, label: t('dashboard.myOpenTasks'), value: String(totalOpen), onClick: () => navigate('/my-tasks') },
     { key: 'overdue', icon: <AlertTriangle size={14} className={overdueCount > 0 ? 'text-destructive' : undefined} />, label: t('common.overdue'), value: String(overdueCount), accent: overdueCount > 0, onClick: () => navigate('/my-tasks') },
   ];
-  if (can('crm.read') && (salesOverdue > 0 || salesDueToday > 0)) {
+  if (salesWork && (salesOverdue > 0 || salesDueToday > 0)) {
     stats.push({
       key: 'salesOverdue',
       icon: <Handshake size={14} className={salesOverdue > 0 ? 'text-destructive' : undefined} />,

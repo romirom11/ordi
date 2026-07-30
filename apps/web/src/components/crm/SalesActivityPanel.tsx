@@ -145,15 +145,19 @@ export function SalesActivityPanel({ leadId, dealId, companyId, contactId, canWr
           ))}
         </div>
       )}
-      <ScheduleActivityDialog
-        open={schedule}
-        onClose={() => setSchedule(false)}
-        leadId={leadId}
-        dealId={dealId}
-        defaultType={activities.some((activity) => activity.status === 'completed') ? 'follow_up' : 'outreach'}
-      />
-      <EditActivityDialog activity={edit} onClose={() => setEdit(null)} />
-      <CompleteActivityDialog activity={complete} onClose={() => setComplete(null)} />
+      {/* Mounted on open: its template and user lookups fire on mount, and the
+        * default activity type is read once, so a fresh mount is the sync. */}
+      {schedule && (
+        <ScheduleActivityDialog
+          open
+          onClose={() => setSchedule(false)}
+          leadId={leadId}
+          dealId={dealId}
+          defaultType={activities.some((activity) => activity.status === 'completed') ? 'follow_up' : 'outreach'}
+        />
+      )}
+      {edit && <EditActivityDialog activity={edit} onClose={() => setEdit(null)} />}
+      {complete && <CompleteActivityDialog activity={complete} onClose={() => setComplete(null)} />}
       <ConfirmDialog
         open={!!cancel}
         onClose={() => setCancel(null)}
@@ -356,9 +360,6 @@ export function ScheduleActivityDialog({ open, onClose, leadId, dealId, defaultT
     setContext('');
     setError(null);
   };
-  // The dialog is mounted before it is opened, so pick up the caller's default
-  // when it changes rather than only on first mount.
-  useEffect(() => { if (!open) setType(defaultType); }, [defaultType, open]);
   const mutation = useMutation({
     mutationFn: () => api.post('/sales-activities', {
       leadId,

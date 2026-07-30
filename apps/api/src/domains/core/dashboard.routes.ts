@@ -7,6 +7,7 @@ import { requireAuth, currentActor } from '../../core/auth';
 import { scopeActivityToResources, visibleActivityTypes } from '../../core/activity';
 import { accessibleProjectIds } from '../../core/access';
 import { err } from '../../lib/errors';
+import { salesWorkCounts } from '../crm/work';
 
 export function dashboardRoutes() {
   const app = new Hono<AppEnv>();
@@ -49,6 +50,19 @@ export function dashboardRoutes() {
         from invoices where deleted_at is null and status not in ('paid','canceled','draft') and due_date < ${today}`);
       out.receivables = rec;
       out.overdue = (overdue as any[])[0];
+    }
+
+    /**
+     * A seller's day is not in `my open tasks` – that counts project work. Their
+     * queue lives in the CRM, so the counts belong here beside the other gated
+     * widgets rather than as a second request from the browser.
+     */
+    if (perms.has('crm.read')) {
+      out.salesWork = await salesWorkCounts({
+        userId: actor.userId,
+        timezone: actor.timezone,
+        access: { permissions: perms },
+      }, { scope: 'mine' });
     }
 
     if (perms.has('deals.read')) {
