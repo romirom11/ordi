@@ -125,6 +125,14 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   queue, next to the task counters. `My open tasks` counts project work,
   so a seller with a full outreach queue was told they were all caught
   up.
+- Start sequence says why it is unavailable over a record that already
+  has a planned action, rather than letting the click fail against the
+  API rule.
+- The Leads table shows the owner, so a team can see whose pipeline is
+  whose without opening every record.
+- Last of the importer's language is gone from the UI: a deal is
+  "Qualified from a lead", its link reads "Open the lead", and a
+  company is a company on the deal rail too.
 - Fixed a test that was set to start failing on a calendar date: the
   email retry-backoff case stepped forward from a hard-coded
   `2026-07-29`, so it stopped claiming on the first tick once the wall

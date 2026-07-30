@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, Check, MoreHorizontal, Pencil, Play, Plus, Workflow, X } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { useT } from '../../lib/i18n';
-import { Button, EmptySection, Input, Select, Spinner, Textarea, fmtDate, fmtRelative } from '../ui';
+import { Button, EmptySection, Input, Select, Spinner, Textarea, Tooltip, fmtDate, fmtRelative } from '../ui';
 import { DateField, DateTimeField } from '../DatePicker';
 import { ConfirmDialog, Dialog, DropdownMenu, MenuItem, toast } from '../overlays';
 import {
@@ -87,6 +87,7 @@ export function SalesActivityPanel({ leadId, dealId, companyId, contactId, canWr
           dealId={dealId}
           companyId={companyId}
           contactId={contactId}
+          hasPlanned={activities.some((activity) => activity.status === 'planned')}
         />
       )}
       {activities.length === 0 ? (
@@ -167,11 +168,14 @@ export function SalesActivityPanel({ leadId, dealId, companyId, contactId, canWr
   );
 }
 
-function SequenceControls({ leadId, dealId, companyId, contactId }: {
+function SequenceControls({ leadId, dealId, companyId, contactId, hasPlanned }: {
   leadId?: string;
   dealId?: string;
   companyId?: string | null;
   contactId?: string | null;
+  /** A sequence owns the next step, so the API refuses to start one over a
+   * planned action. Say so on the button rather than in an error afterwards. */
+  hasPlanned: boolean;
 }) {
   const t = useT();
   const qc = useQueryClient();
@@ -243,14 +247,16 @@ function SequenceControls({ leadId, dealId, companyId, contactId }: {
         </div>
       ) : (
         <div className="mb-3">
-          <Button
-            size="xs"
-            variant="outline"
-            onClick={() => setOpen(true)}
-            disabled={!sequencesQ.data?.length}
-          >
-            <Play size={12} /> {t('crm.startSequence')}
-          </Button>
+          <Tooltip label={hasPlanned ? t('crm.sequenceNeedsClearNext') : undefined}>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => setOpen(true)}
+              disabled={hasPlanned || !sequencesQ.data?.length}
+            >
+              <Play size={12} /> {t('crm.startSequence')}
+            </Button>
+          </Tooltip>
         </div>
       )}
 
