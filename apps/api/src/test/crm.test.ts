@@ -163,8 +163,13 @@ describe('entity attachments', () => {
   let fileId: string;
 
   it('registers and lists files on a company', async () => {
+    const presign = await json(reqAs(users.owner!.cookie).post('/attachments/presign', {
+      filename: 'brief.pdf', size: 1234, mime: 'application/pdf',
+      entityType: 'company', entityId: companyId,
+    }));
     const reg = await reqAs(users.owner!.cookie).post('/attachments/register', {
-      entityType: 'company', entityId: companyId, fileKey: 'uploads/x/brief.pdf',
+      entityType: 'company', entityId: companyId,
+      fileKey: presign.fileKey, keyToken: presign.keyToken,
       filename: 'brief.pdf', size: 1234, mime: 'application/pdf',
     });
     expect(reg.status).toBe(201);

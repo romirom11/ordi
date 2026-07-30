@@ -13,7 +13,7 @@ import {
   FolderKanban, Handshake, Pencil, Receipt, Target, Trash2, ExternalLink,
 } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
-import { Link, useNavigate } from '../lib/router';
+import { Link, useNavigate, useOpen } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import {
@@ -166,6 +166,7 @@ export function CompanyDetailPage({ id }: { id: string }) {
 function LeadsSection({ companyId, canWrite, onAdd }: { companyId: string; canWrite: boolean; onAdd: () => void }) {
   const t = useT();
   const navigate = useNavigate();
+  const open = useOpen();
   const leadsQ = useLeads({ companyId });
   const leads = leadsQ.data ?? [];
   return (
@@ -190,7 +191,8 @@ function LeadsSection({ companyId, canWrite, onAdd }: { companyId: string; canWr
             <button
               key={lead.id}
               type="button"
-              onClick={() => navigate(`/leads/${lead.id}`)}
+              onClick={(e) => open(`/leads/${lead.id}`, e)}
+              onAuxClick={(e) => open(`/leads/${lead.id}`, e)}
               className={cn('flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/50', index > 0 && 'border-t border-border')}
             >
               <Target size={14} className="shrink-0 text-warning" />
@@ -290,6 +292,7 @@ function InvoicesSection({ companyId }: { companyId: string }) {
   const t = useT();
   const can = useCan();
   const navigate = useNavigate();
+  const open = useOpen();
   const wsQ = useWorkspaceSettings();
 
   const enabled = financeEnabled(wsQ.data) && can('finance.read');
@@ -333,7 +336,8 @@ function InvoicesSection({ companyId }: { companyId: string }) {
             return (
               <div
                 key={iv.id}
-                onClick={() => navigate(`/finance/invoices/${iv.id}`)}
+                onClick={(e) => open(`/finance/invoices/${iv.id}`, e)}
+                onAuxClick={(e) => open(`/finance/invoices/${iv.id}`, e)}
                 className={cn('flex cursor-pointer items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/50', i > 0 && 'border-t border-border')}
               >
                 <span className="w-24 shrink-0 truncate font-mono text-[11px] text-muted-foreground">{iv.number ?? iv.id.slice(0, 8)}</span>

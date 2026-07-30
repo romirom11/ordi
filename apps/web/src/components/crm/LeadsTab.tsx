@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Search, Target } from 'lucide-react';
-import { useNavigate } from '../../lib/router';
+import { useOpen } from '../../lib/router';
 import { useT } from '../../lib/i18n';
 import { Avatar, EmptyState, Input, Select, Skeleton, fmtRelative } from '../ui';
 import {
@@ -8,9 +8,17 @@ import {
   useLeads, useUserMap,
 } from './shared';
 
+/**
+ * The header and the rows are separate elements, so one template shared between
+ * them is what keeps a column added to one from misaligning the other. The
+ * tracks add up to 810px plus the row's own 32px of padding, which is what the
+ * scroll container's min-width below has to clear.
+ */
+const LEAD_COLUMNS = 'grid-cols-[minmax(200px,2fr)_minmax(150px,1.2fr)_120px_70px_minmax(160px,1.1fr)_110px]';
+
 export function LeadsTab() {
   const t = useT();
-  const navigate = useNavigate();
+  const open = useOpen();
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const leadsQ = useLeads({ q, status });
@@ -41,8 +49,8 @@ export function LeadsTab() {
             hint={t('crm.leadsHint')}
           />
         ) : (
-          <div className="min-w-[760px]">
-            <div className="grid grid-cols-[minmax(200px,2fr)_minmax(150px,1.2fr)_120px_70px_minmax(160px,1.1fr)_110px] border-b border-border px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
+          <div className="min-w-[842px]">
+            <div className={`grid ${LEAD_COLUMNS} border-b border-border px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-faint`}>
               <span>{t('crm.lead')}</span>
               <span>{t('crm.company')}</span>
               <span>{t('common.status')}</span>
@@ -50,14 +58,16 @@ export function LeadsTab() {
               <span>{t('crm.nextAction')}</span>
               <span>{t('crm.owner')}</span>
             </div>
-            {leads.map((lead) => {
+            {leads.map((lead, i) => {
               const next = lead.nextActivity;
               return (
                 <button
                   key={lead.id}
                   type="button"
-                  onClick={() => navigate(`/leads/${lead.id}`)}
-                  className="grid w-full grid-cols-[minmax(200px,2fr)_minmax(150px,1.2fr)_120px_70px_minmax(160px,1.1fr)_110px] items-center border-b border-border px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
+                  onClick={(e) => open(`/leads/${lead.id}`, e)}
+                  onAuxClick={(e) => open(`/leads/${lead.id}`, e)}
+                  style={{ ['--i' as string]: Math.min(i, 10) }}
+                  className={`row-enter grid w-full ${LEAD_COLUMNS} items-center border-b border-border px-4 py-2.5 text-left transition-colors hover:bg-muted/50`}
                 >
                   <span className="min-w-0">
                     <span className="block truncate text-[13px] font-medium">{lead.title}</span>

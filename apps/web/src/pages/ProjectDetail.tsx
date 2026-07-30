@@ -5,12 +5,12 @@ import {
   LayoutDashboard, ListChecks, Repeat, CalendarClock, Settings, ChevronRight,
 } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
-import { Link, useNavigate, useSearchParams } from '../lib/router';
+import { Link, useNavigate, useOpen, useSearchParams, type OpenIntent } from '../lib/router';
 import { useCan, useProjectRole } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import {
   Button, IconButton, Input, Card, Badge, Skeleton, EmptyState, Spinner, Avatar, AvatarGroup,
-  StatusIcon, PriorityIcon, ProgressBar, ProgressRing, PageBody,
+  StatusIcon, PriorityIcon, ProgressBar, ProgressRing, PageBody, Reveal,
   fmtDate, cn,
 } from '../components/ui';
 import { Dialog, ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, toast } from '../components/overlays';
@@ -159,6 +159,7 @@ type Tab = typeof TABS[number];
 export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
   const t = useT();
   const navigate = useNavigate();
+  const open = useOpen();
   const params = useSearchParams();
   const qc = useQueryClient();
   const can = useCan();
@@ -192,7 +193,7 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
 
   usePageTitle(project ? `${project.key} · ${project.name}` : null);
 
-  const openTask = (tid: string) => navigate(`/projects/${id}/tasks/${tid}`);
+  const openTask = (tid: string, e?: OpenIntent) => open(`/projects/${id}/tasks/${tid}`, e);
 
   const patchProject = useMutation({
     mutationFn: (body: Record<string, unknown>) => api.patch(`/projects/${id}`, { ...body, version: project?.version }),
@@ -224,7 +225,7 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
         onPatch={(b) => patchProject.mutate(b)}
       />
 
-      <div className="flex-1 overflow-auto">
+      <Reveal key={tab} className="flex-1 overflow-auto">
         {tab === 'overview' && (
           <OverviewTab
             id={id}
@@ -239,7 +240,7 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
         {tab === 'tasks' && <TasksTab id={id} statuses={statuses} statusesLoading={statusesQ.isLoading} projectKey={project?.key} users={users} canWrite={canWrite} onOpen={openTask} />}
         {tab === 'cycles' && <CyclesTab id={id} />}
         {tab === 'settings' && <SettingsTab project={project} isAdmin={isAdmin} onPatch={(b) => patchProject.mutate(b)} pending={patchProject.isPending} />}
-      </div>
+      </Reveal>
     </div>
   );
 }
@@ -429,7 +430,7 @@ function buildGroups(
 
 function TasksTab({ id, statuses, statusesLoading, projectKey, users, canWrite, onOpen }: {
   id: string; statuses: TaskStatus[]; statusesLoading: boolean; projectKey?: string; users: UserLite[];
-  canWrite: boolean; onOpen: (tid: string) => void;
+  canWrite: boolean; onOpen: (tid: string, e?: OpenIntent) => void;
 }) {
   const t = useT();
   const qc = useQueryClient();
@@ -633,7 +634,7 @@ function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, re
   projectId: string; projectKey?: string; statuses: TaskStatus[]; groups: TaskGroup[]; prefs: TaskViewPrefs;
   canWrite: boolean; resolveUsers: (ids?: string[]) => UserLite[];
   labelById: Map<string, LabelLite>; childStats: Map<string, ChildStats>; taskById: Map<string, Task>;
-  onOpen: (tid: string) => void; onToggleCollapse: (key: string) => void;
+  onOpen: (tid: string, e?: OpenIntent) => void; onToggleCollapse: (key: string) => void;
   onAdd: (title: string, seed?: Record<string, unknown>) => void;
 }) {
   const t = useT();
@@ -739,7 +740,8 @@ function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, re
                       canWrite={canWrite}
                     >
                       <button
-                        onClick={() => onOpen(task.id)}
+                        onClick={(e) => onOpen(task.id, e)}
+                        onAuxClick={(e) => onOpen(task.id, e)}
                         className={cn(
                           'row-enter group/row flex h-9 w-full items-center gap-2.5 px-4 text-left transition-colors duration-150 hover:bg-muted/50',
                           (i > 0 || flat) && 'border-t border-border/60',
@@ -848,7 +850,7 @@ function BoardView({ projectId, projectKey, statuses, groups, prefs, canWrite, r
   projectId: string; projectKey?: string; statuses: TaskStatus[]; groups: TaskGroup[]; prefs: TaskViewPrefs;
   canWrite: boolean; resolveUsers: (ids?: string[]) => UserLite[];
   labelById: Map<string, LabelLite>; childStats: Map<string, ChildStats>;
-  onOpen: (tid: string) => void;
+  onOpen: (tid: string, e?: OpenIntent) => void;
   onAdd: (title: string, seed?: Record<string, unknown>) => void;
   onMove: (taskId: string, statusId: string, version?: number) => void;
 }) {
@@ -910,7 +912,8 @@ function BoardView({ projectId, projectKey, statuses, groups, prefs, canWrite, r
                       draggable={canWrite}
                       onDragStart={(e) => { setDragId(task.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/task-id', task.id); }}
                       onDragEnd={() => { setDragId(null); setOverCol(null); }}
-                      onClick={() => onOpen(task.id)}
+                      onClick={(e) => onOpen(task.id, e)}
+                      onAuxClick={(e) => onOpen(task.id, e)}
                       className={cn(
                         'cursor-pointer rounded-lg border border-border bg-card p-2.5 text-left shadow-sm transition-all duration-150 hover:border-border-strong',
                         canWrite && 'active:cursor-grabbing',

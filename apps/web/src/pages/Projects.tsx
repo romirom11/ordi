@@ -5,7 +5,7 @@ import {
   Building2, Tag as TagIcon,
 } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
-import { Link, useNavigate } from '../lib/router';
+import { Link, useNavigate, useOpen } from '../lib/router';
 import { useCan, useMe } from '../lib/auth';
 import {
   Button, Input, Badge, PageHeader, Breadcrumbs, Skeleton, EmptyState, Spinner,
@@ -139,6 +139,7 @@ function ProjectProgress({ id }: { id: string }) {
 export function ProjectsPage() {
   const t = useT();
   const navigate = useNavigate();
+  const open = useOpen();
   const qc = useQueryClient();
   const can = useCan();
   const canCreate = can('projects.create');
@@ -252,7 +253,8 @@ export function ProjectsPage() {
                   canDelete={canDelete}
                 >
                 <button
-                  onClick={() => navigate(`/projects/${p.id}`)}
+                  onClick={(e) => open(`/projects/${p.id}`, e)}
+                  onAuxClick={(e) => open(`/projects/${p.id}`, e)}
                   style={{ ['--i' as string]: Math.min(i, 10) }}
                   className={cn(
                     'row-enter group flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors duration-150 hover:bg-muted/60',

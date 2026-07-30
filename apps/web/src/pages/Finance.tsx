@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { appOrigin, api, qs, ApiError } from '../lib/api';
-import { useNavigate } from '../lib/router';
+import { useNavigate, useOpen, type OpenIntent } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { useTabs } from '../lib/tabs';
-import { Button, Input, Select, Card, PageHeader, EmptyState, Skeleton, SegmentedControl, fmtMoney, fmtDate, cn } from '../components/ui';
+import { Button, Input, Select, Card, PageHeader, EmptyState, Reveal, Skeleton, SegmentedControl, fmtMoney, fmtDate, cn } from '../components/ui';
 import { Dialog, ContextMenu, toast, type ContextMenuEntry } from '../components/overlays';
 import { Plus, Trash2, Wallet, AlertTriangle, CheckCircle2, Receipt, FileStack, Copy, ExternalLink, Link2 } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
@@ -139,11 +139,13 @@ export function FinancePage() {
           </div>
         }
       />
-      {tab === 'dashboard' && <DashboardView />}
-      {tab === 'invoices' && <InvoicesView />}
-      {tab === 'quotes' && <QuotesView />}
-      {tab === 'expenses' && <ExpensesView />}
-      {tab === 'transactions' && <TransactionsTab />}
+      <Reveal key={tab}>
+        {tab === 'dashboard' && <DashboardView />}
+        {tab === 'invoices' && <InvoicesView />}
+        {tab === 'quotes' && <QuotesView />}
+        {tab === 'expenses' && <ExpensesView />}
+        {tab === 'transactions' && <TransactionsTab />}
+      </Reveal>
       {incomeOpen && <AddIncomeDialog onClose={() => setIncomeOpen(false)} />}
     </div>
   );
@@ -374,6 +376,7 @@ function InvoicesView() {
   const t = useT();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const open = useOpen();
   const can = useCan();
   const [status, setStatus] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -406,7 +409,7 @@ function InvoicesView() {
         </Select>
         {can('finance.write') && <Button size="sm" className="ml-auto" onClick={() => setShowForm(true)}><Plus size={14} /> {t('finance.newInvoice')}</Button>}
       </div>
-      <DocTable rows={rows} loading={invoices.isLoading} kind="invoice" companies={companies.data?.data} onRow={(id) => navigate(`/finance/invoices/${id}`)} />
+      <DocTable rows={rows} loading={invoices.isLoading} kind="invoice" companies={companies.data?.data} onRow={(id, e) => open(`/finance/invoices/${id}`, e)} />
 
       {can('finance.write') && (
         <Dialog open={showForm} onClose={() => setShowForm(false)} title={t('finance.newInvoice')} width={560}>
@@ -463,7 +466,7 @@ function QuotesView() {
 }
 
 function DocTable({ rows, loading, kind, onRow, companies }: {
-  rows: DocRow[]; loading: boolean; kind: 'invoice' | 'quote'; onRow?: (id: string) => void; companies?: Company[];
+  rows: DocRow[]; loading: boolean; kind: 'invoice' | 'quote'; onRow?: (id: string, e?: OpenIntent) => void; companies?: Company[];
 }) {
   const t = useT();
   const tabs = useTabs();
@@ -498,7 +501,8 @@ function DocTable({ rows, loading, kind, onRow, companies }: {
           <div
             role={onRow ? 'button' : undefined}
             tabIndex={onRow ? 0 : undefined}
-            onClick={onRow ? () => onRow(r.id) : undefined}
+            onClick={onRow ? (e) => onRow(r.id, e) : undefined}
+            onAuxClick={onRow ? (e) => onRow(r.id, e) : undefined}
             onKeyDown={onRow ? (e) => { if (e.key === 'Enter') onRow(r.id); } : undefined}
             className={cn(
               'row-enter flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors duration-150',

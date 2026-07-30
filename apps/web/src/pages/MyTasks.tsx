@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { api } from '../lib/api';
-import { useNavigate } from '../lib/router';
+import { useNavigate, useOpen } from '../lib/router';
 import {
   Badge, EmptyState, PageHeader, PriorityIcon, SegmentedControl, Skeleton, StatusIcon, cn, fmtDate,
 } from '../components/ui';
@@ -102,6 +102,7 @@ function LoadingRows() {
 export function MyTasksPage() {
   const t = useT();
   const navigate = useNavigate();
+  const open = useOpen();
   const [tab, setTab] = useState<Tab>('assigned');
 
   const { data, isLoading } = useQuery<MeTasksResponse>({
@@ -177,7 +178,8 @@ export function MyTasksPage() {
                 return (
                   <button
                     key={task.id}
-                    onClick={() => navigate(`/projects/${task.project_id}/tasks/${task.id}`)}
+                    onClick={(e) => open(`/projects/${task.project_id}/tasks/${task.id}`, e)}
+                    onAuxClick={(e) => open(`/projects/${task.project_id}/tasks/${task.id}`, e)}
                     className="row-enter flex h-9 w-full cursor-pointer items-center gap-3 border-b border-border px-6 text-left transition-colors duration-150 hover:bg-muted"
                     style={{ ['--i' as string]: Math.min(i, 10) }}
                   >

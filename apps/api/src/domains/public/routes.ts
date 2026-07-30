@@ -10,6 +10,8 @@ import { env } from '../../env';
 import { err } from '../../lib/errors';
 import { emit } from '../../core/events';
 import { hmacSha256, encrypt, generateToken } from '../../lib/crypto';
+import { verifyFileToken } from '../../lib/file-tokens';
+import { presignDownload } from '../../lib/s3';
 import { writeActivity } from '../../core/activity';
 import { verifyOAuthState, exchangeGithubCode, exchangeSlackCode } from '../integrations/oauth';
 import {
@@ -47,6 +49,30 @@ export function publicRoutes() {
   const app = new Hono<AppEnv>();
 
   // ── Public invoice page (PRD §11.3) ──
+  /**
+   * A file embedded in rich text, reached by its signed link (lib/file-tokens).
+   * Answers a redirect to a freshly presigned S3 url rather than proxying the
+   * bytes, so storage bandwidth never passes through the API.
+   *
+   * A wrong token is a 404, not a 403: the same rule as every other public
+   * token here – existence is never leaked.
+   */
+  app.get('/files/:id/:token', async (c) => {
+    const id = c.req.param('id');
+    if (!verifyFileToken(id, c.req.param('token'))) throw err.notFound();
+    const { db } = getDb();
+    const [att] = await db.select().from(schema.attachments).where(eq(schema.attachments.id, id));
+    if (!att) throw err.notFound();
+    const url = await presignDownload(att.fileKey);
+    // Dev without S3 configured: presignDownload hands back a local:// stub,
+    // which is not a fetchable url. Say so instead of redirecting nowhere.
+    if (url.startsWith('local://')) throw err.domain('Object storage is not configured');
+    // The presigned url is short-lived, so the redirect itself must not be
+    // cached; the signed link that produced it is what stays stable.
+    c.header('Cache-Control', 'private, max-age=0, must-revalidate');
+    return c.redirect(url, 302);
+  });
+
   app.get('/i/:token', async (c) => {
     const { db } = getDb();
     const token = c.req.param('token');

@@ -1,4 +1,7 @@
-import { createContext, useContext, useEffect, useState, type ReactNode, type MouseEvent } from 'react';
+import {
+  createContext, useCallback, useContext, useEffect, useState,
+  type ReactNode, type MouseEvent, type CSSProperties,
+} from 'react';
 
 interface RouterState {
   path: string;
@@ -48,24 +51,62 @@ export function useSearchParams(): URLSearchParams {
  */
 export const NewTabContext = createContext<((to: string) => void) | null>(null);
 
-export function Link({ to, children, className, onClick }: { to: string; children: ReactNode; className?: string; onClick?: () => void }) {
+/**
+ * The parts of a mouse event that decide how a click should open something.
+ * Loose on purpose so callers can pass a React MouseEvent, a DOM MouseEvent or
+ * nothing at all (a programmatic open).
+ */
+export interface OpenIntent {
+  metaKey?: boolean;
+  ctrlKey?: boolean;
+  button?: number;
+  preventDefault?: () => void;
+}
+
+/**
+ * Open an in-app url the way the click asked for it: plain click navigates the
+ * active tab, Ctrl/Cmd-click and middle-click open a new in-app tab.
+ *
+ * Rows, cards and cells that navigate MUST go through this instead of calling
+ * navigate() directly. A bare `onClick={() => navigate(url)}` swallows the
+ * modifier, so Cmd-click silently does nothing and the context menu becomes
+ * the only way to open a second tab – which is exactly the papercut this
+ * exists to remove. <Link> is built on it too.
+ */
+export function useOpen(): (to: string, e?: OpenIntent) => void {
   const navigate = useNavigate();
   const openInNewTab = useContext(NewTabContext);
-  const handle = (e: MouseEvent) => {
-    if (e.metaKey || e.ctrlKey) {
-      // In-app new tab; without a TabsProvider fall back to the browser default.
-      if (openInNewTab) { e.preventDefault(); openInNewTab(to); }
+  return useCallback((to: string, e?: OpenIntent) => {
+    const button = e?.button ?? 0;
+    // Right-click belongs to the context menu, never to navigation.
+    if (button === 2) return;
+    if (button === 1 || e?.metaKey || e?.ctrlKey) {
+      // Without a TabsProvider (public pages) let the browser do its default.
+      if (!openInNewTab) return;
+      e?.preventDefault?.();
+      openInNewTab(to);
       return;
     }
-    if (e.button !== 0) return;
-    e.preventDefault();
-    onClick?.();
+    if (button !== 0) return;
+    e?.preventDefault?.();
     navigate(to);
+  }, [navigate, openInNewTab]);
+}
+
+export function Link({ to, children, className, style, title, onClick }: {
+  to: string; children: ReactNode; className?: string; style?: CSSProperties;
+  title?: string; onClick?: () => void;
+}) {
+  const open = useOpen();
+  const handle = (e: MouseEvent) => {
+    if (!e.metaKey && !e.ctrlKey && e.button === 0) onClick?.();
+    open(to, e);
   };
-  const handleAux = (e: MouseEvent) => {
-    if (e.button === 1 && openInNewTab) { e.preventDefault(); openInNewTab(to); }
-  };
-  return <a href={to} className={className} onClick={handle} onAuxClick={handleAux}>{children}</a>;
+  return (
+    <a href={to} className={className} style={style} title={title} onClick={handle} onAuxClick={(e) => open(to, e)}>
+      {children}
+    </a>
+  );
 }
 
 /** Match a pattern like /projects/:id/tasks/:taskId against a path. */

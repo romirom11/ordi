@@ -1,5 +1,5 @@
 import { type ReactNode, useState, useEffect, useMemo, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useIsFetching, useQuery } from '@tanstack/react-query';
 import {
   LayoutDashboard, CheckSquare, Handshake, FolderKanban, BookText,
   Clock, Receipt, Users, Settings, Search, LogOut, LayoutGrid, CalendarRange,
@@ -22,6 +22,8 @@ import { TimerIndicator } from './TimerIndicator';
 import { NotificationsBell } from './NotificationsBell';
 import { QuickCreateTask } from './QuickCreateTask';
 import { TabStrip } from './tabs/TabStrip';
+import { ShortcutsDialog } from './ShortcutsDialog';
+import { GO_TO, SHORTCUTS, isTypingTarget } from '../lib/shortcuts';
 import { VersionGuard } from './VersionGuard';
 
 extendDict({
@@ -107,11 +109,15 @@ function loadCollapsed(): Record<string, boolean> {
   return {};
 }
 
-function isTypingTarget(e: KeyboardEvent): boolean {
-  const t = e.target as HTMLElement | null;
-  if (!t) return false;
-  const tag = t.tagName;
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable;
+/**
+ * Restart a CSS entrance animation on an element that is already mounted.
+ * The reflow between removing and re-adding the class is load-bearing: without
+ * it the browser coalesces both mutations and the animation never re-runs.
+ */
+function replayEntrance(el: HTMLElement): void {
+  el.classList.remove('page-enter');
+  void el.offsetWidth;
+  el.classList.add('page-enter');
 }
 
 interface WorkspaceSettings {
@@ -138,7 +144,12 @@ function ShellInner({ children }: { children: ReactNode }) {
   const { pref: themePref, setPref: setThemePref } = useTheme();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
+  const [keysOpen, setKeysOpen] = useState(false);
   const gChord = useRef<number>(0);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const revealArmed = useRef(false);
+  // Queries in flight app-wide: 0 means this page's first load has settled.
+  const fetching = useIsFetching();
 
   useRealtime();
 
@@ -161,25 +172,22 @@ function ShellInner({ children }: { children: ReactNode }) {
     ),
   }), [navigate, t]);
 
-  // Keyboard scheme (PRD §17.1): ⌘K palette, C new task, T stop timer,
-  // G then D/P/C/F/K/T/M navigation. (Tab shortcuts live in TabStrip.)
+  // App-wide keyboard scheme (PRD §17.1). Declared in lib/shortcuts; tab keys
+  // live in TabStrip, which reads the same table.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setPaletteOpen((o) => !o);
-        return;
-      }
+      const hit = (id: string) => SHORTCUTS.find((s) => s.id === id)?.match?.(e) ?? false;
+      if (hit('palette')) { e.preventDefault(); setPaletteOpen((o) => !o); return; }
+      // "?" is Shift+/ – a bare-letter rule would never see it, so it is
+      // checked before the typing guard bails on the shift modifier.
+      if (hit('help') && !isTypingTarget(e)) { e.preventDefault(); setKeysOpen((o) => !o); return; }
       if (e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e)) return;
       const key = e.key.toLowerCase();
 
       if (gChord.current && Date.now() - gChord.current < 700) {
         gChord.current = 0;
-        const map: Record<string, string> = {
-          d: '/', p: '/projects', c: '/crm', f: '/finance', k: '/kb', t: '/time', m: '/my-tasks',
-        };
-        const to = map[key];
-        if (to) { e.preventDefault(); navigate(to); return; }
+        const dest = GO_TO.find((d) => d.key === key);
+        if (dest) { e.preventDefault(); navigate(dest.to); return; }
       }
       if (key === 'g') { gChord.current = Date.now(); return; }
       gChord.current = 0;
@@ -194,6 +202,45 @@ function ShellInner({ children }: { children: ReactNode }) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [navigate]);
+
+  /**
+   * Replay the page entrance on every navigation and scroll back to the top.
+   *
+   * Keying the container on the full path would do both, but it would also
+   * remount the page each time – so the key stays coarse (section + tab) and
+   * the animation is restarted by hand. Removing the class, forcing a reflow
+   * and adding it back is what makes the browser run it again; without the
+   * reflow the removal and the addition collapse into no change at all.
+   *
+   * The scroll reset belongs here too: the scroller is this element, not the
+   * window, so navigate()'s window.scrollTo never moved it and a detail page
+   * opened from a scrolled list used to start half-way down.
+   */
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    el.scrollTop = 0;
+    replayEntrance(el);
+    // Arm a second pass only when the page really is loading. With warm cache
+    // the content is already there and one animation is the whole story.
+    revealArmed.current = fetching > 0;
+    // fetching is read, not tracked: arming must happen on navigation only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path, tabs?.activeId]);
+
+  /**
+   * The entrance above plays over skeletons, so the real content used to land
+   * afterwards with no transition at all – the jolt that reads as "unfinished"
+   * on a page that supposedly has an animation. Replaying once the page's
+   * first queries settle animates the data itself, on every page, without each
+   * one having to opt in.
+   */
+  useEffect(() => {
+    if (fetching !== 0 || !revealArmed.current) return;
+    revealArmed.current = false;
+    const el = contentRef.current;
+    if (el) replayEntrance(el);
+  }, [fetching]);
 
   /* ── Reorderable, sectioned nav ── */
   const [order, setOrder] = useState<string[]>(loadNavOrder);
@@ -340,6 +387,9 @@ function ShellInner({ children }: { children: ReactNode }) {
 
   // Remount the routed page per tab + top-level segment: tab switches and
   // section jumps replay .page-enter, while tab *title* updates do not.
+  // Remount only when the SECTION or the tab changes – a detail page opened
+  // from its own list must keep the surrounding subtree alive. The entrance
+  // animation is replayed for every navigation separately, below.
   const contentKey = `${tabs?.activeId ?? 'tab'}:${path.split('/')[1] || 'home'}`;
 
   return (
@@ -348,11 +398,13 @@ function ShellInner({ children }: { children: ReactNode }) {
         {/* macOS overlay title bar: the native buttons are drawn over the
             window's top-left corner, which is this sidebar. Nothing can live
             underneath them, so the sidebar opens with an empty strip that is
-            theirs – tauri.conf centres the lights inside it. The strip is
-            also the drag handle; without a drag region (and the
+            theirs. Keep it in step with tauri.conf trafficLightPosition: the
+            48px strip and y=18 leave an even 18px above and below a 12px
+            light, so the buttons sit centred instead of crowding the frame.
+            The strip is also the drag handle; without a drag region (and the
             core:window:allow-start-dragging permission) the window cannot be
             moved at all. */}
-        {isMacDesktop && <div className="h-9 shrink-0" data-tauri-drag-region />}
+        {isMacDesktop && <div className="h-12 shrink-0" data-tauri-drag-region />}
 
         {/* One identity row, the way Linear does it: the workspace names the
             place, and who you are only matters when you open the menu – so
@@ -515,7 +567,7 @@ function ShellInner({ children }: { children: ReactNode }) {
         <TabStrip />
         <VersionGuard />
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-sm">
-          <div key={contentKey} className="page-enter flex min-h-0 flex-1 flex-col overflow-auto">
+          <div ref={contentRef} key={contentKey} className="page-enter flex min-h-0 flex-1 flex-col overflow-auto">
             {children}
           </div>
         </div>
@@ -523,6 +575,7 @@ function ShellInner({ children }: { children: ReactNode }) {
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onNavigate={navigate} />
       <QuickCreateTask open={quickOpen} onClose={() => setQuickOpen(false)} />
+      <ShortcutsDialog open={keysOpen} onClose={() => setKeysOpen(false)} />
       <Toaster />
     </div>
   );

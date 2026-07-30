@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode, type CSSProperties } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, qs, ApiError } from '../lib/api';
-import { useNavigate } from '../lib/router';
+import { useNavigate, useOpen, type OpenIntent } from '../lib/router';
 import { useTabs } from '../lib/tabs';
 import { useCan } from '../lib/auth';
 import {
@@ -187,6 +187,7 @@ function DirectoryView() {
   const t = useT();
   const can = useCan();
   const navigate = useNavigate();
+  const open = useOpen();
   const tabs = useTabs();
   const canWrite = can('people.write');
   const [query, setQuery] = useState('');
@@ -218,8 +219,8 @@ function DirectoryView() {
     });
   }, [rows, query, filter]);
 
-  const openRow = (r: DirectoryRow) => {
-    if (r.hasEmployeeProfile && r.employeeId) navigate(`/people/${r.employeeId}`);
+  const openRow = (r: DirectoryRow, e?: OpenIntent) => {
+    if (r.hasEmployeeProfile && r.employeeId) open(`/people/${r.employeeId}`, e);
     else if (canWrite) setCreateTarget({ userId: r.userId, name: r.name, email: r.email });
   };
 
@@ -300,7 +301,8 @@ function DirectoryView() {
                 <div
                   role="button"
                   tabIndex={0}
-                  onClick={() => openRow(r)}
+                  onClick={(e) => openRow(r, e)}
+                  onAuxClick={(e) => openRow(r, e)}
                   onKeyDown={(e) => { if (e.key === 'Enter') openRow(r); }}
                   style={{ ['--i' as string]: Math.min(i, 10) }}
                   className={cn(

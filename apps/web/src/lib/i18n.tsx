@@ -1130,6 +1130,21 @@ export function useT(): (key: string, fallback?: string) => string {
   return useContext(I18nContext).t;
 }
 
+/**
+ * Translate outside React. Needed by ProseMirror extensions and other plain
+ * modules that have no access to context; reads the mirrored locale from
+ * localStorage, the same trick appLocale() in lib/dates uses. Prefer useT() in
+ * components – this one cannot re-render when the language changes.
+ */
+export function translate(key: string, fallback?: string): string {
+  let loc: Locale = 'en';
+  try {
+    const stored = localStorage.getItem('ordi:locale');
+    if (stored === 'uk') loc = 'uk';
+  } catch { /* private mode */ }
+  return DICTS[loc][key] ?? DICTS.en[key] ?? fallback ?? key;
+}
+
 export function useLocale(): Locale {
   return useContext(I18nContext).locale;
 }

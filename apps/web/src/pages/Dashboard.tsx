@@ -6,7 +6,7 @@ import {
   CalendarRange, User as UserIcon, Rocket, ChevronRight, X,
 } from 'lucide-react';
 import { api } from '../lib/api';
-import { useNavigate } from '../lib/router';
+import { useNavigate, useOpen } from '../lib/router';
 import { useMe, useCan } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import { Card, Kbd, PageHeader, Skeleton, EmptyState, PriorityIcon, ProgressBar, fmtMoney, fmtDate, fmtRelative, cn } from '../components/ui';
@@ -429,6 +429,7 @@ export function DashboardPage() {
   const t = useT();
   const me = useMe();
   const navigate = useNavigate();
+  const open = useOpen();
   // Tab/window title should say "Dashboard", not the greeting headline.
   // (Runs after PageHeader's registration, so this one wins.)
   usePageTitle(t('nav.dashboard'));
@@ -554,7 +555,8 @@ export function DashboardPage() {
                 {openTaskRows.slice(0, 8).map(({ task, overdue }, i) => (
                   <button
                     key={task.id}
-                    onClick={() => task.project_id && navigate(`/projects/${task.project_id}/tasks/${task.id}`)}
+                    onClick={(e) => task.project_id && open(`/projects/${task.project_id}/tasks/${task.id}`, e)}
+                    onAuxClick={(e) => task.project_id && open(`/projects/${task.project_id}/tasks/${task.id}`, e)}
                     style={{ ['--i' as string]: Math.min(i, 10) }}
                     className="row-enter flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-[13px] transition-colors duration-150 hover:bg-muted"
                   >

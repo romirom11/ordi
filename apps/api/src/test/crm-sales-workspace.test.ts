@@ -745,10 +745,15 @@ describe('lead and deal boundary', () => {
       leadId: lead.id,
       body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Pain confirmed' }] }] },
     });
+    const filePresign = await json(reqAs(users.owner!.cookie).post('/attachments/presign', {
+      filename: 'research.pdf', size: 20, mime: 'application/pdf',
+      entityType: 'lead', entityId: lead.id,
+    }));
     const file = await json(reqAs(users.owner!.cookie).post('/attachments/register', {
       entityType: 'lead',
       entityId: lead.id,
-      fileKey: 'uploads/research.pdf',
+      fileKey: filePresign.fileKey,
+      keyToken: filePresign.keyToken,
       filename: 'research.pdf',
       size: 20,
       mime: 'application/pdf',

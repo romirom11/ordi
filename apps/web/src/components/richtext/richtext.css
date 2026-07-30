@@ -343,18 +343,57 @@
   transform-origin: top left;
 }
 .ordi-rt-blockmenu-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   width: 100%;
   padding: 0.3rem 0.5rem;
   border-radius: 0.35rem;
   text-align: left;
   font-size: 0.8125rem;
+  white-space: nowrap;
   color: hsl(var(--foreground));
   cursor: pointer;
   transition: background-color var(--duration-quick, 150ms);
 }
 .ordi-rt-blockmenu-item:hover {
   background: hsl(var(--muted));
+}
+.ordi-rt-blockmenu-item.is-active {
+  background: hsl(var(--primary) / 0.12);
+  color: hsl(var(--primary));
+}
+
+/* Colour + highlight swatches */
+.ordi-rt-swatch-label {
+  padding: 0.3rem 0.4rem 0.15rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: hsl(var(--faint));
+}
+.ordi-rt-swatches {
+  display: grid;
+  grid-template-columns: repeat(5, 1.5rem);
+  gap: 0.25rem;
+  padding: 0 0.4rem 0.35rem;
+}
+.ordi-rt-swatch {
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--duration-quick, 150ms), transform var(--duration-quick, 150ms);
+}
+.ordi-rt-swatch:hover {
+  border-color: hsl(var(--border-strong));
+  transform: scale(1.08);
 }
 
 /* ───────────────────────── Mention dropdown ───────────────────────── */
@@ -412,4 +451,297 @@
 .ordi-mention-empty {
   padding: 0.4rem 0.5rem;
   color: hsl(var(--faint));
+}
+
+
+/* ───────────────────────── Block gutter (hover handles) ───────────────────────── */
+
+/* The gutter lives in the editor wrapper, not the prose flow, so it needs the
+   wrapper to be a positioning context – RichEditor adds `relative` for this. */
+.ordi-rt-gutter {
+  position: absolute;
+  left: 0;
+  /* ProseMirror sets position:relative on the editable element, so as a later
+     positioned sibling it would paint over the handles and swallow the click. */
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  padding: 0.1rem;
+  border-radius: 0.35rem;
+  transform: translateY(-50%);
+  animation: fade-in var(--duration-quick, 150ms) var(--ease-smooth-out, ease) both;
+}
+.ordi-rt-gutter [draggable='true'] {
+  /* A draggable <span> still needs to look and behave like a button. */
+  user-select: none;
+  -webkit-user-drag: element;
+}
+
+/* ───────────────────────── Table tools ───────────────────────── */
+
+.ordi-rt-tabletools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 0.4rem;
+  animation: fade-in var(--duration-quick, 150ms) var(--ease-smooth-out, ease) both;
+}
+.ordi-rt-tablebtn {
+  padding: 0.15rem 0.45rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.35rem;
+  background: hsl(var(--card));
+  font-size: 0.6875rem;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  transition: background-color var(--duration-quick, 150ms), color var(--duration-quick, 150ms);
+}
+.ordi-rt-tablebtn:hover {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+}
+
+/* ───────────────────────── Marks: underline, colour, highlight ───────────────────────── */
+
+.ordi-prose u {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ordi-prose mark {
+  border-radius: 0.2rem;
+  padding: 0.05em 0.15em;
+  background: hsl(var(--primary) / 0.22);
+  color: inherit;
+}
+
+/* ───────────────────────── Callout ───────────────────────── */
+
+.ordi-prose [data-callout] {
+  position: relative;
+  display: flow-root;
+  margin: 0.7rem 0;
+  padding: 0.65rem 0.85rem 0.65rem 2.35rem;
+  border: 1px solid hsl(var(--tone) / 0.35);
+  border-radius: 0.5rem;
+  background: hsl(var(--tone) / 0.08);
+  --tone: var(--primary);
+}
+.ordi-prose [data-callout][data-tone='success'] { --tone: var(--success); }
+.ordi-prose [data-callout][data-tone='warning'] { --tone: var(--warning); }
+.ordi-prose [data-callout][data-tone='danger'] { --tone: var(--destructive); }
+/* The icon is drawn rather than stored in the document, so the editor and the
+   read-only renderer cannot disagree about it. */
+.ordi-prose [data-callout]::before {
+  content: 'i';
+  position: absolute;
+  top: 0.72rem;
+  left: 0.7rem;
+  display: grid;
+  place-items: center;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 9999px;
+  background: hsl(var(--tone) / 0.85);
+  color: hsl(var(--primary-foreground));
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-style: italic;
+  line-height: 1;
+  user-select: none;
+}
+.ordi-prose [data-callout][data-tone='success']::before { content: '✓'; font-style: normal; }
+.ordi-prose [data-callout][data-tone='warning']::before { content: '!'; font-style: normal; }
+.ordi-prose [data-callout][data-tone='danger']::before { content: '!'; font-style: normal; }
+.ordi-prose [data-callout] > :first-child { margin-top: 0; }
+.ordi-prose [data-callout] > :last-child { margin-bottom: 0; }
+
+/* ───────────────────────── Toggle ───────────────────────── */
+
+.ordi-prose [data-toggle] {
+  position: relative;
+  margin: 0.4rem 0;
+  padding-left: 1.4rem;
+}
+.ordi-prose [data-toggle-chevron] {
+  position: absolute;
+  top: 0.28rem;
+  left: 0;
+  display: grid;
+  place-items: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 0.25rem;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  transition: background-color var(--duration-quick, 150ms), transform var(--duration-quick, 150ms);
+}
+.ordi-prose [data-toggle-chevron]:hover {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+}
+/* A CSS triangle keeps the marker out of the document and out of React. */
+.ordi-prose [data-toggle-chevron]::before {
+  content: '';
+  width: 0;
+  height: 0;
+  border-top: 0.28rem solid transparent;
+  border-bottom: 0.28rem solid transparent;
+  border-left: 0.42rem solid currentColor;
+  transition: transform var(--duration-quick, 150ms) var(--ease-smooth-out, ease);
+}
+.ordi-prose [data-toggle][data-open='true'] > [data-toggle-chevron]::before {
+  transform: rotate(90deg);
+}
+/* Collapsed: keep the title (first child), hide the body. */
+.ordi-prose [data-toggle][data-open='false'] > [data-toggle-body] > :not(:first-child) {
+  display: none;
+}
+.ordi-prose [data-toggle] > [data-toggle-body] > :first-child {
+  margin-top: 0;
+  font-weight: 500;
+}
+
+/* ───────────────────────── Tables ───────────────────────── */
+
+.ordi-prose table {
+  width: 100%;
+  margin: 0.7rem 0;
+  border-collapse: collapse;
+  table-layout: fixed;
+  overflow: hidden;
+}
+.ordi-prose th,
+.ordi-prose td {
+  position: relative;
+  min-width: 4rem;
+  border: 1px solid hsl(var(--border));
+  padding: 0.35rem 0.5rem;
+  vertical-align: top;
+  text-align: left;
+}
+.ordi-prose th {
+  background: hsl(var(--muted));
+  font-weight: 600;
+}
+.ordi-prose th > p,
+.ordi-prose td > p {
+  margin: 0;
+}
+.ordi-prose .selectedCell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: hsl(var(--primary) / 0.12);
+  pointer-events: none;
+}
+.ordi-prose .column-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  bottom: 0;
+  width: 4px;
+  background: hsl(var(--primary));
+  cursor: col-resize;
+}
+
+/* ───────────────────────── Images ───────────────────────── */
+
+.ordi-prose img,
+.ordi-prose .ordi-rt-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0.7rem 0;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+}
+.ordi-prose img.ProseMirror-selectednode {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+/* ───────────────────────── Text alignment ───────────────────────── */
+
+.ordi-prose [style*='text-align: center'] { text-align: center; }
+.ordi-prose [style*='text-align: right'] { text-align: right; }
+
+/* ───────────────────────── Code highlighting (lowlight / highlight.js) ───────────────────────── */
+
+/* Token colours derived from the app palette so a snippet never looks pasted in
+   from another product, and so light mode is legible without a second theme. */
+.ordi-prose pre code .hljs-comment,
+.ordi-prose pre code .hljs-quote {
+  color: hsl(var(--faint));
+  font-style: italic;
+}
+.ordi-prose pre code .hljs-keyword,
+.ordi-prose pre code .hljs-selector-tag,
+.ordi-prose pre code .hljs-literal,
+.ordi-prose pre code .hljs-doctag {
+  color: hsl(280 55% 70%);
+}
+.ordi-prose pre code .hljs-string,
+.ordi-prose pre code .hljs-regexp,
+.ordi-prose pre code .hljs-addition {
+  color: hsl(152 42% 58%);
+}
+.ordi-prose pre code .hljs-number,
+.ordi-prose pre code .hljs-symbol,
+.ordi-prose pre code .hljs-bullet {
+  color: hsl(36 80% 62%);
+}
+.ordi-prose pre code .hljs-title,
+.ordi-prose pre code .hljs-section,
+.ordi-prose pre code .hljs-name {
+  color: hsl(211 70% 68%);
+}
+.ordi-prose pre code .hljs-attr,
+.ordi-prose pre code .hljs-attribute,
+.ordi-prose pre code .hljs-variable,
+.ordi-prose pre code .hljs-template-variable {
+  color: hsl(190 55% 62%);
+}
+.ordi-prose pre code .hljs-type,
+.ordi-prose pre code .hljs-built_in,
+.ordi-prose pre code .hljs-class .hljs-title {
+  color: hsl(36 70% 68%);
+}
+.ordi-prose pre code .hljs-deletion {
+  color: hsl(var(--destructive));
+}
+.ordi-prose pre code .hljs-emphasis { font-style: italic; }
+.ordi-prose pre code .hljs-strong { font-weight: 600; }
+
+[data-theme='light'] .ordi-prose pre code .hljs-keyword,
+[data-theme='light'] .ordi-prose pre code .hljs-selector-tag,
+[data-theme='light'] .ordi-prose pre code .hljs-literal,
+[data-theme='light'] .ordi-prose pre code .hljs-doctag {
+  color: hsl(280 55% 45%);
+}
+[data-theme='light'] .ordi-prose pre code .hljs-string,
+[data-theme='light'] .ordi-prose pre code .hljs-regexp,
+[data-theme='light'] .ordi-prose pre code .hljs-addition {
+  color: hsl(152 45% 34%);
+}
+[data-theme='light'] .ordi-prose pre code .hljs-number,
+[data-theme='light'] .ordi-prose pre code .hljs-symbol,
+[data-theme='light'] .ordi-prose pre code .hljs-bullet {
+  color: hsl(32 85% 40%);
+}
+[data-theme='light'] .ordi-prose pre code .hljs-title,
+[data-theme='light'] .ordi-prose pre code .hljs-section,
+[data-theme='light'] .ordi-prose pre code .hljs-name {
+  color: hsl(211 65% 44%);
+}
+[data-theme='light'] .ordi-prose pre code .hljs-attr,
+[data-theme='light'] .ordi-prose pre code .hljs-attribute,
+[data-theme='light'] .ordi-prose pre code .hljs-variable,
+[data-theme='light'] .ordi-prose pre code .hljs-template-variable {
+  color: hsl(190 55% 36%);
+}
+[data-theme='light'] .ordi-prose pre code .hljs-type,
+[data-theme='light'] .ordi-prose pre code .hljs-built_in,
+[data-theme='light'] .ordi-prose pre code .hljs-class .hljs-title {
+  color: hsl(28 70% 42%);
 }

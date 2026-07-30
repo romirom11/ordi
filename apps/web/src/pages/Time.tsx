@@ -4,7 +4,7 @@ import { api, qs, ApiError } from '../lib/api';
 import { useCan } from '../lib/auth';
 import {
   Button, IconButton, Input, Textarea, Card, PageHeader, PageBody, Breadcrumbs, EmptyState, Skeleton,
-  SegmentedControl, Select, fmtMoney, appLocale, cn,
+  SegmentedControl, Select, Reveal, fmtMoney, appLocale, cn,
 } from '../components/ui';
 import { Dialog, toast } from '../components/overlays';
 import { ChevronLeft, ChevronRight, Plus, Play, Square, Clock, Timer } from 'lucide-react';
@@ -173,7 +173,7 @@ export function TimePage() {
         breadcrumbs={<Breadcrumbs items={[{ label: t('nav.time') }]} />}
         actions={<SegmentedControl options={tabs} value={tab} onChange={setTab} />}
       />
-      {tab === 'week' ? <MyWeekView /> : <ReportsView />}
+      <Reveal key={tab}>{tab === 'week' ? <MyWeekView /> : <ReportsView />}</Reveal>
     </div>
   );
 }

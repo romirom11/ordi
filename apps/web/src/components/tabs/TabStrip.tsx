@@ -1,8 +1,9 @@
 /**
  * TabStrip – Linear-style in-app tab bar rendered by Shell above the routed
- * page. Tabs behave like browser tabs: click switches, × / middle-click
- * closes, + opens a new tab at '/', Alt+W closes the active tab and
- * Ctrl/Cmd+Shift+[ / ] cycle tabs.
+ * page. Tabs behave like browser tabs: click switches, × / middle-click closes,
+ * + opens a new tab. The keyboard scheme lives in lib/shortcuts (⌘T new, Alt+W
+ * close, ⌘⇧T reopen, ⌘1…9 jump, ⌘[ / ⌘] history, ⌘⇧[ / ⌘⇧] cycle) so the help
+ * sheet and these handlers stay in step.
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
@@ -12,6 +13,7 @@ import {
 } from 'lucide-react';
 import { extendDict, useT } from '../../lib/i18n';
 import { isMacDesktop } from '../../lib/desktop';
+import { MOD, SHORTCUTS, isTypingTarget, modDigit } from '../../lib/shortcuts';
 import { tabFallbackTitle, useTabs, type TabItem } from '../../lib/tabs';
 import { cn, Tooltip } from '../ui';
 import { ContextMenu, toast, type ContextMenuEntry } from '../overlays';
@@ -26,7 +28,7 @@ extendDict({
     'tabs.closeRight': 'Close tabs to the right',
     'tabs.copyLink': 'Copy link',
     'tabs.linkCopied': 'Link copied',
-    'tabs.newTabHint': 'Ctrl/Cmd+click any link to open it in a new tab. Alt+W closes the current one.',
+    'tabs.newTabHint': 'Ctrl/Cmd+click any row or link opens it in a new tab. Alt+W closes this one, ⇧? lists every shortcut.',
     'tabs.back': 'Back',
     'tabs.forward': 'Forward',
   },
@@ -37,7 +39,7 @@ extendDict({
     'tabs.closeRight': 'Закрити вкладки праворуч',
     'tabs.copyLink': 'Копіювати посилання',
     'tabs.linkCopied': 'Посилання скопійовано',
-    'tabs.newTabHint': 'Ctrl/Cmd+клік на будь-яке посилання відкриє його в новій вкладці. Alt+W закриває поточну.',
+    'tabs.newTabHint': 'Ctrl/Cmd+клік на будь-який рядок чи посилання відкриє його в новій вкладці. Alt+W закриває поточну, ⇧? показує всі гарячі клавіші.',
     'tabs.back': 'Назад',
     'tabs.forward': 'Вперед',
   },
@@ -111,28 +113,30 @@ export function TabStrip() {
   const closeRef = useRef(closeAnimated);
   closeRef.current = closeAnimated;
 
-  // Keyboard: Alt+W close · Ctrl/Cmd+Shift+[ / ] switch (Ctrl/Cmd+W is browser-reserved).
+  // Tab keyboard scheme. Matchers come from lib/shortcuts so the help sheet and
+  // these handlers can never disagree about which keys do what.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const api = tabsRef.current;
       if (!api) return;
-      if (e.altKey && !e.metaKey && !e.ctrlKey && e.code === 'KeyW') {
+      const hit = (id: string) => SHORTCUTS.find((s) => s.id === id)?.match?.(e) ?? false;
+
+      if (hit('closeTab')) { e.preventDefault(); closeRef.current(api.activeId); return; }
+      if (hit('reopenTab')) { e.preventDefault(); api.reopenClosed(); return; }
+      if (hit('newTab')) { e.preventDefault(); api.newTab(); return; }
+      if (hit('nextTab')) { e.preventDefault(); api.activateDelta(1); return; }
+      if (hit('prevTab')) { e.preventDefault(); api.activateDelta(-1); return; }
+
+      const nth = modDigit(e);
+      if (nth) { e.preventDefault(); api.activateIndex(nth); return; }
+
+      // Back / forward walk the active tab's own history, like a browser.
+      // Alt+←/→ must never steal the caret from a text field; ⌘[ / ⌘] may,
+      // because no text field uses them.
+      if (hit('back') || hit('forward')) {
+        if (e.altKey && isTypingTarget(e)) return;
         e.preventDefault();
-        closeRef.current(api.activeId);
-        return;
-      }
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.code === 'BracketRight' || e.code === 'BracketLeft')) {
-        e.preventDefault();
-        api.activateDelta(e.code === 'BracketRight' ? 1 : -1);
-        return;
-      }
-      // Alt+←/→ walks the active tab's own history, like a browser.
-      if (e.altKey && !e.metaKey && !e.ctrlKey && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
-        const target = e.target as HTMLElement | null;
-        // Never steal the caret from a text field.
-        if (target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? '')) return;
-        e.preventDefault();
-        api.go(e.code === 'ArrowLeft' ? -1 : 1);
+        api.go(hit('back') ? -1 : 1);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -237,10 +241,10 @@ export function TabStrip() {
         data-tauri-drag-region={isMacDesktop || undefined}
       >
         <div className="mr-0.5 flex shrink-0 items-center">
-          <NavArrow label={t('tabs.back')} shortcut="Alt+←" disabled={!tabs.canGoBack} onClick={() => tabs.go(-1)}>
+          <NavArrow label={t('tabs.back')} shortcut={`${MOD}[`} disabled={!tabs.canGoBack} onClick={() => tabs.go(-1)}>
             <ArrowLeft size={14} />
           </NavArrow>
-          <NavArrow label={t('tabs.forward')} shortcut="Alt+→" disabled={!tabs.canGoForward} onClick={() => tabs.go(1)}>
+          <NavArrow label={t('tabs.forward')} shortcut={`${MOD}]`} disabled={!tabs.canGoForward} onClick={() => tabs.go(1)}>
             <ArrowRight size={14} />
           </NavArrow>
         </div>
@@ -251,7 +255,7 @@ export function TabStrip() {
         >
           {tabs.tabs.map(renderTab)}
         </div>
-        <Tooltip label={t('tabs.newTab')} side="bottom">
+        <Tooltip label={`${t('tabs.newTab')} · ${MOD}T`} side="bottom">
           <button
             aria-label={t('tabs.newTab')}
             onClick={tabs.newTab}
