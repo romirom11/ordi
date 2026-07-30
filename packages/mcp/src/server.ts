@@ -110,7 +110,7 @@ export function buildServer(client: OrdiClient): McpServer {
   server.tool('get_lead', 'One lead with its qualification notes, conversion link and custom fields', { leadId: z.string() },
   ({ leadId }) => wrap(() => client.get(`/leads/${leadId}`)));
 
-  server.tool('get_sales_work', 'Due sales work grouped into overdue, today, waiting for reply, nurture due and no-next-action queues', {
+  server.tool('get_sales_work', 'Sales work grouped into overdue, due today, booked ahead, waiting for reply, nurture due and no-next-action queues. Only overdue, dueToday, nurtureDue and noNextAction need action; upcoming and waitingReply are context.', {
   scope: z.enum(['mine', 'all']).optional().describe('Defaults to mine; use all for the whole sales team'),
 }, ({ scope }) => wrap(() => client.get(`/sales-work?scope=${scope ?? 'mine'}`)));
 
