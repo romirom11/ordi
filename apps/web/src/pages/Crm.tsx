@@ -5,7 +5,7 @@
  * /deals (→ pipeline) so old links land on the right tab.
  */
 import { useState } from 'react';
-import { Building2, Download, KanbanSquare, ListTodo, Plus, Target, Workflow } from 'lucide-react';
+import { Building2, KanbanSquare, ListTodo, Plus, Target, Workflow } from 'lucide-react';
 import { useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { useT } from '../lib/i18n';
@@ -14,9 +14,9 @@ import { ClientsTab } from '../components/crm/ClientsTab';
 import { PipelineTab } from '../components/crm/PipelineTab';
 import { WorkTab } from '../components/crm/WorkTab';
 import { LeadsTab } from '../components/crm/LeadsTab';
-import { ResearchImportDialog } from '../components/crm/ResearchImportDialog';
 import { NewClientDialog, NewDealDialog, NewLeadDialog } from '../components/crm/dialogs';
 import { PlaybooksTab } from '../components/crm/PlaybooksTab';
+import { NoAccessNotice } from '../components/ModuleGate';
 
 type CrmTab = 'work' | 'leads' | 'deals' | 'companies' | 'playbooks';
 
@@ -35,12 +35,12 @@ export function CrmPage({ tab }: { tab?: string }) {
   const active = normalizeTab(tab);
 
   const canWriteCrm = can('crm.write');
+  const canReadDeals = can('deals.read');
   const canWriteDeals = can('deals.write');
 
   const [newClient, setNewClient] = useState(false);
   const [newLead, setNewLead] = useState(false);
   const [newDeal, setNewDeal] = useState(false);
-  const [importResearch, setImportResearch] = useState(false);
 
   const go = (next: CrmTab) => navigate(`/crm/${next}`);
 
@@ -51,21 +51,16 @@ export function CrmPage({ tab }: { tab?: string }) {
         subtitle={
           active === 'work' ? t('crm.workHint')
             : active === 'leads' ? t('crm.leadsHint')
-              : active === 'deals' ? t('deals.subtitle')
+              : active === 'deals' ? (canReadDeals ? t('deals.subtitle') : '')
                 : active === 'playbooks' ? t('crm.playbooksHint')
                 : t('crm.subtitle')
         }
         actions={
           <div className="flex items-center gap-2">
             {active === 'leads' && canWriteCrm && (
-              <>
-                <Button variant="outline" size="sm" onClick={() => setImportResearch(true)}>
-                  <Download size={14} /> {t('crm.importResearch')}
-                </Button>
-                <Button size="sm" onClick={() => setNewLead(true)}>
-                  <Plus size={14} /> {t('crm.newLead')}
-                </Button>
-              </>
+              <Button size="sm" onClick={() => setNewLead(true)}>
+                <Plus size={14} /> {t('crm.newLead')}
+              </Button>
             )}
             {active === 'deals' && canWriteDeals && (
               <Button size="sm" onClick={() => setNewDeal(true)}>
@@ -88,7 +83,9 @@ export function CrmPage({ tab }: { tab?: string }) {
           tabs={[
             { key: 'work', label: t('crm.tabWork'), icon: <ListTodo size={15} /> },
             { key: 'leads', label: t('crm.tabLeads'), icon: <Target size={15} /> },
-            { key: 'deals', label: t('crm.tabPipeline'), icon: <KanbanSquare size={15} /> },
+            ...(canReadDeals
+              ? [{ key: 'deals' as const, label: t('crm.tabPipeline'), icon: <KanbanSquare size={15} /> }]
+              : []),
             { key: 'companies', label: t('crm.tabCompanies'), icon: <Building2 size={15} /> },
             { key: 'playbooks', label: t('crm.tabPlaybooks'), icon: <Workflow size={15} /> },
           ]}
@@ -97,26 +94,34 @@ export function CrmPage({ tab }: { tab?: string }) {
 
       {active === 'work' && <WorkTab />}
       {active === 'leads' && <LeadsTab />}
-      {active === 'deals' && <PipelineTab />}
+      {/*
+        * The route is /crm/:tab, so /crm/deals clears the route's crm.read check
+        * and would otherwise render the pipeline to a role that cannot read one.
+        */}
+      {active === 'deals' && (canReadDeals ? <PipelineTab /> : <NoAccessNotice />)}
       {active === 'companies' && <ClientsTab onNewClient={() => setNewClient(true)} />}
       {active === 'playbooks' && <PlaybooksTab />}
 
-      <NewClientDialog
-        open={newClient}
-        onClose={() => setNewClient(false)}
-        onCreated={(c) => navigate(`/companies/${c.id}`)}
-      />
-      <NewLeadDialog
-        open={newLead}
-        onClose={() => setNewLead(false)}
-        onCreated={(lead) => navigate(`/leads/${lead.id}`)}
-      />
-      <NewDealDialog open={newDeal} onClose={() => setNewDeal(false)} />
-      <ResearchImportDialog
-        open={importResearch}
-        onClose={() => setImportResearch(false)}
-        onImported={() => navigate('/crm/leads')}
-      />
+      {/*
+        * Mounted only while open: each of these runs its own lookups
+        * (companies, deal stages, projects) the moment it mounts, so keeping
+        * them alive pulled those payloads on every CRM tab that never shows them.
+        */}
+      {newClient && (
+        <NewClientDialog
+          open
+          onClose={() => setNewClient(false)}
+          onCreated={(c) => navigate(`/companies/${c.id}`)}
+        />
+      )}
+      {newLead && (
+        <NewLeadDialog
+          open
+          onClose={() => setNewLead(false)}
+          onCreated={(lead) => navigate(`/leads/${lead.id}`)}
+        />
+      )}
+      {canWriteDeals && newDeal && <NewDealDialog open onClose={() => setNewDeal(false)} />}
     </div>
   );
 }

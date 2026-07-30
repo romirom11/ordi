@@ -5,12 +5,12 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, Check, Download, FileText, Paperclip, Pin, Trash2, Upload } from 'lucide-react';
+import { Download, FileText, Paperclip, Pin, Trash2, Upload, UserCircle2 } from 'lucide-react';
 import { api, qs, ApiError } from '../../lib/api';
 import { openExternal } from '../../lib/desktop';
 import { UploadError, uploadAttachment } from '../../lib/uploads';
 import { useT } from '../../lib/i18n';
-import { Avatar, Button, Card, EmptySection, IconButton, Skeleton, Spinner, Tooltip, cn, fmtDate } from '../ui';
+import { Avatar, Button, Card, EmptySection, IconButton, RailChip, Skeleton, Spinner, Tooltip, cn, fmtDate } from '../ui';
 import { ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, toast } from '../overlays';
 import { RichEditor } from '../richtext/RichEditor';
 import { RichText, docIsEmpty } from '../richtext/RichText';
@@ -68,34 +68,146 @@ export function EditableName({ value, editable, size = 'lg', onSave }: {
   );
 }
 
+/* ─────────────── Inline editable value ─────────────── */
+
+/**
+ * Click-to-edit for one field, in the two shapes the CRM detail pages need:
+ * a rail chip for a single-line property, and a prose block for a written note.
+ *
+ * One component rather than three. The company rail, the lead rail and the
+ * lead's qualification cards were each doing this with their own copy — same
+ * state machine, same commit rule, different look and different keyboard, so
+ * two rails in one product behaved differently and every fix had to be made
+ * more than once.
+ *
+ * An empty value is meaningful: it clears the field, so `onSave` gets null.
+ * `display` lets a field read as prose ("14 days") while editing the raw value.
+ */
+export function InlineEdit({
+  value, editable, placeholder, onSave, multiline, rows = 3, inputType = 'text', display,
+}: {
+  value?: string | number | null;
+  editable: boolean;
+  placeholder: string;
+  onSave: (value: string | null) => void;
+  multiline?: boolean;
+  rows?: number;
+  inputType?: 'text' | 'email' | 'number' | 'url';
+  display?: string;
+}) {
+  const text = value == null || value === '' ? '' : String(value);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(text);
+  useEffect(() => { setDraft(text); }, [text]);
+
+  const commit = () => {
+    setEditing(false);
+    const next = draft.trim();
+    if (next !== text) onSave(next || null);
+  };
+  // Escape always reverts. Enter commits a single line; in a note it breaks the
+  // line instead, so there Cmd/Ctrl+Enter is the commit.
+  const onKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === 'Escape') { setDraft(text); setEditing(false); return; }
+    if (event.key !== 'Enter') return;
+    if (!multiline || event.metaKey || event.ctrlKey) commit();
+  };
+
+  if (editing && editable) {
+    return multiline ? (
+      <textarea
+        autoFocus
+        rows={rows}
+        value={draft}
+        placeholder={placeholder}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={onKeyDown}
+        className="w-full resize-y rounded-md border border-primary/40 bg-transparent px-2 py-1.5 text-[13px] leading-relaxed outline-none focus:ring-2 focus:ring-ring/25"
+      />
+    ) : (
+      <input
+        autoFocus
+        type={inputType}
+        value={draft}
+        placeholder={placeholder}
+        onFocus={(event) => event.target.select()}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={onKeyDown}
+        className={cn(
+          'min-h-7 w-full rounded-md border border-primary/40 bg-transparent px-1.5 py-1 text-[13px] outline-none focus:ring-2 focus:ring-ring/25',
+          inputType === 'number' && 'tabular-nums',
+        )}
+      />
+    );
+  }
+
+  if (multiline) {
+    return (
+      <button
+        type="button"
+        disabled={!editable}
+        onClick={() => setEditing(true)}
+        className={cn(
+          'block w-full whitespace-pre-wrap rounded-md px-2 py-1.5 text-left text-[13px] leading-relaxed transition-colors',
+          editable ? 'cursor-text hover:bg-muted' : 'cursor-default',
+          text ? 'text-muted-foreground' : 'text-faint',
+        )}
+      >
+        {text || (editable ? placeholder : '—')}
+      </button>
+    );
+  }
+
+  const chip = (
+    <RailChip empty={!text} disabled={!editable}>
+      <span className={cn('truncate', inputType === 'number' && 'tabular-nums')}>
+        {(text && (display ?? text)) || (editable ? placeholder : '—')}
+      </span>
+    </RailChip>
+  );
+  if (!editable) return chip;
+  return (
+    <button type="button" className="block w-full text-left" onClick={() => setEditing(true)}>
+      {chip}
+    </button>
+  );
+}
+
 /* ─────────────── Owner picker ─────────────── */
 
-export function OwnerPicker({ owner, users, editable, onPick }: {
-  owner?: { id: string; name: string; avatar?: string | null };
+/**
+ * Owner row for a detail rail. Both the company rail and the lead rail need the
+ * exact same control, and the company one used to hand-roll it while the
+ * exported OwnerPicker sat unused - so this is the one that ships.
+ */
+export function OwnerRailValue({ ownerId, users, editable, onPick }: {
+  ownerId?: string | null;
   users: { id: string; name: string; avatar?: string | null }[];
   editable: boolean;
   onPick: (id: string) => void;
 }) {
   const t = useT();
-  const content = (
-    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-      {owner ? <Avatar name={owner.name} src={owner.avatar} size={18} /> : <span className="grid h-[18px] w-[18px] place-items-center rounded-full border border-dashed border-border-strong text-[10px] text-faint">?</span>}
-      {owner ? owner.name : t('crm.noOwner')}
-    </span>
-  );
-  if (!editable) return content;
+  const owner = ownerId ? users.find((user) => user.id === ownerId) : undefined;
+  const label = owner
+    ? <><Avatar name={owner.name} src={owner.avatar} size={18} /><span className="truncate">{owner.name}</span></>
+    : <><UserCircle2 size={16} className="text-faint" /><span className="truncate">{t('crm.noOwner')}</span></>;
+
+  if (!editable) return <RailChip empty={!owner} disabled>{label}</RailChip>;
   return (
     <DropdownMenu
       align="start"
-      trigger={<button className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-muted">{content}<ChevronDown size={12} className="text-faint" /></button>}
+      className="w-full"
+      width={220}
+      trigger={<RailChip empty={!owner} caret>{label}</RailChip>}
     >
       <MenuLabel>{t('crm.changeOwner')}</MenuLabel>
-      {users.map((u) => (
-        <MenuItem key={u.id} onSelect={() => u.id !== owner?.id && onPick(u.id)}>
+      {users.map((user) => (
+        <MenuItem key={user.id} checked={user.id === ownerId} onSelect={() => user.id !== ownerId && onPick(user.id)}>
           <span className="flex items-center gap-2">
-            <Avatar name={u.name} src={u.avatar} size={18} />
-            <span className="flex-1">{u.name}</span>
-            {owner?.id === u.id && <Check size={13} className="text-primary" />}
+            <Avatar name={user.name} src={user.avatar} size={18} />
+            <span className="flex-1 truncate">{user.name}</span>
           </span>
         </MenuItem>
       ))}

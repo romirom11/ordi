@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, Check, MoreHorizontal, Pencil, Play, Plus, Workflow, X } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { useT } from '../../lib/i18n';
-import { Button, EmptySection, Input, Select, Spinner, Textarea, fmtDate, fmtRelative } from '../ui';
+import { Button, EmptySection, Input, Select, Spinner, Textarea, Tooltip, fmtDate, fmtRelative } from '../ui';
 import { DateField, DateTimeField } from '../DatePicker';
 import { ConfirmDialog, Dialog, DropdownMenu, MenuItem, toast } from '../overlays';
 import {
@@ -13,6 +13,7 @@ import {
   salesActivityTypeLabel,
   useContacts,
   useSalesMessageTemplates,
+  useUsersLookup,
   useSalesSequenceEnrollments,
   useSalesSequences,
   useSalesActivities,
@@ -86,6 +87,7 @@ export function SalesActivityPanel({ leadId, dealId, companyId, contactId, canWr
           dealId={dealId}
           companyId={companyId}
           contactId={contactId}
+          hasPlanned={activities.some((activity) => activity.status === 'planned')}
         />
       )}
       {activities.length === 0 ? (
@@ -143,9 +145,19 @@ export function SalesActivityPanel({ leadId, dealId, companyId, contactId, canWr
           ))}
         </div>
       )}
-      <ScheduleActivityDialog open={schedule} onClose={() => setSchedule(false)} leadId={leadId} dealId={dealId} />
-      <EditActivityDialog activity={edit} onClose={() => setEdit(null)} />
-      <CompleteActivityDialog activity={complete} onClose={() => setComplete(null)} />
+      {/* Mounted on open: its template and user lookups fire on mount, and the
+        * default activity type is read once, so a fresh mount is the sync. */}
+      {schedule && (
+        <ScheduleActivityDialog
+          open
+          onClose={() => setSchedule(false)}
+          leadId={leadId}
+          dealId={dealId}
+          defaultType={activities.some((activity) => activity.status === 'completed') ? 'follow_up' : 'outreach'}
+        />
+      )}
+      {edit && <EditActivityDialog activity={edit} onClose={() => setEdit(null)} />}
+      {complete && <CompleteActivityDialog activity={complete} onClose={() => setComplete(null)} />}
       <ConfirmDialog
         open={!!cancel}
         onClose={() => setCancel(null)}
@@ -160,11 +172,14 @@ export function SalesActivityPanel({ leadId, dealId, companyId, contactId, canWr
   );
 }
 
-function SequenceControls({ leadId, dealId, companyId, contactId }: {
+function SequenceControls({ leadId, dealId, companyId, contactId, hasPlanned }: {
   leadId?: string;
   dealId?: string;
   companyId?: string | null;
   contactId?: string | null;
+  /** A sequence owns the next step, so the API refuses to start one over a
+   * planned action. Say so on the button rather than in an error afterwards. */
+  hasPlanned: boolean;
 }) {
   const t = useT();
   const qc = useQueryClient();
@@ -236,14 +251,16 @@ function SequenceControls({ leadId, dealId, companyId, contactId }: {
         </div>
       ) : (
         <div className="mb-3">
-          <Button
-            size="xs"
-            variant="outline"
-            onClick={() => setOpen(true)}
-            disabled={!sequencesQ.data?.length}
-          >
-            <Play size={12} /> {t('crm.startSequence')}
-          </Button>
+          <Tooltip label={hasPlanned ? t('crm.sequenceNeedsClearNext') : undefined}>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => setOpen(true)}
+              disabled={hasPlanned || !sequencesQ.data?.length}
+            >
+              <Play size={12} /> {t('crm.startSequence')}
+            </Button>
+          </Tooltip>
         </div>
       )}
 
@@ -312,17 +329,21 @@ function SequenceControls({ leadId, dealId, companyId, contactId }: {
   );
 }
 
-export function ScheduleActivityDialog({ open, onClose, leadId, dealId }: {
+export function ScheduleActivityDialog({ open, onClose, leadId, dealId, defaultType = 'follow_up' }: {
   open: boolean;
   onClose: () => void;
   leadId?: string;
   dealId?: string;
+  /** `outreach` on a record with no history – nothing has happened to follow up on. */
+  defaultType?: string;
 }) {
   const t = useT();
   const qc = useQueryClient();
   const templatesQ = useSalesMessageTemplates(true);
+  const usersQ = useUsersLookup();
   const [templateId, setTemplateId] = useState('');
-  const [type, setType] = useState('follow_up');
+  const [type, setType] = useState(defaultType);
+  const [ownerId, setOwnerId] = useState('');
   const [dueAt, setDueAt] = useState(() => toLocalInput(new Date(Date.now() + 86_400_000)));
   const [channel, setChannel] = useState('');
   const [subject, setSubject] = useState('');
@@ -331,7 +352,8 @@ export function ScheduleActivityDialog({ open, onClose, leadId, dealId }: {
 
   const reset = () => {
     setTemplateId('');
-    setType('follow_up');
+    setType(defaultType);
+    setOwnerId('');
     setDueAt(toLocalInput(new Date(Date.now() + 86_400_000)));
     setChannel('');
     setSubject('');
@@ -344,6 +366,7 @@ export function ScheduleActivityDialog({ open, onClose, leadId, dealId }: {
       dealId,
       type,
       templateId: templateId || undefined,
+      ownerId: ownerId || undefined,
       dueAt: new Date(dueAt).toISOString(),
       channel: channel.trim() || undefined,
       subject: subject.trim() || undefined,
@@ -397,9 +420,19 @@ export function ScheduleActivityDialog({ open, onClose, leadId, dealId }: {
             {SALES_ACTIVITY_TYPES.map((value) => <option key={value} value={value}>{salesActivityTypeLabel(t, value)}</option>)}
           </Select>
         </Field>
-        <Field label={t('crm.dueAt')}>
-          <DateTimeField value={dueAt} onChange={setDueAt} />
-        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={t('crm.dueAt')}>
+            <DateTimeField value={dueAt} onChange={setDueAt} />
+          </Field>
+          <Field label={t('crm.owner')}>
+            <Select className="w-full" value={ownerId} onChange={(event) => setOwnerId(event.target.value)}>
+              <option value="">{t('crm.ownerDefault')}</option>
+              {(usersQ.data ?? []).map((user) => (
+                <option key={user.id} value={user.id}>{user.name}</option>
+              ))}
+            </Select>
+          </Field>
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <Field label={t('crm.channel')}>
             <Input value={channel} onChange={(event) => setChannel(event.target.value)} placeholder="LinkedIn" />

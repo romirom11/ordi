@@ -15,6 +15,8 @@ import { extendDict, useT } from '../lib/i18n';
 extendDict({
   en: {
     'dashboard.myOpenTasks': 'My open tasks',
+    'dashboard.salesDue': 'Sales due today',
+    'dashboard.salesOverdue': 'Sales overdue',
     'dashboard.activeDealsValue': 'Active deals value',
     'dashboard.outstanding': 'Outstanding',
     'dashboard.you': 'You',
@@ -81,6 +83,8 @@ extendDict({
   uk: {
     'dashboard.myOpenTasks': 'Мої відкриті задачі',
     'dashboard.activeDealsValue': 'Сума активних угод',
+    'dashboard.salesDue': 'Продажі на сьогодні',
+    'dashboard.salesOverdue': 'Продажі прострочено',
     'dashboard.outstanding': 'Заборгованість',
     'dashboard.you': 'Ви',
     'dashboard.noDeals': 'Немає відкритих угод',
@@ -361,6 +365,8 @@ interface DashboardData {
   dealsByStage?: DealStageRow[];
   recentActivity?: ActivityItem[];
   projectCount?: number;
+  /** Present only with crm.read; bucket counts from the CRM work queue. */
+  salesWork?: { overdue: number; dueToday: number };
 }
 
 /* ───────────────────────── Helpers ───────────────────────── */
@@ -477,11 +483,33 @@ export function DashboardPage() {
   const maxDealAmount = Math.max(1, ...dealsByStage.map((d) => Number(d.amount ?? 0)));
 
   const activity = dash.data?.recentActivity ?? [];
+  // Gated server-side like every other widget on this response.
+  const salesWork = dash.data?.salesWork;
+  const salesOverdue = salesWork?.overdue ?? 0;
+  const salesDueToday = salesWork?.dueToday ?? 0;
+
 
   const stats: { key: string; icon: ReactNode; label: string; value: string; accent?: boolean; onClick: () => void }[] = [
     { key: 'myTasks', icon: <ListTodo size={14} />, label: t('dashboard.myOpenTasks'), value: String(totalOpen), onClick: () => navigate('/my-tasks') },
     { key: 'overdue', icon: <AlertTriangle size={14} className={overdueCount > 0 ? 'text-destructive' : undefined} />, label: t('common.overdue'), value: String(overdueCount), accent: overdueCount > 0, onClick: () => navigate('/my-tasks') },
   ];
+  if (salesWork && (salesOverdue > 0 || salesDueToday > 0)) {
+    stats.push({
+      key: 'salesOverdue',
+      icon: <Handshake size={14} className={salesOverdue > 0 ? 'text-destructive' : undefined} />,
+      label: t('dashboard.salesOverdue'),
+      value: String(salesOverdue),
+      accent: salesOverdue > 0,
+      onClick: () => navigate('/crm'),
+    });
+    stats.push({
+      key: 'salesToday',
+      icon: <Handshake size={14} />,
+      label: t('dashboard.salesDue'),
+      value: String(salesDueToday),
+      onClick: () => navigate('/crm'),
+    });
+  }
   if (receivablesRows.length > 0) {
     stats.push({ key: 'receivables', icon: <Receipt size={14} />, label: t('dashboard.outstanding'), value: fmtMoney(outstandingTotal, outstandingCurrency), onClick: () => navigate('/finance') });
   }

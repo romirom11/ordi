@@ -1,20 +1,30 @@
 import { useState } from 'react';
 import { Search, Target } from 'lucide-react';
-import { useNavigate, useOpen } from '../../lib/router';
+import { useOpen } from '../../lib/router';
 import { useT } from '../../lib/i18n';
-import { EmptyState, Input, Select, Skeleton, fmtRelative } from '../ui';
+import { Avatar, EmptyState, Input, Select, Skeleton, fmtRelative } from '../ui';
 import {
   LEAD_STATUSES, StatusPill, salesActivityTypeLabel,
-  useLeads,
+  useLeads, useUserMap,
 } from './shared';
+
+/**
+ * The header and the rows are separate elements, so one template shared between
+ * them is what keeps a column added to one from misaligning the other. The
+ * tracks add up to 810px plus the row's own 32px of padding, which is what the
+ * scroll container's min-width below has to clear.
+ */
+const LEAD_COLUMNS = 'grid-cols-[minmax(200px,2fr)_minmax(150px,1.2fr)_120px_70px_minmax(160px,1.1fr)_110px]';
 
 export function LeadsTab() {
   const t = useT();
-  const navigate = useNavigate();
   const open = useOpen();
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const leadsQ = useLeads({ q, status });
+  // Who is on the hook for each lead – the table had no way to tell, so a team
+  // could not see whose pipeline was whose without opening every record.
+  const userById = useUserMap();
   const leads = leadsQ.data ?? [];
 
   return (
@@ -39,13 +49,14 @@ export function LeadsTab() {
             hint={t('crm.leadsHint')}
           />
         ) : (
-          <div className="min-w-[760px]">
-            <div className="grid grid-cols-[minmax(220px,2fr)_minmax(160px,1.3fr)_120px_90px_minmax(180px,1.2fr)] border-b border-border px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-faint">
+          <div className="min-w-[842px]">
+            <div className={`grid ${LEAD_COLUMNS} border-b border-border px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-faint`}>
               <span>{t('crm.lead')}</span>
               <span>{t('crm.company')}</span>
               <span>{t('common.status')}</span>
               <span>{t('crm.score')}</span>
               <span>{t('crm.nextAction')}</span>
+              <span>{t('crm.owner')}</span>
             </div>
             {leads.map((lead, i) => {
               const next = lead.nextActivity;
@@ -56,7 +67,7 @@ export function LeadsTab() {
                   onClick={(e) => open(`/leads/${lead.id}`, e)}
                   onAuxClick={(e) => open(`/leads/${lead.id}`, e)}
                   style={{ ['--i' as string]: Math.min(i, 10) }}
-                  className="row-enter grid w-full grid-cols-[minmax(220px,2fr)_minmax(160px,1.3fr)_120px_90px_minmax(180px,1.2fr)] items-center border-b border-border px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
+                  className={`row-enter grid w-full ${LEAD_COLUMNS} items-center border-b border-border px-4 py-2.5 text-left transition-colors hover:bg-muted/50`}
                 >
                   <span className="min-w-0">
                     <span className="block truncate text-[13px] font-medium">{lead.title}</span>
@@ -70,6 +81,14 @@ export function LeadsTab() {
                       {next?.subject || (next?.type ? salesActivityTypeLabel(t, next.type) : t('crm.noNextAction'))}
                     </span>
                     {next?.dueAt && <span className="block text-xs text-muted-foreground">{fmtRelative(next.dueAt)}</span>}
+                  </span>
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    {lead.ownerId && userById.get(lead.ownerId) ? (
+                      <>
+                        <Avatar name={userById.get(lead.ownerId)!.name} src={userById.get(lead.ownerId)!.avatar} size={18} />
+                        <span className="truncate text-xs text-muted-foreground">{userById.get(lead.ownerId)!.name}</span>
+                      </>
+                    ) : <span className="text-xs text-faint">{t('crm.noOwner')}</span>}
                   </span>
                 </button>
               );

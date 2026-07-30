@@ -148,6 +148,20 @@
       "when": 1785347508558,
       "tag": "0020_remove_legacy_lead_stage",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1785359542400,
+      "tag": "0021_remove_research_import",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1785361094637,
+      "tag": "0022_drop_legacy_deal_marker",
+      "breakpoints": true
     }
   ]
 }

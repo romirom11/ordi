@@ -241,10 +241,16 @@ async function main() {
     });
     await db.insert(schema.contacts).values({ id: ulid(), companyId: id, firstName: 'Peter', lastName: 'Gibbons', email: 'peter@initech.com', isPrimary: true, createdBy: ownerId });
     const stages = await db.select().from(schema.dealStages);
-    const stage = (name: string) => stages.find((s) => s.name === name)?.id ?? stages[0]!.id;
+    // Throw instead of falling back: a silent `?? stages[0]` hid the fact that the
+    // demo still asked for a 'Lead' stage long after that stage was removed.
+    const stage = (name: string) => {
+      const match = stages.find((s) => s.name === name);
+      if (!match) throw new Error(`seed: no deal stage named ${name}`);
+      return match.id;
+    };
     await db.insert(schema.deals).values([
-      { id: ulid(), companyId: id, title: 'Mobile app discovery', stageId: stage('Lead'), amount: '9000', currency: 'USD', ownerId, createdBy: ownerId },
-      { id: ulid(), companyId: id, title: 'Brand refresh', stageId: stage('Qualified'), amount: '24000', currency: 'USD', ownerId, createdBy: ownerId },
+      { id: ulid(), companyId: id, title: 'Mobile app discovery', stageId: stage('Qualified'), amount: '9000', currency: 'USD', ownerId, createdBy: ownerId },
+      { id: ulid(), companyId: id, title: 'Brand refresh', stageId: stage('Proposal'), amount: '24000', currency: 'USD', ownerId, createdBy: ownerId },
       { id: ulid(), companyId: company!.id, title: 'Retainer 2026', stageId: stage('Proposal'), amount: '48000', currency: 'USD', ownerId, createdBy: ownerId },
       { id: ulid(), companyId: id, title: 'Careers site', stageId: stage('Won'), amount: '12000', currency: 'USD', ownerId, createdBy: ownerId },
     ]);

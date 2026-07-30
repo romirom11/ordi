@@ -696,15 +696,33 @@ export function fmtDate(d?: string | null): string {
   return formatDay(d, { compact: true }) || '–';
 }
 
+const relative = new Map<string, Intl.RelativeTimeFormat>();
+
+/**
+ * Relative time in the user's language: "5 хв тому", "через 5 дн".
+ *
+ * Intl owns the sign, the units, pluralisation and the locale — all of which a
+ * hand-rolled ladder gets wrong one at a time. The sign in particular: this was
+ * written for activity feeds and reused for the due date of planned sales work,
+ * where `now - timestamp` goes negative and every future instant collapsed to
+ * "now". Beyond a month an exact date says more than "in 2 months", so the
+ * ladder stops there.
+ */
 export function fmtRelative(d?: string | null): string {
   if (!d) return '';
-  const diff = Date.now() - new Date(d).getTime();
-  const min = Math.round(diff / 60_000);
-  if (min < 1) return 'now';
-  if (min < 60) return `${min}m`;
-  const h = Math.round(min / 60);
-  if (h < 24) return `${h}h`;
-  const days = Math.round(h / 24);
-  if (days < 30) return `${days}d`;
+  const loc = appLocale();
+  const key = loc ?? '';
+  if (!relative.has(key)) {
+    relative.set(key, new Intl.RelativeTimeFormat(loc, { numeric: 'auto', style: 'narrow' }));
+  }
+  const fmt = relative.get(key)!;
+  const diffMs = new Date(d).getTime() - Date.now();
+  const minutes = Math.round(diffMs / 60_000);
+  if (Math.abs(minutes) < 1) return fmt.format(0, 'second');
+  if (Math.abs(minutes) < 60) return fmt.format(minutes, 'minute');
+  const hours = Math.round(minutes / 60);
+  if (Math.abs(hours) < 24) return fmt.format(hours, 'hour');
+  const days = Math.round(hours / 24);
+  if (Math.abs(days) < 30) return fmt.format(days, 'day');
   return fmtDate(d);
 }

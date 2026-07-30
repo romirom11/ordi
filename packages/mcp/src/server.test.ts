@@ -177,7 +177,7 @@ describe('sales workspace tools', () => {
     const names = (await client.listTools()).tools.map((tool) => tool.name);
     for (const name of [
       'list_leads', 'get_lead', 'get_sales_work', 'list_sales_activities',
-      'create_lead', 'update_lead', 'preview_research_import', 'import_research', 'schedule_sales_activity',
+      'create_lead', 'update_lead', 'schedule_sales_activity',
       'update_sales_activity', 'complete_sales_activity', 'cancel_sales_activity', 'convert_lead',
       'list_sales_playbooks', 'save_sales_message_template', 'save_sales_sequence', 'manage_sales_sequence',
     ]) expect(names).toContain(name);
@@ -188,7 +188,7 @@ describe('sales workspace tools', () => {
     const api = fakeApi({ '/leads?status=ready&companyId=c1': { data: [{
       id: 'l1', companyId: 'c1', companyName: 'Acme', title: 'Workflow pilot',
       product: 'AI pilot', status: 'ready', score: 92, painSignal: 'Manual reporting',
-      rawResearch: { large: true }, version: 2,
+      version: 2,
     }] } });
     const inner = api.get.bind(api);
     api.get = async <T>(path: string): Promise<T> => { requested = path; return inner<T>(path); };
@@ -197,7 +197,6 @@ describe('sales workspace tools', () => {
     expect(requested).toBe('/leads?status=ready&companyId=c1');
     const body = JSON.parse((result.content as any)[0].text);
     expect(body.data[0]).toMatchObject({ id: 'l1', companyName: 'Acme', score: 92, painSignal: 'Manual reporting' });
-    expect(body.data[0].rawResearch).toBeUndefined();
   });
 
   it('schedules, completes and converts through the API contracts', async () => {
@@ -316,26 +315,11 @@ describe('sales workspace tools', () => {
     expect(patches).toEqual([]);
   });
 
-  it('previews research without committing it', async () => {
-    const posts: Array<{ path: string; body: unknown }> = [];
-    const client = await connect(fakeApi({}, posts));
-    const payload = { title: 'Shortlist', prospects: [{ name: 'Acme' }] };
-    await client.callTool({ name: 'preview_research_import', arguments: { payload } });
-    expect(posts).toEqual([{ path: '/leads/import/preview', body: payload }]);
-  });
-
-  it('describes and validates the structured research import contract', async () => {
+  it('no longer exposes the research import tools', async () => {
     const client = await connect(fakeApi({}));
-    const tool = (await client.listTools()).tools.find((item) => item.name === 'import_research');
-    const payloadSchema = (tool?.inputSchema as any)?.properties?.payload;
-    expect(payloadSchema?.properties).toHaveProperty('title');
-    expect(payloadSchema?.properties).toHaveProperty('prospects');
-
-    const invalid = await client.callTool({
-      name: 'import_research',
-      arguments: { payload: { prospects: [{ name: 'Acme' }] } },
-    });
-    expect(invalid.isError).toBe(true);
+    const names = (await client.listTools()).tools.map((tool) => tool.name);
+    expect(names).not.toContain('preview_research_import');
+    expect(names).not.toContain('import_research');
   });
 
   it('requires exactly one activity parent before calling the API', async () => {

@@ -6,6 +6,7 @@
  * otherwise whichever mounts first wins and the other one reads the wrong
  * type at runtime. Anything shared lives here, unwrapped to a plain array.
  */
+import { useMemo } from 'react';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { api, qs } from './api';
 
@@ -80,4 +81,18 @@ export function useLeaveTypes(): UseQueryResult<LeaveTypeLookup[]> {
     queryKey: ['leaveTypes'],
     queryFn: () => api.get<{ data: LeaveTypeLookup[] }>('/leave-types').then((r) => r.data),
   });
+}
+
+/**
+ * The same lookup as a map, for tables that render an owner per row. Three CRM
+ * tabs were each building this from `useUsersLookup` by hand, and one of them
+ * forgot the memo so it rebuilt on every keystroke.
+ */
+export function useUserMap() {
+  const usersQ = useUsersLookup();
+  const byId = useMemo(
+    () => new Map((usersQ.data ?? []).map((user) => [user.id, user])),
+    [usersQ.data],
+  );
+  return byId;
 }

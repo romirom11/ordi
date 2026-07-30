@@ -1,8 +1,25 @@
 import { getDb, sql } from '@ordi/db';
 import { localDateKey, safeTimeZone } from '../../lib/timezone';
+import { boundedLimit } from './common';
 
 type WorkScope = 'mine' | 'all';
-type WorkBucket = 'overdue' | 'dueToday' | 'waitingReply' | 'nurtureDue' | 'noNextAction';
+/**
+ * Order matters: it is the order a seller works the queue, and the CASE below
+ * assigns the first arm that matches.
+ *
+ * `upcoming` was missing, and its absence turned the queue upside down. A lead
+ * with work booked for tomorrow fell through every arm and vanished from the
+ * page, while a lead in `waitingReply` - the one state that explicitly needs
+ * nothing from you - was always shown. A seller whose week was fully planned saw
+ * "no sales work needs attention".
+ */
+type WorkBucket =
+  | 'overdue'
+  | 'dueToday'
+  | 'upcoming'
+  | 'waitingReply'
+  | 'nurtureDue'
+  | 'noNextAction';
 
 interface WorkQueryRow {
   bucket: WorkBucket;
@@ -63,10 +80,18 @@ interface WorkBucketResult {
 export interface SalesWorkSummary {
   overdue: number;
   dueToday: number;
+  upcoming: number;
   waitingReply: number;
   nurtureDue: number;
   noNextAction: number;
+  /** Everything the queue holds, context included. */
   total: number;
+  /**
+   * The part a seller can act on this morning. `waitingReply` and `upcoming`
+   * are deliberately excluded: they describe a pipeline that is behaving, and a
+   * digest that fires for them would arrive on days with nothing to do.
+   */
+  actionable: number;
 }
 
 export function summarizeSalesWork(
@@ -75,6 +100,7 @@ export function summarizeSalesWork(
   const summary = {
     overdue: work.overdue.total,
     dueToday: work.dueToday.total,
+    upcoming: work.upcoming.total,
     waitingReply: work.waitingReply.total,
     nurtureDue: work.nurtureDue.total,
     noNextAction: work.noNextAction.total,
@@ -82,11 +108,8 @@ export function summarizeSalesWork(
   return {
     ...summary,
     total: Object.values(summary).reduce((sum, count) => sum + count, 0),
+    actionable: summary.overdue + summary.dueToday + summary.nurtureDue + summary.noNextAction,
   };
-}
-
-function boundedLimit(value: number | undefined): number {
-  return Number.isFinite(value) ? Math.max(1, Math.min(Math.trunc(value!), 200)) : 50;
 }
 
 export interface SalesWorkViewer {
@@ -95,17 +118,43 @@ export interface SalesWorkViewer {
   access: { permissions: Set<string> };
 }
 
+/**
+ * Bucket counts without the rows.
+ *
+ * The morning digest and the dashboard tile want six integers, and the full
+ * query pays for a `row_number()` over every open lead and deal to produce them
+ * – which the `upcoming` bucket made materially wider, since a healthy pipeline
+ * is mostly work that is merely booked. Aggregating skips the window functions
+ * and the 21-column projection entirely.
+ */
+export async function salesWorkCounts(
+  actor: SalesWorkViewer,
+  params: { scope?: WorkScope; now?: Date } = {},
+): Promise<SalesWorkSummary> {
+  const totals = await queryWork(actor, params, null);
+  return summarizeSalesWork(totals as Record<WorkBucket, { total: number }>);
+}
+
 export async function salesWork(
   actor: SalesWorkViewer,
   params: { scope?: WorkScope; limit?: number; now?: Date } = {},
 ) {
+  return queryWork(actor, params, boundedLimit(params.limit, 50, 200));
+}
+
+/** `limit === null` returns bucket totals only; otherwise rows up to the limit. */
+async function queryWork(
+  actor: SalesWorkViewer,
+  params: { scope?: WorkScope; now?: Date },
+  limit: number | null,
+) {
   const { db } = getDb();
   const canReadDeals = actor.access.permissions.has('deals.read');
-  const limit = boundedLimit(params.limit);
   const mineOnly = params.scope !== 'all';
   const work: Record<WorkBucket, WorkBucketResult> = {
     overdue: { rows: [], total: 0 },
     dueToday: { rows: [], total: 0 },
+    upcoming: { rows: [], total: 0 },
     waitingReply: { rows: [], total: 0 },
     nurtureDue: { rows: [], total: 0 },
     noNextAction: { rows: [], total: 0 },
@@ -147,7 +196,8 @@ export async function salesWork(
           when l.status = 'nurture' then
             case when l.nurture_until is not null and l.nurture_until <= work_clock.today::text then 'nurtureDue' end
           when l.status = 'waiting_reply' then 'waitingReply'
-          when a.id is null then 'noNextAction'
+          when a.id is not null then 'upcoming'
+          else 'noNextAction'
         end as bucket
       from leads l
       join companies c on c.id = l.company_id and c.deleted_at is null
@@ -191,7 +241,8 @@ export async function salesWork(
         case
           when a.due_at < work_clock.day_start then 'overdue'
           when a.due_at < work_clock.next_day_start then 'dueToday'
-          when a.id is null then 'noNextAction'
+          when a.id is not null then 'upcoming'
+          else 'noNextAction'
         end as bucket
       from deals d
       join companies c on c.id = d.company_id and c.deleted_at is null
@@ -211,18 +262,25 @@ export async function salesWork(
           ? sql`(coalesce(a.owner_id, d.owner_id) = ${actor.userId} or coalesce(a.owner_id, d.owner_id) is null)`
           : sql`true`}
     ),
-    ranked as (
+    combined as (
+      select * from lead_work
+      union all
+      select * from deal_work
+    )
+    ${limit === null ? sql`
+      select bucket, count(*)::int as "bucketTotal"
+      from combined
+      where bucket is not null
+      group by bucket
+    ` : sql`
+    , ranked as (
       select combined.*,
              row_number() over (
                partition by bucket
                order by activity_due_at nulls last, nurture_until nulls last, id
              ) as queue_rank,
              count(*) over (partition by bucket)::int as bucket_total
-      from (
-        select * from lead_work
-        union all
-        select * from deal_work
-      ) combined
+      from combined
       where bucket is not null
     )
     select
@@ -251,8 +309,12 @@ export async function salesWork(
     from ranked
     where queue_rank <= ${limit}
     order by bucket, queue_rank
+    `}
   `) as unknown as WorkQueryRow[];
   for (const row of rows) {
+    if (!(row.bucket in work)) continue;
+    work[row.bucket].total = Number(row.bucketTotal);
+    if (limit === null) continue;
     const item: WorkItem = {
       entityType: row.entityType,
       id: row.id,
@@ -278,10 +340,7 @@ export async function salesWork(
         version: row.activityVersion!,
       } : null,
     };
-    if (row.bucket in work) {
-      work[row.bucket].total = Number(row.bucketTotal);
-      work[row.bucket].rows.push(item);
-    }
+    work[row.bucket].rows.push(item);
   }
   return work;
 }

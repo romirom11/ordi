@@ -9,7 +9,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Building2, ChevronRight, Plus, Mail, Phone, Star, UserCircle2,
+  Building2, ChevronRight, Plus, Mail, Phone, Star,
   FolderKanban, Handshake, Pencil, Receipt, Target, Trash2, ExternalLink,
 } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
@@ -17,7 +17,7 @@ import { Link, useNavigate, useOpen } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import {
-  Avatar, Badge, Button, EmptySection, IconButton, RailChip, RailField,
+  Avatar, Button, EmptySection, IconButton, RailChip, RailField,
   Select, Skeleton, Spinner, Tooltip, cn, fmtMoney, fmtDate,
 } from '../components/ui';
 import { ConfirmDialog, Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator, toast } from '../components/overlays';
@@ -27,7 +27,9 @@ import {
   COMPANY_STATUSES, CURRENCIES, StatusPill, useDealStages, useLeads, useUsersLookup,
   type Company, type Contact, type Deal, type Stage,
 } from '../components/crm/shared';
-import { EditableName, FilesSection, NotesSection, SectionHeader } from '../components/crm/detail';
+import {
+  EditableName, FilesSection, InlineEdit, NotesSection, OwnerRailValue, SectionHeader,
+} from '../components/crm/detail';
 import { DealRows } from '../components/crm/DealRows';
 import { ContactDialog, NewDealDialog, NewLeadDialog } from '../components/crm/dialogs';
 import { NewProjectModal } from './Projects';
@@ -503,55 +505,6 @@ function CompanyActivity({ companyId, users }: { companyId: string; users: { id:
 
 /* ─────────────── Rail: properties ─────────────── */
 
-/**
- * Click-to-edit rail value. Renders as the same chip the project rail uses.
- * `display` lets a field read as prose ("14 days") while editing the raw value.
- */
-function RailInput({ value, editable, placeholder, type = 'text', display, onSave }: {
-  value?: string | null; editable: boolean; placeholder: string;
-  type?: 'text' | 'email' | 'number';
-  display?: string;
-  onSave: (v: string) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState('');
-
-  if (editing) {
-    const commit = () => {
-      setEditing(false);
-      const next = draft.trim();
-      if (next !== (value ?? '')) onSave(next);
-    };
-    return (
-      <input
-        autoFocus
-        type={type}
-        value={draft}
-        onFocus={(e) => e.target.select()}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false); }}
-        className={cn(
-          'min-h-7 w-full rounded-md border border-primary/40 bg-transparent px-1.5 py-1 text-[13px] outline-none focus:ring-2 focus:ring-ring/25',
-          type === 'number' && 'tabular-nums',
-        )}
-      />
-    );
-  }
-
-  const chip = (
-    <RailChip empty={!value} disabled={!editable}>
-      <span className={cn('truncate', type === 'number' && 'tabular-nums')}>{(value && (display ?? value)) || placeholder}</span>
-    </RailChip>
-  );
-  if (!editable) return chip;
-  return (
-    <button type="button" className="block w-full text-left" onClick={() => { setDraft(value ?? ''); setEditing(true); }}>
-      {chip}
-    </button>
-  );
-}
-
 function CompanyRail({ company, loading, editable, users, onPatch }: {
   company?: Company; loading: boolean; editable: boolean;
   users: { id: string; name: string; avatar?: string | null }[];
@@ -563,7 +516,6 @@ function CompanyRail({ company, loading, editable, users, onPatch }: {
     return <div className="space-y-3">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-7" />)}</div>;
   }
 
-  const owner = company.ownerId ? users.find((u) => u.id === company.ownerId) : undefined;
   const href = domainHref(company.domain);
 
   return (
@@ -589,41 +541,19 @@ function CompanyRail({ company, loading, editable, users, onPatch }: {
           )}
         </RailField>
         <RailField label={t('crm.owner')}>
-          {editable ? (
-            <DropdownMenu
-              align="start"
-              className="w-full"
-              width={220}
-              trigger={
-                <RailChip empty={!owner} caret>
-                  {owner
-                    ? <><Avatar name={owner.name} src={owner.avatar} size={18} /><span className="truncate">{owner.name}</span></>
-                    : <><UserCircle2 size={16} className="text-faint" /><span className="truncate">{t('crm.noOwner')}</span></>}
-                </RailChip>
-              }
-            >
-              <MenuLabel>{t('crm.changeOwner')}</MenuLabel>
-              {users.map((u) => (
-                <MenuItem key={u.id} checked={u.id === company.ownerId} onSelect={() => u.id !== company.ownerId && onPatch({ ownerId: u.id })}>
-                  <span className="flex items-center gap-2">
-                    <Avatar name={u.name} src={u.avatar} size={18} />
-                    <span className="flex-1 truncate">{u.name}</span>
-                  </span>
-                </MenuItem>
-              ))}
-            </DropdownMenu>
-          ) : (
-            <RailChip empty={!owner} disabled>
-              {owner ? <><Avatar name={owner.name} src={owner.avatar} size={18} /><span className="truncate">{owner.name}</span></> : t('crm.noOwner')}
-            </RailChip>
-          )}
+          <OwnerRailValue
+            ownerId={company.ownerId}
+            users={users}
+            editable={editable}
+            onPick={(ownerId) => onPatch({ ownerId })}
+          />
         </RailField>
         <RailField label={t('crm.colDomain')}>
           {/* Editing is the primary act; opening the site is a hover affordance,
             * which is why the header no longer carries a separate link. */}
           <div className="group/domain flex items-center gap-1">
             <div className="min-w-0 flex-1">
-              <RailInput
+              <InlineEdit
                 value={company.domain}
                 editable={editable}
                 placeholder={t('crm.noDomain')}
@@ -646,10 +576,10 @@ function CompanyRail({ company, loading, editable, users, onPatch }: {
           </div>
         </RailField>
         <RailField label={t('crm.billingEmail')}>
-          <RailInput
+          <InlineEdit
             value={company.billingEmail}
             editable={editable}
-            type="email"
+            inputType="email"
             placeholder="–"
             onSave={(v) => onPatch({ billingEmail: v || null })}
           />
@@ -671,11 +601,11 @@ function CompanyRail({ company, loading, editable, users, onPatch }: {
         </RailField>
         {/* Short label: "Payment terms" wraps to two lines in a 76px column. */}
         <RailField label={t('crm.paymentTermsShort')}>
-          <RailInput
+          <InlineEdit
             value={company.paymentTermsDays != null ? String(company.paymentTermsDays) : ''}
             display={company.paymentTermsDays != null ? t('crm.paymentTermsValue').replace('{n}', String(company.paymentTermsDays)) : undefined}
             editable={editable}
-            type="number"
+            inputType="number"
             placeholder="–"
             onSave={(v) => {
               const n = Number(v);

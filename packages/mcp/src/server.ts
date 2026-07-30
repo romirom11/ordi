@@ -8,7 +8,7 @@ import { z } from 'zod';
 import {
   COMPANY_STATUSES, CUSTOM_FIELD_ENTITIES, CUSTOM_FIELD_TYPES, LEAD_STATUSES,
   LEAD_ACTIVITY_OUTCOME_STATUSES, SALES_ACTIVITY_TYPES, WRITABLE_LEAD_STATUSES,
-  dateOnlySchema, researchImportSchema, docToText, textToDoc,
+  dateOnlySchema, docToText, textToDoc,
 } from '@ordi/shared';
 import { OrdiClient } from './client';
 import { decodeEntities, scrub, text, wrap } from './format';
@@ -53,14 +53,16 @@ export function buildServer(client: OrdiClient): McpServer {
   })) };
 }));
 
-  server.tool('list_companies', 'List CRM companies – the way to obtain companyId for company/finance tools', {
+  server.tool('list_companies', 'List CRM companies – the way to obtain companyId for company/finance tools. Paged: pass the returned nextCursor to continue.', {
   q: z.string().optional().describe('Substring of the company name'),
   status: z.string().optional().describe('e.g. lead | client'), limit: z.number().optional(),
-}, ({ q, status, limit }) => wrap(async () => {
+  cursor: z.string().optional().describe('nextCursor from a previous call'),
+}, ({ q, status, limit, cursor }) => wrap(async () => {
   const qs = new URLSearchParams();
   if (q) qs.set('q', q);
   if (status) qs.set('status', status);
   if (limit) qs.set('limit', String(limit));
+  if (cursor) qs.set('cursor', cursor);
   const res = await client.get<{ data: Record<string, unknown>[]; nextCursor: string | null }>(`/companies${qs.toString() ? `?${qs}` : ''}`);
   return { data: res.data.map((co) => ({
     id: co.id, name: co.name, domain: co.domain, status: co.status,
@@ -88,7 +90,7 @@ export function buildServer(client: OrdiClient): McpServer {
   server.tool('get_contact', 'One contact with every field, including customFields', { contactId: z.string() },
   ({ contactId }) => wrap(() => client.get(`/contacts/${contactId}`)));
 
-  server.tool('list_leads', 'List researched, unqualified sales leads. Filter by status or company; use get_sales_work for due work.', {
+  server.tool('list_leads', 'List unqualified sales leads. Filter by status or company; use get_sales_work for due work.', {
   q: z.string().optional(), status: z.enum(LEAD_STATUSES).optional(), companyId: z.string().optional(),
 }, ({ q, status, companyId }) => wrap(async () => {
   const qs = new URLSearchParams();
@@ -105,10 +107,10 @@ export function buildServer(client: OrdiClient): McpServer {
   })) };
 }));
 
-  server.tool('get_lead', 'One lead with structured research, conversion link and custom fields', { leadId: z.string() },
+  server.tool('get_lead', 'One lead with its qualification notes, conversion link and custom fields', { leadId: z.string() },
   ({ leadId }) => wrap(() => client.get(`/leads/${leadId}`)));
 
-  server.tool('get_sales_work', 'Due sales work grouped into overdue, today, waiting for reply, nurture due and no-next-action queues', {
+  server.tool('get_sales_work', 'Sales work grouped into overdue, due today, booked ahead, waiting for reply, nurture due and no-next-action queues. Only overdue, dueToday, nurtureDue and noNextAction need action; upcoming and waitingReply are context.', {
   scope: z.enum(['mine', 'all']).optional().describe('Defaults to mine; use all for the whole sales team'),
 }, ({ scope }) => wrap(() => client.get(`/sales-work?scope=${scope ?? 'mine'}`)));
 
@@ -136,19 +138,29 @@ export function buildServer(client: OrdiClient): McpServer {
     return { templates, sequences };
   }));
 
-  server.tool('list_deals', 'List deals, filterable by company and by linked project – the way to obtain dealId for move_deal', {
+  server.tool('list_deals', 'List deals, filterable by company and by linked project – the way to obtain dealId for move_deal. Paged: pass the returned nextCursor to continue.', {
   companyId: z.string().optional(),
   projectId: z.string().optional().describe('Filter by linked project id, or the literal "none" for unlinked deals'),
-}, ({ companyId, projectId }) => wrap(async () => {
+  limit: z.number().optional().describe('Rows per page, 1-200, default 100'),
+  cursor: z.string().optional().describe('nextCursor from a previous call'),
+}, ({ companyId, projectId, limit, cursor }) => wrap(async () => {
   const qs = new URLSearchParams();
   if (companyId) qs.set('companyId', companyId);
   if (projectId) qs.set('projectId', projectId);
-  const res = await client.get<{ data: Record<string, unknown>[] }>(`/deals${qs.toString() ? `?${qs}` : ''}`);
-  return { data: res.data.map((d) => ({
-    id: d.id, title: d.title, companyId: d.companyId, projectId: d.projectId, stageId: d.stageId,
-    amount: d.amount, currency: d.currency, expectedCloseDate: d.expectedCloseDate, ownerId: d.ownerId,
-    lostReason: d.lostReason, customFields: d.customFields ?? {},
-  })) };
+  if (limit) qs.set('limit', String(limit));
+  if (cursor) qs.set('cursor', cursor);
+  const res = await client.get<{ data: Record<string, unknown>[]; nextCursor?: string | null }>(
+    `/deals${qs.toString() ? `?${qs}` : ''}`);
+  return {
+    data: res.data.map((d) => ({
+      id: d.id, title: d.title, companyId: d.companyId, projectId: d.projectId, stageId: d.stageId,
+      amount: d.amount, currency: d.currency, expectedCloseDate: d.expectedCloseDate, ownerId: d.ownerId,
+      lostReason: d.lostReason, customFields: d.customFields ?? {},
+    })),
+    // Surfaced rather than dropped: a truncated list that looks complete is worse
+    // than a longer answer.
+    nextCursor: res.nextCursor ?? null,
+  };
 }));
 
   server.tool('get_deal', 'One deal with every field, including customFields – reading a deal never needs a write', { dealId: z.string() },
@@ -368,7 +380,7 @@ export function buildServer(client: OrdiClient): McpServer {
   caution: z.string().optional(), ownerId: z.string().optional(),
 }, (args) => wrap(() => client.post('/leads', args)));
 
-  server.tool('update_lead', 'Update a lead lifecycle or structured research fields', {
+  server.tool('update_lead', 'Update a lead lifecycle or its qualification notes', {
   leadId: z.string(), status: z.enum(WRITABLE_LEAD_STATUSES).optional(), contactId: z.string().nullable().optional(),
   title: z.string().optional(), product: z.string().optional(), score: z.number().int().min(0).max(100).optional(),
   signal: z.string().optional(), painSignal: z.string().optional(), evidence: z.string().optional(),
@@ -381,14 +393,6 @@ export function buildServer(client: OrdiClient): McpServer {
   }
   return client.patch(`/leads/${leadId}`, patch);
 }));
-
-  server.tool('preview_research_import', 'Validate and preview a structured B2B research batch without writing data', {
-  payload: researchImportSchema.describe('Research batch with title, product context, prospects and optional exclusions'),
-}, ({ payload }) => wrap(() => client.post('/leads/import/preview', payload)));
-
-  server.tool('import_research', 'Import one structured B2B research batch. Each prospect includes name plus optional domain/company_url, evidence, fit, timing, source, opener, caution, dimensions and secondary_sources. The API matches companies by domain first, deduplicates leads and retains exclusions.', {
-  payload: researchImportSchema.describe('Research batch with title, product context, prospects and optional exclusions'),
-}, ({ payload }) => wrap(() => client.post('/leads/import', payload)));
 
   server.tool('schedule_sales_activity', 'Schedule the next sales action for exactly one lead or deal', {
   leadId: z.string().optional(), dealId: z.string().optional(), type: z.enum(SALES_ACTIVITY_TYPES),

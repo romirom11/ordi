@@ -52,6 +52,7 @@ async function notify(
         total: Number(payload.total ?? 0),
         overdue: Number(payload.overdue ?? 0),
         dueToday: Number(payload.dueToday ?? 0),
+        upcoming: Number(payload.upcoming ?? 0),
         waitingReply: Number(payload.waitingReply ?? 0),
         nurtureDue: Number(payload.nurtureDue ?? 0),
         noNextAction: Number(payload.noNextAction ?? 0),

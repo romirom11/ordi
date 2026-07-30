@@ -161,7 +161,7 @@ const ACTION_TOOLS = [
   'update_task_status', 'assign_task', 'comment_on_task', 'log_time',
   'create_invoice_from_time', 'create_invoice_from_project', 'send_invoice', 'record_payment',
   'send_payment_reminder', 'create_quote', 'create_note', 'create_company', 'create_contact',
-  'create_lead', 'update_lead', 'import_research', 'schedule_sales_activity',
+  'create_lead', 'update_lead', 'schedule_sales_activity',
   'complete_sales_activity', 'convert_lead',
   'create_deal', 'move_deal', 'create_custom_field', 'create_kb_page',
   'request_leave', 'approve_leave', 'create_job_opening', 'move_applicant',

@@ -14,7 +14,7 @@ import { Avatar, Button, Checkbox, Input, EmptyState, Skeleton, Tooltip, cn, fmt
 import { ContextMenu, ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, toast, type ContextMenuEntry } from '../overlays';
 import { BulkBar, RowCheckbox, bulkMessage, runBulk, useSelection } from '../bulk';
 import {
-  COMPANY_STATUSES, StatusPill, useAllDeals, useCompanies, useDealStages, useUsersLookup,
+  COMPANY_STATUSES, StatusPill, useAllDeals, useCompanies, useDealStages, useUserMap,
   type Company, type Deal, type Stage,
 } from './shared';
 
@@ -57,7 +57,6 @@ export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
   const companiesQ = useCompanies(debouncedQ, status);
   const dealsQ = useAllDeals();
   const stagesQ = useDealStages();
-  const usersQ = useUsersLookup();
 
   const companies = companiesQ.data ?? [];
 
@@ -124,10 +123,10 @@ export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
     return items;
   };
   const rollup = useMemo(
-    () => rollupDeals(dealsQ.data ?? [], stagesQ.data ?? []),
+    () => rollupDeals(dealsQ.data?.deals ?? [], stagesQ.data ?? []),
     [dealsQ.data, stagesQ.data],
   );
-  const userMap = useMemo(() => new Map((usersQ.data ?? []).map((u) => [u.id, u])), [usersQ.data]);
+  const userMap = useUserMap();
 
   const chips: { key: string; label: string }[] = [
     { key: '', label: t('common.all') },

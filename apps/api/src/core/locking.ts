@@ -8,3 +8,14 @@ export function assertVersion(current: { version: number }, expected: number | u
     throw err.conflict('The record was modified by someone else', entity ?? current);
   }
 }
+
+/**
+ * Confirm a version-filtered UPDATE actually matched. `assertVersion` catches a
+ * stale version the caller told us about; this catches the window between the
+ * read and the write, where the filter quietly matches zero rows and the caller
+ * would otherwise be told the edit was stored.
+ */
+export function assertUpdated<T>(updated: T | undefined, before: unknown): T {
+  if (!updated) throw err.conflict('The record was modified by someone else', before);
+  return updated;
+}

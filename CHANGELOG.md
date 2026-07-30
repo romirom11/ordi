@@ -3,6 +3,198 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.17.0
+
+- The rich text editor is finished. Task bodies, KB pages and project
+  descriptions had bold, italic, strike, code, three heading levels and a
+  ten-item slash menu; they now have underline, text colour and highlight,
+  alignment, tables with row and column tools, callouts in four tones,
+  collapsible toggles, code blocks with syntax highlighting across 17
+  languages, and images. A hover gutter inserts a block below, drags to
+  reorder, and opens turn into / move / duplicate / delete. Blocks are
+  declared once in `richtext/blocks.ts`, so the slash menu, the bubble
+  toolbar and the block handle can no longer drift apart the way they had.
+  `RichBody` was a second renderer with its own switch statement that had
+  never learned tables, colour or highlighting; it is a pass-through to
+  `RichText` now.
+- Images can be pasted, dropped or picked, not only linked by url. A
+  document stores a signed, non-expiring path
+  (`/api/v1/files/<id>/<token>`, an HMAC under `AUTH_SECRET`) rather than a
+  presigned storage url that expires within the hour and rots the document
+  holding it - the model invoices, quotes and client portals already use.
+  The path is stored root-relative, so moving the instance to another
+  domain does not break every image ever embedded. Whoever holds such a
+  link can fetch the file, and rotating `AUTH_SECRET` invalidates every
+  issued one. `/attachments/presign` now signs the key it issues and
+  `/attachments/register` refuses a key without a matching signature:
+  registering an arbitrary key was a way to mint a public link to any
+  object in the bucket, an invoice PDF included.
+- Cmd/Ctrl-click and middle-click open a list row in a second tab. Project,
+  task, lead, deal, client, invoice, employee, dashboard and subtask rows
+  were plain click handlers calling `navigate()`, which swallows the
+  modifier, so the context menu was the only way to open anything beside
+  what you were already reading.
+- The keyboard scheme is one table with a help sheet on `Shift+?`, instead
+  of three scattered listeners nothing documented. New: `Cmd+T`,
+  `Cmd+Shift+T` to reopen the last closed tab, `Cmd+1`…`9`, and `Cmd+[` /
+  `Cmd+]` for history. The G chord reaches 11 destinations.
+- Page entrances replay on every navigation and reset their own scroll.
+  They only ever keyed off the first path segment, so opening a project
+  from the project list animated nothing and kept the previous scroll
+  position.
+- External links work in the desktop app. Two independent silent failures:
+  the capability granted `opener:allow-open-url` with no url scope, which
+  rejects every call, and nothing routed links to the opener anyway - all
+  three webviews drop a new-window request instead of handing it to the
+  OS. A delegated handler now covers links the SPA renders later too;
+  http(s), mailto and tel go to the browser, while `ordi://`, `blob:` and
+  in-app router links stay put.
+- Sales activity dates go through the shared date picker and its separate
+  time control, so they honour the user's date preferences. Completing a
+  research review readies the lead and schedules the first outreach,
+  instead of recording that a reply is already pending.
+- Removed the structured research import. It froze one external research
+  tool's JSON shape into the database schema and the public API, and
+  carried a hardcoded list of job-board and company-registry hostnames in
+  the service layer. Gone with it: `POST /leads/import`,
+  `POST /leads/import/preview`, the `import_research` and
+  `preview_research_import` MCP tools, the "Import research" dialog, the
+  `research_batches` table, and the `leads` columns that only ever held
+  import payloads (`research_batch_id`, `dimensions`, `secondary_sources`,
+  `raw_research`).
+- Leads themselves are unchanged. They are created through `POST /leads`,
+  the MCP `create_lead` tool or the New lead dialog, and keep their
+  qualification notes (score, signal, pain signal, evidence, why it fits,
+  why now, source, suggested channel, opener, caution), which stay
+  editable by hand.
+- A stale edit to a client, contact or deal now answers 409 instead of
+  reporting success and discarding the change. The version filter alone
+  matched zero rows without anyone noticing, and PATCH returned 200 with
+  the other writer's data. Each update also commits with its audit entry
+  in one transaction, so a rejected contact edit can no longer demote the
+  previous primary contact on its way out.
+- Deleting a lead cancels its planned activities and stops its active
+  sequence, like every other way a lead stops being worked. The
+  enrollment used to stay `active` forever on a lead nothing could reach,
+  and kept counting toward the sequence's active total.
+- Unqualified prospects live in the Leads workspace only. The pipeline's
+  legacy "Lead" stage is migrated away without losing sales context, and
+  the demotion flow that stage needed is gone from the UI, the API and
+  MCP. A stage may still be *named* "Lead": the ban that shipped beside
+  that migration was a one-off guard promoted into permanent validation
+  across the shared schema, the API and the UI. The `leads.legacy_deal_id`
+  marker the migration used is dropped too.
+- Web CRM reads its status and activity-type enums from `@ordi/shared`
+  instead of keeping copies, so an enum added on the server reaches the
+  dropdowns. Fixes a side effect of the drift: the New lead dialog
+  offered "nurture", which the API always rejected because the form has
+  no return-date field.
+- `GET /deals` is bounded and paged (`limit`, `cursor`, default 100, max
+  200). It used to return every deal in the workspace on every request.
+- `GET /companies` honours the `nextCursor` it already returned. Nothing
+  consumed it before, so passing it back replayed the first page - and
+  the MCP `list_companies` tool hands that cursor to the model. Both
+  lists page on the ULID primary key: ids sort by creation time and
+  compare as exact text, where a `createdAt` cursor silently lost the
+  microseconds Postgres keeps and matched no row.
+- `POST /companies/:id/portal` verifies the company exists before minting
+  a token and records the rotation in the company's history. It used to
+  update by id and report a fresh token for a deleted or invented id, with
+  nothing in the audit trail. The token never enters the audit diff.
+- Opening a CRM URL directly without the permission for it shows a plain
+  "no access" page instead of a screen whose every request 403s. The
+  sidebar already hid those sections; the direct URL, a restored tab and
+  a bookmark went straight through. The Pipeline tab is hidden without
+  `deals.read`.
+- CRM internals split up, no behaviour change: `service.ts` was a
+  1100-line pile of companies, contacts, deals, leads, activities and
+  conversion, and is now a re-export surface over `companies.ts`,
+  `deals.ts`, `leads.ts`, `activities.ts` and `common.ts`. Web
+  `crm/shared.tsx` lost its ~470 lines of dictionary to `crm/i18n.ts`.
+  Every `input: any` in the CRM service is typed from its Zod schema.
+- Planned work no longer reads "now". `fmtRelative` measured
+  `now - timestamp`, so every future instant went negative, matched the
+  under-a-minute branch and rendered as "now" - in the Work queue, the
+  Leads table, the lead page's next-action card and the sales history. A
+  follow-up due next week and one due this minute looked identical, which
+  is the one distinction that queue exists to make. Future instants read
+  "in 5d" now; past ones are unchanged.
+- The Pipeline tab is behind `deals.read` on the URL as well as in the tab
+  bar. `/crm/deals` matches the `/crm/:tab` route, so it passed the
+  route's `crm.read` check and rendered the pipeline shell - subtitle
+  included - to a role that cannot read a deal. It shows the no-access
+  notice instead. The New deal dialog is only mounted with `deals.write`,
+  since its queries ran whether or not it was open and 403'd on every CRM
+  visit for such a role.
+- A lead is fillable again. Pain signal, why it fits, why now, evidence,
+  caution, the opening message, product, score, signal, source, source
+  link, suggested channel and the title are all editable in place on the
+  lead page, and the owner is pickable. Those fields only ever had an
+  importer to fill them, so after it was removed the page showed a dozen
+  boxes a seller could read and never write.
+- The Work queue keeps what is booked ahead. A lead whose next step was
+  planned for tomorrow matched no bucket and disappeared from the page,
+  while `waiting for reply` - the one state that needs nothing from you -
+  was always shown, with a button offering to complete work days early.
+  There is a `Booked ahead` bucket now, and the row's action follows its
+  bucket: finish overdue and due-today work, plan the unplanned, leave
+  the rest to read. The morning digest fires on the actionable part only,
+  so a fully-planned week no longer produces a daily email.
+- A new lead can be logged in one pass. The company picker offers
+  "+ New company…", so the usual case - a prospect that is not in the
+  workspace yet - no longer means cancelling out to the Companies tab and
+  starting over.
+- New preset role: Sales. The whole CRM plus read-only sight of projects
+  and finance. Until now the only preset that covered the sales workspace
+  was Manager, which also grants project write and the right to issue and
+  send invoices.
+- Playbooks ship with a starter: three message templates and a
+  three-step outreach sequence, seeded like deal stages and editable like
+  any other record. The tab used to open empty on a feature about
+  reusable copy.
+- Scheduling an activity defaults to Outreach on a record with no history
+  instead of Follow-up, and can be assigned to a specific owner.
+- Whoever creates a company owns it, the way creating a lead already
+  worked.
+- Naming: the Companies tab says "company" throughout - the list holds
+  prospects as well as clients. The company status `lead` is labelled
+  "Prospect", so the word no longer names both a company status and the
+  separate Leads workspace beside it.
+- The Work tab printed the same sentence three times at once - page
+  subtitle, section subtitle and empty-state hint.
+- A contact can be created from the lead that needs it. The picker
+  offers "+ New contact…" and attaches whoever you add - previously a
+  prospect whose company had no contacts yet was unreachable without a
+  detour to the company page.
+- Convert to deal is visible throughout a lead's life and says what it is
+  waiting for, instead of silently not being there until the lead reaches
+  Engaged.
+- The Work queue's empty state offers a way on to Leads. It is the CRM's
+  landing tab, so on day one it was the first thing a new seller met, and
+  it led nowhere.
+- The dashboard counts sales work: overdue and due-today from the CRM
+  queue, next to the task counters. `My open tasks` counts project work,
+  so a seller with a full outreach queue was told they were all caught
+  up.
+- Start sequence says why it is unavailable over a record that already
+  has a planned action, rather than letting the click fail against the
+  API rule.
+- The Leads table shows the owner, so a team can see whose pipeline is
+  whose without opening every record.
+- Last of the importer's language is gone from the UI: a deal is
+  "Qualified from a lead", its link reads "Open the lead", and a
+  company is a company on the deal rail too.
+- Fixed a test that was set to start failing on a calendar date: the
+  email retry-backoff case stepped forward from a hard-coded
+  `2026-07-29`, so it stopped claiming on the first tick once the wall
+  clock passed it.
+- ordi has a landing page at
+  [romirom11.github.io/ordi](https://romirom11.github.io/ordi). The README
+  was the only place the project explained itself, and it only reaches
+  people who already found the repository. Hand-written HTML and CSS with
+  the design tokens copied from the app, so the site and the product look
+  like the same thing.
+
 ## v1.16.0
 
 - CRM is a sales workspace. `/crm` opens on Work: overdue, due today,

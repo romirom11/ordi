@@ -5,7 +5,7 @@ import { json, reqAs, resetDb, seedRolesAndUsers } from './helpers';
 
 let users: Awaited<ReturnType<typeof seedRolesAndUsers>>;
 let qualifiedStageId: string;
-let legacyLeadStageId: string;
+let leadNamedStageId: string;
 let nurtureDealStageId: string;
 
 function localDateAfter(days: number): string {
@@ -84,79 +84,72 @@ function timezoneBoundaryCase(now: Date): { timeZone: string; dueAt: Date } {
   throw new Error('Could not find a timezone boundary outside the server-local day');
 }
 
-const research = {
-  title: 'kdn.agency — shortlist',
-  product: 'AI workflow pilot',
-  product_url: 'https://kdn.agency',
-  target_customer: 'Small professional services firms',
-  generated_at: '2026-07-27',
-  verdict: 'Two qualified prospects',
-  prospects: [
-    {
-      name: 'Lea Hough & Co LLP',
-      type: 'Partnership · Chartered surveying',
-      stage: 'High intent',
-      score: 97,
-      pain_signal: 'A graduate role owns practice-wide AI adoption.',
-      evidence: 'Current public vacancy.',
-      why_fit: 'Implementation mandate exceeds the role.',
-      why_now: 'The vacancy is active.',
-      source_title: 'Business Development & Marketing Graduate',
-      source_url: 'https://uk.indeed.com/viewjob?jk=lea-hough',
-      source_type: 'Current public listing',
-      signal_date: '2026-07-27',
-      suggested_channel: 'LinkedIn',
-      opener: 'Hi Michael — I saw the AI adoption brief.',
-      caution: 'Revalidate before outreach.',
-      dimensions: { pain_strength: 5, product_fit: 5 },
-      secondary_sources: [{ title: 'Our People', url: 'https://www.leahough.co.uk/our-people/', supports: 'Team structure' }],
-    },
-    {
-      name: 'Joint Inspection Group',
-      stage: 'High intent',
-      score: 95,
-      pain_signal: 'A seven-person team coordinates auditable documents.',
-      source_url: 'https://uk.indeed.com/viewjob?jk=jig',
-      secondary_sources: [{ title: 'JIG Team', url: 'https://www.jig.org/about/company-structure/jig-staff/' }],
-    },
-  ],
-  patterns: [{ title: 'The role arrives first' }],
-  outreach_plan: { first_step: 'Contact manually' },
-  limits: ['Public sources only'],
-  excluded_candidates: [{ name: 'Expired Ltd', reason: 'Signal expired' }],
-};
+/**
+ * Leads are created through the normal API now that the research-JSON import is
+ * gone. Two of them, so the queue tests still have more than one row to sort.
+ */
+const seedLeads = [
+  {
+    title: 'Lea Hough & Co LLP',
+    product: 'AI workflow pilot',
+    status: 'needs_review',
+    score: 97,
+    signal: 'High intent · Partnership',
+    painSignal: 'A graduate role owns practice-wide AI adoption.',
+    evidence: 'Current public vacancy.',
+    whyFit: 'Implementation mandate exceeds the role.',
+    whyNow: 'The vacancy is active.',
+    sourceTitle: 'Business Development & Marketing Graduate',
+    sourceUrl: 'https://www.leahough.co.uk/careers/',
+    sourceType: 'Current public listing',
+    signalDate: '2026-07-27',
+    sourceCheckedAt: '2026-07-27T00:00:00.000Z',
+    suggestedChannel: 'LinkedIn',
+    opener: 'Hi Michael — I saw the AI adoption brief.',
+    caution: 'Revalidate before outreach.',
+  },
+  {
+    title: 'Joint Inspection Group',
+    product: 'AI workflow pilot',
+    status: 'needs_review',
+    score: 95,
+    signal: 'High intent',
+    painSignal: 'A seven-person team coordinates auditable documents.',
+    sourceUrl: 'https://www.jig.org/about/',
+  },
+];
 
 beforeAll(async () => {
   await resetDb();
   users = await seedRolesAndUsers();
   const { db } = getDb();
-  legacyLeadStageId = ulid();
+  leadNamedStageId = ulid();
   qualifiedStageId = ulid();
   nurtureDealStageId = ulid();
   await db.insert(schema.dealStages).values([
-    { id: legacyLeadStageId, name: 'Lead', position: 0, probability: 10 },
+    { id: leadNamedStageId, name: 'Lead', position: 0, probability: 10 },
     { id: qualifiedStageId, name: 'Qualified', position: 1, probability: 30 },
     { id: nurtureDealStageId, name: 'Nurture', position: 2, probability: 20 },
   ]);
 });
 
-describe('research import and daily work', () => {
+describe('lead intake and daily work', () => {
   let leadId: string;
   let companyId: string;
 
-  it('keeps the legacy Lead stage out of the qualified pipeline', async () => {
+  it('lets a pipeline stage carry any name, including Lead', async () => {
     const stages = (await json(reqAs(users.owner!.cookie).get('/deal-stages'))).data;
-    expect(stages.some((stage: any) => stage.name.trim().toLowerCase() === 'lead')).toBe(false);
+    expect(stages.some((stage: any) => stage.id === leadNamedStageId)).toBe(true);
 
-    const recreate = await reqAs(users.owner!.cookie).post('/deal-stages', {
+    const created = await reqAs(users.owner!.cookie).post('/deal-stages', {
       name: ' Lead ',
-      position: 0,
+      position: 9,
       probability: 10,
     });
-    expect(recreate.status).toBe(400);
+    expect(created.status).toBe(201);
   });
 
-  it('rejects creating or moving an opportunity into a legacy Lead stage', async () => {
+  it('accepts any configured stage and still refuses an unknown id', async () => {
     const { db } = getDb();
     const pipelineCompanyId = ulid();
     await db.insert(schema.companies).values({
@@ -165,12 +158,12 @@ describe('research import and daily work', () => {
       createdBy: users.owner!.userId,
     });
 
-    const direct = await reqAs(users.owner!.cookie).post('/deals', {
+    const unknown = await reqAs(users.owner!.cookie).post('/deals', {
       companyId: pipelineCompanyId,
-      title: 'Not qualified',
-      stageId: legacyLeadStageId,
+      title: 'Nowhere stage',
+      stageId: ulid(),
     });
-    expect(direct.status).toBe(400);
+    expect(unknown.status).toBe(400);
 
     const qualified = await json(reqAs(users.owner!.cookie).post('/deals', {
       companyId: pipelineCompanyId,
@@ -178,40 +171,32 @@ describe('research import and daily work', () => {
       stageId: qualifiedStageId,
     }));
     const move = await reqAs(users.owner!.cookie).post(`/deals/${qualified.id}/move`, {
-      stageId: legacyLeadStageId,
+      stageId: leadNamedStageId,
     });
-    expect(move.status).toBe(400);
+    expect(move.status).toBe(200);
 
     const current = await json(reqAs(users.owner!.cookie).get(`/deals/${qualified.id}`));
     const patch = await reqAs(users.owner!.cookie).patch(`/deals/${qualified.id}`, {
-      stageId: legacyLeadStageId,
+      stageId: qualifiedStageId,
       version: current.version,
     });
-    expect(patch.status).toBe(400);
+    expect(patch.status).toBe(200);
+    const stale = await reqAs(users.owner!.cookie).patch(`/deals/${qualified.id}`, {
+      title: 'Stale write',
+      version: current.version,
+    });
+    expect(stale.status).toBe(409);
   });
 
-  it('previews active prospects and retained exclusions without writing data', async () => {
-    const preview = await json(reqAs(users.owner!.cookie).post('/leads/import/preview', research));
-    expect(preview).toMatchObject({ prospects: 2, companiesToCreate: 2, leadsToCreate: 2, exclusions: 1 });
-    expect((await json(reqAs(users.owner!.cookie).get('/leads'))).data).toHaveLength(0);
-  });
-
-  it('does not double-count duplicate prospects in an import preview', async () => {
-    const duplicate = {
-      ...research,
-      title: 'Duplicate preview',
-      prospects: [research.prospects[0], { ...research.prospects[0] }],
-    };
-    const preview = await json(reqAs(users.owner!.cookie).post('/leads/import/preview', duplicate));
-    expect(preview).toMatchObject({ prospects: 2, companiesToCreate: 1, leadsToCreate: 1 });
-    expect(preview.matches.map((match: any) => match.action)).toEqual(['create_company_and_lead', 'skip']);
-  });
-
-  it('imports structured leads idempotently and creates their review actions', async () => {
-    const first = await json(reqAs(users.owner!.cookie).post('/leads/import', research));
-    expect(first).toMatchObject({ createdCompanies: 2, createdLeads: 2, exclusions: 1 });
-    const second = await json(reqAs(users.owner!.cookie).post('/leads/import', research));
-    expect(second).toMatchObject({ createdCompanies: 0, createdLeads: 0, exclusions: 1 });
+  it('stores a lead with its qualification notes and its first review action', async () => {
+    companyId = (await json(reqAs(users.owner!.cookie).post('/companies', {
+      name: 'Lea Hough & Co LLP',
+      domain: 'leahough.co.uk',
+    }))).id;
+    for (const seed of seedLeads) {
+      const created = await reqAs(users.owner!.cookie).post('/leads', { companyId, ...seed });
+      expect(created.status, await created.clone().text()).toBe(201);
+    }
 
     const leads = (await json(reqAs(users.owner!.cookie).get('/leads'))).data;
     expect(leads).toHaveLength(2);
@@ -222,28 +207,28 @@ describe('research import and daily work', () => {
       painSignal: 'A graduate role owns practice-wide AI adoption.',
       opener: 'Hi Michael — I saw the AI adoption brief.',
       sourceCheckedAt: '2026-07-27T00:00:00.000Z',
-      nextActivity: { type: 'review', status: 'planned' },
+      nextActivity: null,
     });
     leadId = lea.id;
-    companyId = lea.companyId;
+
+    const review = await reqAs(users.owner!.cookie).post('/sales-activities', {
+      leadId,
+      type: 'review',
+      subject: 'Validate signal and choose outreach',
+      dueAt: new Date().toISOString(),
+    });
+    expect(review.status).toBe(201);
 
     const activities = (await json(reqAs(users.owner!.cookie).get(`/sales-activities?leadId=${leadId}`))).data;
     expect(activities).toHaveLength(1);
     expect(activities[0]).toMatchObject({ type: 'review', status: 'planned' });
   });
 
-  it('matches company aliases by domain before normalized name', async () => {
-    const preview = await json(reqAs(users.owner!.cookie).post('/leads/import/preview', {
-      ...research,
-      title: 'Domain alias preview',
-      prospects: [{
-        ...research.prospects[0],
-        name: 'Lea Hough and Co',
-        company_url: 'https://leahough.co.uk',
-      }],
-    }));
-    expect(preview).toMatchObject({ companiesToCreate: 0, leadsToCreate: 0 });
-    expect(preview.matches[0]).toMatchObject({ companyId, action: 'skip', domain: 'leahough.co.uk' });
+  it('no longer exposes the research import endpoints', async () => {
+    for (const path of ['/leads/import', '/leads/import/preview']) {
+      const res = await reqAs(users.owner!.cookie).post(path, { title: 'x', prospects: [{ name: 'y' }] });
+      expect(res.status, path).toBe(404);
+    }
   });
 
   it('completes outreach and schedules the follow-up in one command', async () => {
@@ -299,6 +284,27 @@ describe('research import and daily work', () => {
     expect(Object.values(bounded).every((bucket: any) => bucket.rows.length <= 1)).toBe(true);
     expect(bounded.noNextAction.rows).toHaveLength(1);
     expect(bounded.noNextAction.total).toBeGreaterThan(1);
+  });
+
+  it('keeps work booked beyond today visible instead of dropping it', async () => {
+    const booked = await json(reqAs(users.owner!.cookie).post('/leads', {
+      companyId,
+      title: 'Booked ahead',
+      status: 'ready',
+    }));
+    await reqAs(users.owner!.cookie).post('/sales-activities', {
+      leadId: booked.id,
+      type: 'outreach',
+      dueAt: new Date(Date.now() + 3 * 86_400_000).toISOString(),
+    });
+
+    const work = await json(reqAs(users.owner!.cookie).get('/sales-work'));
+    // A lead with its next step planned belongs in `upcoming` – it used to match
+    // no bucket at all and vanish from the queue entirely.
+    expect(work.upcoming.rows.some((row: any) => row.id === booked.id)).toBe(true);
+    expect(work.noNextAction.rows.some((row: any) => row.id === booked.id)).toBe(false);
+    expect(Object.values(work).flatMap((bucket: any) => bucket.rows)
+      .filter((row: any) => row.id === booked.id)).toHaveLength(1);
   });
 
   it('snoozes nurture independently and returns it only on the chosen date', async () => {
@@ -730,7 +736,7 @@ describe('sales activity data integrity', () => {
 });
 
 describe('lead and deal boundary', () => {
-  it('converts once and preserves notes, files, research and planned work', async () => {
+  it('converts once and preserves notes, files and planned work', async () => {
     const { db } = getDb();
     const leads = (await json(reqAs(users.owner!.cookie).get('/leads?q=Lea%20Hough'))).data;
     const lead = leads[0];
@@ -763,10 +769,10 @@ describe('lead and deal boundary', () => {
       lastName: 'Contact',
       createdBy: users.owner!.userId,
     });
-    const legacyStage = await reqAs(users.owner!.cookie).post(`/leads/${lead.id}/convert`, {
-      stageId: legacyLeadStageId,
+    const unknownStage = await reqAs(users.owner!.cookie).post(`/leads/${lead.id}/convert`, {
+      stageId: ulid(),
     });
-    expect(legacyStage.status).toBe(400);
+    expect(unknownStage.status).toBe(400);
     const invalidContact = await reqAs(users.owner!.cookie).post(`/leads/${lead.id}/convert`, {
       stageId: qualifiedStageId,
       contactId: otherContactId,
@@ -792,4 +798,93 @@ describe('lead and deal boundary', () => {
     expect(listedDeal.nextActivity).toMatchObject({ dealId: deal.id, status: 'planned' });
   });
 
+});
+
+describe('stale writes and lead cleanup', () => {
+  let companyId: string;
+
+  beforeAll(async () => {
+    companyId = (await json(reqAs(users.owner!.cookie).post('/companies', {
+      name: 'Stale Write Ltd',
+    }))).id;
+  });
+
+  it('answers a stale company edit with 409 instead of a silent no-op', async () => {
+    const before = await json(reqAs(users.owner!.cookie).get(`/companies/${companyId}`));
+    const first = await reqAs(users.owner!.cookie).patch(`/companies/${companyId}`, {
+      billingEmail: 'first@stale.test',
+      version: before.version,
+    });
+    expect(first.status).toBe(200);
+
+    // Same version the first writer used: the edit is refused, not swallowed.
+    const second = await reqAs(users.owner!.cookie).patch(`/companies/${companyId}`, {
+      billingEmail: 'second@stale.test',
+      version: before.version,
+    });
+    expect(second.status).toBe(409);
+    const after = await json(reqAs(users.owner!.cookie).get(`/companies/${companyId}`));
+    expect(after.billingEmail).toBe('first@stale.test');
+  });
+
+  it('answers a stale contact edit with 409 and keeps the primary flag consistent', async () => {
+    const primary = await json(reqAs(users.owner!.cookie).post('/contacts', {
+      companyId,
+      firstName: 'Ada',
+      lastName: 'First',
+      isPrimary: true,
+    }));
+    const other = await json(reqAs(users.owner!.cookie).post('/contacts', {
+      companyId,
+      firstName: 'Grace',
+      lastName: 'Second',
+    }));
+    const stale = (await json(reqAs(users.owner!.cookie).get(`/contacts/${other.id}`))).version;
+    expect((await reqAs(users.owner!.cookie).patch(`/contacts/${other.id}`, {
+      position: 'CTO',
+      version: stale,
+    })).status).toBe(200);
+
+    const conflict = await reqAs(users.owner!.cookie).patch(`/contacts/${other.id}`, {
+      isPrimary: true,
+      version: stale,
+    });
+    expect(conflict.status).toBe(409);
+    // The rejected edit must not have demoted the existing primary on its way out.
+    const contacts = (await json(reqAs(users.owner!.cookie).get(`/contacts?companyId=${companyId}`))).data;
+    expect(contacts.find((row: any) => row.id === primary.id).isPrimary).toBe(true);
+    expect(contacts.find((row: any) => row.id === other.id).isPrimary).toBe(false);
+  });
+
+  it('cancels planned work and stops the sequence when a lead is deleted', async () => {
+    const { db } = getDb();
+    const lead = await json(reqAs(users.owner!.cookie).post('/leads', {
+      companyId,
+      title: 'Deleted mid-sequence',
+      status: 'ready',
+    }));
+    const sequenceId = (await json(reqAs(users.owner!.cookie).post('/sales-sequences', {
+      name: 'Delete cleanup',
+      steps: [{ activityType: 'outreach' }, { activityType: 'follow_up', delayDays: 3 }],
+    }))).id;
+    const enrollment = await json(reqAs(users.owner!.cookie)
+      .post(`/sales-sequences/${sequenceId}/enroll`, { leadId: lead.id }));
+
+    expect((await reqAs(users.owner!.cookie).del(`/leads/${lead.id}`)).status).toBe(200);
+
+    const [stopped] = await db.select().from(schema.salesSequenceEnrollments)
+      .where(eq(schema.salesSequenceEnrollments.id, enrollment.id));
+    expect(stopped!.status).toBe('stopped');
+    expect(stopped!.stoppedAt).not.toBeNull();
+
+    const activities = await db.select().from(schema.salesActivities)
+      .where(eq(schema.salesActivities.leadId, lead.id));
+    expect(activities.length).toBeGreaterThan(0);
+    expect(activities.every((row) => row.status === 'cancelled')).toBe(true);
+
+    // The stopped enrollment no longer inflates the sequence's active total.
+    const sequence = (await json(reqAs(users.owner!.cookie).get('/sales-sequences'))).data
+      .find((row: any) => row.id === sequenceId);
+    expect(sequence.activeEnrollments).toBe(0);
+  });
 });

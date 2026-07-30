@@ -8,7 +8,6 @@ import {
   isNull,
   schema,
   sql,
-  type Database,
 } from '@ordi/db';
 import {
   SALES_TEMPLATE_VARIABLES,
@@ -24,9 +23,10 @@ import { ulid } from 'ulid';
 import type { z } from 'zod';
 import type { Actor } from '../../context';
 import { writeActivity } from '../../core/activity';
-import { assertVersion } from '../../core/locking';
+import { assertUpdated, assertVersion } from '../../core/locking';
 import { err } from '../../lib/errors';
 import { assertSalesWrite } from './sales-access';
+import { CANCELS_PLANNED_LEAD_STATUSES, pickDefined, type DbWriter } from './common';
 
 type SalesActivity = typeof schema.salesActivities.$inferSelect;
 type SalesActivityInput = z.infer<typeof salesActivityInputSchema>;
@@ -37,10 +37,8 @@ type SalesSequenceInput = z.infer<typeof salesSequenceInputSchema>;
 type SalesSequenceUpdate = z.infer<typeof salesSequenceUpdateSchema>;
 type SalesSequenceEnrollInput = z.infer<typeof salesSequenceEnrollSchema>;
 type SalesSequenceStep = typeof schema.salesSequenceSteps.$inferSelect;
-type SalesDb = Pick<Database, 'select' | 'insert' | 'update' | 'delete'>;
 
 const SUPPORTED_VARIABLES = new Set<string>(SALES_TEMPLATE_VARIABLES);
-const STOPS_LEAD_SEQUENCE = new Set(['nurture', 'disqualified', 'no_response']);
 const TEMPLATE_UPDATE_FIELDS = [
   'name',
   'activityType',
@@ -128,17 +126,14 @@ export async function updateSalesMessageTemplate(
     )).for('update');
     if (!before) throw err.notFound('Sales message template not found');
     assertVersion(before, input.version, before);
-    const patch: Record<string, unknown> = {};
-    for (const key of TEMPLATE_UPDATE_FIELDS) {
-      if (input[key] !== undefined) patch[key] = input[key];
-    }
+    const patch = pickDefined(input, TEMPLATE_UPDATE_FIELDS);
     if (!Object.keys(patch).length) return before;
     const [after] = await tx.update(schema.salesMessageTemplates).set(patch)
       .where(and(
         eq(schema.salesMessageTemplates.id, id),
         eq(schema.salesMessageTemplates.version, before.version),
       )).returning();
-    if (!after) throw err.conflict('The record was modified by someone else', before);
+    assertUpdated(after, before);
     await writeActivity(tx, {
       entityType: 'sales_message_template',
       entityId: id,
@@ -152,7 +147,7 @@ export async function updateSalesMessageTemplate(
   });
 }
 
-async function hydrateSequenceSteps(dbOrTx: SalesDb, inputs: SalesSequenceInput['steps']) {
+async function hydrateSequenceSteps(dbOrTx: DbWriter, inputs: SalesSequenceInput['steps']) {
   const templateIds = [...new Set(inputs.map((step) => step.templateId).filter(Boolean) as string[])];
   const templates = templateIds.length
     ? await dbOrTx.select().from(schema.salesMessageTemplates).where(and(
@@ -283,10 +278,7 @@ export async function updateSalesSequence(actor: Actor, id: string, input: Sales
         .limit(1);
       if (used) throw err.domain('A sequence cannot change steps after it has been used');
     }
-    const patch: Record<string, unknown> = {};
-    for (const key of SEQUENCE_UPDATE_FIELDS) {
-      if (input[key] !== undefined) patch[key] = input[key];
-    }
+    const patch = pickDefined(input, SEQUENCE_UPDATE_FIELDS);
     const steps = input.steps ? await hydrateSequenceSteps(tx, input.steps) : null;
     const sequencePatch = {
       ...patch,
@@ -297,7 +289,7 @@ export async function updateSalesSequence(actor: Actor, id: string, input: Sales
       eq(schema.salesSequences.id, id),
       eq(schema.salesSequences.version, before.version),
     )).returning({ id: schema.salesSequences.id });
-    if (!updated) throw err.conflict('The record was modified by someone else', before);
+    assertUpdated(updated, before);
     if (steps) {
       await tx.delete(schema.salesSequenceSteps).where(eq(schema.salesSequenceSteps.sequenceId, id));
       await tx.insert(schema.salesSequenceSteps).values(
@@ -327,7 +319,7 @@ interface ActivityParent {
 }
 
 async function variablesFor(
-  dbOrTx: SalesDb,
+  dbOrTx: DbWriter,
   parent: ActivityParent,
 ): Promise<Record<string, string>> {
   const [[company], [contact], [owner]] = await Promise.all([
@@ -361,7 +353,7 @@ async function variablesFor(
 }
 
 export async function resolveActivityTemplate(
-  dbOrTx: SalesDb,
+  dbOrTx: DbWriter,
   parent: ActivityParent,
   input: SalesActivityInput,
 ) {
@@ -389,7 +381,7 @@ export async function resolveActivityTemplate(
 }
 
 async function enrollmentParent(
-  dbOrTx: SalesDb,
+  dbOrTx: DbWriter,
   actor: Actor,
   input: SalesSequenceEnrollInput,
 ): Promise<ActivityParent> {
@@ -430,7 +422,7 @@ async function enrollmentParent(
 }
 
 async function createStepActivity(
-  dbOrTx: SalesDb,
+  dbOrTx: DbWriter,
   actor: Actor,
   enrollment: {
     id: string;
@@ -568,7 +560,7 @@ export async function listSalesSequenceEnrollments(params: { leadId?: string; de
 }
 
 async function parentFromActivity(
-  dbOrTx: SalesDb,
+  dbOrTx: DbWriter,
   activity: SalesActivity,
 ): Promise<ActivityParent> {
   const [parent] = activity.leadId
@@ -592,7 +584,7 @@ async function parentFromActivity(
  * sequence, or the id of the next sequence activity.
  */
 export async function advanceSequenceActivity(
-  dbOrTx: SalesDb,
+  dbOrTx: DbWriter,
   actor: Actor,
   activity: SalesActivity,
   input: SalesActivityCompleteInput,
@@ -606,7 +598,7 @@ export async function advanceSequenceActivity(
   ).for('update');
   if (!enrollment || enrollment.status !== 'active') return null;
 
-  if (activity.leadId && input.leadStatus && STOPS_LEAD_SEQUENCE.has(input.leadStatus)) {
+  if (activity.leadId && input.leadStatus && CANCELS_PLANNED_LEAD_STATUSES.has(input.leadStatus)) {
     await dbOrTx.update(schema.salesSequenceEnrollments).set({
       status: 'stopped',
       stoppedAt: new Date(),
@@ -645,7 +637,7 @@ export async function advanceSequenceActivity(
 }
 
 export async function stopSequenceForActivity(
-  dbOrTx: SalesDb,
+  dbOrTx: DbWriter,
   activity: SalesActivity,
 ): Promise<void> {
   if (!activity.sequenceEnrollmentId) return;
@@ -658,7 +650,7 @@ export async function stopSequenceForActivity(
   ));
 }
 
-export async function stopActiveLeadSequence(dbOrTx: SalesDb, leadId: string): Promise<void> {
+export async function stopActiveLeadSequence(dbOrTx: DbWriter, leadId: string): Promise<void> {
   await dbOrTx.update(schema.salesSequenceEnrollments).set({
     status: 'stopped',
     stoppedAt: new Date(),
@@ -668,7 +660,7 @@ export async function stopActiveLeadSequence(dbOrTx: SalesDb, leadId: string): P
   ));
 }
 
-export async function stopActiveDealSequence(dbOrTx: SalesDb, dealId: string): Promise<void> {
+export async function stopActiveDealSequence(dbOrTx: DbWriter, dealId: string): Promise<void> {
   await dbOrTx.update(schema.salesSequenceEnrollments).set({
     status: 'stopped',
     stoppedAt: new Date(),
@@ -718,7 +710,7 @@ export async function stopSalesSequenceEnrollment(actor: Actor, id: string, vers
       eq(schema.salesSequenceEnrollments.id, id),
       eq(schema.salesSequenceEnrollments.version, before.version),
     )).returning();
-    if (!after) throw err.conflict('The record was modified by someone else', before);
+    assertUpdated(after, before);
     await writeActivity(tx, {
       entityType: before.leadId ? 'lead' : 'deal',
       entityId: before.leadId ?? before.dealId!,

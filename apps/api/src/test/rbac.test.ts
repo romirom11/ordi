@@ -129,6 +129,36 @@ describe('CRM notes leave an audit trail', () => {
   });
 });
 
+describe('the Sales preset covers the sales workspace and stops there', () => {
+  it('works the whole CRM: companies, leads, activities and the pipeline', async () => {
+    const sales = reqAs(users.sales!.cookie);
+    expect((await sales.get('/companies')).status).toBe(200);
+    expect((await sales.get('/leads')).status).toBe(200);
+    expect((await sales.get('/sales-work')).status).toBe(200);
+    expect((await sales.get('/deals')).status).toBe(200);
+    expect((await sales.get('/deal-stages')).status).toBe(200);
+    expect((await sales.get('/sales-message-templates')).status).toBe(200);
+
+    const company = await sales.post('/companies', { name: 'Sales role can create' });
+    expect(company.status).toBe(201);
+    const created = await sales.post('/leads', {
+      companyId: ((await company.json()) as { id: string }).id,
+      title: 'Sales role can create a lead',
+    });
+    expect(created.status).toBe(201);
+  });
+
+  it('reads delivery and money without being able to change either', async () => {
+    const sales = reqAs(users.sales!.cookie);
+    // The point of the role: a seller needs to see what is being delivered and
+    // what has been paid, and needs no ability to touch either.
+    expect((await sales.get('/projects')).status).toBe(200);
+    expect((await sales.get('/invoices')).status).toBe(200);
+    expect((await sales.post('/invoices', { companyId: ulid(), currency: 'USD' })).status).toBe(403);
+    expect((await sales.get('/employees')).status).toBe(403);
+  });
+});
+
 describe('CRM permission boundary', () => {
   it('guest cannot list companies', async () => {
     expect((await reqAs(users.guest!.cookie).get('/companies')).status).toBe(403);

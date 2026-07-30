@@ -1,7 +1,7 @@
 import { getDb, schema, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import { publishEvent } from '../core/events';
-import { salesWork, summarizeSalesWork } from '../domains/crm/work';
+import { salesWorkCounts } from '../domains/crm/work';
 import { localDateKey, localHour, safeTimeZone } from '../lib/timezone';
 import { logger } from '../lib/logger';
 
@@ -61,15 +61,15 @@ export async function runSalesWorkDigests(now = new Date()): Promise<SalesDigest
       }).returning({ id: schema.salesDigestRuns.id });
       if (!inserted.length) return false;
 
-      const work = await salesWork({
+      const summary = await salesWorkCounts({
         userId: user.id,
         timezone: timeZone,
         access: {
           permissions: new Set(user.canReadDeals ? ['crm.read', 'deals.read'] : ['crm.read']),
         },
-      }, { scope: 'mine', limit: 1, now });
-      const summary = summarizeSalesWork(work);
-      if (summary.total === 0) return false;
+      }, { scope: 'mine', now });
+      // Booked-ahead and waiting-for-reply are a healthy pipeline, not a to-do.
+      if (summary.actionable === 0) return false;
 
       await publishEvent(tx, {
         type: 'sales.work_digest_due',
