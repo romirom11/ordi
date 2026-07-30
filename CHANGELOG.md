@@ -111,6 +111,20 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   separate Leads workspace beside it.
 - The Work tab printed the same sentence three times at once - page
   subtitle, section subtitle and empty-state hint.
+- A contact can be created from the lead that needs it. The picker
+  offers "+ New contact…" and attaches whoever you add - previously a
+  prospect whose company had no contacts yet was unreachable without a
+  detour to the company page.
+- Convert to deal is visible throughout a lead's life and says what it is
+  waiting for, instead of silently not being there until the lead reaches
+  Engaged.
+- The Work queue's empty state offers a way on to Leads. It is the CRM's
+  landing tab, so on day one it was the first thing a new seller met, and
+  it led nowhere.
+- The dashboard counts sales work: overdue and due-today from the CRM
+  queue, next to the task counters. `My open tasks` counts project work,
+  so a seller with a full outreach queue was told they were all caught
+  up.
 - Fixed a test that was set to start failing on a calendar date: the
   email retry-backoff case stepped forward from a hard-coded
   `2026-07-29`, so it stopped claiming on the first tick once the wall

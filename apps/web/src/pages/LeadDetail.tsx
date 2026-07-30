@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, ChevronRight, Copy, ExternalLink, Target } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
@@ -7,7 +7,7 @@ import { useCan } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import { useT } from '../lib/i18n';
 import {
-  Button, Card, RailChip, RailField, Select, Skeleton, fmtDate, fmtRelative,
+  Button, Card, RailChip, RailField, Select, Skeleton, Tooltip, fmtDate, fmtRelative,
 } from '../components/ui';
 import { toast } from '../components/overlays';
 import {
@@ -19,6 +19,9 @@ import {
   OwnerRailValue, SectionHeader,
 } from '../components/crm/detail';
 import { SalesActivityPanel } from '../components/crm/SalesActivityPanel';
+import { ContactDialog } from '../components/crm/dialogs';
+
+const NEW_CONTACT = '__new__';
 
 export function LeadDetailPage({ id }: { id: string }) {
   const t = useT();
@@ -29,6 +32,7 @@ export function LeadDetailPage({ id }: { id: string }) {
   const activitiesQ = useSalesActivities({ leadId: id, status: 'planned' });
   const stagesQ = useDealStages();
   const usersQ = useUsersLookup();
+  const [addingContact, setAddingContact] = useState(false);
   const lead = leadQ.data;
   const contactsQ = useContacts(lead?.companyId);
   usePageTitle(lead?.title);
@@ -102,10 +106,21 @@ export function LeadDetailPage({ id }: { id: string }) {
               <ExternalLink size={13} /> {t('crm.openSource')}
             </a>
           )}
-          {canConvert && lead.status === 'engaged' && firstQualifiedStage && (
-            <Button size="sm" onClick={() => convert.mutate()} disabled={convert.isPending}>
-              <CheckCircle2 size={13} /> {t('crm.convertToDeal')}
-            </Button>
+          {/*
+            * Conversion is gated on `engaged`, and a button that simply is not
+            * there teaches nobody why. Show it throughout the live part of the
+            * lifecycle and say what is missing when it is not yet time.
+            */}
+          {canConvert && lead.status !== 'converted' && firstQualifiedStage && (
+            <Tooltip label={lead.status === 'engaged' ? undefined : t('crm.convertNeedsEngaged')}>
+              <Button
+                size="sm"
+                onClick={() => convert.mutate()}
+                disabled={convert.isPending || lead.status !== 'engaged'}
+              >
+                <CheckCircle2 size={13} /> {t('crm.convertToDeal')}
+              </Button>
+            </Tooltip>
           )}
         </div>
       </div>
@@ -194,14 +209,20 @@ export function LeadDetailPage({ id }: { id: string }) {
               <RailField label={t('crm.company')}>
                 <Link to={`/companies/${lead.companyId}`}><RailChip>{lead.companyName || lead.title}</RailChip></Link>
               </RailField>
-              <RailField label={t('crm.contacts')}>
+              <RailField label={t('crm.contact')}>
                 {editable ? (
                   <Select
                     className="w-full border-0"
                     value={lead.contactId ?? ''}
-                    onChange={(event) => patch.mutate({ contactId: event.target.value || null })}
+                    onChange={(event) => {
+                      // A prospect with no contact cannot be reached, and the company
+                      // may well have none yet – so the picker can create one.
+                      if (event.target.value === NEW_CONTACT) { setAddingContact(true); return; }
+                      patch.mutate({ contactId: event.target.value || null });
+                    }}
                   >
                     <option value="">{t('crm.noContact')}</option>
+                    <option value={NEW_CONTACT}>{t('crm.newContactOption')}</option>
                     {(contactsQ.data ?? []).map((contact) => (
                       <option key={contact.id} value={contact.id}>
                         {[contact.firstName, contact.lastName].filter(Boolean).join(' ')}
@@ -253,6 +274,13 @@ export function LeadDetailPage({ id }: { id: string }) {
           )}
         </aside>
       </div>
+
+      <ContactDialog
+        open={addingContact}
+        onClose={() => setAddingContact(false)}
+        companyId={lead.companyId}
+        onCreated={(contact) => patch.mutate({ contactId: contact.id })}
+      />
     </div>
   );
 }

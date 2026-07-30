@@ -309,9 +309,11 @@ export function NewDealDialog({ open, onClose, lockedCompanyId, defaultStageId, 
 }
 
 /** Create or edit a contact: pass `contact` to edit, omit it to create. */
-export function ContactDialog({ open, onClose, companyId, contact }: {
+export function ContactDialog({ open, onClose, companyId, contact, onCreated }: {
   open: boolean; onClose: () => void; companyId: string;
   contact?: { id: string; firstName?: string | null; lastName?: string | null; email?: string | null; phone?: string | null; position?: string | null };
+  /** Fired only on create, so a lead can attach the contact it just made. */
+  onCreated?: (created: { id: string }) => void;
 }) {
   const t = useT();
   const qc = useQueryClient();
@@ -342,14 +344,15 @@ export function ContactDialog({ open, onClose, companyId, contact }: {
         email: email.trim() || null, phone: phone.trim() || null, position: position.trim() || null,
       };
       return contact
-        ? api.patch(`/contacts/${contact.id}`, body)
-        : api.post('/contacts', { companyId, ...body, email: body.email ?? undefined, phone: body.phone ?? undefined, position: body.position ?? undefined });
+        ? api.patch(`/contacts/${contact.id}`, body).then(() => null)
+        : api.post<{ id: string }>('/contacts', { companyId, ...body, email: body.email ?? undefined, phone: body.phone ?? undefined, position: body.position ?? undefined });
     },
-    onSuccess: () => {
+    onSuccess: (created) => {
       qc.invalidateQueries({ queryKey: ['contacts', companyId] });
       toast(t('common.saved'));
       reset();
       onClose();
+      if (created) onCreated?.(created);
     },
     onError: (e) => setError(errMsg(e, t('crm.addContactFailed'))),
   });

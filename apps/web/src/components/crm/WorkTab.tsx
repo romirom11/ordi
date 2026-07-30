@@ -13,6 +13,7 @@ import {
 export function WorkTab() {
   const t = useT();
   const can = useCan();
+  const navigate = useNavigate();
   const [scope, setScope] = useState<'mine' | 'all'>('mine');
   const workQ = useSalesWork(scope);
   const [complete, setComplete] = useState<SalesActivity | null>(null);
@@ -63,7 +64,17 @@ export function WorkTab() {
           </Select>
         </div>
         {total === 0 && (
-          <EmptyState icon={<Check size={20} />} title={t('crm.allCaughtUp')} hint={t('crm.allCaughtUpHint')} />
+          <EmptyState
+            icon={<Check size={20} />}
+            title={t('crm.allCaughtUp')}
+            hint={t('crm.allCaughtUpHint')}
+            // The queue is where the CRM opens, so on day one this is the first
+            // thing a new seller meets. An empty state with nowhere to go is a
+            // dead end; from here the next move is to add a lead.
+            action={can('crm.write')
+              ? <Button size="sm" onClick={() => navigate('/crm/leads')}>{t('crm.goToLeads')}</Button>
+              : undefined}
+          />
         )}
         {groups.filter((group) => group.rows.length > 0).map((group) => (
           <section key={group.key}>
