@@ -12,6 +12,7 @@ import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { guard } from '../../core/rbac';
 import { err } from '../../lib/errors';
+import { idPage } from '../../lib/http';
 import { assertProject } from '../../core/access';
 import * as svc from './service';
 
@@ -45,14 +46,17 @@ export function tasksRoutes() {
 
   // ── Tasks ──
   app.get('/tasks', async (c) => {
-    const limit = Number(c.req.query('limit') ?? 50);
+    // The list minted a `nextCursor` long before it read one back, so every
+    // caller silently saw the newest page and nothing behind it.
+    const { limit, cursor } = idPage(c, 50, 200);
     return c.json(await svc.listTasks(currentActor(c), {
       projectId: c.req.query('projectId'), status: c.req.query('status'), priority: c.req.query('priority'),
       assignee: c.req.query('assignee'), cycleId: c.req.query('cycleId'), type: c.req.query('type'),
+      parentId: c.req.query('parentId'),
       // `label` takes one id or a comma-separated set; a set means all of them.
       labels: (c.req.query('label') ?? '').split(',').map((s) => s.trim()).filter(Boolean),
       q: c.req.query('q'), dueFrom: c.req.query('dueFrom'), dueTo: c.req.query('dueTo'),
-      cfFilters: parseCfFilters(c), limit,
+      cfFilters: parseCfFilters(c), cursor, limit,
     }));
   });
 

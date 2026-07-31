@@ -4,7 +4,7 @@ import {
   CalendarDays, Plus,
   LayoutDashboard, ListChecks, Repeat, CalendarClock, Settings, ChevronRight,
 } from 'lucide-react';
-import { api, qs, ApiError } from '../lib/api';
+import { api, qs, getAllPages, ApiError } from '../lib/api';
 import { Link, useNavigate, useOpen, useSearchParams, type OpenIntent } from '../lib/router';
 import { useCan, useProjectRole } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
@@ -442,7 +442,8 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, canWrite, 
   const updatePrefs = (patch: Partial<TaskViewPrefs>) =>
     setPrefsState((p) => { const next = { ...p, ...patch }; savePrefs(id, next); return next; });
 
-  const tasksQ = useQuery<Task[]>({ queryKey: ['tasks', id], queryFn: () => api.get<{ data: Task[] }>(`/tasks${qs({ projectId: id })}`).then((r) => r.data) });
+  // The whole project, not the newest page: grouping and ordering happen here.
+  const tasksQ = useQuery<Task[]>({ queryKey: ['tasks', id], queryFn: () => getAllPages<Task>('/tasks', { projectId: id }) });
   const allTasks = useMemo(() => tasksQ.data ?? [], [tasksQ.data]);
   // Task labels only: the project vocabulary never applies to a task list.
   const labelsQ = useLabels('task');

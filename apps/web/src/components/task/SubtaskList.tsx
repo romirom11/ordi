@@ -6,7 +6,7 @@
 import { useState } from 'react';
 import { CornerDownLeft, Plus, Trash2 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, ApiError } from '../../lib/api';
+import { api, getAllPages, ApiError } from '../../lib/api';
 import { useNavigate, useOpen } from '../../lib/router';
 import { ProgressRing, StatusIcon, Tooltip, cn } from '../ui';
 import { toast } from '../overlays';
@@ -37,8 +37,9 @@ export function SubtaskList({ taskId, projectId, projectKey, statuses }: {
 
   const subtasksQ = useQuery({
     queryKey: ['subtasks', taskId],
-    queryFn: () => api.get<{ data: SubtaskRow[] }>(`/tasks?projectId=${projectId}`)
-      .then((r) => r.data.filter((x) => x.parentId === taskId)),
+    // Filtered server-side: picking children out of the project's newest page
+    // hid the sub-tasks of any task that had scrolled off it.
+    queryFn: () => getAllPages<SubtaskRow>('/tasks', { projectId, parentId: taskId }),
   });
   const subtasks = subtasksQ.data ?? [];
 

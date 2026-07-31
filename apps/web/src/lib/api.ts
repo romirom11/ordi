@@ -85,6 +85,28 @@ export const api = {
   del: <T>(path: string) => request<T>('DELETE', path),
 };
 
+/**
+ * Walk a cursor-paged list to the end.
+ *
+ * A view that groups and sorts client-side needs the whole set, not the newest
+ * page: `/tasks` answers 50 rows by default, so a project past that showed a
+ * partial board with no hint that the rest existed. `maxPages` is a runaway
+ * guard, not a page size — 40 pages of 200 is 8k rows, past which a screen that
+ * renders every row is the wrong tool anyway.
+ */
+export async function getAllPages<T>(path: string, params: Record<string, unknown> = {}, maxPages = 40): Promise<T[]> {
+  const out: T[] = [];
+  let cursor: string | null = null;
+  for (let i = 0; i < maxPages; i++) {
+    const res: { data: T[]; nextCursor?: string | null } =
+      await api.get<{ data: T[]; nextCursor?: string | null }>(`${path}${qs({ ...params, limit: 200, cursor })}`);
+    out.push(...(res.data ?? []));
+    cursor = res.nextCursor ?? null;
+    if (!cursor) break;
+  }
+  return out;
+}
+
 export function qs(params: Record<string, unknown>): string {
   const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {

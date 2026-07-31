@@ -63,3 +63,58 @@ describe('task list filters', () => {
     expect(await titles(`status=${statusByCategory.done}`)).toEqual([]);
   });
 });
+
+/**
+ * The list minted a `nextCursor` from `createdAt` and the route never read one
+ * back, so every caller saw the newest page and nothing behind it — a board
+ * silently stopped at the default 50 tasks.
+ */
+describe('task list pagination', () => {
+  const pageOf = (query: string) =>
+    json(reqAs(users.owner!.cookie).get(`/tasks?projectId=${projectId}&${query}`));
+
+  it('walks every task through the cursor, once each', async () => {
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let i = 0; i < 10; i++) {
+      const res: any = await pageOf(`limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
+      expect(res.data.length).toBeLessThanOrEqual(2);
+      seen.push(...res.data.map((t: any) => t.title));
+      cursor = res.nextCursor;
+      if (!cursor) break;
+    }
+    expect(cursor).toBeNull();
+    expect(seen.sort()).toEqual(['August case study', 'August opener', 'September piece', 'Undated idea']);
+  });
+
+  it('stops paging when the last page fits', async () => {
+    const res: any = await pageOf('limit=100');
+    expect(res.data).toHaveLength(4);
+    expect(res.nextCursor).toBeNull();
+  });
+
+  it('carries the filters across pages', async () => {
+    const first: any = await pageOf(`label=${labels.linkedin}&limit=2`);
+    expect(first.data).toHaveLength(2);
+    expect(first.nextCursor).toBeTruthy();
+    const second: any = await pageOf(`label=${labels.linkedin}&limit=2&cursor=${encodeURIComponent(first.nextCursor)}`);
+    expect(second.nextCursor).toBeNull();
+    const all = [...first.data, ...second.data].map((t: any) => t.title).sort();
+    expect(all).toEqual(['August case study', 'August opener', 'September piece']);
+  });
+
+  // Its own project: the checklist read the project's newest page and picked
+  // children out of it, so a parent that had scrolled off showed as empty.
+  it('returns one parent’s children rather than the whole project', async () => {
+    const owner = reqAs(users.owner!.cookie);
+    const type = await json(owner.post('/project-types', { name: 'Nested', revenueSource: 'none' }));
+    const p = await json(owner.post('/projects', { name: 'Nested', key: 'NST', projectTypeId: type.id }));
+    const parent = await json(owner.post('/tasks', { projectId: p.id, title: 'Parent' }));
+    await json(owner.post('/tasks', { projectId: p.id, title: 'Child A', parentId: parent.id }));
+    await json(owner.post('/tasks', { projectId: p.id, title: 'Child B', parentId: parent.id }));
+    await json(owner.post('/tasks', { projectId: p.id, title: 'Unrelated' }));
+
+    const res: any = await json(owner.get(`/tasks?projectId=${p.id}&parentId=${parent.id}`));
+    expect(res.data.map((t: any) => t.title).sort()).toEqual(['Child A', 'Child B']);
+  });
+});

@@ -5,7 +5,7 @@
  * settings.manage. Money/numeric columns are strings.
  */
 import {
-  getDb, schema, eq, and, or, isNull, isNotNull, inArray, notInArray, desc, asc, sql, type SQL,
+  getDb, schema, eq, and, or, isNull, isNotNull, inArray, notInArray, lte, desc, asc, sql, type SQL,
 } from '@ordi/db';
 import { ulid } from 'ulid';
 import { MAX_SUBTASK_DEPTH, appendPosition, buildBranchName, type CustomFieldFilter, type LabelScope } from '@ordi/shared';
@@ -20,7 +20,7 @@ import { extractMentions } from '../kb/service';
 import { encrypt, generateToken } from '../../lib/crypto';
 import { sendEmailNow } from '../../lib/email';
 import { asLocale, loadBranding, renderEmail, tr } from '../../lib/email-templates';
-import { page } from '../../lib/http';
+import { pageById } from '../../lib/http';
 
 const { tasks, projects, taskStatuses, taskAssignees, taskLabels, projectMembers, cycles } = schema;
 
@@ -370,10 +370,11 @@ async function assertSubtaskDepth(parentId: string | null | undefined) {
   }
 }
 
+/** Cursor-paged on `id desc`; see `idPage` in lib/http for why the key is the id. */
 export async function listTasks(actor: Actor, params: {
   projectId?: string; status?: string; priority?: string; assignee?: string; cycleId?: string;
-  type?: string; labels?: string[]; q?: string; dueFrom?: string; dueTo?: string;
-  cfFilters?: CustomFieldFilter[]; limit: number;
+  type?: string; parentId?: string; labels?: string[]; q?: string; dueFrom?: string; dueTo?: string;
+  cfFilters?: CustomFieldFilter[]; cursor?: { id?: string } | null; limit: number;
 }) {
   const { db } = getDb();
   let scope: string[];
@@ -400,17 +401,21 @@ export async function listTasks(actor: Actor, params: {
     params.priority ? eq(tasks.priority, params.priority) : undefined,
     params.cycleId ? eq(tasks.cycleId, params.cycleId) : undefined,
     params.type ? eq(tasks.typeId, params.type) : undefined,
+    // A checklist asks for one parent's children, not for the whole project.
+    params.parentId ? eq(tasks.parentId, params.parentId) : undefined,
     params.q ? sql`${tasks.title} ilike ${'%' + params.q + '%'}` : undefined,
     // due_date is a YYYY-MM-DD text column, so the window compares lexically;
     // tasks with no date fall outside it, as a calendar query means them to.
     params.dueFrom ? sql`${tasks.dueDate} >= ${params.dueFrom}` : undefined,
     params.dueTo ? sql`${tasks.dueDate} <= ${params.dueTo}` : undefined,
     params.assignee ? inArray(tasks.id, db.select({ id: taskAssignees.taskId }).from(taskAssignees).where(eq(taskAssignees.userId, params.assignee))) : undefined,
+    // Inclusive: `pageById` mints the cursor from the first row of the next page.
+    params.cursor?.id ? lte(tasks.id, params.cursor.id) : undefined,
     ...byLabel,
     ...cf,
-  )).orderBy(desc(tasks.createdAt)).limit(params.limit + 1);
+  )).orderBy(desc(tasks.id)).limit(params.limit + 1);
 
-  const paged = page(rows, params.limit, (r) => ({ createdAt: r.createdAt }));
+  const paged = pageById(rows, params.limit);
   const ids = paged.data.map((t) => t.id);
   const projectIds = [...new Set(paged.data.map((t) => t.projectId))];
 
