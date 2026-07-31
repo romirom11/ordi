@@ -24,7 +24,8 @@ import {
   useDealStages, useLead, useProjectsLookup, useUsersLookup,
   CURRENCIES, type Company, type Deal, type ProjectLite, type Stage,
 } from '../components/crm/shared';
-import { EditableName, FilesSection, NotesSection, SectionHeader } from '../components/crm/detail';
+import { EditableName, NotesSection, SectionHeader } from '../components/crm/detail';
+import { FilesSection } from '../components/FilesSection';
 import { LostReasonDialog } from '../components/crm/dialogs';
 import { SalesActivityPanel } from '../components/crm/SalesActivityPanel';
 import { DateField } from '../components/DatePicker';
