@@ -5,7 +5,7 @@
  * the author or a project admin.
  */
 import { Hono } from 'hono';
-import { getDb, schema, eq, and, asc, desc, sql } from '@ordi/db';
+import { getDb, schema, eq, and, asc, desc, inArray, isNull, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import { milestoneInputSchema, milestonePatchSchema, projectUpdatePostSchema, projectUpdatePatchSchema } from '@ordi/shared';
 import type { AppEnv } from '../../context';
@@ -25,6 +25,32 @@ async function loadMilestone(id: string) {
   const [row] = await db.select().from(milestones).where(eq(milestones.id, id));
   if (!row) throw err.notFound('Milestone not found');
   return row;
+}
+
+/**
+ * A milestone is what its tasks say it is: the counts come back with the row so
+ * the overview shows real progress instead of a hand-ticked checkbox. `done`
+ * stays writable — a milestone can be called finished while stragglers remain.
+ */
+async function withTaskCounts<T extends { id: string }>(rows: T[]): Promise<(T & { taskCount: number; doneCount: number })[]> {
+  if (!rows.length) return [];
+  const { db } = getDb();
+  const counts = await db
+    .select({
+      milestoneId: tasks.milestoneId,
+      total: sql<number>`count(*)::int`,
+      done: sql<number>`count(*) filter (where ${taskStatuses.category} = 'done')::int`,
+    })
+    .from(tasks)
+    .innerJoin(taskStatuses, eq(taskStatuses.id, tasks.statusId))
+    .where(and(inArray(tasks.milestoneId, rows.map((r) => r.id)), isNull(tasks.deletedAt)))
+    .groupBy(tasks.milestoneId);
+  const byId = new Map(counts.map((c) => [c.milestoneId, c]));
+  return rows.map((r) => ({
+    ...r,
+    taskCount: byId.get(r.id)?.total ?? 0,
+    doneCount: byId.get(r.id)?.done ?? 0,
+  }));
 }
 
 async function loadUpdate(id: string) {
@@ -156,7 +182,7 @@ export function projectOverviewRoutes() {
     const rows = await db.select().from(milestones)
       .where(eq(milestones.projectId, projectId))
       .orderBy(asc(milestones.position), asc(milestones.createdAt));
-    return c.json({ data: rows });
+    return c.json({ data: await withTaskCounts(rows) });
   });
 
   app.post('/projects/:id/milestones', async (c) => {

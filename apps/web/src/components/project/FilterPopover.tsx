@@ -1,10 +1,11 @@
 /**
  * Linear-style Filter popover: a search field on top, then filter dimensions
- * (Status / Priority / Assignee / Labels / Due date). Picking a dimension slides
+ * (Status / Priority / Assignee / Labels / Milestone / Due date). Picking a dimension
+ * slides
  * to its option list; options multi-select without closing the popover.
  */
 import { useMemo, useState, type ReactNode } from 'react';
-import { CalendarDays, Check, ChevronLeft, ChevronRight, Filter, Search, Tag, UserCircle2 } from 'lucide-react';
+import { CalendarDays, Check, ChevronLeft, ChevronRight, Diamond, Filter, Search, Tag, UserCircle2 } from 'lucide-react';
 import { Avatar, IconButton, PriorityIcon, StatusIcon, Tooltip, cn } from '../ui';
 import { DropdownMenu } from '../overlays';
 import { useT } from '../../lib/i18n';
@@ -16,8 +17,9 @@ import type { UserLite } from './pickers';
 
 export interface LabelLite { id: string; name: string; color?: string | null }
 export interface StatusLite { id: string; name: string; category?: string; color?: string }
+export interface MilestoneLite { id: string; name: string; done?: boolean }
 
-type Dim = 'status' | 'priority' | 'assignee' | 'label' | 'due';
+type Dim = 'status' | 'priority' | 'assignee' | 'label' | 'milestone' | 'due';
 
 function toggle(list: string[], id: string): string[] {
   return list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
@@ -39,8 +41,8 @@ function OptionRow({ icon, label, selected, onToggle }: {
   );
 }
 
-function FilterPanel({ statuses, labels, users, filters, onChange }: {
-  statuses: StatusLite[]; labels: LabelLite[]; users: UserLite[];
+function FilterPanel({ statuses, labels, users, milestones, filters, onChange }: {
+  statuses: StatusLite[]; labels: LabelLite[]; users: UserLite[]; milestones: MilestoneLite[];
   filters: TaskFilters; onChange: (f: TaskFilters) => void;
 }) {
   const t = useT();
@@ -52,6 +54,7 @@ function FilterPanel({ statuses, labels, users, filters, onChange }: {
     { key: 'priority', label: t('tasks.priority'), icon: <PriorityIcon priority="high" size={14} />, count: filters.priorities.length },
     { key: 'assignee', label: t('tasksview.assignee'), icon: <UserCircle2 size={14} />, count: filters.assigneeIds.length },
     { key: 'label', label: t('tasksview.labels'), icon: <Tag size={14} />, count: filters.labelIds.length },
+    { key: 'milestone', label: t('tasksview.milestone'), icon: <Diamond size={14} />, count: filters.milestoneIds.length },
     { key: 'due', label: t('tasks.dueDate'), icon: <CalendarDays size={14} />, count: filters.due ? 1 : 0 },
   ];
 
@@ -94,6 +97,16 @@ function FilterPanel({ statuses, labels, users, filters, onChange }: {
           selected: filters.labelIds.includes(l.id),
           toggle: () => onChange({ ...filters, labelIds: toggle(filters.labelIds, l.id) }),
         }));
+      case 'milestone': {
+        const rows = [...milestones, { id: 'none', name: t('tasksview.noMilestone') }];
+        return rows.filter((m) => match(m.name)).map((m) => ({
+          key: m.id,
+          icon: <Diamond size={14} />,
+          label: m.name,
+          selected: filters.milestoneIds.includes(m.id),
+          toggle: () => onChange({ ...filters, milestoneIds: toggle(filters.milestoneIds, m.id) }),
+        }));
+      }
       case 'due':
         return DUE_PRESETS.filter((p) => match(t(DUE_LABEL_KEY[p]))).map((p: DuePreset) => ({
           key: p,
@@ -106,7 +119,7 @@ function FilterPanel({ statuses, labels, users, filters, onChange }: {
         return [];
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dim, q, statuses, labels, users, filters, onChange, t]);
+  }, [dim, q, statuses, labels, users, milestones, filters, onChange, t]);
 
   return (
     <div className="w-full">
@@ -165,8 +178,8 @@ function FilterPanel({ statuses, labels, users, filters, onChange }: {
   );
 }
 
-export function FilterPopover({ statuses, labels, users, filters, onChange }: {
-  statuses: StatusLite[]; labels: LabelLite[]; users: UserLite[];
+export function FilterPopover({ statuses, labels, users, milestones, filters, onChange }: {
+  statuses: StatusLite[]; labels: LabelLite[]; users: UserLite[]; milestones: MilestoneLite[];
   filters: TaskFilters; onChange: (f: TaskFilters) => void;
 }) {
   const t = useT();
@@ -183,7 +196,7 @@ export function FilterPopover({ statuses, labels, users, filters, onChange }: {
         </Tooltip>
       }
     >
-      <FilterPanel statuses={statuses} labels={labels} users={users} filters={filters} onChange={onChange} />
+      <FilterPanel statuses={statuses} labels={labels} users={users} milestones={milestones} filters={filters} onChange={onChange} />
     </DropdownMenu>
   );
 }

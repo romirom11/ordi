@@ -52,7 +52,7 @@ export function tasksRoutes() {
     return c.json(await svc.listTasks(currentActor(c), {
       projectId: c.req.query('projectId'), status: c.req.query('status'), priority: c.req.query('priority'),
       assignee: c.req.query('assignee'), cycleId: c.req.query('cycleId'), type: c.req.query('type'),
-      parentId: c.req.query('parentId'),
+      parentId: c.req.query('parentId'), milestoneId: c.req.query('milestoneId'),
       // `label` takes one id or a comma-separated set; a set means all of them.
       labels: (c.req.query('label') ?? '').split(',').map((s) => s.trim()).filter(Boolean),
       q: c.req.query('q'), dueFrom: c.req.query('dueFrom'), dueTo: c.req.query('dueTo'),

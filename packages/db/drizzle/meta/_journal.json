@@ -162,6 +162,13 @@
       "when": 1785361094637,
       "tag": "0022_drop_legacy_deal_marker",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1785505707830,
+      "tag": "0023_add_task_milestone",
+      "breakpoints": true
     }
   ]
 }

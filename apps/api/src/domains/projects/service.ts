@@ -354,6 +354,18 @@ export async function saveProjectAsTemplate(actor: Actor, projectId: string, nam
 
 // ─────────────────────────── Tasks ───────────────────────────
 
+/**
+ * A milestone belongs to one project, so a task can only carry one of its own
+ * project's milestones — otherwise the overview would count work it does not
+ * own, and moving a task between projects would drag a stale grouping with it.
+ */
+async function assertMilestoneInProject(milestoneId: string, projectId: string): Promise<void> {
+  const { db } = getDb();
+  const [ms] = await db.select({ id: schema.milestones.id }).from(schema.milestones)
+    .where(and(eq(schema.milestones.id, milestoneId), eq(schema.milestones.projectId, projectId)));
+  if (!ms) throw err.validation('milestoneId must be a milestone of the same project');
+}
+
 async function assertSubtaskDepth(parentId: string | null | undefined) {
   if (!parentId) return;
   const { db } = getDb();
@@ -373,7 +385,7 @@ async function assertSubtaskDepth(parentId: string | null | undefined) {
 /** Cursor-paged on `id desc`; see `idPage` in lib/http for why the key is the id. */
 export async function listTasks(actor: Actor, params: {
   projectId?: string; status?: string; priority?: string; assignee?: string; cycleId?: string;
-  type?: string; parentId?: string; labels?: string[]; q?: string; dueFrom?: string; dueTo?: string;
+  type?: string; parentId?: string; milestoneId?: string; labels?: string[]; q?: string; dueFrom?: string; dueTo?: string;
   cfFilters?: CustomFieldFilter[]; cursor?: { id?: string } | null; limit: number;
 }) {
   const { db } = getDb();
@@ -403,6 +415,7 @@ export async function listTasks(actor: Actor, params: {
     params.type ? eq(tasks.typeId, params.type) : undefined,
     // A checklist asks for one parent's children, not for the whole project.
     params.parentId ? eq(tasks.parentId, params.parentId) : undefined,
+    params.milestoneId ? eq(tasks.milestoneId, params.milestoneId) : undefined,
     params.q ? sql`${tasks.title} ilike ${'%' + params.q + '%'}` : undefined,
     // due_date is a YYYY-MM-DD text column, so the window compares lexically;
     // tasks with no date fall outside it, as a calendar query means them to.
@@ -449,11 +462,13 @@ export async function createTask(actor: Actor, input: any) {
   const { db } = getDb();
   const id = ulid();
   const statusId = input.statusId ?? (await defaultStatusId(input.projectId));
+  if (input.milestoneId) await assertMilestoneInProject(input.milestoneId, input.projectId);
   const position = await nextTaskPosition(input.projectId);
   await db.insert(tasks).values({
     id, projectId: input.projectId, number: 0, title: input.title,
     description: input.description ?? null, statusId, typeId: input.typeId ?? null,
     priority: input.priority ?? 'none', parentId: input.parentId ?? null,
+    milestoneId: input.milestoneId ?? null,
     dueDate: input.dueDate ?? null, startDate: input.startDate ?? null,
     estimate: input.estimate != null ? String(input.estimate) : null,
     cycleId: input.cycleId ?? null, position, customFields: input.customFields ?? {},
@@ -527,9 +542,10 @@ export async function updateTask(actor: Actor, id: string, input: any) {
   assertVersion(before, input.version, before);
 
   const patch: Record<string, unknown> = {};
-  for (const k of ['title', 'description', 'statusId', 'typeId', 'priority', 'parentId', 'dueDate', 'startDate', 'cycleId']) {
+  for (const k of ['title', 'description', 'statusId', 'typeId', 'priority', 'parentId', 'milestoneId', 'dueDate', 'startDate', 'cycleId']) {
     if (input[k] !== undefined) patch[k] = input[k];
   }
+  if (input.milestoneId) await assertMilestoneInProject(input.milestoneId, before.projectId);
   if (input.customFields !== undefined) patch.customFields = mergeCustomFields(before.customFields, input.customFields);
   if (input.estimate !== undefined) patch.estimate = input.estimate != null ? String(input.estimate) : null;
   if (input.parentId !== undefined && input.parentId) await assertSubtaskDepth(input.parentId);

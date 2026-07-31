@@ -39,7 +39,7 @@ export function DisplayPopover({ prefs, onChange }: {
 
   const groupingLabel: Record<Grouping, string> = {
     status: t('common.status'), assignee: t('tasksview.assignee'), priority: t('tasks.priority'),
-    label: t('tasksview.labels'), none: t('tasksview.none'),
+    label: t('tasksview.labels'), milestone: t('tasksview.milestone'), none: t('tasksview.none'),
   };
   const orderingLabel: Record<Ordering, string> = {
     priority: t('tasks.priority'), dueDate: t('tasks.dueDate'), created: t('tasksview.orderCreated'), title: t('common.title'),

@@ -6,14 +6,14 @@
  */
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bookmark, CalendarDays, Plus, X } from 'lucide-react';
+import { Bookmark, CalendarDays, Diamond, Plus, X } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { useMe } from '../../lib/auth';
 import { Avatar, Button, IconButton, Input, PriorityIcon, Spinner, StatusIcon, Tooltip, cn } from '../ui';
 import { ConfirmDialog, Dialog, DropdownMenu, MenuLabel, MenuSeparator, toast, useMenuClose } from '../overlays';
 import { useT } from '../../lib/i18n';
 import type { SavedView } from '../views/SavedViewsBar';
-import { FilterPopover, type LabelLite, type StatusLite } from './FilterPopover';
+import { FilterPopover, type LabelLite, type MilestoneLite, type StatusLite } from './FilterPopover';
 import { DisplayPopover } from './DisplayPopover';
 import {
   DUE_LABEL_KEY, PRIORITY_LABEL_KEY, EMPTY_FILTERS,
@@ -41,9 +41,9 @@ function Chip({ icon, label, onRemove }: { icon: ReactNode; label: string; onRem
   );
 }
 
-function FilterChips({ filters, onFilters, statuses, labels, users }: {
+function FilterChips({ filters, onFilters, statuses, labels, users, milestones }: {
   filters: TaskFilters; onFilters: (f: TaskFilters) => void;
-  statuses: StatusLite[]; labels: LabelLite[]; users: UserLite[];
+  statuses: StatusLite[]; labels: LabelLite[]; users: UserLite[]; milestones: MilestoneLite[];
 }) {
   const t = useT();
   const chips: ReactNode[] = [];
@@ -69,6 +69,12 @@ function FilterChips({ filters, onFilters, statuses, labels, users }: {
     chips.push(<Chip key={`l-${lid}`}
       icon={<span className="block h-2 w-2 rounded-full" style={{ backgroundColor: l.color ?? '#8a8f98' }} />} label={l.name}
       onRemove={() => onFilters({ ...filters, labelIds: filters.labelIds.filter((x) => x !== lid) })} />);
+  }
+  for (const mid of filters.milestoneIds) {
+    const name = mid === 'none' ? t('tasksview.noMilestone') : milestones.find((x) => x.id === mid)?.name;
+    if (!name) continue;
+    chips.push(<Chip key={`m-${mid}`} icon={<Diamond size={12} className="text-muted-foreground" />} label={name}
+      onRemove={() => onFilters({ ...filters, milestoneIds: filters.milestoneIds.filter((x) => x !== mid) })} />);
   }
   if (filters.due) {
     chips.push(<Chip key="due" icon={<CalendarDays size={12} className="text-muted-foreground" />} label={t(DUE_LABEL_KEY[filters.due])}
@@ -148,7 +154,7 @@ function SavedViewsList({ views, loading, myId, onApply, onDelete, onSave }: {
 
 /* ───────────────────────── Toolbar ───────────────────────── */
 
-export function TasksToolbar({ projectId, prefs, onPrefs, filters, onFilters, statuses, labels, users }: {
+export function TasksToolbar({ projectId, prefs, onPrefs, filters, onFilters, statuses, labels, users, milestones }: {
   projectId: string;
   prefs: TaskViewPrefs;
   onPrefs: (patch: Partial<TaskViewPrefs>) => void;
@@ -157,6 +163,7 @@ export function TasksToolbar({ projectId, prefs, onPrefs, filters, onFilters, st
   statuses: StatusLite[];
   labels: LabelLite[];
   users: UserLite[];
+  milestones: MilestoneLite[];
 }) {
   const t = useT();
   const qc = useQueryClient();
@@ -222,7 +229,7 @@ export function TasksToolbar({ projectId, prefs, onPrefs, filters, onFilters, st
     <>
       <div className="sticky top-0 z-20 border-b border-border bg-surface/95 px-4 backdrop-blur-sm">
         <div className="flex min-h-[38px] flex-wrap items-center gap-1.5 py-1">
-          <FilterChips filters={filters} onFilters={onFilters} statuses={statuses} labels={labels} users={users} />
+          <FilterChips filters={filters} onFilters={onFilters} statuses={statuses} labels={labels} users={users} milestones={milestones} />
           <div className="ml-auto flex items-center gap-0.5 pl-2">
             <DropdownMenu
               align="end"
@@ -244,7 +251,7 @@ export function TasksToolbar({ projectId, prefs, onPrefs, filters, onFilters, st
                 onSave={() => { setSaveName(''); setSaving(true); }}
               />
             </DropdownMenu>
-            <FilterPopover statuses={statuses} labels={labels} users={users} filters={filters} onChange={onFilters} />
+            <FilterPopover statuses={statuses} labels={labels} users={users} milestones={milestones} filters={filters} onChange={onFilters} />
             <DisplayPopover prefs={prefs} onChange={onPrefs} />
           </div>
         </div>

@@ -174,6 +174,9 @@ export const tasks = pgTable('tasks', {
   typeId: text('type_id').references(() => taskTypes.id),
   priority: text('priority').notNull().default('none'),
   parentId: text('parent_id'),
+  // Which milestone this task delivers. Clearing the milestone frees its tasks
+  // rather than deleting work, hence `set null`.
+  milestoneId: text('milestone_id').references(() => milestones.id, { onDelete: 'set null' }),
   dueDate: text('due_date'),
   startDate: text('start_date'),
   estimate: numeric('estimate'),
@@ -190,6 +193,7 @@ export const tasks = pgTable('tasks', {
   statusIdx: index('tasks_status_idx').on(t.statusId),
   cycleIdx: index('tasks_cycle_idx').on(t.cycleId),
   parentIdx: index('tasks_parent_idx').on(t.parentId),
+  milestoneIdx: index('tasks_milestone_idx').on(t.milestoneId),
 }));
 
 export const taskAssignees = pgTable('task_assignees', {

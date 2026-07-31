@@ -5,7 +5,9 @@
  */
 import type { ReactNode } from 'react';
 import { useState } from 'react';
-import { CalendarDays, CalendarPlus, Gauge, Tag, UserPlus2, X } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { CalendarDays, CalendarPlus, Diamond, Gauge, Tag, UserPlus2, X } from 'lucide-react';
+import { api } from '../../lib/api';
 import {
   Avatar, AvatarGroup, Badge, PriorityIcon, StatusIcon, cn, fmtDate,
 } from '../ui';
@@ -14,7 +16,7 @@ import { LabelsMenu } from '../LabelsMenu';
 import { GitBlock } from './GitBlock';
 import { useT, extendDict } from '../../lib/i18n';
 import { TaskTimer } from './TaskTimer';
-import type { TaskDetail, TaskPatch, TaskStatus, UserLite } from './types';
+import type { MilestoneLite, TaskDetail, TaskPatch, TaskStatus, UserLite } from './types';
 import { Calendar } from '../DatePicker';
 
 extendDict({
@@ -23,6 +25,9 @@ extendDict({
     'task.labels': 'Labels',
     'task.startDate': 'Start date',
     'task.estimate': 'Estimate',
+    'task.milestone': 'Milestone',
+    'task.setMilestone': 'No milestone',
+    'task.noMilestones': 'No milestones in this project yet',
     'task.unassigned': 'Unassigned',
     'task.addLabel': 'Add label',
     'task.setDue': 'Set due date',
@@ -47,6 +52,9 @@ extendDict({
     'task.labels': 'Мітки',
     'task.startDate': 'Дата початку',
     'task.estimate': 'Оцінка',
+    'task.milestone': 'Віха',
+    'task.setMilestone': 'Без віхи',
+    'task.noMilestones': 'У проєкті ще немає віх',
     'task.unassigned': 'Не призначено',
     'task.addLabel': 'Додати мітку',
     'task.setDue': 'Вказати дедлайн',
@@ -189,6 +197,15 @@ export function PropertySidebar({ task, statuses, users, onPatch, hasRepos }: {
 }) {
   const t = useT();
 
+  // The project's milestones, so a task can say which one it delivers.
+  const { data: milestoneRows } = useQuery<MilestoneLite[]>({
+    queryKey: ['milestones', task.projectId],
+    queryFn: () => api.get<{ data: MilestoneLite[] }>(`/projects/${task.projectId}/milestones`).then((r) => r.data),
+    staleTime: 60_000,
+  });
+  const milestones = milestoneRows ?? [];
+  const milestone = milestones.find((m) => m.id === task.milestoneId);
+
   const status = statuses.find((s) => s.id === task.statusId);
   const assigneeIds = task.assignees.map((a) => a.userId);
   const labelIds = task.labels.map((l) => l.id);
@@ -318,6 +335,38 @@ export function PropertySidebar({ task, statuses, users, onPatch, hasRepos }: {
           }
         >
           <LabelsMenu scope="task" value={labelIds} onChange={(ids) => onPatch({ labelIds: ids })} />
+        </DropdownMenu>
+      </Row>
+
+      {/* Milestone */}
+      <Row label={t('task.milestone')}>
+        <DropdownMenu
+          className="w-full"
+          width={220}
+          trigger={
+            <Chip empty={!milestone}>
+              <Diamond size={14} className={cn(milestone?.done && 'text-success')} fill={milestone?.done ? 'currentColor' : 'none'} />
+              <span className="truncate">{milestone?.name ?? t('task.setMilestone')}</span>
+            </Chip>
+          }
+        >
+          {milestones.length === 0 && <MenuLabel>{t('task.noMilestones')}</MenuLabel>}
+          {milestones.map((m) => (
+            <MenuItem
+              key={m.id}
+              icon={<Diamond size={14} className={cn(m.done && 'text-success')} fill={m.done ? 'currentColor' : 'none'} />}
+              checked={m.id === task.milestoneId}
+              onSelect={() => onPatch({ milestoneId: m.id === task.milestoneId ? null : m.id })}
+            >
+              {m.name}
+            </MenuItem>
+          ))}
+          {task.milestoneId && (
+            <>
+              <MenuSeparator />
+              <MenuItem icon={<X size={14} />} danger onSelect={() => onPatch({ milestoneId: null })}>{t('task.clear')}</MenuItem>
+            </>
+          )}
         </DropdownMenu>
       </Row>
 
