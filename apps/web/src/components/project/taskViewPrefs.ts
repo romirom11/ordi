@@ -28,6 +28,8 @@ extendDict({
     'tasksview.ordering': 'Ordering',
     'tasksview.none': 'None',
     'tasksview.orderCreated': 'Created',
+    'tasksview.orderAsc': 'Ascending',
+    'tasksview.orderDesc': 'Descending',
     'tasksview.showSubtasks': 'Show sub-tasks',
     'tasksview.showEmptyGroups': 'Show empty groups',
     'tasksview.displayProps': 'Display properties',
@@ -71,6 +73,8 @@ extendDict({
     'tasksview.ordering': 'Сортування',
     'tasksview.none': 'Немає',
     'tasksview.orderCreated': 'Дата створення',
+    'tasksview.orderAsc': 'За зростанням',
+    'tasksview.orderDesc': 'За спаданням',
     'tasksview.showSubtasks': 'Показувати підзадачі',
     'tasksview.showEmptyGroups': 'Показувати порожні групи',
     'tasksview.displayProps': 'Властивості рядка',
@@ -104,6 +108,9 @@ export type Grouping = typeof GROUPINGS[number];
 export const ORDERINGS = ['priority', 'dueDate', 'created', 'title'] as const;
 export type Ordering = typeof ORDERINGS[number];
 
+export const ORDER_DIRS = ['asc', 'desc'] as const;
+export type OrderDir = typeof ORDER_DIRS[number];
+
 export const DISPLAY_PROPS = ['id', 'priority', 'status', 'assignee', 'labels', 'dueDate', 'progress'] as const;
 export type DisplayProp = typeof DISPLAY_PROPS[number];
 
@@ -111,6 +118,7 @@ export interface TaskViewPrefs {
   view: TaskView;
   grouping: Grouping;
   ordering: Ordering;
+  orderingDir: OrderDir;
   showSubtasks: boolean;
   showEmptyGroups: boolean;
   props: Record<DisplayProp, boolean>;
@@ -122,6 +130,7 @@ export const DEFAULT_PREFS: TaskViewPrefs = {
   view: 'list',
   grouping: 'status',
   ordering: 'priority',
+  orderingDir: 'asc',
   showSubtasks: true,
   showEmptyGroups: true,
   props: { id: true, priority: true, status: true, assignee: true, labels: true, dueDate: true, progress: true },
@@ -153,6 +162,7 @@ export function loadPrefs(projectId: string): TaskViewPrefs {
     view: isTaskView(stored.view) ? stored.view : DEFAULT_PREFS.view,
     grouping: (GROUPINGS as readonly string[]).includes(stored.grouping as string) ? stored.grouping as Grouping : DEFAULT_PREFS.grouping,
     ordering: (ORDERINGS as readonly string[]).includes(stored.ordering as string) ? stored.ordering as Ordering : DEFAULT_PREFS.ordering,
+    orderingDir: (ORDER_DIRS as readonly string[]).includes(stored.orderingDir as string) ? stored.orderingDir as OrderDir : DEFAULT_PREFS.orderingDir,
     props: { ...DEFAULT_PREFS.props, ...(stored.props ?? {}) },
     collapsed: Array.isArray(stored.collapsed) ? stored.collapsed.filter((k): k is string => typeof k === 'string') : [],
   };
@@ -253,32 +263,73 @@ interface OrderableTask {
   priority?: string;
   dueDate?: string | null;
   createdAt?: string;
+  /** Per-project manual order; a numeric column, so it arrives as a string. */
+  position?: string | number | null;
+  /** Per-project counter behind the task ref (ZAJ-7 → 7). */
+  number?: number;
 }
 
-export function orderTasks<T extends OrderableTask>(tasks: T[], ordering: Ordering): T[] {
+/**
+ * Ties used to fall through to `Array#sort` stability, i.e. to whatever order
+ * the API sent — `/tasks` pages newest-first — so ten tasks written out in
+ * order came back 10…1 inside every priority band. Every ordering therefore
+ * ends on one explicit sequence: manual position, then the per-project number,
+ * then creation time. Only tasks of one project are ever ordered together, so
+ * comparing project-scoped position/number is sound.
+ */
+export function orderTasks<T extends OrderableTask>(
+  tasks: T[], ordering: Ordering, dir: OrderDir = DEFAULT_PREFS.orderingDir,
+): T[] {
+  const sign = dir === 'desc' ? -1 : 1;
   const sorted = tasks.slice();
-  switch (ordering) {
-    case 'priority':
-      sorted.sort((a, b) =>
-        (PRIORITY_RANK[a.priority ?? 'none'] ?? 4) - (PRIORITY_RANK[b.priority ?? 'none'] ?? 4)
-        || cmpDue(a.dueDate, b.dueDate));
-      break;
-    case 'dueDate':
-      sorted.sort((a, b) => cmpDue(a.dueDate, b.dueDate));
-      break;
-    case 'created':
-      sorted.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
-      break;
-    case 'title':
-      sorted.sort((a, b) => a.title.localeCompare(b.title));
-      break;
-  }
+  sorted.sort((a, b) => {
+    switch (ordering) {
+      case 'priority': {
+        const byPriority = (PRIORITY_RANK[a.priority ?? 'none'] ?? 4) - (PRIORITY_RANK[b.priority ?? 'none'] ?? 4);
+        if (byPriority) return sign * byPriority;
+        const byDue = cmpDue(a.dueDate, b.dueDate, sign);
+        if (byDue) return byDue;
+        break;
+      }
+      case 'dueDate': {
+        const byDue = cmpDue(a.dueDate, b.dueDate, sign);
+        if (byDue) return byDue;
+        break;
+      }
+      case 'created': {
+        const byCreated = (a.createdAt ?? '').localeCompare(b.createdAt ?? '');
+        if (byCreated) return sign * byCreated;
+        break;
+      }
+      case 'title': {
+        // Numeric collation, or "WP-плагін 10" lands ahead of "WP-плагін 2".
+        const byTitle = a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' });
+        if (byTitle) return sign * byTitle;
+        break;
+      }
+    }
+    return sign * cmpSeq(a, b);
+  });
   return sorted;
 }
 
-function cmpDue(a?: string | null, b?: string | null): number {
+/** A missing due date is an absence, not a date: it sinks either way. */
+function cmpDue(a: string | null | undefined, b: string | null | undefined, sign = 1): number {
   if (!a && !b) return 0;
   if (!a) return 1;
   if (!b) return -1;
-  return a.localeCompare(b);
+  return sign * a.localeCompare(b);
+}
+
+function numOr(v: string | number | null | undefined): number {
+  return v == null || v === '' ? NaN : Number(v);
+}
+
+/** The order a plan was written in: manual position, then number, then time. */
+function cmpSeq(a: OrderableTask, b: OrderableTask): number {
+  const pa = numOr(a.position);
+  const pb = numOr(b.position);
+  if (Number.isFinite(pa) && Number.isFinite(pb) && pa !== pb) return pa - pb;
+  if (a.number != null && b.number != null && a.number !== b.number) return a.number - b.number;
+  return (a.createdAt ?? '').localeCompare(b.createdAt ?? '');
 }

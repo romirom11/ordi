@@ -137,6 +137,7 @@ interface Task {
   id: string; number?: number; ref?: string; title: string; statusId: string; priority?: string;
   dueDate?: string | null; startDate?: string | null; estimate?: number | string | null; version?: number;
   parentId?: string | null; assigneeIds?: string[]; labelIds?: string[]; createdAt?: string;
+  position?: string | number | null;
 }
 interface Cycle {
   id: string; name: string; startDate?: string; endDate?: string; status?: string; goal?: string;
@@ -498,9 +499,9 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, canWrite, 
   const groups = useMemo(() => {
     const grouping = prefs.view === 'board' ? 'status' : prefs.grouping;
     return buildGroups(grouping, visibleTasks, statuses, users, labels, t)
-      .map((g) => ({ ...g, items: orderTasks(g.items, prefs.ordering) }))
+      .map((g) => ({ ...g, items: orderTasks(g.items, prefs.ordering, prefs.orderingDir) }))
       .filter((g) => g.items.length > 0 || (prefs.showEmptyGroups && canWrite) || g.key === 'all');
-  }, [prefs.view, prefs.grouping, prefs.ordering, prefs.showEmptyGroups, visibleTasks, statuses, users, labels, canWrite, t]);
+  }, [prefs.view, prefs.grouping, prefs.ordering, prefs.orderingDir, prefs.showEmptyGroups, visibleTasks, statuses, users, labels, canWrite, t]);
 
   const loading = statusesLoading || tasksQ.isLoading;
   const { view } = prefs;

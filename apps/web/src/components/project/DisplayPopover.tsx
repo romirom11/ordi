@@ -4,7 +4,9 @@
  * chips. Footer resets to defaults.
  */
 import type { ReactNode } from 'react';
-import { CalendarDays, Columns3, GanttChart, List, SlidersHorizontal, Table2 } from 'lucide-react';
+import {
+  ArrowDownWideNarrow, ArrowUpNarrowWide, CalendarDays, Columns3, GanttChart, List, SlidersHorizontal, Table2,
+} from 'lucide-react';
 import { IconButton, SegmentedControl, Select, Switch, Tooltip, cn } from '../ui';
 import { DropdownMenu } from '../overlays';
 import { useT } from '../../lib/i18n';
@@ -49,6 +51,8 @@ export function DisplayPopover({ prefs, onChange }: {
   };
 
   const isListy = prefs.view === 'list' || prefs.view === 'board';
+  const desc = prefs.orderingDir === 'desc';
+  const dirLabel = t(desc ? 'tasksview.orderDesc' : 'tasksview.orderAsc');
 
   return (
     <DropdownMenu
@@ -83,13 +87,24 @@ export function DisplayPopover({ prefs, onChange }: {
           </Select>
         </Row>
         <Row label={t('tasksview.ordering')}>
-          <Select
-            value={prefs.ordering}
-            onChange={(e) => onChange({ ordering: e.target.value as Ordering })}
-            className="h-7 w-[130px] text-xs"
-          >
-            {ORDERINGS.map((o) => <option key={o} value={o}>{orderingLabel[o]}</option>)}
-          </Select>
+          <span className="flex items-center gap-1">
+            <Select
+              value={prefs.ordering}
+              onChange={(e) => onChange({ ordering: e.target.value as Ordering })}
+              className="h-7 w-[130px] text-xs"
+            >
+              {ORDERINGS.map((o) => <option key={o} value={o}>{orderingLabel[o]}</option>)}
+            </Select>
+            <Tooltip label={dirLabel} side="bottom">
+              <IconButton
+                size="sm"
+                aria-label={dirLabel}
+                onClick={() => onChange({ orderingDir: desc ? 'asc' : 'desc' })}
+              >
+                {desc ? <ArrowDownWideNarrow size={14} /> : <ArrowUpNarrowWide size={14} />}
+              </IconButton>
+            </Tooltip>
+          </span>
         </Row>
         <Row label={t('tasksview.showSubtasks')}>
           <Switch checked={prefs.showSubtasks} onChange={(v) => onChange({ showSubtasks: v })} label={t('tasksview.showSubtasks')} />

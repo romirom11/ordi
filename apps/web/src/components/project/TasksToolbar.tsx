@@ -184,7 +184,7 @@ export function TasksToolbar({ projectId, prefs, onPrefs, filters, onFilters, st
         projectId,
         taskFilters: filters,
         display: {
-          grouping: prefs.grouping, ordering: prefs.ordering,
+          grouping: prefs.grouping, ordering: prefs.ordering, orderingDir: prefs.orderingDir,
           showSubtasks: prefs.showSubtasks, showEmptyGroups: prefs.showEmptyGroups, props: prefs.props,
         },
       },
@@ -208,6 +208,8 @@ export function TasksToolbar({ projectId, prefs, onPrefs, filters, onFilters, st
     if (display && typeof display === 'object') {
       if (display.grouping) patch.grouping = display.grouping;
       if (display.ordering) patch.ordering = display.ordering;
+      // Views saved before the direction toggle read as ascending, the default.
+      patch.orderingDir = display.orderingDir === 'desc' ? 'desc' : 'asc';
       if (typeof display.showSubtasks === 'boolean') patch.showSubtasks = display.showSubtasks;
       if (typeof display.showEmptyGroups === 'boolean') patch.showEmptyGroups = display.showEmptyGroups;
       if (display.props && typeof display.props === 'object') patch.props = { ...prefs.props, ...display.props };
