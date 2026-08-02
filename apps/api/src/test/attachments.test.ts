@@ -144,3 +144,59 @@ describe('signed file links', () => {
     expect((await json(res)).error.message).toMatch(/storage/i);
   });
 });
+
+/**
+ * Files hanging off a project. A workspace-wide `projects.read` is not access
+ * to a *private* project, and its files are exactly what it keeps private, so
+ * membership decides here rather than the permission alone.
+ */
+describe('project files', () => {
+  let projectId: string;
+  let typeId: string;
+
+  beforeAll(async () => {
+    const owner = reqAs(users.owner!.cookie);
+    const type = await json(owner.post('/project-types', { name: 'Delivery', revenueSource: 'none' }));
+    typeId = type.id;
+    const project = await json(owner.post('/projects', { name: 'Delivery', key: 'DLV', projectTypeId: typeId }));
+    projectId = project.id;
+  });
+
+  const attach = (cookie: string, entityType: string, entityId: string) => (async () => {
+    const presign = await json(reqAs(cookie).post('/attachments/presign', {
+      filename: 'brief.pdf', size: 2048, mime: 'application/pdf',
+    }));
+    return reqAs(cookie).post('/attachments/register', {
+      fileKey: presign.fileKey, keyToken: presign.keyToken,
+      filename: 'brief.pdf', size: 2048, mime: 'application/pdf', entityType, entityId,
+    });
+  })();
+
+  it('accepts a file on a project and lists it back', async () => {
+    const res = await attach(users.owner!.cookie, 'project', projectId);
+    expect(res.status).toBe(201);
+    const list = await json(reqAs(users.owner!.cookie).get(`/attachments?entityType=project&entityId=${projectId}`));
+    expect(list.data.map((f: any) => f.filename)).toContain('brief.pdf');
+  });
+
+  it('refuses a file on a project that does not exist', async () => {
+    const res = await attach(users.owner!.cookie, 'project', ulid());
+    expect(res.status).toBe(404);
+  });
+
+  it('keeps a private project’s files off a non-member with projects.read', async () => {
+    const owner = reqAs(users.owner!.cookie);
+    const secret = await json(owner.post('/projects', {
+      name: 'Secret', key: 'SCR', projectTypeId: typeId, visibility: 'private',
+    }));
+    const created = await attach(users.owner!.cookie, 'project', secret.id);
+    expect(created.status).toBe(201);
+    const { id } = await json(created);
+
+    // `member` carries projects.read but is not on this private project.
+    const outsider = reqAs(users.member!.cookie);
+    expect((await outsider.get(`/attachments?entityType=project&entityId=${secret.id}`)).status).toBe(404);
+    expect((await outsider.get(`/attachments/${id}/url`)).status).toBe(404);
+    expect((await outsider.del(`/attachments/${id}`)).status).toBe(404);
+  });
+});

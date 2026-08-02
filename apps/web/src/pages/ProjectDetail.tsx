@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  CalendarDays, Plus,
+  CalendarDays, Diamond, Plus,
   LayoutDashboard, ListChecks, Repeat, CalendarClock, Settings, ChevronRight,
 } from 'lucide-react';
-import { api, qs, ApiError } from '../lib/api';
+import { api, qs, getAllPages, ApiError } from '../lib/api';
 import { Link, useNavigate, useOpen, useSearchParams, type OpenIntent } from '../lib/router';
 import { useCan, useProjectRole } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
@@ -20,11 +20,12 @@ import { TimelineView } from '../components/views/TimelineView';
 import { SpreadsheetView } from '../components/views/SpreadsheetView';
 import { RichEditor, EMPTY_DOC } from '../components/richtext/RichEditor';
 import { ProjectAccessPanel } from '../components/ProjectAccessPanel';
+import { FilesSection } from '../components/FilesSection';
 import { ProjectIcon } from '../components/project/ProjectIcon';
 import { PropertiesRail } from '../components/project/PropertiesRail';
 import { ProjectResources, type ProjectLink } from '../components/project/ProjectResources';
 import { ProjectUpdates } from '../components/project/ProjectUpdates';
-import { ProjectMilestones } from '../components/project/ProjectMilestones';
+import { ProjectMilestones, type Milestone } from '../components/project/ProjectMilestones';
 import { ProjectActivity } from '../components/project/ProjectActivity';
 import { ProjectDeals } from '../components/project/ProjectDeals';
 import { ProjectIntegrations } from '../components/project/ProjectIntegrations';
@@ -136,7 +137,8 @@ interface TaskStatus {
 interface Task {
   id: string; number?: number; ref?: string; title: string; statusId: string; priority?: string;
   dueDate?: string | null; startDate?: string | null; estimate?: number | string | null; version?: number;
-  parentId?: string | null; assigneeIds?: string[]; labelIds?: string[]; createdAt?: string;
+  parentId?: string | null; milestoneId?: string | null; assigneeIds?: string[]; labelIds?: string[];
+  createdAt?: string; position?: string | number | null;
 }
 interface Cycle {
   id: string; name: string; startDate?: string; endDate?: string; status?: string; goal?: string;
@@ -235,6 +237,7 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
             isAdmin={isAdmin}
             onPatch={(b) => patchProject.mutate(b)}
             onManageMembers={() => setTab('settings')}
+            onOpenMilestoneTasks={(mid) => navigate(`/projects/${id}?section=tasks&milestone=${mid}`)}
           />
         )}
         {tab === 'tasks' && <TasksTab id={id} statuses={statuses} statusesLoading={statusesQ.isLoading} projectKey={project?.key} users={users} canWrite={canWrite} onOpen={openTask} />}
@@ -376,7 +379,7 @@ interface TaskGroup {
 
 function buildGroups(
   grouping: Grouping, tasks: Task[], statuses: TaskStatus[], users: UserLite[], labels: LabelLite[],
-  t: (k: string) => string,
+  milestones: Milestone[], t: (k: string) => string,
 ): TaskGroup[] {
   switch (grouping) {
     case 'status':
@@ -404,6 +407,21 @@ function buildGroups(
         key: 'assignee:none', label: t('tasksview.noAssignee'),
         icon: <StatusIcon category="backlog" size={14} />,
         items: tasks.filter((x) => !(x.assigneeIds ?? []).length),
+        seed: {},
+      });
+      return groups;
+    }
+    case 'milestone': {
+      const groups: TaskGroup[] = milestones.map((m) => ({
+        key: `milestone:${m.id}`, label: m.name,
+        icon: <Diamond size={13} className={m.done ? 'text-success' : 'text-faint'} fill={m.done ? 'currentColor' : 'none'} />,
+        items: tasks.filter((x) => x.milestoneId === m.id),
+        seed: { milestoneId: m.id },
+      }));
+      groups.push({
+        key: 'milestone:none', label: t('tasksview.noMilestone'),
+        icon: <Diamond size={13} className="text-faint" />,
+        items: tasks.filter((x) => !x.milestoneId),
         seed: {},
       });
       return groups;
@@ -441,7 +459,23 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, canWrite, 
   const updatePrefs = (patch: Partial<TaskViewPrefs>) =>
     setPrefsState((p) => { const next = { ...p, ...patch }; savePrefs(id, next); return next; });
 
-  const tasksQ = useQuery<Task[]>({ queryKey: ['tasks', id], queryFn: () => api.get<{ data: Task[] }>(`/tasks${qs({ projectId: id })}`).then((r) => r.data) });
+  // `?milestone=` arrives from the overview: show that milestone's work, and
+  // group by milestone so the answer to "what is in it" is on screen.
+  const params = useSearchParams();
+  const milestoneParam = params.get('milestone');
+  useEffect(() => {
+    if (!milestoneParam) return;
+    setFilters((f) => ({ ...f, milestoneIds: [milestoneParam] }));
+    setPrefsState((p) => { const next = { ...p, grouping: 'milestone' as Grouping }; savePrefs(id, next); return next; });
+  }, [milestoneParam, id]);
+
+  // The whole project, not the newest page: grouping and ordering happen here.
+  const tasksQ = useQuery<Task[]>({ queryKey: ['tasks', id], queryFn: () => getAllPages<Task>('/tasks', { projectId: id }) });
+  const milestonesQ = useQuery<Milestone[]>({
+    queryKey: ['milestones', id],
+    queryFn: () => api.get<{ data: Milestone[] }>(`/projects/${id}/milestones`).then((r) => r.data),
+  });
+  const milestones = useMemo(() => milestonesQ.data ?? [], [milestonesQ.data]);
   const allTasks = useMemo(() => tasksQ.data ?? [], [tasksQ.data]);
   // Task labels only: the project vocabulary never applies to a task list.
   const labelsQ = useLabels('task');
@@ -497,10 +531,10 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, canWrite, 
 
   const groups = useMemo(() => {
     const grouping = prefs.view === 'board' ? 'status' : prefs.grouping;
-    return buildGroups(grouping, visibleTasks, statuses, users, labels, t)
-      .map((g) => ({ ...g, items: orderTasks(g.items, prefs.ordering) }))
+    return buildGroups(grouping, visibleTasks, statuses, users, labels, milestones, t)
+      .map((g) => ({ ...g, items: orderTasks(g.items, prefs.ordering, prefs.orderingDir) }))
       .filter((g) => g.items.length > 0 || (prefs.showEmptyGroups && canWrite) || g.key === 'all');
-  }, [prefs.view, prefs.grouping, prefs.ordering, prefs.showEmptyGroups, visibleTasks, statuses, users, labels, canWrite, t]);
+  }, [prefs.view, prefs.grouping, prefs.ordering, prefs.orderingDir, prefs.showEmptyGroups, visibleTasks, statuses, users, labels, milestones, canWrite, t]);
 
   const loading = statusesLoading || tasksQ.isLoading;
   const { view } = prefs;
@@ -517,6 +551,7 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, canWrite, 
         statuses={statuses}
         labels={labels}
         users={users}
+        milestones={milestones}
       />
 
       {loading ? (
@@ -998,10 +1033,11 @@ function SummaryInput({ project, canWrite, onPatch }: {
   );
 }
 
-function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageMembers }: {
+function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageMembers, onOpenMilestoneTasks }: {
   id: string; project?: Project; users: UserLite[]; canWrite: boolean; isAdmin: boolean;
   onPatch: (body: Record<string, unknown>) => void;
   onManageMembers: () => void;
+  onOpenMilestoneTasks: (milestoneId: string) => void;
 }) {
   const t = useT();
 
@@ -1024,7 +1060,7 @@ function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageM
   };
 
   return (
-    <PageBody width="wide" className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_280px]">
+    <PageBody width="full" className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_280px]">
       {/* Left: summary, resources, updates, description, milestones, activity */}
       <div className="order-2 min-w-0 space-y-7 lg:order-1">
         {project ? (
@@ -1038,6 +1074,8 @@ function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageM
               />
             </div>
 
+            <FilesSection entityType="project" entityId={id} canWrite={canWrite} />
+
             <ProjectUpdates projectId={id} canWrite={canWrite} isAdmin={isAdmin} />
 
             <section>
@@ -1045,7 +1083,7 @@ function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageM
               <RichEditor key={project.id} value={doc} onChange={onDescChange} editable={canWrite} placeholder={t('projects.aboutPlaceholder')} />
             </section>
 
-            <ProjectMilestones projectId={id} canWrite={canWrite} />
+            <ProjectMilestones projectId={id} canWrite={canWrite} onOpenTasks={onOpenMilestoneTasks} />
 
             <ProjectDeals projectId={id} />
 

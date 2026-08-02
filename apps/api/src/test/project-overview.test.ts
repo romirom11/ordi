@@ -202,3 +202,59 @@ describe('label scopes', () => {
     expect(ok.id).toBeTruthy();
   });
 });
+
+/**
+ * A milestone is a container for work, not a lone checkbox: tasks point at one,
+ * the list reports how far its tasks are, and a milestone from another project
+ * is not a thing a task can carry.
+ */
+describe('milestones hold tasks', () => {
+  const owner = () => reqAs(users.owner!.cookie);
+
+  it('counts a milestone’s tasks and how many are done', async () => {
+    const ms = await json(owner().post(`/projects/${projectId}/milestones`, { name: 'Ship v1' }));
+    const a = await json(owner().post('/tasks', { projectId, title: 'Build it', milestoneId: ms.id }));
+    await json(owner().post('/tasks', { projectId, title: 'Test it', milestoneId: ms.id }));
+    await json(owner().post('/tasks', { projectId, title: 'Unrelated' }));
+
+    let row = ((await json(owner().get(`/projects/${projectId}/milestones`))).data as any[]).find((m) => m.id === ms.id);
+    expect(row.taskCount).toBe(2);
+    expect(row.doneCount).toBe(0);
+
+    const fresh = await json(owner().get(`/tasks/${a.id}`));
+    await json(owner().patch(`/tasks/${a.id}`, { statusId: statusByCategory.done, version: fresh.version }));
+
+    row = ((await json(owner().get(`/projects/${projectId}/milestones`))).data as any[]).find((m) => m.id === ms.id);
+    expect(row.taskCount).toBe(2);
+    expect(row.doneCount).toBe(1);
+  });
+
+  it('lists only the tasks of one milestone', async () => {
+    const ms = await json(owner().post(`/projects/${projectId}/milestones`, { name: 'Filterable' }));
+    await json(owner().post('/tasks', { projectId, title: 'In the milestone', milestoneId: ms.id }));
+    const res = await json(owner().get(`/tasks?projectId=${projectId}&milestoneId=${ms.id}`));
+    expect(res.data.map((t: any) => t.title)).toEqual(['In the milestone']);
+  });
+
+  it('refuses a milestone belonging to another project', async () => {
+    const type = await json(owner().post('/project-types', { name: 'Other', revenueSource: 'none' }));
+    const other = await json(owner().post('/projects', { name: 'Other', key: 'OTH', projectTypeId: type.id }));
+    const foreign = await json(owner().post(`/projects/${other.id}/milestones`, { name: 'Not ours' }));
+
+    const created = await owner().post('/tasks', { projectId, title: 'Wrong milestone', milestoneId: foreign.id });
+    expect(created.status).toBe(400);
+
+    const task = await json(owner().post('/tasks', { projectId, title: 'Right project' }));
+    const patched = await owner().patch(`/tasks/${task.id}`, { milestoneId: foreign.id, version: task.version });
+    expect(patched.status).toBe(400);
+  });
+
+  it('frees the tasks when the milestone is deleted', async () => {
+    const ms = await json(owner().post(`/projects/${projectId}/milestones`, { name: 'Doomed' }));
+    const task = await json(owner().post('/tasks', { projectId, title: 'Survives', milestoneId: ms.id }));
+    await owner().del(`/milestones/${ms.id}`);
+    const after = await json(owner().get(`/tasks/${task.id}`));
+    expect(after.milestoneId).toBeNull();
+    expect(after.title).toBe('Survives');
+  });
+});

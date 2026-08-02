@@ -28,8 +28,9 @@ import {
   type Company, type Contact, type Deal, type Stage,
 } from '../components/crm/shared';
 import {
-  EditableName, FilesSection, InlineEdit, NotesSection, OwnerRailValue, SectionHeader,
+  EditableName, InlineEdit, NotesSection, OwnerRailValue, SectionHeader,
 } from '../components/crm/detail';
+import { FilesSection } from '../components/FilesSection';
 import { DealRows } from '../components/crm/DealRows';
 import { ContactDialog, NewDealDialog, NewLeadDialog } from '../components/crm/dialogs';
 import { NewProjectModal } from './Projects';

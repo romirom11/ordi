@@ -30,6 +30,7 @@ export interface TaskDetail {
   typeId: string | null;
   priority: string;
   parentId: string | null;
+  milestoneId: string | null;
   dueDate: string | null;
   startDate: string | null;
   estimate: string | number | null;
@@ -98,4 +99,13 @@ export interface TaskPatch {
   assigneeIds?: string[];
   labelIds?: string[];
   parentId?: string | null;
+  milestoneId?: string | null;
+}
+
+/** A project milestone as the task sidebar needs it. */
+export interface MilestoneLite {
+  id: string;
+  name: string;
+  done: boolean;
+  targetDate?: string | null;
 }

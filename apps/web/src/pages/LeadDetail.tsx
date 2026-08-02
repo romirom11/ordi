@@ -15,8 +15,9 @@ import {
   useContacts, useDealStages, useLead, useSalesActivities, useUsersLookup,
 } from '../components/crm/shared';
 import {
-  EditableName, FilesSection, InlineEdit, NotesSection, OwnerRailValue, SectionHeader,
+  EditableName, InlineEdit, NotesSection, OwnerRailValue, SectionHeader,
 } from '../components/crm/detail';
+import { FilesSection } from '../components/FilesSection';
 import { SalesActivityPanel } from '../components/crm/SalesActivityPanel';
 import { ContactDialog } from '../components/crm/dialogs';
 

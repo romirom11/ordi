@@ -6,7 +6,7 @@ import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, CalendarDays, Diamond, Plus, Trash2, X } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
-import { Checkbox, IconButton, Skeleton, fmtDate, cn } from '../ui';
+import { Checkbox, IconButton, ProgressRing, Skeleton, Tooltip, fmtDate, cn } from '../ui';
 import { DropdownMenu, MenuItem, MenuSeparator, toast, useMenuClose } from '../overlays';
 import { Calendar } from '../DatePicker';
 import { useT, extendDict } from '../../lib/i18n';
@@ -26,24 +26,34 @@ extendDict({
     'projects.milestoneUp': 'Move up',
     'projects.milestoneDown': 'Move down',
     'projects.milestoneSaveFailed': 'Could not save the milestone.',
+    'projects.milestoneTasks': 'Show its tasks',
+    'projects.milestoneNoTasks': 'No tasks assigned yet',
   },
   uk: {
-    'projects.milestones': 'Віхи',
-    'projects.addMilestone': 'Додати віху…',
+    'projects.milestones': 'Майлстоуни',
+    'projects.addMilestone': 'Додати майлстоун…',
     'projects.milestoneTarget': 'Цільова дата',
-    'projects.milestoneDelete': 'Видалити віху',
+    'projects.milestoneDelete': 'Видалити майлстоун',
     'projects.milestoneUp': 'Перемістити вгору',
     'projects.milestoneDown': 'Перемістити вниз',
-    'projects.milestoneSaveFailed': 'Не вдалося зберегти віху.',
+    'projects.milestoneSaveFailed': 'Не вдалося зберегти майлстоун.',
+    'projects.milestoneTasks': 'Показати задачі',
+    'projects.milestoneNoTasks': 'Задач ще не призначено',
   },
 });
 
 export interface Milestone {
   id: string; projectId: string; name: string; targetDate?: string | null;
   done: boolean; position: number; createdAt?: string;
+  /** Rolled up from the milestone's tasks by the API. */
+  taskCount?: number; doneCount?: number;
 }
 
-export function ProjectMilestones({ projectId, canWrite }: { projectId: string; canWrite: boolean }) {
+export function ProjectMilestones({ projectId, canWrite, onOpenTasks }: {
+  projectId: string; canWrite: boolean;
+  /** Jump to the Tasks tab grouped by milestone, scrolled to this one. */
+  onOpenTasks?: (milestoneId: string) => void;
+}) {
   const t = useT();
   const qc = useQueryClient();
   const [draft, setDraft] = useState('');
@@ -125,6 +135,22 @@ export function ProjectMilestones({ projectId, canWrite }: { projectId: string; 
               <span className={cn('min-w-0 flex-1 truncate text-[13px]', m.done && 'text-muted-foreground line-through')}>
                 {m.name}
               </span>
+
+              {/* What the milestone actually holds: its tasks, and how far they are. */}
+              <Tooltip label={m.taskCount ? t('projects.milestoneTasks') : t('projects.milestoneNoTasks')}>
+                <button
+                  type="button"
+                  disabled={!m.taskCount}
+                  onClick={() => onOpenTasks?.(m.id)}
+                  className={cn(
+                    'flex shrink-0 items-center gap-1.5 rounded px-1.5 py-0.5 text-xs tabular-nums transition-colors duration-150',
+                    m.taskCount ? 'text-muted-foreground hover:bg-muted' : 'text-faint',
+                  )}
+                >
+                  <ProgressRing value={m.taskCount ? ((m.doneCount ?? 0) / m.taskCount) * 100 : 0} size={13} />
+                  {m.doneCount ?? 0}/{m.taskCount ?? 0}
+                </button>
+              </Tooltip>
 
               {/* target date */}
               {canWrite ? (

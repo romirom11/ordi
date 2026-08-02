@@ -4,7 +4,7 @@ import {
   Plus, FolderKanban, Lock, Globe, Target, ChevronRight, UserCircle2, Users, CalendarDays,
   Building2, Tag as TagIcon,
 } from 'lucide-react';
-import { api, qs, ApiError } from '../lib/api';
+import { api, getAllPages, ApiError } from '../lib/api';
 import { Link, useNavigate, useOpen } from '../lib/router';
 import { useCan, useMe } from '../lib/auth';
 import {
@@ -111,7 +111,8 @@ function StatusPill({ status }: { status: string }) {
 function ProjectProgress({ id }: { id: string }) {
   const tasksQ = useQuery<TaskLite[]>({
     queryKey: ['tasks', id],
-    queryFn: () => api.get<{ data: TaskLite[] }>(`/tasks${qs({ projectId: id })}`).then((r) => r.data),
+    // Every task, or the ring reports completion over the newest page alone.
+    queryFn: () => getAllPages<TaskLite>('/tasks', { projectId: id }),
     staleTime: 30_000,
   });
   const statusesQ = useQuery<StatusLite[]>({
