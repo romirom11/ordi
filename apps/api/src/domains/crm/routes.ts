@@ -4,7 +4,7 @@ import { ulid } from 'ulid';
 import {
   companyInputSchema, companyUpdateSchema, contactInputSchema, contactUpdateSchema,
   dealStageInputSchema, dealInputSchema, dealUpdateSchema, dealMoveSchema, noteInputSchema,
-  leadInputSchema, leadUpdateSchema, salesActivityInputSchema,
+  leadInputSchema, leadUpdateSchema, leadBulkUpdateSchema, salesActivityInputSchema,
   salesActivityUpdateSchema, salesActivityCancelSchema, salesActivityCompleteSchema, leadConvertSchema,
   salesMessageTemplateInputSchema, salesMessageTemplateUpdateSchema,
   salesSequenceInputSchema, salesSequenceUpdateSchema, salesSequenceEnrollSchema, salesSequenceStopSchema,
@@ -97,19 +97,26 @@ export function crmRoutes() {
 
   // ── Leads ──
   app.get('/leads', guard('crm.read'), async (c) => {
-    return c.json({ data: await svc.listLeads({
+    // listLeads returns { data, truncated } – the bounded list says when it is cut.
+    return c.json(await svc.listLeads({
       q: c.req.query('q'),
       status: c.req.query('status'),
       companyId: c.req.query('companyId'),
       ownerId: c.req.query('ownerId'),
       limit: Number(c.req.query('limit') ?? 100),
-    }) });
+    }));
   });
 
   app.post('/leads', guard('crm.write'), async (c) => {
     const body = leadInputSchema.parse(await c.req.json());
     const id = await svc.createLead(currentActor(c), body);
     return c.json({ id }, 201);
+  });
+
+  // Before /leads/:id so the path segment 'bulk' is not read as a lead id.
+  app.post('/leads/bulk', guard('crm.write'), async (c) => {
+    const body = leadBulkUpdateSchema.parse(await c.req.json());
+    return c.json(await svc.bulkUpdateLeads(currentActor(c), body));
   });
 
   app.get('/leads/:id', guard('crm.read'), async (c) => c.json(await svc.getLead(c.req.param('id'))));
@@ -201,6 +208,13 @@ export function crmRoutes() {
     return c.json(await svc.salesWork(currentActor(c), {
       scope,
       limit: Number(c.req.query('limit') ?? 50),
+    }));
+  });
+
+  app.get('/sales-analytics', guard('crm.read'), async (c) => {
+    const actor = currentActor(c);
+    return c.json(await svc.salesAnalytics({
+      includeDeals: actor.access.permissions.has('deals.read'),
     }));
   });
 

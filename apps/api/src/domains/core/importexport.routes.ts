@@ -110,6 +110,26 @@ export function importExportRoutes() {
     return csvResponse(c, 'contacts.csv', csv);
   });
 
+  app.get('/export/leads.csv', guard('crm.export'), async (c) => {
+    const { db } = getDb();
+    const rows = await db.select({
+      id: schema.leads.id, companyName: schema.companies.name, title: schema.leads.title,
+      product: schema.leads.product, status: schema.leads.status, score: schema.leads.score,
+      signal: schema.leads.signal, sourceUrl: schema.leads.sourceUrl,
+      suggestedChannel: schema.leads.suggestedChannel, owner: schema.users.name,
+      createdAt: schema.leads.createdAt,
+    }).from(schema.leads)
+      .innerJoin(schema.companies, eq(schema.leads.companyId, schema.companies.id))
+      .leftJoin(schema.users, eq(schema.leads.ownerId, schema.users.id))
+      .where(isNull(schema.leads.deletedAt))
+      .orderBy(desc(schema.leads.createdAt));
+    const csv = toCsv(
+      ['id', 'companyName', 'title', 'product', 'status', 'score', 'signal', 'sourceUrl', 'suggestedChannel', 'owner', 'createdAt'],
+      rows.map((r) => [r.id, r.companyName, r.title, r.product, r.status, r.score, r.signal, r.sourceUrl, r.suggestedChannel, r.owner, r.createdAt]),
+    );
+    return csvResponse(c, 'leads.csv', csv);
+  });
+
   app.get('/export/tasks.csv', guard('projects.export'), async (c) => {
     const actor = currentActor(c);
     const { db } = getDb();
@@ -268,6 +288,108 @@ export function importExportRoutes() {
       diff: { imported: valid.length, errors: errors.length },
     });
     return c.json({ imported: valid.length, errors });
+  });
+
+  /**
+   * Leads arrive as lists – a research batch, an export from another tool – and
+   * their companies usually are not in the workspace yet. Requiring every
+   * company to pre-exist would force a second import first, so unknown company
+   * names are created on the fly (as prospects), the same shortcut the New Lead
+   * dialog takes one record at a time.
+   */
+  app.post('/import/leads', guard('crm.write'), async (c) => {
+    const actor = currentActor(c);
+    const body = importBodySchema.parse(await c.req.json());
+    const { cols, data } = readRows(body.csv);
+    const errors: ImportError[] = [];
+    interface LeadRow {
+      companyName: string; title: string; product: string | null; status: string;
+      score: number | null; signal: string | null; sourceUrl: string | null;
+      suggestedChannel: string | null; opener: string | null;
+    }
+    const valid: LeadRow[] = [];
+
+    const { db } = getDb();
+    const companies = await db.select({ id: schema.companies.id, name: schema.companies.name })
+      .from(schema.companies).where(isNull(schema.companies.deletedAt));
+    const companyByName = new Map(companies.map((co) => [co.name, co.id]));
+
+    // No nurture (needs a per-lead return date) and no terminal states – an
+    // import brings work in, it does not record how work ended.
+    const importableStatuses = new Set(['new', 'needs_review', 'ready', 'waiting_reply', 'engaged']);
+
+    if (!cols.has('companyname') || !cols.has('title')) {
+      errors.push({ line: 1, message: 'Missing required headers: companyName, title' });
+    } else data.forEach((row, i) => {
+      const line = i + 2;
+      const companyName = cell(row, cols, 'companyname');
+      const title = cell(row, cols, 'title');
+      if (!companyName) { errors.push({ line, message: 'companyName is required' }); return; }
+      if (!title) { errors.push({ line, message: 'title is required' }); return; }
+      const statusRaw = cell(row, cols, 'status');
+      const scoreRaw = cell(row, cols, 'score');
+      const scoreNum = scoreRaw ? Number(scoreRaw) : NaN;
+      const sourceUrlRaw = cell(row, cols, 'sourceurl');
+      if (sourceUrlRaw) {
+        // Dropping a bad URL silently would lose the one field that cannot be
+        // reconstructed later, so the row fails loudly instead.
+        let protocol = '';
+        try { protocol = new URL(sourceUrlRaw).protocol; } catch { /* handled below */ }
+        if (protocol !== 'http:' && protocol !== 'https:') {
+          errors.push({ line, message: 'sourceUrl must be an http(s) URL' });
+          return;
+        }
+      }
+      valid.push({
+        companyName,
+        title,
+        product: cell(row, cols, 'product') || null,
+        status: importableStatuses.has(statusRaw) ? statusRaw : 'new',
+        score: Number.isInteger(scoreNum) && scoreNum >= 0 && scoreNum <= 100 ? scoreNum : null,
+        signal: cell(row, cols, 'signal') || null,
+        sourceUrl: sourceUrlRaw || null,
+        suggestedChannel: cell(row, cols, 'suggestedchannel') || null,
+        opener: cell(row, cols, 'opener') || null,
+      });
+    });
+
+    const newCompanies = [...new Set(valid.map((v) => v.companyName))]
+      .filter((name) => !companyByName.has(name));
+
+    if (body.dryRun) {
+      return c.json({ rows: data.length, valid: valid.length, newCompanies: newCompanies.length, errors });
+    }
+
+    await db.transaction(async (tx) => {
+      for (const name of newCompanies) {
+        const id = ulid();
+        await tx.insert(schema.companies).values({ id, name, status: 'lead', createdBy: actor.userId });
+        companyByName.set(name, id);
+      }
+      for (const v of valid) {
+        await tx.insert(schema.leads).values({
+          id: ulid(),
+          companyId: companyByName.get(v.companyName)!,
+          title: v.title,
+          product: v.product,
+          status: v.status,
+          score: v.score,
+          signal: v.signal,
+          sourceUrl: v.sourceUrl,
+          suggestedChannel: v.suggestedChannel,
+          opener: v.opener,
+          // The importer works these leads until someone reassigns them.
+          ownerId: actor.userId,
+          createdBy: actor.userId,
+        });
+      }
+    });
+    await writeActivity(db, {
+      entityType: 'lead', entityId: 'csv-import', action: 'imported_csv',
+      actorId: actor.userId, actorType: actor.actorType,
+      diff: { imported: valid.length, newCompanies: newCompanies.length, errors: errors.length },
+    });
+    return c.json({ imported: valid.length, newCompanies: newCompanies.length, errors });
   });
 
   app.post('/import/tasks', guard('projects.create'), async (c) => {

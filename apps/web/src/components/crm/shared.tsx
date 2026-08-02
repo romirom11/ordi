@@ -237,10 +237,15 @@ export function useAllDeals() {
   });
 }
 
+/**
+ * Like useAllDeals: the list is bounded (200 max) and `truncated` says out loud
+ * when there are more leads than the table shows.
+ */
 export function useLeads(params: { q?: string; status?: string; companyId?: string } = {}) {
-  return useQuery<Lead[]>({
+  return useQuery<{ leads: Lead[]; truncated: boolean }>({
     queryKey: ['leads', params],
-    queryFn: () => api.get<{ data: Lead[] }>(`/leads${qs(params)}`).then((r) => r.data),
+    queryFn: () => api.get<{ data: Lead[]; truncated?: boolean }>(`/leads${qs({ ...params, limit: 200 })}`)
+      .then((r) => ({ leads: r.data, truncated: !!r.truncated })),
   });
 }
 
@@ -299,6 +304,40 @@ export function useSalesSequenceEnrollments(params: { leadId?: string; dealId?: 
       `/sales-sequence-enrollments${qs(params)}`,
     ).then((response) => response.data),
     enabled: !!params.leadId || !!params.dealId,
+  });
+}
+
+export interface CurrencyTotal { currency: string; amount: number }
+
+export interface SalesAnalytics {
+  leads: {
+    total: number;
+    byStatus: Record<string, number>;
+    new30d: number;
+    prev30d: number;
+    resolved: { converted: number; disqualified: number; noResponse: number };
+    conversionRate: number | null;
+  };
+  deals: {
+    stages: Array<{
+      id: string; name: string; position: number; probability: number;
+      isWon: boolean; isLost: boolean; count: number; totals: CurrencyTotal[];
+    }>;
+    openCount: number;
+    wonCount: number;
+    lostCount: number;
+    winRate: number | null;
+    openTotals: CurrencyTotal[];
+    weightedOpenTotals: CurrencyTotal[];
+    wonTotals: CurrencyTotal[];
+    lostReasons: Array<{ reason: string | null; count: number }>;
+  } | null;
+}
+
+export function useSalesAnalytics() {
+  return useQuery<SalesAnalytics>({
+    queryKey: ['sales-analytics'],
+    queryFn: () => api.get<SalesAnalytics>('/sales-analytics'),
   });
 }
 

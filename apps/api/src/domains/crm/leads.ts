@@ -1,7 +1,7 @@
 /** Leads: an unqualified pursuit, with its own lifecycle up to conversion. */
 import { getDb, schema, eq, and, isNull, desc, asc, sql, inArray } from '@ordi/db';
 import { ulid } from 'ulid';
-import type { leadInputSchema, leadUpdateSchema, leadConvertSchema } from '@ordi/shared';
+import type { leadInputSchema, leadUpdateSchema, leadBulkUpdateSchema, leadConvertSchema } from '@ordi/shared';
 import type { z } from 'zod';
 import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
@@ -9,12 +9,13 @@ import { writeActivity } from '../../core/activity';
 import { assertVersion } from '../../core/locking';
 import { mergeCustomFields } from '../../core/customfields';
 import { stopActiveLeadSequence } from './playbooks';
-import { CANCELS_PLANNED_LEAD_STATUSES, assertCompanyExists, assertContactCompany, pickDefined, type DbReader } from './common';
+import { CANCELS_PLANNED_LEAD_STATUSES, assertCompanyExists, assertContactCompany, boundedLimit, pickDefined, type DbReader } from './common';
 import { nextSalesActivities } from './activities';
 import { requirePipelineStage } from './deals';
 
 type LeadInput = z.infer<typeof leadInputSchema>;
 type LeadUpdate = z.infer<typeof leadUpdateSchema>;
+type LeadBulkUpdate = z.infer<typeof leadBulkUpdateSchema>;
 type LeadConvert = z.infer<typeof leadConvertSchema>;
 
 const LEAD_UPDATE_FIELDS = [
@@ -53,6 +54,11 @@ async function enrichLeads<T extends { companyId: string; contactId: string | nu
   }));
 }
 
+/**
+ * Returns `truncated` alongside the rows: the list is bounded, and a table that
+ * silently stops at the cap looks complete when it is not – the same lie the
+ * pipeline board already refuses to tell.
+ */
 export async function listLeads(params: {
   q?: string;
   status?: string;
@@ -61,6 +67,7 @@ export async function listLeads(params: {
   limit?: number;
 }) {
   const { db } = getDb();
+  const limit = boundedLimit(params.limit, 100, 200);
   const rows = await db.select().from(schema.leads).where(and(
     isNull(schema.leads.deletedAt),
     params.status ? eq(schema.leads.status, params.status) : undefined,
@@ -69,13 +76,18 @@ export async function listLeads(params: {
     params.q
       ? sql`(${schema.leads.title} ilike ${'%' + params.q + '%'} or ${schema.leads.painSignal} ilike ${'%' + params.q + '%'} or ${schema.leads.evidence} ilike ${'%' + params.q + '%'})`
       : undefined,
-  )).orderBy(desc(schema.leads.createdAt)).limit(params.limit ?? 100);
+  )).orderBy(desc(schema.leads.createdAt)).limit(limit + 1);
+  const truncated = rows.length > limit;
+  if (truncated) rows.length = limit;
   const [enriched, activities] = await Promise.all([
     enrichLeads(rows),
     nextSalesActivities({ leadIds: rows.map((row) => row.id) }),
   ]);
   const nextByLead = new Map(activities.map((activity) => [activity.leadId, activity]));
-  return enriched.map((lead) => ({ ...lead, nextActivity: nextByLead.get(lead.id) ?? null }));
+  return {
+    data: enriched.map((lead) => ({ ...lead, nextActivity: nextByLead.get(lead.id) ?? null })),
+    truncated,
+  };
 }
 
 async function getLeadRecord(
@@ -202,6 +214,36 @@ export async function updateLead(actor: Actor, id: string, input: LeadUpdate) {
     });
   });
   return getLead(id);
+}
+
+/**
+ * One decision applied across many leads: reassign the owner and/or move the
+ * status. Each lead goes through updateLead, so the single-lead rules – nurture
+ * needs a return date, terminal statuses cancel planned activities and stop
+ * sequences – hold for fifty leads exactly as they do for one. Failures are
+ * collected per lead instead of aborting the batch: reassigning 48 of 50 and
+ * naming the 2 that failed beats an all-or-nothing error.
+ */
+export async function bulkUpdateLeads(actor: Actor, input: LeadBulkUpdate) {
+  const patch: LeadUpdate = {};
+  if (input.ownerId !== undefined) patch.ownerId = input.ownerId;
+  if (input.status !== undefined) patch.status = input.status;
+  if (input.nurtureUntil !== undefined) patch.nurtureUntil = input.nurtureUntil;
+  let updated = 0;
+  const errors: { id: string; message: string }[] = [];
+  for (const id of [...new Set(input.ids)]) {
+    try {
+      const lead = await getLeadRecord(id);
+      // The single-lead UI freezes a converted lead as a record of what
+      // happened; a batch must not quietly rewrite that history.
+      if (lead.status === 'converted') throw err.domain('A converted lead cannot be changed');
+      await updateLead(actor, id, patch);
+      updated += 1;
+    } catch (cause) {
+      errors.push({ id, message: cause instanceof Error ? cause.message : 'Update failed' });
+    }
+  }
+  return { updated, errors };
 }
 
 /**

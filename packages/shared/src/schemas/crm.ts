@@ -160,6 +160,36 @@ export const leadInputSchema = z.object({
 });
 export const leadUpdateSchema = leadInputSchema.partial().extend({ version: z.number().int().optional() });
 
+/**
+ * One decision applied to many leads at once: reassign the owner and/or move
+ * the status. Only these two fields – everything else on a lead is judgement
+ * written per prospect, which a batch cannot supply.
+ */
+export const leadBulkUpdateSchema = z.object({
+  ids: z.array(idSchema).min(1).max(200),
+  ownerId: idSchema.nullable().optional(),
+  status: z.enum(WRITABLE_LEAD_STATUSES).optional(),
+  nurtureUntil: dateOnlySchema.optional(),
+}).superRefine((value, ctx) => {
+  if (value.ownerId === undefined && value.status === undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Set an owner or a status to update' });
+  }
+  if (value.status === 'nurture' && !value.nurtureUntil) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['nurtureUntil'],
+      message: 'A nurture return date is required',
+    });
+  }
+  if (value.nurtureUntil && value.status !== 'nurture') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['nurtureUntil'],
+      message: 'A nurture return date requires nurture status',
+    });
+  }
+});
+
 export const salesActivityInputSchema = z.object({
   leadId: idSchema.optional(),
   dealId: idSchema.optional(),
