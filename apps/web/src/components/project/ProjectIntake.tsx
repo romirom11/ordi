@@ -7,7 +7,7 @@
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Copy, Inbox, Mail, X } from 'lucide-react';
-import { api, ApiError } from '../../lib/api';
+import { api, appOrigin, ApiError } from '../../lib/api';
 import { useOpen } from '../../lib/router';
 import { Button, Card, EmptyState, Input, Select, Skeleton, Spinner, Switch, fmtDate } from '../ui';
 import { Dialog, toast } from '../overlays';
@@ -294,7 +294,8 @@ export function IntakeSettingsSection({ projectId }: { projectId: string }) {
   });
 
   const settings = settingsQ.data;
-  const link = settings ? `${window.location.origin}/intake/${settings.formToken}` : '';
+  // appOrigin, not window.location: in the desktop app the window is not the instance.
+  const link = settings ? `${appOrigin()}/intake/${settings.formToken}` : '';
 
   const copy = async () => {
     try {
