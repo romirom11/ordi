@@ -169,7 +169,7 @@ function LeadsSection({ companyId, canWrite, onAdd }: { companyId: string; canWr
   const navigate = useNavigate();
   const open = useOpen();
   const leadsQ = useLeads({ companyId });
-  const leads = leadsQ.data ?? [];
+  const leads = leadsQ.data?.leads ?? [];
   return (
     <section>
       <SectionHeader

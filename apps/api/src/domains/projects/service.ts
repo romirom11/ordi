@@ -109,6 +109,26 @@ export async function listProjects(actor: Actor, filters: { typeId?: string; sta
 }
 
 /**
+ * Per-project task totals in one grouped query. The projects list used to pull
+ * every task of every project to draw a completion ring – one page load cost
+ * N full task lists.
+ */
+export async function projectTaskCounts(actor: Actor) {
+  const ids = await accessibleProjectIds(actor);
+  if (!ids.length) return [];
+  const { db } = getDb();
+  const rows = await db.select({
+    projectId: tasks.projectId,
+    total: sql<number>`count(*)::int`,
+    done: sql<number>`count(*) filter (where ${taskStatuses.category} = 'done')::int`,
+  }).from(tasks)
+    .innerJoin(taskStatuses, eq(taskStatuses.id, tasks.statusId))
+    .where(and(isNull(tasks.deletedAt), inArray(tasks.projectId, ids)))
+    .groupBy(tasks.projectId);
+  return rows.map((row) => ({ projectId: row.projectId, total: Number(row.total), done: Number(row.done) }));
+}
+
+/**
  * Load a project type and validate the desired company link. requiresClient
  * means the client is mandatory – not that other types cannot have one: any
  * project may be linked to a client (the CRM Projects card and the project
@@ -443,11 +463,27 @@ export async function listTasks(actor: Actor, params: {
     ? await db.select({ taskId: taskLabels.taskId, labelId: taskLabels.labelId }).from(taskLabels).where(inArray(taskLabels.taskId, ids))
     : [];
 
+  // A "blocks" relation is only a fact on the task page unless the lists carry
+  // it: blocked = some open task blocks this one.
+  const blockedIds = new Set<string>();
+  if (ids.length) {
+    const inList = sql.raw('(' + ids.map((i) => `'${i.replace(/'/g, "''")}'`).join(',') + ')');
+    const blockedRows = await db.execute(sql`
+      select distinct tr.related_task_id as id
+      from task_relations tr
+      join tasks b on b.id = tr.task_id and b.deleted_at is null
+      join task_statuses bs on bs.id = b.status_id
+      where tr.type = 'blocks' and tr.related_task_id in ${inList}
+        and bs.category not in ('done', 'canceled')`) as unknown as { id: string }[];
+    for (const row of blockedRows) blockedIds.add(row.id);
+  }
+
   const data = paged.data.map((t) => ({
     ...t,
     ref: refOf(keyMap.get(t.projectId) ?? '', t.number),
     assigneeIds: assignRows.filter((a) => a.taskId === t.id).map((a) => a.userId),
     labelIds: labelRows.filter((l) => l.taskId === t.id).map((l) => l.labelId),
+    blocked: blockedIds.has(t.id),
   }));
   return { data, nextCursor: paged.nextCursor };
 }
@@ -590,27 +626,90 @@ export async function softDeleteTask(actor: Actor, id: string) {
   await writeActivity(db, { entityType: 'task', entityId: id, action: 'deleted', actorId: actor.userId, actorType: actor.actorType });
 }
 
+/**
+ * Moving a task moves the work, not a copy of its title. The whole subtree goes
+ * (children keep their parent, re-pointed to the new ids), and everything that
+ * hangs off each task follows: comments, relations, external and git links,
+ * attachments, logged time and a running timer. Before this, comments stayed on
+ * the soft-deleted original and subtasks were orphaned under a parent nothing
+ * could open any more.
+ *
+ * Project-scoped fields cannot travel: status resets to the target's default,
+ * and type/cycle/milestone clear (each belongs to the source project).
+ */
 export async function moveTask(actor: Actor, id: string, targetProjectId: string) {
   const { db } = getDb();
   const source = await loadTask(id);
   await assertProject(actor, source.projectId, 'member');
   await assertProject(actor, targetProjectId, 'member');
+  if (source.projectId === targetProjectId) return { ...source, ref: await taskRef(source) };
   const statusId = await defaultStatusId(targetProjectId);
-  const position = await nextTaskPosition(targetProjectId);
-  const newId = ulid();
-  await db.insert(tasks).values({
-    id: newId, projectId: targetProjectId, number: 0, title: source.title,
-    description: source.description, statusId, typeId: null, priority: source.priority,
-    parentId: null, dueDate: source.dueDate, startDate: source.startDate,
-    estimate: source.estimate, cycleId: null, position, customFields: source.customFields,
-    createdBy: actor.userId,
-  });
-  const assignees = await assigneeIdsOf(id);
-  if (assignees.length) await db.insert(taskAssignees).values(assignees.map((userId) => ({ taskId: newId, userId })));
-  const labelRows = await db.select({ labelId: taskLabels.labelId }).from(taskLabels).where(eq(taskLabels.taskId, id));
-  if (labelRows.length) await db.insert(taskLabels).values(labelRows.map((l) => ({ taskId: newId, labelId: l.labelId })));
 
-  await db.update(tasks).set({ redirectToTaskId: newId, deletedAt: new Date() }).where(eq(tasks.id, id));
+  const newId = await db.transaction(async (tx) => {
+    // Collect the subtree breadth-first, so a parent is always inserted first.
+    const subtree = [source];
+    let frontier = [source.id];
+    while (frontier.length) {
+      const children = await tx.select().from(tasks)
+        .where(and(inArray(tasks.parentId, frontier), isNull(tasks.deletedAt)));
+      subtree.push(...children);
+      frontier = children.map((child) => child.id);
+    }
+    const oldIds = subtree.map((t) => t.id);
+    const newIdOf = new Map(oldIds.map((oldId) => [oldId, ulid()]));
+
+    const [posRow] = await tx.select({ maxPos: sql<string | null>`max(${tasks.position})` })
+      .from(tasks).where(eq(tasks.projectId, targetProjectId));
+    let lastPos = posRow?.maxPos != null ? Number(posRow.maxPos) : null;
+
+    const [assigneeRows, labelRows] = await Promise.all([
+      tx.select().from(taskAssignees).where(inArray(taskAssignees.taskId, oldIds)),
+      tx.select().from(taskLabels).where(inArray(taskLabels.taskId, oldIds)),
+    ]);
+
+    for (const t of subtree) {
+      lastPos = appendPosition(lastPos);
+      await tx.insert(tasks).values({
+        id: newIdOf.get(t.id)!, projectId: targetProjectId, number: 0, title: t.title,
+        description: t.description, statusId, typeId: null, priority: t.priority,
+        parentId: t.parentId ? newIdOf.get(t.parentId) ?? null : null,
+        milestoneId: null, dueDate: t.dueDate, startDate: t.startDate,
+        estimate: t.estimate, cycleId: null, position: String(lastPos),
+        customFields: t.customFields, createdBy: t.createdBy,
+      });
+    }
+    if (assigneeRows.length) {
+      await tx.insert(taskAssignees).values(assigneeRows.map((row) => ({
+        taskId: newIdOf.get(row.taskId)!, userId: row.userId,
+      })));
+    }
+    if (labelRows.length) {
+      await tx.insert(taskLabels).values(labelRows.map((row) => ({
+        taskId: newIdOf.get(row.taskId)!, labelId: row.labelId,
+      })));
+    }
+
+    // Everything referencing an old task re-points to its counterpart in place,
+    // keeping authors, timestamps and invoice links exactly as they were.
+    for (const [oldId, mappedId] of newIdOf) {
+      await tx.update(schema.comments).set({ taskId: mappedId }).where(eq(schema.comments.taskId, oldId));
+      await tx.update(schema.taskRelations).set({ taskId: mappedId }).where(eq(schema.taskRelations.taskId, oldId));
+      await tx.update(schema.taskRelations).set({ relatedTaskId: mappedId }).where(eq(schema.taskRelations.relatedTaskId, oldId));
+      await tx.update(schema.taskLinks).set({ taskId: mappedId }).where(eq(schema.taskLinks.taskId, oldId));
+      await tx.update(schema.gitLinks).set({ taskId: mappedId }).where(eq(schema.gitLinks.taskId, oldId));
+      await tx.update(schema.attachments).set({ entityId: mappedId }).where(and(
+        eq(schema.attachments.entityType, 'task'),
+        eq(schema.attachments.entityId, oldId),
+      ));
+      // Hours follow the work; the rates were frozen on each entry when logged.
+      await tx.update(schema.timeEntries).set({ taskId: mappedId, projectId: targetProjectId })
+        .where(eq(schema.timeEntries.taskId, oldId));
+      await tx.update(schema.activeTimers).set({ taskId: mappedId }).where(eq(schema.activeTimers.taskId, oldId));
+      await tx.update(tasks).set({ redirectToTaskId: mappedId, deletedAt: new Date() }).where(eq(tasks.id, oldId));
+    }
+    return newIdOf.get(source.id)!;
+  });
+
   const task = await loadTask(newId);
   const ref = await taskRef(task);
   await emit({ type: 'task.created', aggregateType: 'task', aggregateId: newId, payload: { ref, projectId: targetProjectId, movedFrom: id }, actorId: actor.userId, actorType: actor.actorType });

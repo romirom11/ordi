@@ -13,6 +13,7 @@ import { toast } from './overlays';
 const EXPORTS: { path: string; label: string; perm: string }[] = [
   { path: '/api/v1/export/companies.csv', label: 'Companies', perm: 'crm.export' },
   { path: '/api/v1/export/contacts.csv', label: 'Contacts', perm: 'crm.export' },
+  { path: '/api/v1/export/leads.csv', label: 'Leads', perm: 'crm.export' },
   { path: '/api/v1/export/tasks.csv', label: 'Tasks', perm: 'projects.export' },
   { path: '/api/v1/export/invoices.csv', label: 'Invoices', perm: 'finance.export' },
   { path: '/api/v1/export/time.csv', label: 'Time entries', perm: 'time.read_all' },
@@ -21,6 +22,8 @@ const EXPORTS: { path: string; label: string; perm: string }[] = [
 const IMPORT_TARGETS = [
   { key: 'companies', label: 'Companies', perm: 'crm.write', hint: 'name,domain,status,billingEmail,defaultCurrency' },
   { key: 'contacts', label: 'Contacts', perm: 'crm.write', hint: 'companyName,firstName,lastName,email,phone' },
+  // Unknown companyName values are created as prospect companies on the fly.
+  { key: 'leads', label: 'Leads', perm: 'crm.write', hint: 'companyName,title,product,status,score,signal,sourceUrl,suggestedChannel,opener' },
   { key: 'tasks', label: 'Tasks', perm: 'projects.create', hint: 'projectKey,title,priority' },
 ] as const;
 

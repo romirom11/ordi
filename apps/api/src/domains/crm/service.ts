@@ -7,6 +7,7 @@
  *   leads.ts      – leads and lead → deal conversion
  *   activities.ts – sales activities
  *   work.ts       – the Work queue
+ *   analytics.ts  – funnel and pipeline metrics
  *   playbooks.ts  – message templates and manual sequences (imported directly)
  *   common.ts     – the few helpers more than one of the above needs
  *
@@ -43,6 +44,7 @@ export {
   getLead,
   createLead,
   updateLead,
+  bulkUpdateLeads,
   softDeleteLead,
   convertLead,
 } from './leads';
@@ -58,3 +60,5 @@ export {
 } from './activities';
 
 export { salesWork } from './work';
+
+export { salesAnalytics } from './analytics';

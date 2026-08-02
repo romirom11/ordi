@@ -5,7 +5,7 @@
  * /deals (→ pipeline) so old links land on the right tab.
  */
 import { useState } from 'react';
-import { Building2, KanbanSquare, ListTodo, Plus, Target, Workflow } from 'lucide-react';
+import { BarChart3, Building2, KanbanSquare, ListTodo, Plus, Target, Workflow } from 'lucide-react';
 import { useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { useT } from '../lib/i18n';
@@ -16,15 +16,17 @@ import { WorkTab } from '../components/crm/WorkTab';
 import { LeadsTab } from '../components/crm/LeadsTab';
 import { NewClientDialog, NewDealDialog, NewLeadDialog } from '../components/crm/dialogs';
 import { PlaybooksTab } from '../components/crm/PlaybooksTab';
+import { AnalyticsTab } from '../components/crm/AnalyticsTab';
 import { NoAccessNotice } from '../components/ModuleGate';
 
-type CrmTab = 'work' | 'leads' | 'deals' | 'companies' | 'playbooks';
+type CrmTab = 'work' | 'leads' | 'deals' | 'companies' | 'playbooks' | 'analytics';
 
 function normalizeTab(tab?: string): CrmTab {
   if (tab === 'deals' || tab === 'pipeline') return 'deals';
   if (tab === 'clients' || tab === 'companies') return 'companies';
   if (tab === 'leads') return 'leads';
   if (tab === 'playbooks') return 'playbooks';
+  if (tab === 'analytics') return 'analytics';
   return 'work';
 }
 
@@ -53,6 +55,7 @@ export function CrmPage({ tab }: { tab?: string }) {
             : active === 'leads' ? t('crm.leadsHint')
               : active === 'deals' ? (canReadDeals ? t('deals.subtitle') : '')
                 : active === 'playbooks' ? t('crm.playbooksHint')
+                : active === 'analytics' ? t('crm.analyticsHint')
                 : t('crm.subtitle')
         }
         actions={
@@ -88,6 +91,7 @@ export function CrmPage({ tab }: { tab?: string }) {
               : []),
             { key: 'companies', label: t('crm.tabCompanies'), icon: <Building2 size={15} /> },
             { key: 'playbooks', label: t('crm.tabPlaybooks'), icon: <Workflow size={15} /> },
+            { key: 'analytics', label: t('crm.tabAnalytics'), icon: <BarChart3 size={15} /> },
           ]}
         />
       </div>
@@ -101,6 +105,7 @@ export function CrmPage({ tab }: { tab?: string }) {
       {active === 'deals' && (canReadDeals ? <PipelineTab /> : <NoAccessNotice />)}
       {active === 'companies' && <ClientsTab onNewClient={() => setNewClient(true)} />}
       {active === 'playbooks' && <PlaybooksTab />}
+      {active === 'analytics' && <AnalyticsTab />}
 
       {/*
         * Mounted only while open: each of these runs its own lookups
