@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  CalendarDays, Diamond, Plus,
+  Ban, CalendarDays, Diamond, Inbox, Plus,
   LayoutDashboard, ListChecks, Repeat, CalendarClock, Settings, ChevronRight,
 } from 'lucide-react';
 import { api, qs, getAllPages, ApiError } from '../lib/api';
@@ -30,6 +30,9 @@ import { ProjectActivity } from '../components/project/ProjectActivity';
 import { ProjectDeals } from '../components/project/ProjectDeals';
 import { ProjectIntegrations } from '../components/project/ProjectIntegrations';
 import { ProjectContextMenu, TaskContextMenu } from '../components/project/contextMenus';
+import { ProjectIntakeTab, IntakeSettingsSection, useIntakeItems } from '../components/project/ProjectIntake';
+import { ProjectAutomationSection } from '../components/project/ProjectAutomation';
+import { CycleDetailsDialog } from '../components/project/CycleDetails';
 import { PROJECT_STATUSES, STATUS_META, type UserLite } from '../components/project/pickers';
 import { TasksToolbar } from '../components/project/TasksToolbar';
 import type { LabelLite } from '../components/project/FilterPopover';
@@ -81,6 +84,7 @@ extendDict({
     'projects.overviewHint': 'This is the project page – describe the goals here, and add tasks in the Tasks tab.',
     'projects.summaryPh': 'Add a short summary…',
     'projects.description': 'Description',
+    'projects.blocked': 'Blocked by another task',
   },
   uk: {
     'bulkTasks.status': 'Статус',
@@ -121,6 +125,7 @@ extendDict({
     'projects.overviewHint': 'Це сторінка проєкту: опишіть тут цілі, а задачі додавайте у вкладці Tasks.',
     'projects.summaryPh': 'Короткий підсумок…',
     'projects.description': 'Опис',
+    'projects.blocked': 'Заблоковано іншою задачею',
   },
 });
 
@@ -138,7 +143,7 @@ interface Task {
   id: string; number?: number; ref?: string; title: string; statusId: string; priority?: string;
   dueDate?: string | null; startDate?: string | null; estimate?: number | string | null; version?: number;
   parentId?: string | null; milestoneId?: string | null; assigneeIds?: string[]; labelIds?: string[];
-  createdAt?: string; position?: string | number | null;
+  createdAt?: string; position?: string | number | null; blocked?: boolean;
 }
 interface Cycle {
   id: string; name: string; startDate?: string; endDate?: string; status?: string; goal?: string;
@@ -155,7 +160,7 @@ function isOverdue(due: string | null | undefined, cat?: string): boolean {
 
 /* ───────────────────────── Page ───────────────────────── */
 
-const TABS = ['overview', 'tasks', 'cycles', 'settings'] as const;
+const TABS = ['overview', 'tasks', 'cycles', 'intake', 'settings'] as const;
 type Tab = typeof TABS[number];
 
 export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
@@ -193,6 +198,10 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
   const isAdmin = role === 'admin';
   const canDelete = isAdmin && can('projects.delete');
 
+  // Pending intake requests: members triage them, the tab badge says how many wait.
+  const intakeQ = useIntakeItems(id, canWrite);
+  const intakeCount = intakeQ.data?.length ?? 0;
+
   usePageTitle(project ? `${project.key} · ${project.name}` : null);
 
   const openTask = (tid: string, e?: OpenIntent) => open(`/projects/${id}/tasks/${tid}`, e);
@@ -225,6 +234,7 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
         onTab={setTab}
         onDeleted={() => navigate('/projects')}
         onPatch={(b) => patchProject.mutate(b)}
+        intakeCount={canWrite ? intakeCount : undefined}
       />
 
       <Reveal key={tab} className="flex-1 overflow-auto">
@@ -241,7 +251,10 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
           />
         )}
         {tab === 'tasks' && <TasksTab id={id} statuses={statuses} statusesLoading={statusesQ.isLoading} projectKey={project?.key} users={users} canWrite={canWrite} onOpen={openTask} />}
-        {tab === 'cycles' && <CyclesTab id={id} />}
+        {tab === 'cycles' && <CyclesTab id={id} isAdmin={isAdmin} />}
+        {tab === 'intake' && (canWrite
+          ? <ProjectIntakeTab projectId={id} statuses={statuses} users={users} />
+          : <EmptyState icon={<Inbox size={20} />} title={t('common.noAccess')} />)}
         {tab === 'settings' && <SettingsTab project={project} isAdmin={isAdmin} onPatch={(b) => patchProject.mutate(b)} pending={patchProject.isPending} />}
       </Reveal>
     </div>
@@ -250,10 +263,12 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
 
 /* ───────────────────────── Header ───────────────────────── */
 
-function ProjectHeader({ project, loading, canWrite, canDelete, tab, onTab, onDeleted, onPatch }: {
+function ProjectHeader({ project, loading, canWrite, canDelete, tab, onTab, onDeleted, onPatch, intakeCount }: {
   project?: Project; loading: boolean; canWrite: boolean; canDelete: boolean;
   tab: Tab; onTab: (t: Tab) => void; onDeleted: () => void;
   onPatch: (body: Record<string, unknown>) => void;
+  /** undefined hides the tab (viewer role); a number shows it with a badge. */
+  intakeCount?: number;
 }) {
   const t = useT();
   const [editingName, setEditingName] = useState(false);
@@ -280,10 +295,13 @@ function ProjectHeader({ project, loading, canWrite, canDelete, tab, onTab, onDe
     if (v && v !== project.name) onPatch({ name: v });
   };
 
-  const sections: { key: Tab; label: string; icon: ReactNode }[] = [
+  const sections: { key: Tab; label: string; icon: ReactNode; badge?: number }[] = [
     { key: 'overview', label: t('projects.overview'), icon: <LayoutDashboard size={14} /> },
     { key: 'tasks', label: t('common.tasks'), icon: <ListChecks size={14} /> },
     { key: 'cycles', label: t('projects.cycles'), icon: <Repeat size={14} /> },
+    ...(intakeCount !== undefined
+      ? [{ key: 'intake' as Tab, label: t('intake.title'), icon: <Inbox size={14} />, badge: intakeCount }]
+      : []),
   ];
 
   return (
@@ -340,6 +358,9 @@ function ProjectHeader({ project, loading, canWrite, canDelete, tab, onTab, onDe
             >
               <span className={cn('[&>svg]:block', tab === s.key ? 'text-foreground' : 'text-faint')}>{s.icon}</span>
               <span className="hidden md:block">{s.label}</span>
+              {!!s.badge && (
+                <span className="rounded-full bg-primary/15 px-1.5 text-[11px] font-medium tabular-nums text-primary">{s.badge}</span>
+              )}
             </button>
           ))}
           <span className="mx-1 h-4 w-px bg-border" aria-hidden />
@@ -797,6 +818,9 @@ function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, re
                         )}
                         {props.status && <StatusIcon category={st?.category} color={st?.color} size={14} />}
                         <span className="flex min-w-0 items-center gap-1.5">
+                          {task.blocked && (
+                            <span title={t('projects.blocked')} className="shrink-0 text-warning"><Ban size={13} /></span>
+                          )}
                           <span className="truncate text-[13px] font-medium">{task.title}</span>
                           {parent && (
                             <span className="hidden min-w-0 max-w-44 truncate text-xs text-faint lg:block">› {parent.title}</span>
@@ -957,6 +981,9 @@ function BoardView({ projectId, projectKey, statuses, groups, prefs, canWrite, r
                     >
                       <div className="flex items-start gap-1.5">
                         {props.priority && <span className="mt-0.5"><PriorityIcon priority={task.priority} size={14} /></span>}
+                        {task.blocked && (
+                          <span title={t('projects.blocked')} className="mt-0.5 shrink-0 text-warning"><Ban size={13} /></span>
+                        )}
                         <span className="flex-1 text-[13px] font-medium leading-snug">{task.title}</span>
                         {props.progress && stats && <ProgressPill stats={stats} />}
                       </div>
@@ -1127,12 +1154,13 @@ function cyclePercent(c: Cycle): number | null {
   return null;
 }
 
-function CyclesTab({ id }: { id: string }) {
+function CyclesTab({ id, isAdmin }: { id: string; isAdmin: boolean }) {
   const t = useT();
   const qc = useQueryClient();
   const can = useCan();
   const canWrite = can('projects.write') || can('projects.create');
   const { data, isLoading } = useQuery<Cycle[]>({ queryKey: ['cycles', id], queryFn: () => api.get<{ data: Cycle[] }>(`/projects/${id}/cycles`).then((r) => r.data) });
+  const [details, setDetails] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
   const [start, setStart] = useState('');
@@ -1175,7 +1203,12 @@ function CyclesTab({ id }: { id: string }) {
           {cycles.map((c) => {
             const pct = cyclePercent(c);
             return (
-              <Card key={c.id} className="p-4">
+              // The card opens the cycle: progress, burndown and (for admins) completion.
+              <Card
+                key={c.id}
+                className="cursor-pointer p-4 transition-colors hover:border-border-strong"
+                onClick={() => setDetails(c.id)}
+              >
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate font-medium">{c.name}</span>
                   {c.status && <Badge className="bg-muted capitalize text-muted-foreground">{c.status}</Badge>}
@@ -1200,6 +1233,16 @@ function CyclesTab({ id }: { id: string }) {
             );
           })}
         </div>
+      )}
+
+      {details && (
+        <CycleDetailsDialog
+          cycleId={details}
+          cycles={cycles}
+          isAdmin={isAdmin}
+          onClose={() => setDetails(null)}
+          onCompleted={() => setDetails(null)}
+        />
       )}
 
       <Dialog open={adding} onClose={() => { setAdding(false); reset(); }} title={t('projects.newCycle')} width={440}>
@@ -1306,6 +1349,14 @@ function SettingsTab({ project, isAdmin, onPatch, pending }: {
         <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('projects.access')}</h2>
         <ProjectAccessPanel projectId={project.id} canManage={isAdmin} />
       </section>
+
+      {/* Intake form + task automation – the endpoints demand project admin. */}
+      {isAdmin && (
+        <>
+          <IntakeSettingsSection projectId={project.id} />
+          <ProjectAutomationSection projectId={project.id} />
+        </>
+      )}
 
       {/* Integrations */}
       <ProjectIntegrations

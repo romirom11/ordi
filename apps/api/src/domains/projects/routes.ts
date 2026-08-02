@@ -82,6 +82,10 @@ export function projectsRoutes() {
     return c.json({ data: rows });
   });
 
+  // Static path first, or /projects/:id would swallow it as an id.
+  app.get('/projects/task-counts', async (c) =>
+    c.json({ data: await svc.projectTaskCounts(currentActor(c)) }));
+
   app.post('/projects', guard('projects.create'), async (c) => {
     const body = projectInputSchema.parse(await c.req.json());
     const res = await svc.createProject(currentActor(c), body);

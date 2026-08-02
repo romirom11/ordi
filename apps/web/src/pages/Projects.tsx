@@ -4,7 +4,7 @@ import {
   Plus, FolderKanban, Lock, Globe, Target, ChevronRight, UserCircle2, Users, CalendarDays,
   Building2, Tag as TagIcon,
 } from 'lucide-react';
-import { api, getAllPages, ApiError } from '../lib/api';
+import { api, ApiError } from '../lib/api';
 import { Link, useNavigate, useOpen } from '../lib/router';
 import { useCan, useMe } from '../lib/auth';
 import {
@@ -84,8 +84,7 @@ interface ProjectTypeLite {
 }
 interface CompanyLite { id: string; name: string }
 interface UserLite { id: string; name: string; avatar?: string | null }
-interface TaskLite { id: string; statusId: string }
-interface StatusLite { id: string; category?: string }
+interface TaskCounts { projectId: string; total: number; done: number }
 
 const STATUS_META: Record<string, { color: string; key: string }> = {
   active: { color: '#22c55e', key: 'projects.statusActive' },
@@ -107,28 +106,15 @@ function StatusPill({ status }: { status: string }) {
   );
 }
 
-/** Small completion ring computed from the project's tasks + statuses (cache shared with detail page). */
-function ProjectProgress({ id }: { id: string }) {
-  const tasksQ = useQuery<TaskLite[]>({
-    queryKey: ['tasks', id],
-    // Every task, or the ring reports completion over the newest page alone.
-    queryFn: () => getAllPages<TaskLite>('/tasks', { projectId: id }),
-    staleTime: 30_000,
-  });
-  const statusesQ = useQuery<StatusLite[]>({
-    queryKey: ['task-statuses', id],
-    queryFn: () => api.get<{ data: StatusLite[] }>(`/projects/${id}/task-statuses`).then((r) => r.data),
-    staleTime: 60_000,
-  });
-  if (tasksQ.isLoading || statusesQ.isLoading) return <div className="h-4 w-4 rounded-full bg-muted" />;
-  const tasks = tasksQ.data ?? [];
-  const statuses = statusesQ.data ?? [];
-  if (tasks.length === 0) return <span className="text-xs tabular-nums text-faint">–</span>;
-  const catOf = (sid: string) => statuses.find((s) => s.id === sid)?.category;
-  const done = tasks.filter((t) => catOf(t.statusId) === 'done').length;
-  const pct = Math.round((done / tasks.length) * 100);
+/**
+ * Small completion ring. The counts come from one grouped query for the whole
+ * list – each row used to pull its project's entire task list to draw this.
+ */
+function ProjectProgress({ counts }: { counts?: TaskCounts }) {
+  if (!counts || counts.total === 0) return <span className="text-xs tabular-nums text-faint">–</span>;
+  const pct = Math.round((counts.done / counts.total) * 100);
   return (
-    <Tooltip label={`${done}/${tasks.length}`} side="top">
+    <Tooltip label={`${counts.done}/${counts.total}`} side="top">
       <span className="inline-flex items-center gap-1.5">
         <ProgressRing value={pct} size={16} stroke={2.5} color={pct === 100 ? '#22c55e' : undefined} />
         <span className="w-8 text-right text-xs tabular-nums text-muted-foreground">{pct}%</span>
@@ -154,6 +140,15 @@ export function ProjectsPage() {
     queryKey: ['projects'],
     queryFn: () => api.get<{ data: Project[] }>('/projects').then((r) => r.data),
   });
+  const countsQ = useQuery<TaskCounts[]>({
+    queryKey: ['project-task-counts'],
+    queryFn: () => api.get<{ data: TaskCounts[] }>('/projects/task-counts').then((r) => r.data),
+    staleTime: 30_000,
+  });
+  const countsById = useMemo(
+    () => new Map((countsQ.data ?? []).map((row) => [row.projectId, row])),
+    [countsQ.data],
+  );
   const usersQ = useQuery<UserLite[]>({
     queryKey: ['users', 'lookup'],
     queryFn: () => api.get<{ data: UserLite[] }>('/users/lookup').then((r) => r.data),
@@ -277,7 +272,7 @@ export function ProjectsPage() {
                   )}
                   <Badge className="hidden shrink-0 bg-muted font-mono text-[11px] text-muted-foreground sm:inline-flex">{p.key}</Badge>
                   <div className="hidden shrink-0 md:block"><StatusPill status={p.status} /></div>
-                  <div className="hidden w-20 shrink-0 justify-end sm:flex"><ProjectProgress id={p.id} /></div>
+                  <div className="hidden w-20 shrink-0 justify-end sm:flex"><ProjectProgress counts={countsById.get(p.id)} /></div>
                   <div className="hidden w-20 shrink-0 items-center justify-end gap-1 text-xs text-muted-foreground lg:flex">
                     {p.targetDate ? (<><Target size={12} className="text-faint" /><span className="tabular-nums">{fmtDate(p.targetDate)}</span></>) : null}
                   </div>
