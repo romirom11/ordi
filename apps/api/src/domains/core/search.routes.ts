@@ -3,7 +3,7 @@ import { getDb, sql } from '@ordi/db';
 import { docToText, snippet } from '@ordi/shared';
 import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
-import { accessibleProjectIds, accessibleSpaceIds } from '../../core/access';
+import { accessibleProjectIds, accessibleSpaceIds, editableSpaceIds } from '../../core/access';
 
 /**
  * Global search (PRD §14.2): FTS + trigram, permission-filtered. Ranking:
@@ -105,13 +105,19 @@ export function searchRoutes() {
     }
 
     // Pages live in spaces, and a space can be private – searching them without
-    // that scope surfaced titles from spaces the actor cannot open.
+    // that scope surfaced titles from spaces the actor cannot open. Inside an
+    // accessible space the page-level rule (canSeePage) still applies: drafts
+    // and private pages answer to the space's editors and the author only.
     const spaceIds = await accessibleSpaceIds(actor);
     if (spaceIds.length) {
+      const editorIds = await editableSpaceIds(actor);
+      const inList = (ids: string[]) => sql.raw('(' + ids.map((id) => `'${id.replace(/'/g, "''")}'`).join(',') + ')');
       const rows = await db.execute(sql`
         select pg.id, pg.title, 'page' as kind, pg.space_id from kb_pages pg
         where pg.deleted_at is null
-        and pg.space_id in ${sql.raw('(' + spaceIds.map((id) => `'${id.replace(/'/g, "''")}'`).join(',') + ')')}
+        and pg.space_id in ${inList(spaceIds)}
+        and (${editorIds.length ? sql`pg.space_id in ${inList(editorIds)}` : sql`false`}
+          or (pg.published = true and (pg.visibility = 'public' or pg.created_by = ${actor.userId})))
         and (${tsq ? sql`pg.search_vector @@ to_tsquery('simple', ${tsq})` : sql`false`} or pg.title ilike ${'%' + q + '%'})
         limit 6`);
       results.push(...(rows as any[]).map((r) => ({ id: r.id, title: r.title, kind: 'page', url: `/kb/${r.space_id}/${r.id}` })));

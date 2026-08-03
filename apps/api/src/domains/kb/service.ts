@@ -6,13 +6,13 @@
  */
 import { getDb, schema, eq, and, isNull, desc, inArray } from '@ordi/db';
 import { ulid } from 'ulid';
-import { appendPosition, canAccessSpace, hasPermission } from '@ordi/shared';
+import { appendPosition, canAccessSpace, canSeePage as canSeePageRow, hasPermission } from '@ordi/shared';
 import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { emit } from '../../core/events';
 import { assertVersion } from '../../core/locking';
-import { assertSpace, assertProject, effectiveProjectRole } from '../../core/access';
+import { assertSpace, assertProject, effectiveProjectRole, accessibleSpaceIds, editableSpaceIds } from '../../core/access';
 
 const SOFT_LOCK_TTL_MS = 120 * 1000; // SOFT_LOCK_TTL_SECONDS
 
@@ -195,9 +195,7 @@ async function isSpaceEditor(actor: Actor, spaceId: string): Promise<boolean> {
 
 /** Page-level visibility (PRD §9.3): draft => editors only; private => author or editor. */
 function canSeePage(pg: PageRow, actor: Actor, isEditor: boolean): boolean {
-  if (!pg.published && !isEditor) return false;
-  if (pg.visibility === 'private' && !isEditor && pg.createdBy !== actor.userId) return false;
-  return true;
+  return canSeePageRow(pg, actor.userId, isEditor);
 }
 
 /**
@@ -500,6 +498,7 @@ export async function createPage(actor: Actor, input: any): Promise<string> {
     icon: input.icon ?? null,
     position: String(position),
     isTemplate: input.isTemplate ?? false,
+    published: input.published ?? true,
     visibility: input.visibility ?? 'public',
     createdBy: actor.userId,
   });
@@ -543,11 +542,16 @@ export async function getPage(actor: Actor, id: string, includeBacklinks: boolea
   const out: Record<string, unknown> = { ...pg, mentions, links, canEdit: isEditor };
 
   if (includeBacklinks) {
-    out.backlinks = await db
+    // A backlink names the page that links here – filter by what the actor may
+    // see of *that* page, or a private space's titles surface on public ones.
+    const rows = await db
       .select({
         pageId: schema.kbPageLinks.pageId,
         title: schema.kbPages.title,
         spaceId: schema.kbPages.spaceId,
+        published: schema.kbPages.published,
+        visibility: schema.kbPages.visibility,
+        createdBy: schema.kbPages.createdBy,
       })
       .from(schema.kbPageLinks)
       .innerJoin(schema.kbPages, eq(schema.kbPages.id, schema.kbPageLinks.pageId))
@@ -558,6 +562,11 @@ export async function getPage(actor: Actor, id: string, includeBacklinks: boolea
           isNull(schema.kbPages.deletedAt),
         ),
       );
+    const visibleSpaces = new Set(await accessibleSpaceIds(actor));
+    const editorSpaces = new Set(await editableSpaceIds(actor));
+    out.backlinks = rows
+      .filter((b) => visibleSpaces.has(b.spaceId) && canSeePageRow(b, actor.userId, editorSpaces.has(b.spaceId)))
+      .map((b) => ({ pageId: b.pageId, title: b.title, spaceId: b.spaceId }));
   }
   return out;
 }
@@ -643,6 +652,10 @@ export async function listVersions(actor: Actor, pageId: string) {
   const { db } = getDb();
   const pg = await loadPage(pageId);
   await assertSpace(actor, pg.spaceId, 'viewer');
+  // Versions carry full bodies – a page the actor cannot open must not
+  // narrate its history either.
+  const isEditor = await isSpaceEditor(actor, pg.spaceId);
+  if (!canSeePage(pg, actor, isEditor)) throw err.notFound('Page not found');
   return db
     .select()
     .from(schema.kbPageVersions)
@@ -870,6 +883,11 @@ export async function duplicatePage(actor: Actor, id: string, input: any): Promi
   const { db } = getDb();
   const source = await loadPage(id);
   await assertSpace(actor, source.spaceId, 'viewer');
+  // Duplicating copies the body – a draft or private page the actor cannot
+  // read must not become readable via a copy into a space they edit.
+  if (!canSeePage(source, actor, await isSpaceEditor(actor, source.spaceId))) {
+    throw err.notFound('Page not found');
+  }
   const targetSpaceId = input.spaceId ?? source.spaceId;
   await assertSpace(actor, targetSpaceId, 'editor');
 

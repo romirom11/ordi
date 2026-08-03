@@ -29,6 +29,8 @@ extendDict({
     'kb.publish': 'Publish',
     'kb.unpublish': 'Unpublish',
     'kb.published': 'Published',
+    'kb.draft': 'Draft',
+    'kb.draftHint': 'Only space editors can see this page',
     'kb.publishFailed': 'Could not update the publish status',
     'kb.newSubpage': 'New subpage',
     'kb.createSpaceFailed': 'Could not create the space',
@@ -64,6 +66,8 @@ extendDict({
     'kb.publish': 'Опублікувати',
     'kb.unpublish': 'Зняти з публікації',
     'kb.published': 'Опубліковано',
+    'kb.draft': 'Чернетка',
+    'kb.draftHint': 'Цю сторінку бачать лише редактори простору',
     'kb.publishFailed': 'Не вдалося змінити статус публікації',
     'kb.newSubpage': 'Нова підсторінка',
     'kb.createSpaceFailed': 'Не вдалося створити простір',
@@ -201,7 +205,8 @@ function PageTree({ nodes, spaceId, activeId, depth, canWrite, expandedPages, on
               </span>
               <FileText size={13} className="shrink-0 text-faint" />
               <span className="min-w-0 flex-1 truncate">{n.title || t('kb.untitled')}</span>
-              {n.published && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-success" title={t('kb.published')} />}
+              {/* Published is the norm now – mark the exception. Viewers never receive drafts, so this only shows to editors. */}
+              {!n.published && <span className="shrink-0 text-faint" title={t('kb.draftHint')}><EyeOff size={11} /></span>}
               {canWrite && (
                 <span onClick={(e) => e.stopPropagation()} className="flex shrink-0 items-center">
                 <DropdownMenu
@@ -681,6 +686,16 @@ function PageDetailView({ pageId, spaceId, canWrite }: { pageId: string; spaceId
     setBodyDoc(page.data.body ?? EMPTY_DOC);
   };
 
+  const publish = useMutation({
+    mutationFn: () => api.patch(`/pages/${pageId}`, { published: true, version: page.data?.version }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['page', pageId] });
+      qc.invalidateQueries({ queryKey: ['spacePages'] });
+      toast(t('kb.published'));
+    },
+    onError: () => toast.error(t('kb.publishFailed')),
+  });
+
   const ancestors = useMemo(() => {
     if (!flat.data) return [] as FlatPage[];
     const byId = new Map(flat.data.data.map((p) => [p.id, p]));
@@ -722,7 +737,16 @@ function PageDetailView({ pageId, spaceId, canWrite }: { pageId: string; spaceId
           ]}
         />
         <div className="flex shrink-0 items-center gap-2">
-          {page.data.published && <Badge className="bg-success/15 text-success">{t('kb.published')}</Badge>}
+          {!page.data.published && (
+            <>
+              <span title={t('kb.draftHint')}><Badge className="bg-warning/15 text-warning">{t('kb.draft')}</Badge></span>
+              {canWrite && (
+                <Button size="sm" variant="ghost" onClick={() => publish.mutate()} disabled={publish.isPending}>
+                  {publish.isPending ? <Spinner /> : t('kb.publish')}
+                </Button>
+              )}
+            </>
+          )}
           <IconButton
             size="sm"
             onClick={() => setShowVersions((v) => !v)}

@@ -3,6 +3,25 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## Unreleased
+
+- A created KB page is a visible KB page. Pages were born as drafts by a
+  silent default while the only publish control hid in a context menu, so a
+  role holding kb.read opened the knowledge base to empty spaces – every page
+  anyone had written was a draft nobody meant to keep hidden. Pages are now
+  born published, existing pages are marked published by migration (a page
+  meant as a draft can be unpublished again), and draft became the marked
+  state: an explicit choice on create, a Draft badge with a Publish button on
+  the page, an icon in the tree instead of the green dot on everything.
+- The draft/private page rule now holds everywhere a page surfaces, not only
+  in the tree: search stops matching drafts and other people's private pages,
+  the home feed and per-entity activity trail stop narrating their titles,
+  version history answers 404 to those who cannot open the page (it carries
+  full bodies), backlinks name only pages the viewer could follow, and
+  duplication refuses to copy a page out of a space where the actor cannot
+  read it. KB page events on the live stream are scoped to the space's
+  audience instead of broadcasting workspace-wide.
+
 ## v1.19.0
 
 - Files work where ordi is actually run. Uploads used to hand the browser a

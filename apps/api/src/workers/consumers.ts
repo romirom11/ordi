@@ -186,6 +186,9 @@ const sse: Consumer = {
       // actorId travels with the payload so clients can skip pings for their own actions.
       data: { aggregateType: ev.aggregateType, aggregateId: ev.aggregateId, actorId: ev.actorId, ...p },
       projectScope: p.projectId ? [p.projectId] : undefined,
+      // KB events carry a spaceId – a private space's page titles must not
+      // stream workspace-wide.
+      spaceScope: !p.projectId && p.spaceId ? [p.spaceId] : undefined,
       userScope: ev.type === 'sales.work_digest_due' && p.userId ? [p.userId] : undefined,
     });
   },

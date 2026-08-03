@@ -33,7 +33,7 @@ export const kbPages = pgTable('kb_pages', {
   icon: text('icon'),
   position: position(),
   isTemplate: boolean('is_template').notNull().default(false),
-  published: boolean('published').notNull().default(false),
+  published: boolean('published').notNull().default(true),
   visibility: text('visibility').notNull().default('public'), // public | private
   lockedBy: text('locked_by').references(() => users.id),
   lockedAt: timestamp('locked_at', { withTimezone: true }),
