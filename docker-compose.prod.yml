@@ -38,7 +38,7 @@ services:
 
   # Bundled object storage for installs without external S3/R2.
   # Off by default: enable with COMPOSE_PROFILES=minio in the environment,
-  # plus S3_ENDPOINT=http://minio:9000. Root credentials are the same pair
+  # plus S3_ENDPOINT=http://ordi-minio:9000. Root credentials are the same pair
   # the api uses, so the two can never drift apart. Nothing is published to
   # the host: all file traffic goes through the api.
   minio:

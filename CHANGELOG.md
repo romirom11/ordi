@@ -3,6 +3,46 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.19.0
+
+- Files work where ordi is actually run. Uploads used to hand the browser a
+  presigned URL to `http://minio:9000`, a hostname that exists only on the
+  docker network, so every upload from the UI failed on a self-hosted install
+  and failed twice behind https as mixed content. All bytes now travel through
+  the API: `POST /attachments` takes the file as multipart and generates the
+  storage key server-side (replacing `/attachments/presign` and
+  `/attachments/register`, and with them the register-a-foreign-key hole
+  `keyToken` defended against), and `GET /files/:id/:token` streams the object
+  instead of redirecting to storage. One flow serves bundled MinIO and external
+  S3/R2 alike, with no CORS, no public storage endpoint, and MinIO's port no
+  longer published to the host.
+- Files preview in place: images, the built-in PDF viewer, video, audio and
+  text-ish files as monospaced text, all on what the browser renders natively;
+  unpreviewable types say so and offer the download. Scriptable uploads (html,
+  svg, xml) are served with `Content-Security-Policy: sandbox`, closing the
+  stored-XSS vector that serving them from the app's own origin opened.
+- Uploads take several files at once, with one summary toast and the first
+  failure named per file. Storage refusals stop reporting an operator's
+  misconfiguration as a server crash: `InvalidAccessKeyId`,
+  `SignatureDoesNotMatch`, `NoSuchBucket` and `AccessDenied` map to a 422 that
+  names the environment variable to check, a missing object to a 404.
+- The prod stack bundles MinIO behind `COMPOSE_PROFILES=minio`, sharing the
+  `S3_ACCESS_KEY`/`S3_SECRET_KEY` pair the api uses so credentials cannot
+  drift, with a one-shot init that creates the bucket on first boot. The
+  deployment docs had promised a bundled MinIO the prod compose never had.
+- In-stack addresses use unique aliases (`ordi-db`, `ordi-minio`) that exist
+  only on the stack's private network. On a PaaS a container sits on two
+  networks and resolves generic names against both, which had a real
+  deployment talking to another project's MinIO and Postgres – reported as bad
+  credentials, indistinguishable from it.
+- Lead rows answer a right-click like every other list: open in a new tab, copy
+  link, open company, status and owner submenus, delete behind a confirm; a
+  converted lead offers navigation only.
+- Lead statuses have colour. All nine rendered in the same grey, so
+  Disqualified looked exactly like Ready to contact. They are toned by whose
+  move it is rather than by funnel depth, and the settled ones stay grey so the
+  rows worth acting on carry the colour.
+
 ## v1.18.0
 
 - Leads are workable in volume. The lead table grows a select column and a
