@@ -50,10 +50,13 @@ nginx-образ `docker/Dockerfile.web` ще збирається як deprecat
    - *Зовнішній S3/R2*: задайте `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`,
      `S3_SECRET_KEY`, `S3_REGION`.
    - *Вбудований MinIO*: додайте `COMPOSE_PROFILES=minio`,
-     `S3_ENDPOINT=http://minio:9000` і ту саму пару
+     `S3_ENDPOINT=http://ordi-minio:9000` і ту саму пару
      `S3_ACCESS_KEY`/`S3_SECRET_KEY` – вона ж стає root-креденшелами MinIO,
      тож api і сховище фізично не можуть розійтися. Бакет створюється
-     автоматично при першому старті (`minio-init`).
+     автоматично при першому старті (`minio-init`). Адреса саме
+     `ordi-minio`, не `minio`: на спільній мережі PaaS (Dokploy/Coolify)
+     api бачить чужі контейнери, і генеричний аліас `minio` може
+     зарезолвитись у сусідній проєкт.
 
    Сховище назовні не виставляється взагалі: браузер вантажить і читає файли
    через API, а вже API ходить у бакет по внутрішній мережі. MinIO не потрібні
