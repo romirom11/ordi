@@ -43,24 +43,3 @@ export function fileSrc(attachmentId: string): string {
   return `/api/v1/files/${attachmentId}/${signFileToken(attachmentId)}`;
 }
 
-/* ── Upload keys ─────────────────────────────────────────────────────────── */
-
-/**
- * Proof that a file key came from this API's own presign call.
- *
- * Registering an attachment mints a signed, session-free link for whatever key
- * the caller names – so without this, a caller could register a key belonging to
- * another object in the bucket (an invoice PDF, someone else's upload) and walk
- * away with a public link to it. Presign signs the key it issued; register
- * refuses any key that does not carry a matching signature.
- */
-export function signUploadKey(fileKey: string): string {
-  return hmacSha256(env.authSecret, `upload:${fileKey}`).slice(0, TOKEN_LENGTH);
-}
-
-export function verifyUploadKey(fileKey: string, token: unknown): boolean {
-  if (typeof token !== 'string') return false;
-  const expected = signUploadKey(fileKey);
-  if (token.length !== expected.length) return false;
-  return timingSafeEqual(Buffer.from(token), Buffer.from(expected));
-}

@@ -11,7 +11,7 @@ import { err } from '../../lib/errors';
 import { emit } from '../../core/events';
 import { hmacSha256, encrypt, generateToken } from '../../lib/crypto';
 import { verifyFileToken } from '../../lib/file-tokens';
-import { presignDownload } from '../../lib/s3';
+import { getObject } from '../../lib/s3';
 import { writeActivity } from '../../core/activity';
 import { verifyOAuthState, exchangeGithubCode, exchangeSlackCode } from '../integrations/oauth';
 import {
@@ -50,9 +50,10 @@ export function publicRoutes() {
 
   // ── Public invoice page (PRD §11.3) ──
   /**
-   * A file embedded in rich text, reached by its signed link (lib/file-tokens).
-   * Answers a redirect to a freshly presigned S3 url rather than proxying the
-   * bytes, so storage bandwidth never passes through the API.
+   * A file reached by its signed link (lib/file-tokens): the bytes stream
+   * through the API, so storage itself is never exposed to a browser – the
+   * old 302 to a presigned url sent the client to an endpoint that, on a
+   * self-hosted MinIO, exists only inside the docker network.
    *
    * A wrong token is a 404, not a 403: the same rule as every other public
    * token here – existence is never leaked.
@@ -63,14 +64,17 @@ export function publicRoutes() {
     const { db } = getDb();
     const [att] = await db.select().from(schema.attachments).where(eq(schema.attachments.id, id));
     if (!att) throw err.notFound();
-    const url = await presignDownload(att.fileKey);
-    // Dev without S3 configured: presignDownload hands back a local:// stub,
-    // which is not a fetchable url. Say so instead of redirecting nowhere.
-    if (url.startsWith('local://')) throw err.domain('Object storage is not configured');
-    // The presigned url is short-lived, so the redirect itself must not be
-    // cached; the signed link that produced it is what stays stable.
-    c.header('Cache-Control', 'private, max-age=0, must-revalidate');
-    return c.redirect(url, 302);
+    const object = await getObject(att.fileKey);
+    if (!object) throw err.domain('Object storage is not configured');
+    c.header('Content-Type', att.mime || object.contentType || 'application/octet-stream');
+    const length = object.contentLength ?? att.size;
+    if (length) c.header('Content-Length', String(length));
+    // RFC 5987 filename* carries any unicode name; the plain fallback is ASCII.
+    const asciiName = att.filename.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '');
+    c.header('Content-Disposition', `inline; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(att.filename)}`);
+    // An attachment id always names the same bytes, so the link can cache hard.
+    c.header('Cache-Control', 'private, max-age=31536000, immutable');
+    return c.body(object.body);
   });
 
   app.get('/i/:token', async (c) => {

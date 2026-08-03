@@ -3,10 +3,12 @@
  * sells into (SaaS lead vs. services lead), the link is validated against live
  * projects, filterable, and clearable.
  */
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { getDb, schema, eq } from '@ordi/db';
 import { ulid } from 'ulid';
 import { resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
+
+vi.mock('../lib/s3', () => import('./s3-mock'));
 
 let users: Awaited<ReturnType<typeof seedRolesAndUsers>>;
 let companyId: string;
@@ -162,16 +164,12 @@ describe('company deletion dependencies', () => {
 describe('entity attachments', () => {
   let fileId: string;
 
-  it('registers and lists files on a company', async () => {
-    const presign = await json(reqAs(users.owner!.cookie).post('/attachments/presign', {
-      filename: 'brief.pdf', size: 1234, mime: 'application/pdf',
-      entityType: 'company', entityId: companyId,
-    }));
-    const reg = await reqAs(users.owner!.cookie).post('/attachments/register', {
-      entityType: 'company', entityId: companyId,
-      fileKey: presign.fileKey, keyToken: presign.keyToken,
-      filename: 'brief.pdf', size: 1234, mime: 'application/pdf',
-    });
+  it('uploads and lists files on a company', async () => {
+    const fd = new FormData();
+    fd.append('file', new File([new Uint8Array(1234)], 'brief.pdf', { type: 'application/pdf' }), 'brief.pdf');
+    fd.append('entityType', 'company');
+    fd.append('entityId', companyId);
+    const reg = await reqAs(users.owner!.cookie).postForm('/attachments', fd);
     expect(reg.status).toBe(201);
     fileId = (await json(reg)).id;
 

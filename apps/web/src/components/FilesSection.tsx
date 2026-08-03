@@ -12,7 +12,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Download, FileText, Paperclip, Trash2, Upload } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
 import { openExternal } from '../lib/desktop';
-import { UploadError, uploadAttachment } from '../lib/uploads';
+import { UploadError, resolveFileSrc, uploadAttachment } from '../lib/uploads';
 import { useT } from '../lib/i18n';
 import { Button, EmptySection, IconButton, Skeleton, Spinner, Tooltip, cn, fmtDate } from './ui';
 import { ConfirmDialog, toast } from './overlays';
@@ -63,9 +63,9 @@ export function FilesSection({ entityType, entityId, canWrite, variant = 'sectio
   };
 
   const download = async (f: FileRow) => {
+    // The url is the signed API path; the file streams through the API.
     const res = await api.get<{ url: string }>(`/attachments/${f.id}/url`);
-    if (res.url.startsWith('local://')) { toast.error(t('crm.storageNotConfigured')); return; }
-    openExternal(res.url);
+    openExternal(resolveFileSrc(res.url));
   };
 
   const del = useMutation({

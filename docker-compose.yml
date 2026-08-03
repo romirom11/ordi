@@ -23,8 +23,9 @@ services:
       MINIO_ROOT_PASSWORD: ordi-secret
     volumes:
       - minio_data:/data
+    # File bytes go through the API, so the S3 port stays off the host.
+    # 9001 is the admin console – needed once, to create the `ordi` bucket.
     ports:
-      - "9000:9000"
       - "9001:9001"
 
   api:
@@ -40,9 +41,6 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
       CORS_ORIGINS: http://localhost:8080,tauri://localhost
       S3_ENDPOINT: http://minio:9000
-      # What the browser uploads to: minio:9000 exists only on this network.
-      # Behind a domain, point this at the public (https) address of MinIO.
-      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
       S3_BUCKET: ordi
       S3_ACCESS_KEY: ordi
       S3_SECRET_KEY: ordi-secret

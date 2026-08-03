@@ -37,14 +37,6 @@ export const env = {
   smtpFrom: process.env.SMTP_FROM ?? 'ordi <no-reply@ordi.local>',
   s3: {
     endpoint: process.env.S3_ENDPOINT ?? '',
-    /**
-     * Endpoint browsers can actually reach, for presigned upload/download
-     * URLs. In docker-compose the API talks to MinIO as http://minio:9000 –
-     * a hostname that exists only on the docker network, so a URL signed
-     * against it dies in the browser (and as mixed content behind https).
-     * Unset means the internal endpoint is public enough (real S3/R2).
-     */
-    publicEndpoint: process.env.S3_PUBLIC_ENDPOINT ?? '',
     bucket: process.env.S3_BUCKET ?? 'ordi',
     accessKey: process.env.S3_ACCESS_KEY ?? '',
     secretKey: process.env.S3_SECRET_KEY ?? '',

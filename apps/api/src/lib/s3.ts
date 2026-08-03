@@ -1,46 +1,55 @@
-/** S3-compatible storage (PRD §14.5): presigned uploads, 25MB cap, blocked exts. */
+/**
+ * S3-compatible storage (PRD §14.5). All file traffic goes through the API:
+ * the browser POSTs the file here and we put it in the bucket; the signed
+ * /files link streams it back out. Storage is never exposed to the browser,
+ * so an internal MinIO on a docker network needs no public endpoint, no CORS
+ * and no second https vhost – and an external S3/R2 stays private too.
+ */
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { env } from '../env';
-
-function makeClient(endpoint: string): S3Client {
-  return new S3Client({
-    endpoint,
-    region: env.s3.region,
-    credentials: { accessKeyId: env.s3.accessKey, secretAccessKey: env.s3.secretKey },
-    forcePathStyle: true,
-  });
-}
 
 let client: S3Client | null = null;
 function getClient(): S3Client | null {
   if (!env.s3.endpoint) return null;
-  if (!client) client = makeClient(env.s3.endpoint);
+  if (!client) {
+    client = new S3Client({
+      endpoint: env.s3.endpoint,
+      region: env.s3.region,
+      credentials: { accessKeyId: env.s3.accessKey, secretAccessKey: env.s3.secretKey },
+      forcePathStyle: true,
+    });
+  }
   return client;
 }
 
-/**
- * Presigned URLs are fetched by the browser, and the signature covers the
- * Host header – the URL cannot be rewritten after signing. So they are signed
- * against S3_PUBLIC_ENDPOINT when it differs from the internal one (MinIO on
- * a docker network), and against the ordinary endpoint otherwise.
- */
-let publicClient: S3Client | null = null;
-function getPresignClient(): S3Client | null {
-  // Storage is configured by S3_ENDPOINT; a public endpoint alone enables nothing.
-  if (!env.s3.endpoint || !env.s3.publicEndpoint) return getClient();
-  if (!publicClient) publicClient = makeClient(env.s3.publicEndpoint);
-  return publicClient;
+export function isStorageConfigured(): boolean {
+  return !!env.s3.endpoint;
 }
 
-export async function presignUpload(key: string, mime: string): Promise<string> {
-  const c = getPresignClient();
-  if (!c) return `local://${key}`; // dev fallback
-  return getSignedUrl(c, new PutObjectCommand({ Bucket: env.s3.bucket, Key: key, ContentType: mime }), { expiresIn: 900 });
+/** False when storage is not configured – the caller says so to the user. */
+export async function putObject(key: string, body: Uint8Array, mime: string): Promise<boolean> {
+  const c = getClient();
+  if (!c) return false;
+  await c.send(new PutObjectCommand({ Bucket: env.s3.bucket, Key: key, Body: body, ContentType: mime }));
+  return true;
 }
 
-export async function presignDownload(key: string): Promise<string> {
-  const c = getPresignClient();
-  if (!c) return `local://${key}`;
-  return getSignedUrl(c, new GetObjectCommand({ Bucket: env.s3.bucket, Key: key }), { expiresIn: 900 });
+export interface StoredObject {
+  /** Web stream of the object bytes, handed straight to the response. */
+  body: ReadableStream;
+  contentType?: string;
+  contentLength?: number;
+}
+
+/** Null when storage is not configured; throws if the object is missing. */
+export async function getObject(key: string): Promise<StoredObject | null> {
+  const c = getClient();
+  if (!c) return null;
+  const res = await c.send(new GetObjectCommand({ Bucket: env.s3.bucket, Key: key }));
+  if (!res.Body) throw new Error(`S3 object ${key} has no body`);
+  return {
+    body: res.Body.transformToWebStream(),
+    contentType: res.ContentType,
+    contentLength: res.ContentLength,
+  };
 }

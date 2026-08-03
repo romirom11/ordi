@@ -1,35 +1,14 @@
 import { Hono } from 'hono';
 import { getDb, schema, eq, and, desc } from '@ordi/db';
 import { ulid } from 'ulid';
-import { z } from 'zod';
 import { MAX_UPLOAD_BYTES, BLOCKED_FILE_EXTENSIONS, type Permission } from '@ordi/shared';
 import type { Actor, AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { assertProject } from '../../core/access';
 import { writeActivity } from '../../core/activity';
-import { presignUpload, presignDownload } from '../../lib/s3';
-import { fileSrc, signUploadKey, verifyUploadKey } from '../../lib/file-tokens';
+import { putObject } from '../../lib/s3';
+import { fileSrc } from '../../lib/file-tokens';
 import { err } from '../../lib/errors';
-
-const presignSchema = z.object({
-  filename: z.string().min(1),
-  size: z.number().int().min(1).max(MAX_UPLOAD_BYTES),
-  mime: z.string().min(1),
-  entityType: z.string().optional(),
-  entityId: z.string().optional(),
-});
-
-const registerSchema = z.object({
-  fileKey: z.string().min(1),
-  /** The signature /presign returned alongside fileKey. */
-  keyToken: z.string().min(1),
-  filename: z.string().min(1),
-  size: z.number().int().min(1).max(MAX_UPLOAD_BYTES),
-  mime: z.string().min(1),
-  /** Absent for a file embedded in rich text: it belongs to a document, not a record. */
-  entityType: z.string().optional(),
-  entityId: z.string().optional(),
-});
 
 /** Which permission covers files hanging off each entity type. */
 const READ_PERM: Record<string, Permission> = { company: 'crm.read', lead: 'crm.read', deal: 'deals.read', task: 'projects.read', project: 'projects.read' };
@@ -82,36 +61,47 @@ export function attachmentsRoutes() {
     return c.json({ data: rows });
   });
 
-  app.post('/presign', async (c) => {
-    const body = presignSchema.parse(await c.req.json());
-    const ext = body.filename.split('.').pop()?.toLowerCase() ?? '';
-    if (BLOCKED_FILE_EXTENSIONS.includes(ext)) throw err.domain('File type not allowed');
-    const key = `uploads/${ulid()}/${body.filename}`;
-    const url = await presignUpload(key, body.mime);
-    // keyToken is what register demands back, so a caller cannot register a key
-    // this endpoint never issued (lib/file-tokens).
-    return c.json({ uploadUrl: url, fileKey: key, keyToken: signUploadKey(key) });
-  });
-
-  app.post('/register', async (c) => {
+  /**
+   * The upload: one multipart POST carrying the file and (optionally) the
+   * record it hangs off. The API puts the bytes in the bucket itself, so
+   * storage never has to be reachable from a browser – the old
+   * presign → PUT → register dance handed the browser a URL to an endpoint
+   * that, on a self-hosted MinIO, only exists inside the docker network.
+   * Registering used to mint a public link for any key the caller named;
+   * with the key generated server-side that hole is gone with the dance.
+   */
+  app.post('/', async (c) => {
     const actor = currentActor(c);
-    const body = registerSchema.parse(await c.req.json());
-    if (!verifyUploadKey(body.fileKey, body.keyToken)) throw err.validation('fileKey was not issued by /presign');
-    if (body.entityType) {
-      requireEntityPerm(actor.access.permissions, WRITE_PERM, body.entityType);
-      await assertEntityAccess(actor, body.entityType, body.entityId, 'member');
+    const form = await c.req.parseBody();
+    const file = form['file'];
+    if (!(file instanceof File)) throw err.validation('file field required (multipart/form-data)');
+    if (!file.name) throw err.validation('filename required');
+    if (file.size < 1 || file.size > MAX_UPLOAD_BYTES) throw err.validation('File exceeds the size cap');
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+    if (BLOCKED_FILE_EXTENSIONS.includes(ext)) throw err.domain('File type not allowed');
+    const entityType = typeof form['entityType'] === 'string' && form['entityType'] ? form['entityType'] : null;
+    const entityId = typeof form['entityId'] === 'string' && form['entityId'] ? form['entityId'] : null;
+    if (entityType) {
+      requireEntityPerm(actor.access.permissions, WRITE_PERM, entityType);
+      await assertEntityAccess(actor, entityType, entityId, 'member');
     }
+
+    const mime = file.type || 'application/octet-stream';
+    const key = `uploads/${ulid()}/${file.name}`;
+    const stored = await putObject(key, new Uint8Array(await file.arrayBuffer()), mime);
+    if (!stored) throw err.domain('Object storage is not configured');
+
     const { db } = getDb();
     const id = ulid();
     await db.insert(schema.attachments).values({
-      id, entityType: body.entityType ?? null, entityId: body.entityId ?? null,
-      fileKey: body.fileKey, filename: body.filename, size: body.size, mime: body.mime,
+      id, entityType, entityId,
+      fileKey: key, filename: file.name, size: file.size, mime,
       createdBy: actor.userId,
     });
-    if (body.entityType) {
+    if (entityType) {
       await writeActivity(db, {
         entityType: 'attachment', entityId: id, action: 'created',
-        diff: { file: { to: body.filename }, on: { to: `${body.entityType}:${body.entityId}` } },
+        diff: { file: { to: file.name }, on: { to: `${entityType}:${entityId}` } },
         actorId: actor.userId, actorType: actor.actorType,
       });
     }
@@ -150,8 +140,10 @@ export function attachmentsRoutes() {
       requireEntityPerm(actor.access.permissions, READ_PERM, att.entityType);
       await assertEntityAccess(actor, att.entityType, att.entityId, 'viewer');
     }
+    // Both are the signed API path now: the file streams back through /files,
+    // so storage stays private.
     return c.json({
-      url: await presignDownload(att.fileKey), src: fileSrc(att.id),
+      url: fileSrc(att.id), src: fileSrc(att.id),
       filename: att.filename, mime: att.mime,
     });
   });
