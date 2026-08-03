@@ -42,18 +42,47 @@ export function salesActivityStatusLabel(t: (key: string, fallback?: string) => 
   return t(`crm.activityStatus.${value}`, value.replaceAll('_', ' '));
 }
 
-/* Status colour semantics (brief): lead=warning, active=success, paused/archived=faint. */
-export const STATUS_TEXT: Record<string, string> = {
-  lead: 'text-warning',
-  active: 'text-success',
-  paused: 'text-faint',
-  archived: 'text-faint',
-};
-export const STATUS_DOT: Record<string, string> = {
-  lead: 'bg-warning',
-  active: 'bg-success',
-  paused: 'bg-faint',
-  archived: 'bg-faint',
+/**
+ * Pill tones. Written as literal class pairs because Tailwind scans source for
+ * whole class names – a `text-${tone}` template would never be generated.
+ */
+const TONES = {
+  action: { text: 'text-primary', dot: 'bg-primary' },
+  attention: { text: 'text-warning', dot: 'bg-warning' },
+  live: { text: 'text-success', dot: 'bg-success' },
+  lost: { text: 'text-destructive', dot: 'bg-destructive' },
+  waiting: { text: 'text-muted-foreground', dot: 'bg-muted-foreground' },
+  quiet: { text: 'text-faint', dot: 'bg-faint' },
+} as const;
+
+/**
+ * Company and lead statuses share one map: the two vocabularies do not overlap
+ * and both render through StatusPill.
+ *
+ * Leads are toned by whose move it is rather than by funnel depth, so a glance
+ * down the table says what to pick up: indigo means we owe the lead an action,
+ * amber that it needs a human decision, green that the conversation is live or
+ * won. Everything settled or out of our hands greys out so the rows worth
+ * acting on carry the colour.
+ */
+const STATUS_TONE: Record<string, keyof typeof TONES> = {
+  // Companies.
+  lead: 'attention',
+  active: 'live',
+  paused: 'quiet',
+  archived: 'quiet',
+  // Leads we owe an action.
+  new: 'action',
+  ready: 'action',
+  needs_review: 'attention',
+  // Leads in a live conversation, or through it.
+  engaged: 'live',
+  converted: 'live',
+  // Leads waiting on someone else, then the closed ones.
+  waiting_reply: 'waiting',
+  nurture: 'waiting',
+  no_response: 'quiet',
+  disqualified: 'lost',
 };
 
 export interface Company {
@@ -360,9 +389,10 @@ export { useUsersLookup, useUserMap } from '../../lib/queries';
 export function StatusPill({ status, className }: { status: string; className?: string }) {
   const t = useT();
   const label = t(`crm.status.${status}`, status);
+  const tone = TONES[STATUS_TONE[status] ?? 'quiet'];
   return (
-    <span className={cn('inline-flex items-center gap-1.5 text-xs font-medium', STATUS_TEXT[status] ?? 'text-faint', className)}>
-      <span className={cn('h-1.5 w-1.5 rounded-full', STATUS_DOT[status] ?? 'bg-faint')} />
+    <span className={cn('inline-flex items-center gap-1.5 text-xs font-medium', tone.text, className)}>
+      <span className={cn('h-1.5 w-1.5 rounded-full', tone.dot)} />
       {label}
     </span>
   );
