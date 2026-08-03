@@ -28,6 +28,47 @@ services:
       timeout: 5s
       retries: 10
 
+  # Bundled object storage for installs without external S3/R2.
+  # Off by default: enable with COMPOSE_PROFILES=minio in the environment,
+  # plus S3_ENDPOINT=http://minio:9000. Root credentials are the same pair
+  # the api uses, so the two can never drift apart. Nothing is published to
+  # the host: all file traffic goes through the api.
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    profiles: ["minio"]
+    command: server /data
+    environment:
+      # Interpolation runs even for profile-disabled services, so these cannot
+      # be `:?`-required; MinIO itself refuses to start on empty credentials.
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Creates the bucket on first boot, so "make a bucket in the console" stops
+  # being a manual step (the console is not even exposed).
+  minio-init:
+    image: minio/mc:latest
+    profiles: ["minio"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+      mc mb --ignore-existing local/$${BUCKET}
+      "
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-}
+      BUCKET: ${S3_BUCKET:-ordi}
+
   # The whole application: REST API, workers, and the built web app.
   api:
     build:
@@ -66,3 +107,4 @@ services:
 
 volumes:
   db_data:
+  minio_data:

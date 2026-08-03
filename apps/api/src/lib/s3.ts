@@ -7,6 +7,27 @@
  */
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { env } from '../env';
+import { err } from './errors';
+
+/**
+ * A storage refusal is an operator problem, not a server crash: wrong
+ * credentials or a missing bucket used to surface as an unhandled 500 with
+ * the real reason visible only in the API logs.
+ */
+function rethrowStorageError(cause: unknown): never {
+  const name = (cause as { name?: string })?.name ?? '';
+  if (name === 'InvalidAccessKeyId' || name === 'SignatureDoesNotMatch') {
+    throw err.domain(`Storage rejected the API's credentials (${name}) - check S3_ACCESS_KEY / S3_SECRET_KEY`);
+  }
+  if (name === 'NoSuchBucket') {
+    throw err.domain(`Storage bucket "${env.s3.bucket}" does not exist - create it or fix S3_BUCKET`);
+  }
+  if (name === 'NoSuchKey') throw err.notFound('File is missing from storage');
+  if (name === 'AccessDenied') {
+    throw err.domain('Storage denied access (AccessDenied) - the S3 credentials lack rights on the bucket');
+  }
+  throw cause as Error;
+}
 
 let client: S3Client | null = null;
 function getClient(): S3Client | null {
@@ -30,7 +51,11 @@ export function isStorageConfigured(): boolean {
 export async function putObject(key: string, body: Uint8Array, mime: string): Promise<boolean> {
   const c = getClient();
   if (!c) return false;
-  await c.send(new PutObjectCommand({ Bucket: env.s3.bucket, Key: key, Body: body, ContentType: mime }));
+  try {
+    await c.send(new PutObjectCommand({ Bucket: env.s3.bucket, Key: key, Body: body, ContentType: mime }));
+  } catch (cause) {
+    rethrowStorageError(cause);
+  }
   return true;
 }
 
@@ -45,11 +70,15 @@ export interface StoredObject {
 export async function getObject(key: string): Promise<StoredObject | null> {
   const c = getClient();
   if (!c) return null;
-  const res = await c.send(new GetObjectCommand({ Bucket: env.s3.bucket, Key: key }));
-  if (!res.Body) throw new Error(`S3 object ${key} has no body`);
-  return {
-    body: res.Body.transformToWebStream(),
-    contentType: res.ContentType,
-    contentLength: res.ContentLength,
-  };
+  try {
+    const res = await c.send(new GetObjectCommand({ Bucket: env.s3.bucket, Key: key }));
+    if (!res.Body) throw new Error(`S3 object ${key} has no body`);
+    return {
+      body: res.Body.transformToWebStream(),
+      contentType: res.ContentType,
+      contentLength: res.ContentLength,
+    };
+  } catch (cause) {
+    rethrowStorageError(cause);
+  }
 }
