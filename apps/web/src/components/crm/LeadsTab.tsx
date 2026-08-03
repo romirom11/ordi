@@ -1,15 +1,16 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Search, Target, UserCircle2, X } from 'lucide-react';
-import { api, ApiError } from '../../lib/api';
+import { Building2, CircleDot, Copy, ExternalLink, Search, Target, Trash2, UserCircle2, X } from 'lucide-react';
+import { api, appOrigin, ApiError } from '../../lib/api';
 import { useOpen } from '../../lib/router';
+import { useTabs } from '../../lib/tabs';
 import { useCan } from '../../lib/auth';
 import { useT } from '../../lib/i18n';
 import { Avatar, Button, EmptyState, Input, Select, Skeleton, fmtRelative } from '../ui';
-import { toast } from '../overlays';
+import { ContextMenu, ConfirmDialog, toast, type ContextMenuEntry } from '../overlays';
 import {
   LEAD_STATUSES, WRITABLE_LEAD_STATUSES, StatusPill, salesActivityTypeLabel,
-  useLeads, useUserMap, useUsersLookup,
+  useLeads, useUserMap, useUsersLookup, type Lead,
 } from './shared';
 
 /**
@@ -40,6 +41,9 @@ export function LeadsTab() {
   const usersQ = useUsersLookup();
   const leads = leadsQ.data?.leads ?? [];
   const canWrite = can('crm.write');
+  const canDelete = can('crm.delete');
+  const tabs = useTabs();
+  const [toDelete, setToDelete] = useState<Lead | null>(null);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Filters change what the checkboxes point at – keep only ids still visible.
@@ -58,6 +62,62 @@ export function LeadsTab() {
     });
   };
 
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['leads'] });
+    qc.invalidateQueries({ queryKey: ['sales-work'] });
+    qc.invalidateQueries({ queryKey: ['sales-analytics'] });
+  };
+
+  const patchLead = useMutation({
+    mutationFn: (vars: { lead: Lead; body: Record<string, unknown> }) =>
+      api.patch(`/leads/${vars.lead.id}`, { ...vars.body, version: vars.lead.version }),
+    onSuccess: () => { refresh(); toast(t('common.saved')); },
+    onError: (error) => {
+      refresh();
+      if (error instanceof ApiError && (error.code === 'version_conflict' || error.status === 409)) toast.error(t('crm.conflict'));
+      else toast.error(error instanceof ApiError ? error.message : t('common.saveFailed'));
+    },
+  });
+
+  const del = useMutation({
+    mutationFn: (id: string) => api.del(`/leads/${id}`),
+    onSuccess: () => { setToDelete(null); refresh(); toast(t('crm.leadDeleted')); },
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t('common.saveFailed')),
+  });
+
+  /** Same right-click vocabulary as clients and deals; leads never had one. */
+  const buildMenu = (lead: Lead): ContextMenuEntry[] => {
+    const url = `/leads/${lead.id}`;
+    const items: ContextMenuEntry[] = [
+      { key: 'open', label: t('crm.openInNewTab'), icon: <ExternalLink size={14} />, onSelect: () => tabs?.openInNewTab(url) },
+      { key: 'copy', label: t('crm.copyLink'), icon: <Copy size={14} />, onSelect: () => { navigator.clipboard?.writeText(`${appOrigin()}${url}`).then(() => toast(t('crm.linkCopied'))); } },
+      { key: 'company', label: t('crm.openCompany'), icon: <Building2 size={14} />, onSelect: () => tabs?.openInNewTab(`/companies/${lead.companyId}`) },
+    ];
+    // A converted lead is a frozen record: navigation only. Nurture is absent
+    // from the submenu because it needs a return date the menu cannot ask for.
+    if (canWrite && lead.status !== 'converted') {
+      items.push({
+        key: 'status', label: t('crm.changeStatus'), icon: <CircleDot size={14} />,
+        children: BULK_STATUSES.map((s) => ({
+          key: s, label: <StatusPill status={s} />, disabled: s === lead.status,
+          onSelect: () => { if (s !== lead.status) patchLead.mutate({ lead, body: { status: s } }); },
+        })),
+      });
+      items.push({
+        key: 'owner', label: t('crm.changeOwner'), icon: <UserCircle2 size={14} />,
+        children: (usersQ.data ?? []).map((user) => ({
+          key: user.id, label: user.name, disabled: user.id === lead.ownerId,
+          onSelect: () => { if (user.id !== lead.ownerId) patchLead.mutate({ lead, body: { ownerId: user.id } }); },
+        })),
+      });
+    }
+    if (canDelete) {
+      items.push({ type: 'separator' });
+      items.push({ key: 'delete', label: t('common.delete'), icon: <Trash2 size={14} />, danger: true, onSelect: () => setToDelete(lead) });
+    }
+    return items;
+  };
+
   const bulk = useMutation({
     mutationFn: (patch: BulkPatch) =>
       api.post<{ updated: number; errors: { id: string; message: string }[] }>('/leads/bulk', {
@@ -65,9 +125,7 @@ export function LeadsTab() {
         ...patch,
       }),
     onSuccess: (result) => {
-      qc.invalidateQueries({ queryKey: ['leads'] });
-      qc.invalidateQueries({ queryKey: ['sales-work'] });
-      qc.invalidateQueries({ queryKey: ['sales-analytics'] });
+      refresh();
       if (result.errors.length) {
         toast.error(t('crm.bulkPartial')
           .replace('{updated}', String(result.updated))
@@ -159,8 +217,8 @@ export function LeadsTab() {
               return (
                 // The whole row still opens the lead, as it did before the
                 // select column existed; only the checkbox itself opts out.
+                <ContextMenu key={lead.id} items={buildMenu(lead)}>
                 <div
-                  key={lead.id}
                   style={{ ['--i' as string]: Math.min(i, 10) }}
                   onClick={(e) => { if (!(e.target as HTMLElement).closest('input')) open(`/leads/${lead.id}`, e); }}
                   onAuxClick={(e) => { if (!(e.target as HTMLElement).closest('input')) open(`/leads/${lead.id}`, e); }}
@@ -201,11 +259,23 @@ export function LeadsTab() {
                     ) : <span className="text-xs text-faint">{t('crm.noOwner')}</span>}
                   </span>
                 </div>
+                </ContextMenu>
               );
             })}
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!toDelete}
+        onClose={() => setToDelete(null)}
+        onConfirm={() => toDelete && del.mutate(toDelete.id)}
+        title={t('crm.deleteLeadTitle')}
+        body={toDelete ? t('crm.deleteLeadBody').replace('{name}', toDelete.title) : ''}
+        confirmLabel={t('common.delete')}
+        danger
+        pending={del.isPending}
+      />
     </div>
   );
 }

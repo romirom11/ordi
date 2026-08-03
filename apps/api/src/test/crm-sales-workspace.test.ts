@@ -1,7 +1,9 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { getDb, schema, eq, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import { json, reqAs, resetDb, seedRolesAndUsers } from './helpers';
+
+vi.mock('../lib/s3', () => import('./s3-mock'));
 
 let users: Awaited<ReturnType<typeof seedRolesAndUsers>>;
 let qualifiedStageId: string;
@@ -745,19 +747,11 @@ describe('lead and deal boundary', () => {
       leadId: lead.id,
       body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Pain confirmed' }] }] },
     });
-    const filePresign = await json(reqAs(users.owner!.cookie).post('/attachments/presign', {
-      filename: 'research.pdf', size: 20, mime: 'application/pdf',
-      entityType: 'lead', entityId: lead.id,
-    }));
-    const file = await json(reqAs(users.owner!.cookie).post('/attachments/register', {
-      entityType: 'lead',
-      entityId: lead.id,
-      fileKey: filePresign.fileKey,
-      keyToken: filePresign.keyToken,
-      filename: 'research.pdf',
-      size: 20,
-      mime: 'application/pdf',
-    }));
+    const fileForm = new FormData();
+    fileForm.append('file', new File([new Uint8Array(20)], 'research.pdf', { type: 'application/pdf' }), 'research.pdf');
+    fileForm.append('entityType', 'lead');
+    fileForm.append('entityId', lead.id);
+    const file = await json(reqAs(users.owner!.cookie).postForm('/attachments', fileForm));
 
     const otherCompanyId = ulid();
     const otherContactId = ulid();

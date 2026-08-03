@@ -23,8 +23,9 @@ services:
       MINIO_ROOT_PASSWORD: ordi-secret
     volumes:
       - minio_data:/data
+    # File bytes go through the API, so the S3 port stays off the host.
+    # 9001 is the admin console – needed once, to create the `ordi` bucket.
     ports:
-      - "9000:9000"
       - "9001:9001"
 
   api:

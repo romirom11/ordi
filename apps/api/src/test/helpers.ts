@@ -62,6 +62,10 @@ export function reqAs(cookie: string) {
     post: (path: string, body?: unknown) => app.request(`/api/v1${path}`, {
       method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
     }),
+    // Multipart: the runtime sets the boundary header itself.
+    postForm: (path: string, form: FormData) => app.request(`/api/v1${path}`, {
+      method: 'POST', headers: { cookie }, body: form,
+    }),
     patch: (path: string, body?: unknown) => app.request(`/api/v1${path}`, {
       method: 'PATCH', headers: { cookie, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
     }),

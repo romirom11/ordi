@@ -12,10 +12,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Download, FileText, Paperclip, Trash2, Upload } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
 import { openExternal } from '../lib/desktop';
-import { UploadError, uploadAttachment } from '../lib/uploads';
+import { UploadError, resolveFileSrc, uploadAttachment } from '../lib/uploads';
 import { useT } from '../lib/i18n';
 import { Button, EmptySection, IconButton, Skeleton, Spinner, Tooltip, cn, fmtDate } from './ui';
 import { ConfirmDialog, toast } from './overlays';
+import { FilePreviewDialog } from './FilePreview';
 import { SectionHeader } from './crm/detail';
 
 export interface FileRow { id: string; filename: string; size?: number | null; mime?: string | null; createdAt?: string }
@@ -40,6 +41,7 @@ export function FilesSection({ entityType, entityId, canWrite, variant = 'sectio
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [toDelete, setToDelete] = useState<FileRow | null>(null);
+  const [preview, setPreview] = useState<FileRow | null>(null);
 
   const queryKey = ['attachments', entityType, entityId];
   const { data, isLoading } = useQuery<FileRow[]>({
@@ -63,9 +65,9 @@ export function FilesSection({ entityType, entityId, canWrite, variant = 'sectio
   };
 
   const download = async (f: FileRow) => {
+    // The url is the signed API path; the file streams through the API.
     const res = await api.get<{ url: string }>(`/attachments/${f.id}/url`);
-    if (res.url.startsWith('local://')) { toast.error(t('crm.storageNotConfigured')); return; }
-    openExternal(res.url);
+    openExternal(resolveFileSrc(res.url));
   };
 
   const del = useMutation({
@@ -96,6 +98,8 @@ export function FilesSection({ entityType, entityId, canWrite, variant = 'sectio
     />
   );
 
+  const previewDialog = preview && <FilePreviewDialog file={preview} onClose={() => setPreview(null)} />;
+
   if (variant === 'rail') {
     return (
       <div>
@@ -118,7 +122,7 @@ export function FilesSection({ entityType, entityId, canWrite, variant = 'sectio
               <div key={f.id} className="group/file flex min-h-7 items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-muted">
                 <FileText size={14} className="shrink-0 text-muted-foreground" />
                 <button
-                  onClick={() => download(f)}
+                  onClick={() => setPreview(f)}
                   className="min-w-0 flex-1 truncate text-left text-[13px]"
                   title={`${f.filename} · ${fmtSize(f.size)} · ${fmtDate(f.createdAt)}`}
                 >
@@ -139,6 +143,7 @@ export function FilesSection({ entityType, entityId, canWrite, variant = 'sectio
           </div>
         )}
         {confirmDelete}
+        {previewDialog}
       </div>
     );
   }
@@ -167,7 +172,8 @@ export function FilesSection({ entityType, entityId, canWrite, variant = 'sectio
           {files.map((f, i) => (
             <div key={f.id} className={cn('group/file flex items-center gap-3 px-3 py-2', i > 0 && 'border-t border-border')}>
               <FileText size={16} className="shrink-0 text-muted-foreground" />
-              <button onClick={() => download(f)} className="min-w-0 flex-1 truncate text-left text-[13px] font-medium hover:underline" title={f.filename}>
+              {/* The name opens the preview; the icon on the right downloads. */}
+              <button onClick={() => setPreview(f)} className="min-w-0 flex-1 truncate text-left text-[13px] font-medium hover:underline" title={f.filename}>
                 {f.filename}
               </button>
               <span className="shrink-0 text-xs tabular-nums text-faint">{fmtSize(f.size)}</span>
@@ -191,6 +197,7 @@ export function FilesSection({ entityType, entityId, canWrite, variant = 'sectio
       )}
 
       {confirmDelete}
+      {previewDialog}
     </section>
   );
 }

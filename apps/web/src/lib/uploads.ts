@@ -1,9 +1,8 @@
 /**
- * The one upload path: presign → PUT to storage → register (PRD §14.5).
- *
- * Every uploader goes through here – the CRM Files section and the rich text
- * editor both did their own three-step dance before, and the editor's copy would
- * have been the second place to forget the keyToken presign now demands.
+ * The one upload path: a single multipart POST through the API (PRD §14.5).
+ * The API puts the bytes in storage itself, so storage never has to be
+ * reachable from the browser – which, on a self-hosted MinIO inside a docker
+ * network, it is not.
  */
 import { ApiError, api, appOrigin } from './api';
 import { MAX_UPLOAD_BYTES } from '@ordi/shared';
@@ -38,23 +37,20 @@ export interface UploadOptions {
 export async function uploadAttachment(file: File, opts: UploadOptions = {}): Promise<Uploaded> {
   if (file.size > MAX_UPLOAD_BYTES) throw new UploadError('uploads.tooLarge');
   const mime = file.type || 'application/octet-stream';
-  const presign = await api.post<{ uploadUrl: string; fileKey: string; keyToken: string }>(
-    '/attachments/presign',
-    { filename: file.name, size: file.size, mime, ...opts },
-  );
-  // Dev without S3 returns a local:// stub. Registering anyway keeps the flow
-  // demonstrable, but nothing can be fetched back, so an embedded image would
-  // be a permanent broken box – say so instead.
-  if (presign.uploadUrl.startsWith('local://')) throw new UploadError('uploads.noStorage');
-
-  const put = await fetch(presign.uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': mime } });
-  if (!put.ok) throw new UploadError('uploads.failed');
-
-  const registered = await api.post<{ id: string; src: string }>('/attachments/register', {
-    ...opts, fileKey: presign.fileKey, keyToken: presign.keyToken,
-    filename: file.name, size: file.size, mime,
-  });
-  return { id: registered.id, src: registered.src, filename: file.name, mime };
+  const form = new FormData();
+  form.append('file', file, file.name);
+  if (opts.entityType) form.append('entityType', opts.entityType);
+  if (opts.entityId) form.append('entityId', opts.entityId);
+  try {
+    const uploaded = await api.postForm<{ id: string; src: string }>('/attachments', form);
+    return { id: uploaded.id, src: uploaded.src, filename: file.name, mime };
+  } catch (e) {
+    // Dev without S3 configured: the API says so; keep the phrasing localized.
+    if (e instanceof ApiError && /storage is not configured/i.test(e.message)) {
+      throw new UploadError('uploads.noStorage');
+    }
+    throw e;
+  }
 }
 
 /** Images only, so a slash-menu image block cannot end up holding a PDF. */
