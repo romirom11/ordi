@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, ChevronRight, Copy, ExternalLink, Info, Target } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
@@ -15,7 +15,7 @@ import {
   useContacts, useDealStages, useLead, useSalesActivities, useUsersLookup,
 } from '../components/crm/shared';
 import {
-  EditableName, InlineEdit, NotesSection, OwnerRailValue, SectionHeader,
+  DetailField, EditableName, InlineEdit, NotesSection, OwnerRailValue, SectionHeader,
 } from '../components/crm/detail';
 import { FilesSection } from '../components/FilesSection';
 import { SalesActivityPanel } from '../components/crm/SalesActivityPanel';
@@ -302,15 +302,6 @@ export function LeadDetailPage({ id }: { id: string }) {
         companyId={lead.companyId}
         onCreated={(contact) => patch.mutate({ contactId: contact.id })}
       />
-    </div>
-  );
-}
-
-function DetailField({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="min-w-0">
-      <p className="mb-1 px-2 text-xs font-semibold uppercase tracking-wide text-faint">{label}</p>
-      {children}
     </div>
   );
 }

@@ -1,14 +1,15 @@
 /**
  * Deal detail, in the same shape as the company and project records: a one-line
- * identity header, content at full width (notes + activity trail) and a rail
- * carrying every property – stage, client, project, owner, money, dates,
- * custom fields and files. Moving to a lost stage still prompts for a reason.
+ * identity header, content at full width (custom fields + notes + activity
+ * trail) and a rail carrying the short properties – stage, client, project,
+ * owner, money, dates and files. Moving to a lost stage still prompts for a
+ * reason.
  */
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Activity as ActivityIcon, CalendarClock, ChevronDown, ChevronRight,
-  ExternalLink as ExternalLinkIcon, FolderKanban, Handshake, Target, UserCircle2,
+  ExternalLink as ExternalLinkIcon, FolderKanban, Handshake, SlidersHorizontal, Target, UserCircle2,
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { Link } from '../lib/router';
@@ -24,7 +25,7 @@ import {
   useDealStages, useLead, useProjectsLookup, useUsersLookup,
   CURRENCIES, type Company, type Deal, type ProjectLite, type Stage,
 } from '../components/crm/shared';
-import { EditableName, NotesSection, SectionHeader } from '../components/crm/detail';
+import { DetailField, EditableName, NotesSection, SectionHeader } from '../components/crm/detail';
 import { FilesSection } from '../components/FilesSection';
 import { LostReasonDialog } from '../components/crm/dialogs';
 import { SalesActivityPanel } from '../components/crm/SalesActivityPanel';
@@ -147,6 +148,7 @@ export function DealDetailPage({ id }: { id: string }) {
                 </Link>
               </Card>
             )}
+            <CustomFieldsSection deal={d} editable={canWrite} onPatch={(body) => patch.mutate(body)} />
             <SalesActivityPanel
               dealId={id}
               companyId={d?.companyId}
@@ -173,7 +175,6 @@ export function DealDetailPage({ id }: { id: string }) {
             onPickStage={pickStage}
             onPatch={(body) => patch.mutate(body)}
           />
-          <CustomFieldsRail deal={d} editable={canWrite} onPatch={(body) => patch.mutate(body)} />
           <FilesSection entityType="deal" entityId={id} canWrite={canWrite} variant="rail" />
         </aside>
       </div>
@@ -422,7 +423,12 @@ function EditableAmount({ amount, currency, editable, onSave }: {
 
 /* ─────────────── Custom fields ─────────────── */
 
-function CustomFieldsRail({ deal, editable, onPatch }: {
+/**
+ * Workspace-defined fields carry free text and URLs – prose-length values that
+ * truncated into unreadability in the rail, under labels wrapping at 150px.
+ * They render in the wide column instead, same as the lead's Details card.
+ */
+function CustomFieldsSection({ deal, editable, onPatch }: {
   deal?: DealFull; editable: boolean; onPatch: (body: Record<string, unknown>) => void;
 }) {
   const t = useT();
@@ -438,16 +444,18 @@ function CustomFieldsRail({ deal, editable, onPatch }: {
   const save = (key: string, v: unknown) => onPatch({ customFields: { ...values, [key]: v } });
 
   return (
-    <div>
-      <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('crm.customFields')}</h2>
-      <div className="space-y-0.5">
-        {defs.map((f) => (
-          <RailField key={f.id} label={f.label} wideLabel>
-            <CustomFieldValue field={f} value={values[f.key]} editable={editable} users={usersQ.data ?? []} onSave={(v) => save(f.key, v)} />
-          </RailField>
-        ))}
-      </div>
-    </div>
+    <section>
+      <SectionHeader icon={<SlidersHorizontal size={15} />} title={t('crm.customFields')} />
+      <Card className="p-4">
+        <div className="grid gap-x-6 gap-y-3 md:grid-cols-2">
+          {defs.map((f) => (
+            <DetailField key={f.id} label={f.label}>
+              <CustomFieldValue field={f} value={values[f.key]} editable={editable} users={usersQ.data ?? []} onSave={(v) => save(f.key, v)} />
+            </DetailField>
+          ))}
+        </div>
+      </Card>
+    </section>
   );
 }
 
@@ -538,7 +546,7 @@ function CustomFieldValue({ field: f, value: v, editable, users, onSave }: {
   // ── text / number / url: click-to-edit ──
   const display = v == null || v === '' ? null
     : f.type === 'url'
-      ? <a href={String(v)} target="_blank" rel="noreferrer" className="text-primary hover:underline" onClick={(e) => e.stopPropagation()}>{String(v)}</a>
+      ? <a href={String(v)} target="_blank" rel="noreferrer" className="break-words text-primary hover:underline" onClick={(e) => e.stopPropagation()}>{String(v)}</a>
       : <span className={cn(f.type === 'number' && 'tabular-nums')}>{String(v)}</span>;
   if (!editable) return display ?? empty;
   if (editing) {
