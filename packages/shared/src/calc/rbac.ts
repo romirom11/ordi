@@ -102,6 +102,23 @@ export function canAccessSpace(
   return spaceAccessRank(ctx, params) >= minRank;
 }
 
+/**
+ * Page-level visibility inside an accessible space (PRD §9.3): a draft is for
+ * the space's editors, a `private` page for its author and the editors. One
+ * function, because the rule used to live only in the KB list/get path while
+ * search, feeds, versions and backlinks each answered on space access alone –
+ * every one of them leaked what the page tree itself refused to show.
+ */
+export function canSeePage(
+  page: { published: boolean; visibility: string; createdBy: string | null },
+  userId: string,
+  isEditor: boolean,
+): boolean {
+  if (!page.published && !isEditor) return false;
+  if (page.visibility === 'private' && !isEditor && page.createdBy !== userId) return false;
+  return true;
+}
+
 /** API token scope must be a subset of the owner's role permissions (PRD §4.5.5). */
 export function validateTokenScope(ownerPermissions: Set<string>, requestedScopes: Permission[]): {
   ok: boolean;

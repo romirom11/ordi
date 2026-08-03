@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hasPermission, canAccessProject, canAccessSpace, validateTokenScope, type AccessContext } from './rbac';
+import { hasPermission, canAccessProject, canAccessSpace, canSeePage, validateTokenScope, type AccessContext } from './rbac';
 
 function ctx(
   perms: string[],
@@ -82,6 +82,25 @@ describe('canAccessSpace on workspace spaces', () => {
   });
   it('kb.write without kb.read grants nothing (the space is listed nowhere)', () => {
     expect(canAccessSpace(ctx(['kb.write']), { visibility: 'workspace', spaceId: 's1', minRole: 'editor' })).toBe(false);
+  });
+});
+
+describe('canSeePage (page-level visibility)', () => {
+  const page = (over: Partial<{ published: boolean; visibility: string; createdBy: string | null }> = {}) =>
+    ({ published: true, visibility: 'public', createdBy: 'author', ...over });
+
+  it('a published public page reads for any space viewer', () => {
+    expect(canSeePage(page(), 'someone', false)).toBe(true);
+  });
+  it('a draft reads for editors only – not even for its author', () => {
+    expect(canSeePage(page({ published: false }), 'someone', false)).toBe(false);
+    expect(canSeePage(page({ published: false }), 'author', false)).toBe(false);
+    expect(canSeePage(page({ published: false }), 'someone', true)).toBe(true);
+  });
+  it('a private page reads for its author and the editors', () => {
+    expect(canSeePage(page({ visibility: 'private' }), 'someone', false)).toBe(false);
+    expect(canSeePage(page({ visibility: 'private' }), 'author', false)).toBe(true);
+    expect(canSeePage(page({ visibility: 'private' }), 'someone', true)).toBe(true);
   });
 });
 

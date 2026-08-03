@@ -4,10 +4,10 @@
  * values recorded as fact-only, secrets excluded entirely.
  */
 import { getDb, schema, eq, inArray } from '@ordi/db';
-import { buildRedactedDiff, type Permission } from '@ordi/shared';
+import { buildRedactedDiff, canSeePage, type Permission } from '@ordi/shared';
 import { ulid } from 'ulid';
 import type { Actor } from '../context';
-import { accessibleProjectIds, accessibleSpaceIds } from './access';
+import { accessibleProjectIds, accessibleSpaceIds, editableSpaceIds } from './access';
 
 /**
  * Cross-entity feeds (home dashboard): the permission required to see activity
@@ -75,14 +75,19 @@ const SPACE_SCOPED = new Set(['kb_space', 'kb_page', 'kb_page_comment']);
  * one query per kind. Records outside those two families resolve to null and
  * are governed by the permission map alone.
  */
+/** What canSeePage needs to judge a page-owned activity record. */
+export interface PageVisibilityMeta { published: boolean; visibility: string; createdBy: string | null }
+
 export async function activityOwners(rows: { entityType: string; entityId: string }[]): Promise<{
   projectOf: Map<string, string>;
   spaceOf: Map<string, string>;
+  pageMetaOf: Map<string, PageVisibilityMeta>;
 }> {
   const { db } = getDb();
   const idsOf = (type: string) => [...new Set(rows.filter((r) => r.entityType === type).map((r) => r.entityId))];
   const projectOf = new Map<string, string>();
   const spaceOf = new Map<string, string>();
+  const pageMetaOf = new Map<string, PageVisibilityMeta>();
 
   for (const id of idsOf('project')) projectOf.set(id, id);
   for (const id of idsOf('kb_space')) spaceOf.set(id, id);
@@ -93,6 +98,12 @@ export async function activityOwners(rows: { entityType: string; entityId: strin
   const pageIds = idsOf('kb_page');
   const pageCommentIds = idsOf('kb_page_comment');
 
+  const pageFields = {
+    spaceId: schema.kbPages.spaceId,
+    published: schema.kbPages.published,
+    visibility: schema.kbPages.visibility,
+    createdBy: schema.kbPages.createdBy,
+  };
   const [tasks, comments, cycles, pages, pageComments] = await Promise.all([
     taskIds.length
       ? db.select({ id: schema.tasks.id, projectId: schema.tasks.projectId }).from(schema.tasks).where(inArray(schema.tasks.id, taskIds))
@@ -106,17 +117,20 @@ export async function activityOwners(rows: { entityType: string; entityId: strin
       ? db.select({ id: schema.cycles.id, projectId: schema.cycles.projectId }).from(schema.cycles).where(inArray(schema.cycles.id, cycleIds))
       : [],
     pageIds.length
-      ? db.select({ id: schema.kbPages.id, spaceId: schema.kbPages.spaceId }).from(schema.kbPages).where(inArray(schema.kbPages.id, pageIds))
+      ? db.select({ id: schema.kbPages.id, ...pageFields }).from(schema.kbPages).where(inArray(schema.kbPages.id, pageIds))
       : [],
     pageCommentIds.length
-      ? db.select({ id: schema.kbPageComments.id, spaceId: schema.kbPages.spaceId })
+      ? db.select({ id: schema.kbPageComments.id, ...pageFields })
         .from(schema.kbPageComments).innerJoin(schema.kbPages, eq(schema.kbPages.id, schema.kbPageComments.pageId))
         .where(inArray(schema.kbPageComments.id, pageCommentIds))
       : [],
   ]);
   for (const r of [...tasks, ...comments, ...cycles]) projectOf.set(r.id, r.projectId);
-  for (const r of [...pages, ...pageComments]) spaceOf.set(r.id, r.spaceId);
-  return { projectOf, spaceOf };
+  for (const r of [...pages, ...pageComments]) {
+    spaceOf.set(r.id, r.spaceId);
+    pageMetaOf.set(r.id, { published: r.published, visibility: r.visibility, createdBy: r.createdBy });
+  }
+  return { projectOf, spaceOf, pageMetaOf };
 }
 
 /**
@@ -134,13 +148,15 @@ export async function scopeActivityToResources<T extends { entityType: string; e
   if (actor.access.permissions.has('audit.read')) return rows;
   const scoped = rows.filter((r) => PROJECT_SCOPED.has(r.entityType) || SPACE_SCOPED.has(r.entityType));
   if (!scoped.length) return rows;
-  const [projectIds, spaceIds, owners] = await Promise.all([
+  const [projectIds, spaceIds, editorIds, owners] = await Promise.all([
     accessibleProjectIds(actor),
     accessibleSpaceIds(actor),
+    editableSpaceIds(actor),
     activityOwners(scoped),
   ]);
   const projects = new Set(projectIds);
   const spaces = new Set(spaceIds);
+  const editorSpaces = new Set(editorIds);
   return rows.filter((r) => {
     if (PROJECT_SCOPED.has(r.entityType)) {
       const owner = owners.projectOf.get(r.entityId);
@@ -148,7 +164,13 @@ export async function scopeActivityToResources<T extends { entityType: string; e
     }
     if (SPACE_SCOPED.has(r.entityType)) {
       const owner = owners.spaceOf.get(r.entityId);
-      return owner ? spaces.has(owner) : false;
+      if (!owner || !spaces.has(owner)) return false;
+      // Page-owned records answer to page-level visibility too: a draft or a
+      // private page must not narrate its title through the feed to viewers
+      // the page tree itself refuses.
+      const meta = owners.pageMetaOf.get(r.entityId);
+      if (!meta) return true; // the space itself
+      return canSeePage(meta, actor.userId, editorSpaces.has(owner));
     }
     return true;
   });

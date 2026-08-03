@@ -3,7 +3,7 @@ import { streamSSE } from 'hono/streaming';
 import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { broadcaster } from '../../core/events';
-import { accessibleProjectIds } from '../../core/access';
+import { accessibleProjectIds, accessibleSpaceIds } from '../../core/access';
 
 /** SSE stream (PRD §3.4): server pushes events filtered by the actor's access. */
 export function streamRoutes() {
@@ -13,8 +13,10 @@ export function streamRoutes() {
   app.get('/', async (c) => {
     const actor = currentActor(c);
     let projectIds = new Set(await accessibleProjectIds(actor));
-    /** Projects we re-read for and still could not see – do not re-read again. */
+    let spaceIds = new Set(await accessibleSpaceIds(actor));
+    /** Projects/spaces we re-read for and still could not see – do not re-read again. */
     let denied = new Set<string>();
+    let deniedSpaces = new Set<string>();
 
     /**
      * The set is a snapshot, and this connection outlives it: the app reuses one
@@ -35,14 +37,29 @@ export function streamRoutes() {
       return false;
     };
 
+    /** Same snapshot-then-re-read dance for KB spaces (page.* events). */
+    const canSeeSpace = async (scope: string[]): Promise<boolean> => {
+      if (scope.some((s) => spaceIds.has(s))) return true;
+      if (scope.every((s) => deniedSpaces.has(s))) return false;
+      spaceIds = new Set(await accessibleSpaceIds(actor, { fresh: true }));
+      if (scope.some((s) => spaceIds.has(s))) return true;
+      for (const s of scope) deniedSpaces.add(s);
+      return false;
+    };
+
     return streamSSE(c, async (stream) => {
       const unsub = broadcaster.subscribe((msg) => {
         if (msg.userScope?.length && !msg.userScope.includes(actor.userId)) return;
-        if (!msg.projectScope?.length) {
+        const gate = msg.projectScope?.length
+          ? canSee(msg.projectScope)
+          : msg.spaceScope?.length
+            ? canSeeSpace(msg.spaceScope)
+            : null;
+        if (!gate) {
           stream.writeSSE({ event: msg.event, data: JSON.stringify(msg.data) }).catch(() => {});
           return;
         }
-        void canSee(msg.projectScope).then((allowed) => {
+        void gate.then((allowed) => {
           if (allowed) stream.writeSSE({ event: msg.event, data: JSON.stringify(msg.data) }).catch(() => {});
         }).catch(() => {});
       });
@@ -52,9 +69,10 @@ export function streamRoutes() {
       while (!closed) {
         await stream.sleep(15_000);
         if (closed) break;
-        // Access can be granted later too; forget the misses so a project the
-        // user has since been added to gets one more chance.
+        // Access can be granted later too; forget the misses so a project or
+        // space the user has since been added to gets one more chance.
         denied = new Set();
+        deniedSpaces = new Set();
         await stream.writeSSE({ event: 'ping', data: '{}' }).catch(() => { closed = true; });
       }
       unsub();

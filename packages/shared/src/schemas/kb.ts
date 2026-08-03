@@ -22,6 +22,8 @@ export const pageInputSchema = z.object({
   body: richTextSchema.optional(),
   icon: z.string().nullable().optional(),
   isTemplate: z.boolean().default(false),
+  /** Pages are born visible; a draft is an explicit choice, not a default. */
+  published: z.boolean().default(true),
   visibility: z.enum(['public', 'private']).default('public'),
 });
 

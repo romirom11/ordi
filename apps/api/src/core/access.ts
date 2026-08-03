@@ -66,15 +66,20 @@ const SPACE_RANK = { viewer: 1, editor: 2 } as const;
 const PROJECT_ROLE_OF_RANK = [null, 'viewer', 'member', 'admin'] as const;
 
 /**
- * Every KB space the actor can read: workspace spaces (with kb.read), spaces
- * they are a member of, and the spaces of projects they can reach. The
- * counterpart of accessibleProjectIds, for the feeds and search that pull
- * space-owned rows straight out of the database.
+ * Every KB space the actor can read or edit: workspace spaces (with kb.read /
+ * kb.write), spaces they are a member of, and the spaces of projects they can
+ * reach. The counterpart of accessibleProjectIds, for the feeds and search
+ * that pull space-owned rows straight out of the database – both levels in one
+ * pass, because page-level visibility (canSeePage) needs the editor set
+ * everywhere the viewer set goes.
  */
-const spaceCacheKey = Symbol('accessibleSpaceIds');
-export async function accessibleSpaceIds(actor: Actor): Promise<string[]> {
-  const anyActor = actor as unknown as Record<symbol, string[] | undefined>;
-  if (anyActor[spaceCacheKey]) return anyActor[spaceCacheKey]!;
+const spaceCacheKey = Symbol('spaceAccessSets');
+async function spaceAccessSets(
+  actor: Actor,
+  opts?: { fresh?: boolean },
+): Promise<{ viewer: string[]; editor: string[] }> {
+  const anyActor = actor as unknown as Record<symbol, { viewer: string[]; editor: string[] } | undefined>;
+  if (!opts?.fresh && anyActor[spaceCacheKey]) return anyActor[spaceCacheKey]!;
   const { db } = getDb();
   const spaces = await db
     .select({ id: schema.kbSpaces.id, visibility: schema.kbSpaces.visibility, projectId: schema.kbSpaces.projectId })
@@ -91,15 +96,27 @@ export async function accessibleSpaceIds(actor: Actor): Promise<string[]> {
     p.id,
     effectiveProjectRole(actor, { id: p.id, visibility: p.visibility as 'workspace' | 'private' }),
   ]));
-  const ids = spaces
-    .filter((s) => spaceAccessRank(actor.access, {
+  const sets: { viewer: string[]; editor: string[] } = { viewer: [], editor: [] };
+  for (const s of spaces) {
+    const rank = spaceAccessRank(actor.access, {
       visibility: s.visibility as 'workspace' | 'private',
       spaceId: s.id,
       inheritedProjectRole: s.projectId ? roleOfProject.get(s.projectId) ?? null : null,
-    }) >= SPACE_RANK.viewer)
-    .map((s) => s.id);
-  anyActor[spaceCacheKey] = ids;
-  return ids;
+    });
+    if (rank >= SPACE_RANK.viewer) sets.viewer.push(s.id);
+    if (rank >= SPACE_RANK.editor) sets.editor.push(s.id);
+  }
+  anyActor[spaceCacheKey] = sets;
+  return sets;
+}
+
+export async function accessibleSpaceIds(actor: Actor, opts?: { fresh?: boolean }): Promise<string[]> {
+  return (await spaceAccessSets(actor, opts)).viewer;
+}
+
+/** The spaces the actor edits – the isEditor half of canSeePage, in bulk. */
+export async function editableSpaceIds(actor: Actor): Promise<string[]> {
+  return (await spaceAccessSets(actor)).editor;
 }
 
 /**

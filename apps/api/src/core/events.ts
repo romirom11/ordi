@@ -43,6 +43,8 @@ export interface SSEMessage {
   data: unknown;
   /** project ids this message is scoped to; empty => workspace-wide. */
   projectScope?: string[];
+  /** KB space ids this message is scoped to; empty => workspace-wide. */
+  spaceScope?: string[];
   /** user ids this message targets; empty => any authorized. */
   userScope?: string[];
 }

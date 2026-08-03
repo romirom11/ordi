@@ -169,6 +169,13 @@
       "when": 1785505707830,
       "tag": "0023_add_task_milestone",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1785766401964,
+      "tag": "0024_kb_pages_published_default",
+      "breakpoints": true
     }
   ]
 }
