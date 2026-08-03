@@ -50,18 +50,26 @@ export function FilesSection({ entityType, entityId, canWrite, variant = 'sectio
   });
   const files = data ?? [];
 
-  const upload = async (file: File) => {
+  /** Sequential on purpose: one clear error per file beats a burst of retries. */
+  const upload = async (picked: FileList) => {
+    const files = [...picked];
     setUploading(true);
-    try {
-      await uploadAttachment(file, { entityType, entityId });
-      qc.invalidateQueries({ queryKey });
-      toast(t('crm.fileUploaded'));
-    } catch (e) {
-      toast.error(e instanceof UploadError ? t(e.messageKey) : e instanceof ApiError ? e.message : t('crm.uploadFailed'));
-    } finally {
-      setUploading(false);
-      if (inputRef.current) inputRef.current.value = '';
+    let ok = 0;
+    let firstError: string | null = null;
+    for (const file of files) {
+      try {
+        await uploadAttachment(file, { entityType, entityId });
+        ok += 1;
+      } catch (e) {
+        const message = e instanceof UploadError ? t(e.messageKey) : e instanceof ApiError ? e.message : t('crm.uploadFailed');
+        if (!firstError) firstError = files.length > 1 ? `${file.name}: ${message}` : message;
+      }
     }
+    setUploading(false);
+    if (inputRef.current) inputRef.current.value = '';
+    if (ok) qc.invalidateQueries({ queryKey });
+    if (firstError) toast.error(firstError);
+    else toast(ok === 1 ? t('crm.fileUploaded') : t('crm.filesUploaded').replace('{n}', String(ok)));
   };
 
   const download = async (f: FileRow) => {
@@ -80,8 +88,9 @@ export function FilesSection({ entityType, entityId, canWrite, variant = 'sectio
     <input
       ref={inputRef}
       type="file"
+      multiple
       className="hidden"
-      onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); }}
+      onChange={(e) => { if (e.target.files?.length) upload(e.target.files); }}
     />
   );
 
