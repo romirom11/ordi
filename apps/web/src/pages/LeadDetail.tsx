@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, CheckCircle2, ChevronRight, Copy, ExternalLink, Target } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronRight, Copy, ExternalLink, Info, Target } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { Link, useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
@@ -15,7 +15,7 @@ import {
   useContacts, useDealStages, useLead, useSalesActivities, useUsersLookup,
 } from '../components/crm/shared';
 import {
-  EditableName, InlineEdit, NotesSection, OwnerRailValue, SectionHeader,
+  DetailField, EditableName, InlineEdit, NotesSection, OwnerRailValue, SectionHeader,
 } from '../components/crm/detail';
 import { FilesSection } from '../components/FilesSection';
 import { SalesActivityPanel } from '../components/crm/SalesActivityPanel';
@@ -141,6 +141,48 @@ export function LeadDetailPage({ id }: { id: string }) {
               </div>
             </Card>
 
+            {/*
+              * These values are prose-length (an offer description, a market
+              * signal, a URL) – in the 320px rail they truncated into
+              * unreadability, so they live in the wide column instead. The
+              * rail keeps only the short relational facts.
+              */}
+            <section>
+              <SectionHeader icon={<Info size={15} />} title={t('crm.leadDetails')} />
+              <Card className="p-4">
+                <div className="grid gap-x-6 gap-y-3 md:grid-cols-2">
+                  <DetailField label={t('crm.product')}>
+                    <InlineEdit multiline rows={2} value={lead.product} editable={editable} placeholder={t('crm.productHint')} onSave={(product) => patch.mutate({ product })} />
+                  </DetailField>
+                  <DetailField label={t('crm.signal')}>
+                    <InlineEdit multiline rows={2} value={lead.signal} editable={editable} placeholder={t('crm.signalHint')} onSave={(signal) => patch.mutate({ signal })} />
+                  </DetailField>
+                  <DetailField label={t('crm.source')}>
+                    <InlineEdit value={lead.sourceTitle} editable={editable} placeholder={t('crm.sourceHint')} onSave={(sourceTitle) => patch.mutate({ sourceTitle })} />
+                  </DetailField>
+                  <DetailField label={t('crm.sourceLink')}>
+                    <InlineEdit
+                      value={lead.sourceUrl}
+                      editable={editable}
+                      inputType="url"
+                      placeholder="https://…"
+                      display={urlHost(lead.sourceUrl)}
+                      onSave={(sourceUrl) => patch.mutate({ sourceUrl })}
+                    />
+                    {lead.sourceCheckedAt && (
+                      <p className="mt-0.5 px-1.5 text-xs text-faint">{t('crm.sourceChecked')} · {fmtDate(lead.sourceCheckedAt)}</p>
+                    )}
+                  </DetailField>
+                  <DetailField label={t('crm.suggestedChannel')}>
+                    <InlineEdit value={lead.suggestedChannel} editable={editable} placeholder={t('crm.suggestedChannelHint')} onSave={(suggestedChannel) => patch.mutate({ suggestedChannel })} />
+                  </DetailField>
+                  <DetailField label={t('crm.score')}>
+                    <InlineEdit value={lead.score} editable={editable} inputType="number" placeholder={t('crm.scoreHint')} onSave={(score) => patch.mutate({ score: score === null ? null : Number(score) })} />
+                  </DetailField>
+                </div>
+              </Card>
+            </section>
+
             <section>
               <SectionHeader icon={<Target size={15} />} title={t('crm.qualification')} />
               <div className="grid gap-3 md:grid-cols-2">
@@ -245,27 +287,6 @@ export function LeadDetailPage({ id }: { id: string }) {
                   onPick={(ownerId) => patch.mutate({ ownerId })}
                 />
               </RailField>
-              <RailField label={t('crm.product')}>
-                <InlineEdit value={lead.product} editable={editable} placeholder={t('crm.productHint')} onSave={(product) => patch.mutate({ product })} />
-              </RailField>
-              <RailField label={t('crm.score')}>
-                <InlineEdit value={lead.score} editable={editable} inputType="number" placeholder={t('crm.scoreHint')} onSave={(score) => patch.mutate({ score: score === null ? null : Number(score) })} />
-              </RailField>
-              <RailField label={t('crm.signal')}>
-                <InlineEdit value={lead.signal} editable={editable} placeholder={t('crm.signalHint')} onSave={(signal) => patch.mutate({ signal })} />
-              </RailField>
-              <RailField label={t('crm.source')}>
-                <InlineEdit value={lead.sourceTitle} editable={editable} placeholder={t('crm.sourceHint')} onSave={(sourceTitle) => patch.mutate({ sourceTitle })} />
-              </RailField>
-              <RailField label={t('crm.sourceLink')}>
-                <InlineEdit value={lead.sourceUrl} editable={editable} inputType="url" placeholder="https://…" onSave={(sourceUrl) => patch.mutate({ sourceUrl })} />
-              </RailField>
-              <RailField label={t('crm.suggestedChannel')}>
-                <InlineEdit value={lead.suggestedChannel} editable={editable} placeholder={t('crm.suggestedChannelHint')} onSave={(suggestedChannel) => patch.mutate({ suggestedChannel })} />
-              </RailField>
-              {lead.sourceCheckedAt && (
-                <RailField label={t('crm.sourceChecked')}><RailChip disabled>{fmtDate(lead.sourceCheckedAt)}</RailChip></RailField>
-              )}
               <RailField label={t('crm.created')}><RailChip disabled>{fmtDate(lead.createdAt)}</RailChip></RailField>
             </div>
           </div>
@@ -283,6 +304,16 @@ export function LeadDetailPage({ id }: { id: string }) {
       />
     </div>
   );
+}
+
+/** Hostname alone identifies the source; the full URL stays for the edit and the open button. */
+function urlHost(url?: string | null) {
+  if (!url) return undefined;
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return undefined;
+  }
 }
 
 function QualificationCard({ title, hint, value, editable, onSave }: {

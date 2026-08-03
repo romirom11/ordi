@@ -3,6 +3,21 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.21.0
+
+- Prose-length CRM fields read fully instead of truncating. The lead's
+  product, signal, source and suggested channel lived in the 320px properties
+  rail, which cut every value to one ellipsised line and wrapped the labels
+  onto two – the only way to read a field was to click into it and edit. They
+  now sit in a Details card in the wide main column, where values wrap. The
+  source link shows its hostname (the full URL stays behind the edit and the
+  Open source button) with the source-checked date as a footnote under it.
+- Deal custom fields moved the same way: workspace-defined fields render as a
+  Custom fields card in the main column instead of the rail, and a read-only
+  URL value wraps instead of overflowing the card. The rail on both pages
+  keeps the short relational facts – status/stage, company, contact, project,
+  owner, money, dates and files.
+
 ## v1.20.0
 
 - A created KB page is a visible KB page. Pages were born as drafts by a

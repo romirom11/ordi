@@ -255,6 +255,7 @@ extendDict({
   en: {
     'crm.tabWork': 'Work',
     'crm.qualification': 'Qualification',
+    'crm.leadDetails': 'Details',
     'crm.painSignalHint': 'What problem are they living with?',
     'crm.whyFitHint': 'Why are we a fit for it?',
     'crm.whyNowHint': 'Why is this worth their time now?',
@@ -399,6 +400,7 @@ extendDict({
   uk: {
     'crm.tabWork': 'Робота',
     'crm.qualification': 'Кваліфікація',
+    'crm.leadDetails': 'Деталі',
     'crm.painSignalHint': 'З якою проблемою вони живуть?',
     'crm.whyFitHint': 'Чому ми їм підходимо?',
     'crm.whyNowHint': 'Чому це на часі саме зараз?',

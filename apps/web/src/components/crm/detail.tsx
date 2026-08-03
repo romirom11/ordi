@@ -227,6 +227,19 @@ export function SectionHeader({ icon, title, count, action }: { icon: React.Reac
   );
 }
 
+/**
+ * A labelled value in a wide-column details grid – for the fields whose values
+ * are prose-length and truncated into unreadability in the 320px rail.
+ */
+export function DetailField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <p className="mb-1 px-2 text-xs font-semibold uppercase tracking-wide text-faint">{label}</p>
+      {children}
+    </div>
+  );
+}
+
 /* ─────────────── Property row ─────────────── */
 
 export function PropRow({ label, children }: { label: string; children: React.ReactNode }) {
