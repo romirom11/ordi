@@ -13,18 +13,30 @@ import { err } from './errors';
  * A storage refusal is an operator problem, not a server crash: wrong
  * credentials or a missing bucket used to surface as an unhandled 500 with
  * the real reason visible only in the API logs.
+ *
+ * The message names where the request went and (masked) what key it carried:
+ * an empty key, a key with a stray CR from a CRLF env file, and a stale
+ * endpoint all produce the same InvalidAccessKeyId, and without this detail
+ * they are indistinguishable from a wrong password.
  */
+function maskedKey(): string {
+  const key = env.s3.accessKey;
+  if (!key) return 'empty key';
+  return `key "${key.slice(0, 2)}…" of ${key.length} chars`;
+}
+
 function rethrowStorageError(cause: unknown): never {
   const name = (cause as { name?: string })?.name ?? '';
+  const at = `${maskedKey()} at ${env.s3.endpoint}`;
   if (name === 'InvalidAccessKeyId' || name === 'SignatureDoesNotMatch') {
-    throw err.domain(`Storage rejected the API's credentials (${name}) - check S3_ACCESS_KEY / S3_SECRET_KEY`);
+    throw err.domain(`Storage rejected the API's credentials (${name}; ${at}) - check S3_ACCESS_KEY / S3_SECRET_KEY`);
   }
   if (name === 'NoSuchBucket') {
-    throw err.domain(`Storage bucket "${env.s3.bucket}" does not exist - create it or fix S3_BUCKET`);
+    throw err.domain(`Storage bucket "${env.s3.bucket}" does not exist at ${env.s3.endpoint} - create it or fix S3_BUCKET`);
   }
   if (name === 'NoSuchKey') throw err.notFound('File is missing from storage');
   if (name === 'AccessDenied') {
-    throw err.domain('Storage denied access (AccessDenied) - the S3 credentials lack rights on the bucket');
+    throw err.domain(`Storage denied access (AccessDenied; ${at}) - the S3 credentials lack rights on the bucket`);
   }
   throw cause as Error;
 }
