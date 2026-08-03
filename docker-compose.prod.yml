@@ -13,9 +13,17 @@
 # is what emails, PDF links and the OAuth discovery documents are built from.
 
 services:
+  # Generic service names are a trap on a PaaS: the router attaches `api` to a
+  # shared network (Dokploy/Coolify), and a container on two networks resolves
+  # names against BOTH - so `db` or `minio` can land on another project's
+  # container. Every in-stack address therefore uses a unique alias
+  # (ordi-db, ordi-minio) that exists only on this stack's own network.
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    networks:
+      default:
+        aliases: [ordi-db]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-ordi}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
@@ -38,6 +46,9 @@ services:
     restart: unless-stopped
     profiles: ["minio"]
     command: server /data
+    networks:
+      default:
+        aliases: [ordi-minio]
     environment:
       # Interpolation runs even for profile-disabled services, so these cannot
       # be `:?`-required; MinIO itself refuses to start on empty credentials.
@@ -61,7 +72,7 @@ services:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+      mc alias set local http://ordi-minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
       mc mb --ignore-existing local/$${BUCKET}
       "
     environment:
@@ -81,7 +92,7 @@ services:
       NODE_ENV: production
       # Migrations run on boot (see the image's CMD), so a fresh volume and an
       # upgraded image both end up at the right schema without extra steps.
-      DATABASE_URL: postgres://${POSTGRES_USER:-ordi}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ordi}
+      DATABASE_URL: postgres://${POSTGRES_USER:-ordi}:${POSTGRES_PASSWORD}@ordi-db:5432/${POSTGRES_DB:-ordi}
       APP_URL: ${APP_URL:?set APP_URL to the public https address}
       # Same origin as the SPA: the API lives under /api/v1 on it, and every
       # callback URL is built by appending that path – so no /api suffix here.
