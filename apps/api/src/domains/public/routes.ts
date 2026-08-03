@@ -66,7 +66,13 @@ export function publicRoutes() {
     if (!att) throw err.notFound();
     const object = await getObject(att.fileKey);
     if (!object) throw err.domain('Object storage is not configured');
-    c.header('Content-Type', att.mime || object.contentType || 'application/octet-stream');
+    const mime = att.mime || object.contentType || 'application/octet-stream';
+    c.header('Content-Type', mime);
+    // Files now come from the app's own origin, so an uploaded HTML or SVG
+    // opened as a page would run its scripts here. `sandbox` gives such a
+    // document a unique origin and no scripts; embedding as <img> is
+    // unaffected (image contexts never ran scripts to begin with).
+    if (/html|svg|xml/i.test(mime)) c.header('Content-Security-Policy', 'sandbox');
     const length = object.contentLength ?? att.size;
     if (length) c.header('Content-Length', String(length));
     // RFC 5987 filename* carries any unicode name; the plain fallback is ASCII.

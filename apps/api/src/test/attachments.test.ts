@@ -107,8 +107,21 @@ describe('signed file links', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('image/png');
     expect(res.headers.get('content-disposition')).toContain('shot.png');
+    // A plain image needs no sandbox.
+    expect(res.headers.get('content-security-policy')).toBeNull();
     const bytes = new Uint8Array(await res.arrayBuffer());
     expect(bytes).toEqual(PNG_BYTES);
+  });
+
+  it('sandboxes scriptable types so an uploaded page cannot run on this origin', async () => {
+    const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+    const { src } = await json(await reqAs(users.owner!.cookie).postForm(
+      '/attachments',
+      form('logo.svg', { bytes: svg, mime: 'image/svg+xml' }),
+    ));
+    const res = await anon().get(src.replace('/api/v1', ''));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-security-policy')).toBe('sandbox');
   });
 });
 
