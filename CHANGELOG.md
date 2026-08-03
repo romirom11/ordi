@@ -3,6 +3,45 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.18.0
+
+- Leads are workable in volume. The lead table grows a select column and a
+  bulk bar: reassign the owner or move the status of up to 200 leads in one
+  action, each still passing the single-lead rules (terminal statuses cancel
+  planned activities and stop sequences, nurture demands a return date,
+  converted leads stay frozen), with failures reported per lead. Lead lists
+  import and export as CSV; the importer creates unknown companies as
+  prospects on the fly, validates line by line with a dry run, and hands
+  ownership to the importer. The table says when it is cut at its 200-row
+  bound instead of looking complete.
+- A CRM Analytics tab: lead funnel by status, 30-day intake trend,
+  lead-to-deal conversion, pipeline value by stage (raw and probability
+  weighted), win rate and ranked lost reasons. Live snapshots of the base
+  tables; the deals half is withheld from roles without `deals.read`.
+- Intake requests reach the team. A project Intake tab (pending count on the
+  tab) triages each public-form request into a task or a decline with a
+  reason, mailing the requester either way; project settings gain the form
+  toggle and its shareable link. Requests used to land in a table no screen
+  read.
+- A cycle can end. The cycle card opens details with live progress and a
+  burndown drawn from the daily snapshots the worker was already collecting;
+  completing the cycle rolls open tasks to the backlog or the next cycle.
+- Moving a task between projects moves the work: the whole subtree, comments,
+  relations, external and git links, attachments, logged time and a running
+  timer follow to the new tasks. Comments used to stay on the soft-deleted
+  original and subtasks were orphaned.
+- Task templates and recurring rules get settings sections, feeding the
+  scheduler that has been running all along.
+- Milestones hold tasks: a task carries one of its project's milestones, the
+  tasks view groups and filters by them, and the overview shows real
+  done-vs-total counts per milestone. Projects keep files, gated by
+  membership. The task list pages through the whole project instead of
+  showing its newest 50, and tied orderings resolve by the tasks' own
+  sequence.
+- Task lists and boards mark tasks blocked by an open "blocks" relation, and
+  the projects list reads its completion rings from one grouped
+  `GET /projects/task-counts` query instead of per-row full task fetches.
+
 ## v1.17.0
 
 - The rich text editor is finished. Task bodies, KB pages and project
