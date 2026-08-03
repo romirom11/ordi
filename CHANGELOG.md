@@ -3,7 +3,7 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
-## Unreleased
+## v1.20.0
 
 - A created KB page is a visible KB page. Pages were born as drafts by a
   silent default while the only publish control hid in a context menu, so a
