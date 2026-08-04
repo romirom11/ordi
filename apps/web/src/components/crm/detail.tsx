@@ -158,8 +158,10 @@ export function InlineEdit({
   }
 
   const chip = (
+    // Values wrap instead of truncating – an ellipsis hides exactly the data
+    // the field exists to show, and hover recovers nothing.
     <RailChip empty={!text} disabled={!editable}>
-      <span className={cn('truncate', inputType === 'number' && 'tabular-nums')}>
+      <span className={cn('min-w-0 flex-1 break-words', inputType === 'number' && 'tabular-nums')}>
         {(text && (display ?? text)) || (editable ? placeholder : '—')}
       </span>
     </RailChip>
@@ -188,8 +190,8 @@ export function OwnerRailValue({ ownerId, users, editable, onPick }: {
   const t = useT();
   const owner = ownerId ? users.find((user) => user.id === ownerId) : undefined;
   const label = owner
-    ? <><Avatar name={owner.name} src={owner.avatar} size={18} /><span className="truncate">{owner.name}</span></>
-    : <><UserCircle2 size={16} className="text-faint" /><span className="truncate">{t('crm.noOwner')}</span></>;
+    ? <><Avatar name={owner.name} src={owner.avatar} size={18} /><span className="min-w-0 flex-1 break-words">{owner.name}</span></>
+    : <><UserCircle2 size={16} className="text-faint" /><span className="min-w-0 flex-1 break-words">{t('crm.noOwner')}</span></>;
 
   if (!editable) return <RailChip empty={!owner} disabled>{label}</RailChip>;
   return (
