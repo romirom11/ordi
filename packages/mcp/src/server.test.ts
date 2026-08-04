@@ -377,6 +377,44 @@ describe('sales workspace tools', () => {
     expect(conflictingFollowUp.isError).toBe(true);
     expect(posts).toHaveLength(0);
   });
+
+  // suggestedChannel & co. used to be missing from the tool schema, so the SDK
+  // silently stripped them and the "update" saved nothing.
+  it('update_lead forwards the research fields and customFields', async () => {
+    const patches: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({}, [], patches));
+    await client.callTool({ name: 'update_lead', arguments: {
+      leadId: 'l1', suggestedChannel: 'LinkedIn DM', sourceTitle: 'HN thread',
+      sourceType: 'forum', signalDate: '2026-08-01',
+      sourceCheckedAt: '2026-08-01T10:00:00Z', customFields: { region: 'EU' },
+    } });
+    expect(patches).toEqual([{
+      path: '/leads/l1',
+      body: {
+        suggestedChannel: 'LinkedIn DM', sourceTitle: 'HN thread',
+        sourceType: 'forum', signalDate: '2026-08-01',
+        sourceCheckedAt: '2026-08-01T10:00:00Z', customFields: { region: 'EU' },
+      },
+    }]);
+  });
+
+  it('create_lead forwards the research fields and customFields', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({}, posts));
+    await client.callTool({ name: 'create_lead', arguments: {
+      companyId: 'c1', title: 'Workflow pilot',
+      suggestedChannel: 'Email', sourceTitle: 'Press release', signalDate: '2026-07-30',
+      customFields: { region: 'EU' },
+    } });
+    expect(posts).toEqual([{
+      path: '/leads',
+      body: {
+        companyId: 'c1', title: 'Workflow pilot',
+        suggestedChannel: 'Email', sourceTitle: 'Press release', signalDate: '2026-07-30',
+        customFields: { region: 'EU' },
+      },
+    }]);
+  });
 });
 
 describe('custom field tools', () => {
@@ -423,6 +461,18 @@ describe('custom field tools', () => {
     expect(posts).toEqual([{
       path: '/custom-fields',
       body: { entityType: 'deals', key: 'source', label: 'Source', type: 'select', options: [{ value: 'ads', label: 'Ads' }] },
+    }]);
+  });
+
+  it('create_custom_field accepts the leads entity', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const client = await connect(fakeApi({}, posts));
+    await client.callTool({ name: 'create_custom_field', arguments: {
+      entityType: 'leads', key: 'region', label: 'Region', type: 'text',
+    } });
+    expect(posts).toEqual([{
+      path: '/custom-fields',
+      body: { entityType: 'leads', key: 'region', label: 'Region', type: 'text' },
     }]);
   });
 

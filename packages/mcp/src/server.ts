@@ -376,17 +376,29 @@ export function buildServer(client: OrdiClient): McpServer {
   contactId: z.string().optional(), status: z.enum(WRITABLE_LEAD_STATUSES).optional(),
   score: z.number().int().min(0).max(100).optional(), signal: z.string().optional(),
   painSignal: z.string().optional(), whyFit: z.string().optional(), whyNow: z.string().optional(),
-  evidence: z.string().optional(), sourceUrl: z.string().optional(), opener: z.string().optional(),
+  evidence: z.string().optional(), opener: z.string().optional(),
+  sourceTitle: z.string().optional().describe('Human name of the research source'),
+  sourceUrl: z.string().optional(), sourceType: z.string().optional(),
+  signalDate: z.string().optional().describe('YYYY-MM-DD the signal was observed'),
+  sourceCheckedAt: z.string().optional().describe('ISO date-time the source was last verified'),
+  suggestedChannel: z.string().optional().describe('Recommended outreach channel, e.g. LinkedIn DM'),
   caution: z.string().optional(), ownerId: z.string().optional(),
+  customFields: z.record(z.string(), z.unknown()).optional().describe('Keyed by custom field key (see list_custom_fields)'),
 }, (args) => wrap(() => client.post('/leads', args)));
 
-  server.tool('update_lead', 'Update a lead lifecycle or its qualification notes', {
+  server.tool('update_lead', 'Update a lead lifecycle or its qualification notes. customFields merge by key: send only the fields you are changing.', {
   leadId: z.string(), status: z.enum(WRITABLE_LEAD_STATUSES).optional(), contactId: z.string().nullable().optional(),
-  title: z.string().optional(), product: z.string().optional(), score: z.number().int().min(0).max(100).optional(),
-  signal: z.string().optional(), painSignal: z.string().optional(), evidence: z.string().optional(),
-  whyFit: z.string().optional(), whyNow: z.string().optional(), sourceUrl: z.string().optional(),
-  opener: z.string().optional(), caution: z.string().optional(), nurtureUntil: dateOnlySchema.nullable().optional(),
-  disqualifiedReason: z.string().optional(), ownerId: z.string().optional(),
+  title: z.string().optional(), product: z.string().nullable().optional(), score: z.number().int().min(0).max(100).nullable().optional(),
+  signal: z.string().nullable().optional(), painSignal: z.string().nullable().optional(), evidence: z.string().nullable().optional(),
+  whyFit: z.string().nullable().optional(), whyNow: z.string().nullable().optional(),
+  sourceTitle: z.string().nullable().optional().describe('Human name of the research source'),
+  sourceUrl: z.string().nullable().optional(), sourceType: z.string().nullable().optional(),
+  signalDate: z.string().nullable().optional().describe('YYYY-MM-DD the signal was observed'),
+  sourceCheckedAt: z.string().nullable().optional().describe('ISO date-time the source was last verified'),
+  suggestedChannel: z.string().nullable().optional().describe('Recommended outreach channel, e.g. LinkedIn DM'),
+  opener: z.string().nullable().optional(), caution: z.string().nullable().optional(), nurtureUntil: dateOnlySchema.nullable().optional(),
+  disqualifiedReason: z.string().nullable().optional(), ownerId: z.string().optional(),
+  customFields: z.record(z.string(), z.unknown()).optional().describe('Keyed by custom field key (see list_custom_fields); null clears one'),
 }, ({ leadId, ...patch }) => wrap(() => {
   if (patch.status === 'nurture' && !patch.nurtureUntil) {
     throw new Error('nurtureUntil is required when status is nurture');

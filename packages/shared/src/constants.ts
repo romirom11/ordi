@@ -69,7 +69,7 @@ export const CUSTOM_FIELD_TYPES = [
 export type CustomFieldType = (typeof CUSTOM_FIELD_TYPES)[number];
 
 export const CUSTOM_FIELD_ENTITIES = [
-  'companies', 'contacts', 'deals', 'projects', 'tasks', 'invoices', 'quotes', 'employees', 'applicants',
+  'companies', 'contacts', 'leads', 'deals', 'projects', 'tasks', 'invoices', 'quotes', 'employees', 'applicants',
 ] as const;
 export type CustomFieldEntity = (typeof CUSTOM_FIELD_ENTITIES)[number];
 

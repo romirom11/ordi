@@ -18,6 +18,7 @@ import {
 import {
   DetailField, EditableName, InlineEdit, NotesSection, OwnerRailValue, SectionHeader,
 } from '../components/crm/detail';
+import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
 import { FilesSection } from '../components/FilesSection';
 import { SalesActivityPanel, ScheduleActivityDialog } from '../components/crm/SalesActivityPanel';
 import { ContactDialog } from '../components/crm/dialogs';
@@ -214,6 +215,13 @@ export function LeadDetailPage({ id }: { id: string }) {
                 </Card>
               )}
             </section>
+
+            <CustomFieldsSection
+              entityType="leads"
+              values={lead.customFields}
+              editable={editable}
+              onSave={(customFields) => patch.mutate({ customFields })}
+            />
 
             {lead.status === 'converted' && lead.convertedDealId ? (
               <Card className="flex items-center justify-between gap-3 border-primary/30 p-4">
