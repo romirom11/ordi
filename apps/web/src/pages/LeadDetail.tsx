@@ -1,15 +1,16 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, CheckCircle2, ChevronRight, Copy, ExternalLink, Info, Target } from 'lucide-react';
+import { AlertTriangle, Building2, CheckCircle2, ChevronRight, Copy, ExternalLink, Info, Plus, Target } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { Link, useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import { useT } from '../lib/i18n';
 import {
-  Button, Card, RailChip, RailField, Select, Skeleton, Tooltip, fmtDate, fmtRelative,
+  Button, Card, RailChip, RailField, Skeleton, Tooltip, fmtDate, fmtRelative,
 } from '../components/ui';
-import { toast } from '../components/overlays';
+import { MenuItem, toast } from '../components/overlays';
+import { SearchSelect } from '../components/SearchSelect';
 import {
   WRITABLE_LEAD_STATUSES, StatusPill, salesActivityTypeLabel,
   useContacts, useDealStages, useLead, useSalesActivities, useUsersLookup,
@@ -18,10 +19,8 @@ import {
   DetailField, EditableName, InlineEdit, NotesSection, OwnerRailValue, SectionHeader,
 } from '../components/crm/detail';
 import { FilesSection } from '../components/FilesSection';
-import { SalesActivityPanel } from '../components/crm/SalesActivityPanel';
+import { SalesActivityPanel, ScheduleActivityDialog } from '../components/crm/SalesActivityPanel';
 import { ContactDialog } from '../components/crm/dialogs';
-
-const NEW_CONTACT = '__new__';
 
 export function LeadDetailPage({ id }: { id: string }) {
   const t = useT();
@@ -33,6 +32,7 @@ export function LeadDetailPage({ id }: { id: string }) {
   const stagesQ = useDealStages();
   const usersQ = useUsersLookup();
   const [addingContact, setAddingContact] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
   const lead = leadQ.data;
   const contactsQ = useContacts(lead?.companyId);
   usePageTitle(lead?.title);
@@ -138,6 +138,13 @@ export function LeadDetailPage({ id }: { id: string }) {
                   </p>
                   {next?.dueAt && <p className="mt-0.5 text-xs text-muted-foreground">{fmtDate(next.dueAt)} · {fmtRelative(next.dueAt)}</p>}
                 </div>
+                {/* An empty "next action" is the state the workflow exists to
+                  * prevent – the card offers the fix, not just the warning. */}
+                {!next && canWrite && lead.status !== 'converted' && (
+                  <Button size="sm" variant="outline" className="shrink-0" onClick={() => setScheduling(true)}>
+                    <Plus size={13} /> {t('crm.scheduleAction')}
+                  </Button>
+                )}
               </div>
             </Card>
 
@@ -238,46 +245,85 @@ export function LeadDetailPage({ id }: { id: string }) {
             <div className="space-y-0.5">
               <RailField label={t('common.status')}>
                 {editable ? (
-                  <Select className="w-full border-0" value={lead.status} onChange={(event) => patch.mutate({ status: event.target.value })}>
-                    {WRITABLE_LEAD_STATUSES.filter((status) => (
+                  <SearchSelect
+                    className="w-full"
+                    width={200}
+                    value={lead.status}
+                    onChange={(status) => patch.mutate({ status })}
+                    options={WRITABLE_LEAD_STATUSES.filter((status) => (
                       // nurture needs a return date, so it stays available only to a lead already in it
                       status !== 'nurture' || lead.status === 'nurture'
-                    )).map((status) => (
-                      <option key={status} value={status}>{t(`crm.status.${status}`)}</option>
-                    ))}
-                  </Select>
+                    )).map((status) => ({
+                      value: status,
+                      label: t(`crm.status.${status}`),
+                      render: <StatusPill status={status} />,
+                    }))}
+                    trigger={<RailChip caret><StatusPill status={lead.status} /></RailChip>}
+                  />
                 ) : <RailChip disabled><StatusPill status={lead.status} /></RailChip>}
               </RailField>
               <RailField label={t('crm.company')}>
-                <Link to={`/companies/${lead.companyId}`}><RailChip>{lead.companyName || lead.title}</RailChip></Link>
+                <Link to={`/companies/${lead.companyId}`} className="block">
+                  <RailChip>
+                    <Building2 size={15} className="shrink-0 text-muted-foreground" />
+                    <span className="truncate">{lead.companyName || lead.title}</span>
+                    <ExternalLink size={12} className="ml-auto shrink-0 text-faint opacity-0 transition-opacity group-hover:opacity-100" />
+                  </RailChip>
+                </Link>
               </RailField>
               <RailField label={t('crm.contact')}>
-                {editable ? (
-                  <Select
-                    className="w-full border-0"
-                    value={lead.contactId ?? ''}
-                    onChange={(event) => {
-                      // A prospect with no contact cannot be reached, and the company
-                      // may well have none yet – so the picker can create one.
-                      if (event.target.value === NEW_CONTACT) { setAddingContact(true); return; }
-                      patch.mutate({ contactId: event.target.value || null });
-                    }}
-                  >
-                    <option value="">{t('crm.noContact')}</option>
-                    <option value={NEW_CONTACT}>{t('crm.newContactOption')}</option>
-                    {(contactsQ.data ?? []).map((contact) => (
-                      <option key={contact.id} value={contact.id}>
-                        {[contact.firstName, contact.lastName].filter(Boolean).join(' ')}
-                      </option>
-                    ))}
-                  </Select>
-                ) : (
-                  <RailChip disabled empty={!lead.contact}>
-                    {lead.contact
-                      ? [lead.contact.firstName, lead.contact.lastName].filter(Boolean).join(' ')
-                      : '—'}
-                  </RailChip>
-                )}
+                <div className="group/contact flex items-center gap-1">
+                  <div className="min-w-0 flex-1">
+                    {editable ? (
+                      <SearchSelect
+                        className="w-full"
+                        width={230}
+                        value={lead.contactId ?? ''}
+                        onChange={(contactId) => patch.mutate({ contactId: contactId || null })}
+                        options={[
+                          { value: '', label: t('crm.noContact') },
+                          ...(contactsQ.data ?? []).map((contact) => ({
+                            value: contact.id,
+                            label: [contact.firstName, contact.lastName].filter(Boolean).join(' '),
+                            hint: contact.position ?? undefined,
+                          })),
+                        ]}
+                        trigger={(
+                          <RailChip caret empty={!lead.contact}>
+                            <span className="truncate">
+                              {lead.contact
+                                ? [lead.contact.firstName, lead.contact.lastName].filter(Boolean).join(' ')
+                                : t('crm.noContact')}
+                            </span>
+                          </RailChip>
+                        )}
+                        footer={(
+                          // A prospect with no contact cannot be reached, and the company
+                          // may well have none yet – so the picker can create one.
+                          <MenuItem icon={<Plus size={14} />} onSelect={() => setAddingContact(true)}>
+                            {t('crm.newContactOption')}
+                          </MenuItem>
+                        )}
+                      />
+                    ) : (
+                      <RailChip disabled empty={!lead.contact}>
+                        {lead.contact
+                          ? [lead.contact.firstName, lead.contact.lastName].filter(Boolean).join(' ')
+                          : '—'}
+                      </RailChip>
+                    )}
+                  </div>
+                  {/* Contacts live on the company record – that is where this leads. */}
+                  {lead.contact && (
+                    <Link
+                      to={`/companies/${lead.companyId}`}
+                      aria-label={t('crm.company')}
+                      className="shrink-0 rounded p-1 text-faint opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-hover/contact:opacity-100"
+                    >
+                      <ExternalLink size={12} />
+                    </Link>
+                  )}
+                </div>
               </RailField>
               <RailField label={t('crm.owner')}>
                 <OwnerRailValue
@@ -302,6 +348,15 @@ export function LeadDetailPage({ id }: { id: string }) {
         companyId={lead.companyId}
         onCreated={(contact) => patch.mutate({ contactId: contact.id })}
       />
+      {/* Mounted on open, like the panel's own button, so defaults are fresh. */}
+      {scheduling && (
+        <ScheduleActivityDialog
+          open
+          onClose={() => setScheduling(false)}
+          leadId={id}
+          defaultType={['new', 'needs_review', 'ready'].includes(lead.status) ? 'outreach' : 'follow_up'}
+        />
+      )}
     </div>
   );
 }

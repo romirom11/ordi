@@ -6,8 +6,9 @@ import { useOpen } from '../../lib/router';
 import { useTabs } from '../../lib/tabs';
 import { useCan } from '../../lib/auth';
 import { useT } from '../../lib/i18n';
-import { Avatar, Button, EmptyState, Input, Select, Skeleton, fmtRelative } from '../ui';
+import { Avatar, Button, EmptyState, Input, Skeleton, fmtRelative } from '../ui';
 import { ContextMenu, ConfirmDialog, toast, type ContextMenuEntry } from '../overlays';
+import { SearchSelect } from '../SearchSelect';
 import {
   LEAD_STATUSES, WRITABLE_LEAD_STATUSES, StatusPill, salesActivityTypeLabel,
   useLeads, useUserMap, useUsersLookup, type Lead,
@@ -147,10 +148,17 @@ export function LeadsTab() {
           <Search size={14} className="absolute left-2.5 top-2 text-faint" />
           <Input className="pl-8" value={q} onChange={(event) => setQ(event.target.value)} placeholder={t('crm.searchLeads')} />
         </div>
-        <Select value={status} onChange={(event) => setStatus(event.target.value)}>
-          <option value="">{t('common.allStatuses')}</option>
-          {LEAD_STATUSES.map((value) => <option key={value} value={value}>{t(`crm.status.${value}`)}</option>)}
-        </Select>
+        <SearchSelect
+          width={200}
+          value={status}
+          onChange={setStatus}
+          options={[
+            { value: '', label: t('common.allStatuses') },
+            ...LEAD_STATUSES.map((value) => ({
+              value, label: t(`crm.status.${value}`), render: <StatusPill status={value} />,
+            })),
+          ]}
+        />
       </div>
       {visibleSelected.size > 0 && (
         <div className="flex flex-wrap items-center gap-2 border-b border-border bg-primary/[0.04] px-4 py-2">
@@ -159,23 +167,27 @@ export function LeadsTab() {
           </span>
           <span className="flex items-center gap-1.5">
             <UserCircle2 size={14} className="text-muted-foreground" />
-            <Select
+            <SearchSelect
+              width={220}
               value=""
               disabled={bulk.isPending}
-              onChange={(event) => { if (event.target.value) bulk.mutate({ ownerId: event.target.value }); }}
-            >
-              <option value="">{t('crm.changeOwner')}</option>
-              {(usersQ.data ?? []).map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}
-            </Select>
+              placeholder={t('crm.changeOwner')}
+              onChange={(ownerId) => { if (ownerId) bulk.mutate({ ownerId }); }}
+              options={(usersQ.data ?? []).map((user) => ({
+                value: user.id, label: user.name, icon: <Avatar name={user.name} src={user.avatar} size={16} />,
+              }))}
+            />
           </span>
-          <Select
+          <SearchSelect
+            width={200}
             value=""
             disabled={bulk.isPending}
-            onChange={(event) => { if (event.target.value) bulk.mutate({ status: event.target.value }); }}
-          >
-            <option value="">{t('crm.changeStatus')}</option>
-            {BULK_STATUSES.map((value) => <option key={value} value={value}>{t(`crm.status.${value}`)}</option>)}
-          </Select>
+            placeholder={t('crm.changeStatus')}
+            onChange={(next) => { if (next) bulk.mutate({ status: next }); }}
+            options={BULK_STATUSES.map((value) => ({
+              value, label: t(`crm.status.${value}`), render: <StatusPill status={value} />,
+            }))}
+          />
           <Button size="xs" variant="ghost" onClick={() => setSelected(new Set())}>
             <X size={12} /> {t('crm.clearSelection')}
           </Button>

@@ -3,11 +3,13 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, Check, MoreHorizontal, Pencil, Play, Plus, Workflow, X } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { useT } from '../../lib/i18n';
-import { Button, EmptySection, Input, Select, Spinner, Textarea, Tooltip, fmtDate, fmtRelative } from '../ui';
+import { Avatar, Button, EmptySection, Input, Spinner, Textarea, Tooltip, fmtDate, fmtRelative } from '../ui';
 import { DateField, DateTimeField } from '../DatePicker';
 import { ConfirmDialog, Dialog, DropdownMenu, MenuItem, toast } from '../overlays';
+import { SearchSelect } from '../SearchSelect';
 import {
   LEAD_ACTIVITY_OUTCOME_STATUSES,
+  StatusPill,
   SALES_ACTIVITY_TYPES,
   salesActivityStatusLabel,
   salesActivityTypeLabel,
@@ -275,33 +277,32 @@ function SequenceControls({ leadId, dealId, companyId, contactId, hasPlanned }: 
           onSubmit={(event) => { event.preventDefault(); start.mutate(); }}
         >
           <Field label={t('crm.sequence')}>
-            <Select
-              required
+            <SearchSelect
               className="w-full"
               value={sequenceId}
-              onChange={(event) => setSequenceId(event.target.value)}
-            >
-              {(sequencesQ.data ?? []).map((sequence) => (
-                <option key={sequence.id} value={sequence.id}>
-                  {sequence.name} · {t('crm.stepsCount').replace('{count}', String(sequence.steps.length))}
-                </option>
-              ))}
-            </Select>
+              onChange={setSequenceId}
+              options={(sequencesQ.data ?? []).map((sequence) => ({
+                value: sequence.id,
+                label: sequence.name,
+                hint: t('crm.stepsCount').replace('{count}', String(sequence.steps.length)),
+              }))}
+            />
           </Field>
           {!!contactsQ.data?.length && (
             <Field label={t('crm.contact')}>
-              <Select
+              <SearchSelect
                 className="w-full"
                 value={selectedContactId}
-                onChange={(event) => setSelectedContactId(event.target.value)}
-              >
-                <option value="">{t('crm.noContact')}</option>
-                {contactsQ.data.map((contact) => (
-                  <option key={contact.id} value={contact.id}>
-                    {[contact.firstName, contact.lastName].filter(Boolean).join(' ')}
-                  </option>
-                ))}
-              </Select>
+                onChange={setSelectedContactId}
+                options={[
+                  { value: '', label: t('crm.noContact') },
+                  ...contactsQ.data.map((contact) => ({
+                    value: contact.id,
+                    label: [contact.firstName, contact.lastName].filter(Boolean).join(' '),
+                    hint: contact.position ?? undefined,
+                  })),
+                ]}
+              />
             </Field>
           )}
           {error && <p className="text-[13px] text-destructive">{error}</p>}
@@ -394,11 +395,10 @@ export function ScheduleActivityDialog({ open, onClose, leadId, dealId, defaultT
       <form onSubmit={submit} className="space-y-3 px-4 pb-4 pt-1">
         {!!templatesQ.data?.length && (
           <Field label={t('crm.messageTemplate')}>
-            <Select
+            <SearchSelect
               className="w-full"
               value={templateId}
-              onChange={(event) => {
-                const id = event.target.value;
+              onChange={(id) => {
                 setTemplateId(id);
                 const template = templatesQ.data?.find((row) => row.id === id);
                 if (!template) return;
@@ -407,30 +407,37 @@ export function ScheduleActivityDialog({ open, onClose, leadId, dealId, defaultT
                 setSubject(template.subject ?? '');
                 setContext(template.body);
               }}
-            >
-              <option value="">{t('crm.noTemplate')}</option>
-              {templatesQ.data.map((template) => (
-                <option key={template.id} value={template.id}>{template.name}</option>
-              ))}
-            </Select>
+              options={[
+                { value: '', label: t('crm.noTemplate') },
+                ...templatesQ.data.map((template) => ({ value: template.id, label: template.name })),
+              ]}
+            />
           </Field>
         )}
         <Field label={t('crm.activityType')}>
-          <Select className="w-full" value={type} onChange={(event) => setType(event.target.value)}>
-            {SALES_ACTIVITY_TYPES.map((value) => <option key={value} value={value}>{salesActivityTypeLabel(t, value)}</option>)}
-          </Select>
+          <SearchSelect
+            className="w-full"
+            value={type}
+            onChange={setType}
+            options={SALES_ACTIVITY_TYPES.map((value) => ({ value, label: salesActivityTypeLabel(t, value) }))}
+          />
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label={t('crm.dueAt')}>
             <DateTimeField value={dueAt} onChange={setDueAt} />
           </Field>
           <Field label={t('crm.owner')}>
-            <Select className="w-full" value={ownerId} onChange={(event) => setOwnerId(event.target.value)}>
-              <option value="">{t('crm.ownerDefault')}</option>
-              {(usersQ.data ?? []).map((user) => (
-                <option key={user.id} value={user.id}>{user.name}</option>
-              ))}
-            </Select>
+            <SearchSelect
+              className="w-full"
+              value={ownerId}
+              onChange={setOwnerId}
+              options={[
+                { value: '', label: t('crm.ownerDefault') },
+                ...(usersQ.data ?? []).map((user) => ({
+                  value: user.id, label: user.name, icon: <Avatar name={user.name} src={user.avatar} size={16} />,
+                })),
+              ]}
+            />
           </Field>
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -525,20 +532,18 @@ export function CompleteActivityDialog({ activity, onClose }: {
         </Field>
         {isLead && (
           <Field label={t('common.status')}>
-            <Select
+            <SearchSelect
               className="w-full"
               value={leadStatus}
-              onChange={(event) => {
-                const value = event.target.value;
+              onChange={(value) => {
                 setLeadStatus(value);
                 if (value === 'disqualified' || value === 'no_response') setFollowUp(false);
                 if (value === 'nurture') setFollowUp(false);
               }}
-            >
-              {LEAD_ACTIVITY_OUTCOME_STATUSES.map((value) => (
-                <option key={value} value={value}>{t(`crm.status.${value}`)}</option>
-              ))}
-            </Select>
+              options={LEAD_ACTIVITY_OUTCOME_STATUSES.map((value) => ({
+                value, label: t(`crm.status.${value}`), render: <StatusPill status={value} />,
+              }))}
+            />
           </Field>
         )}
         {isLead && leadStatus === 'nurture' && (
@@ -630,11 +635,12 @@ function EditActivityDialog({ activity, onClose }: {
         className="space-y-3 px-4 pb-4 pt-1"
       >
         <Field label={t('crm.activityType')}>
-          <Select className="w-full" value={type} onChange={(event) => setType(event.target.value)}>
-            {SALES_ACTIVITY_TYPES.map((value) => (
-              <option key={value} value={value}>{salesActivityTypeLabel(t, value)}</option>
-            ))}
-          </Select>
+          <SearchSelect
+            className="w-full"
+            value={type}
+            onChange={setType}
+            options={SALES_ACTIVITY_TYPES.map((value) => ({ value, label: salesActivityTypeLabel(t, value) }))}
+          />
         </Field>
         <Field label={t('crm.dueAt')}>
           <DateTimeField value={dueAt} onChange={setDueAt} />

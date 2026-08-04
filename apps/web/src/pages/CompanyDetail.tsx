@@ -18,8 +18,9 @@ import { useCan } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import {
   Avatar, Button, EmptySection, IconButton, RailChip, RailField,
-  Select, Skeleton, Spinner, Tooltip, cn, fmtMoney, fmtDate,
+  Skeleton, Spinner, Tooltip, cn, fmtMoney, fmtDate,
 } from '../components/ui';
+import { SearchSelect } from '../components/SearchSelect';
 import { ConfirmDialog, Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator, toast } from '../components/overlays';
 import { EntityActivity } from '../components/EntityActivity';
 import { useT } from '../lib/i18n';
@@ -711,10 +712,15 @@ function ProjectsRail({ companyId }: { companyId: string }) {
           ) : candidates.length === 0 ? (
             <p className="text-[13px] text-muted-foreground">{t('crm.noUnlinkedProjects')}</p>
           ) : (
-            <Select value={linkId} onChange={(e) => setLinkId(e.target.value)} className="w-full">
-              <option value="">{t('common.select')}</option>
-              {candidates.map((p) => <option key={p.id} value={p.id}>{p.name}{p.key ? ` (${p.key})` : ''}</option>)}
-            </Select>
+            <SearchSelect
+              className="w-full"
+              value={linkId}
+              onChange={setLinkId}
+              placeholder={t('common.select')}
+              options={candidates.map((p) => ({
+                value: p.id, label: p.name, hint: p.key ?? undefined, icon: <FolderKanban size={14} />,
+              }))}
+            />
           )}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={() => { setLinking(false); setLinkId(''); }}>{t('common.cancel')}</Button>
