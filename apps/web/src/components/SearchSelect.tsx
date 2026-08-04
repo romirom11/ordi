@@ -38,7 +38,7 @@ const SEARCH_FROM = 8;
 
 export function SearchSelect({
   value, options, onChange, placeholder, disabled, className, triggerClassName,
-  width = 240, align = 'start', searchable, trigger, footer, menuLabel,
+  width = 200, align = 'start', searchable, trigger, footer, menuLabel,
 }: {
   value?: string | null;
   options: SearchSelectOption[];
@@ -59,6 +59,9 @@ export function SearchSelect({
   footer?: ReactNode;
   menuLabel?: string;
 }) {
+  /* `width` is only a floor: the menu matches the control it drops from, so a
+   * full-width field in a dialog gets a full-width menu instead of wrapping
+   * every option into two lines beside empty space. */
   const t = useT();
   const current = options.find((option) => option.value === (value ?? ''));
 
@@ -85,6 +88,7 @@ export function SearchSelect({
     <DropdownMenu
       align={align}
       width={width}
+      matchAnchorWidth
       disabled={disabled}
       className={className}
       trigger={trigger ?? defaultTrigger}

@@ -3,6 +3,15 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.22.1
+
+- CRM dropdowns take the width of the field they belong to instead of a fixed
+  240px, so options in a full-width dialog select stop wrapping into two lines
+  beside empty space.
+- Opening one picker closes the one before it: the outside-click listener now
+  runs in the capture phase, which a dialog panel's `stopPropagation` used to
+  swallow, leaving the previous menu open on top of the field you clicked.
+
 ## v1.22.0
 
 - Every native browser dropdown in the CRM is replaced by an app-styled
