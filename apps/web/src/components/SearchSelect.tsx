@@ -179,7 +179,8 @@ function OptionList({ value, options, onChange, withSearch }: {
             )}
           >
             {option.icon && <span className="shrink-0 text-muted-foreground [&>svg]:block">{option.icon}</span>}
-            <span className="min-w-0 flex-1 truncate">{option.render ?? option.label}</span>
+            {/* Options wrap too – a picker whose choices cannot be read defeats itself. */}
+            <span className="min-w-0 flex-1 break-words">{option.render ?? option.label}</span>
             {option.hint && <span className="shrink-0 text-[11px] text-faint">{option.hint}</span>}
             {option.value === value && <Check size={13} className="shrink-0 text-primary" />}
           </button>
