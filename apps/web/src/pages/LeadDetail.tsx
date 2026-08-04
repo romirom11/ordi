@@ -20,7 +20,7 @@ import {
 } from '../components/crm/detail';
 import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
 import { FilesSection } from '../components/FilesSection';
-import { SalesActivityPanel, ScheduleActivityDialog } from '../components/crm/SalesActivityPanel';
+import { CompleteActivityDialog, SalesActivityPanel, ScheduleActivityDialog } from '../components/crm/SalesActivityPanel';
 import { ContactDialog } from '../components/crm/dialogs';
 
 export function LeadDetailPage({ id }: { id: string }) {
@@ -34,6 +34,7 @@ export function LeadDetailPage({ id }: { id: string }) {
   const usersQ = useUsersLookup();
   const [addingContact, setAddingContact] = useState(false);
   const [scheduling, setScheduling] = useState(false);
+  const [completing, setCompleting] = useState(false);
   const lead = leadQ.data;
   const contactsQ = useContacts(lead?.companyId);
   usePageTitle(lead?.title);
@@ -126,9 +127,11 @@ export function LeadDetailPage({ id }: { id: string }) {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col min-[1050px]:flex-row">
-        <main className="order-2 min-w-0 flex-1 overflow-auto min-[1050px]:order-1">
-          <div className="space-y-7 px-6 py-6">
+      <div className="flex min-h-0 flex-1 flex-col min-[1100px]:flex-row">
+        {/* Content takes the full width up to the rail; the rail flexes with
+          * the viewport instead of a fixed 320px. */}
+        <main className="order-2 min-w-0 flex-1 overflow-auto min-[1100px]:order-1">
+          <div className="w-full space-y-7 px-6 py-6">
             <Card className={`p-4 ${next ? 'border-primary/30' : 'border-warning/40'}`}>
               <div className="flex items-start gap-3">
                 {next ? <CheckCircle2 size={18} className="mt-0.5 text-primary" /> : <AlertTriangle size={18} className="mt-0.5 text-warning" />}
@@ -139,8 +142,13 @@ export function LeadDetailPage({ id }: { id: string }) {
                   </p>
                   {next?.dueAt && <p className="mt-0.5 text-xs text-muted-foreground">{fmtDate(next.dueAt)} · {fmtRelative(next.dueAt)}</p>}
                 </div>
-                {/* An empty "next action" is the state the workflow exists to
-                  * prevent – the card offers the fix, not just the warning. */}
+                {/* The card is the Focus slot: it offers the action, not just
+                  * the state – schedule when empty, complete when due. */}
+                {next && canWrite && (
+                  <Button size="sm" variant="outline" className="shrink-0" onClick={() => setCompleting(true)}>
+                    <CheckCircle2 size={13} /> {t('crm.completeAction')}
+                  </Button>
+                )}
                 {!next && canWrite && lead.status !== 'converted' && (
                   <Button size="sm" variant="outline" className="shrink-0" onClick={() => setScheduling(true)}>
                     <Plus size={13} /> {t('crm.scheduleAction')}
@@ -158,35 +166,49 @@ export function LeadDetailPage({ id }: { id: string }) {
             <section>
               <SectionHeader icon={<Info size={15} />} title={t('crm.leadDetails')} />
               <Card className="p-4">
+                {/* Empty fields render only while they can be filled – on a
+                  * frozen or read-only record a grid of dashes says nothing. */}
                 <div className="grid gap-x-6 gap-y-3 md:grid-cols-2">
-                  <DetailField label={t('crm.product')}>
-                    <InlineEdit multiline rows={2} value={lead.product} editable={editable} placeholder={t('crm.productHint')} onSave={(product) => patch.mutate({ product })} />
-                  </DetailField>
-                  <DetailField label={t('crm.signal')}>
-                    <InlineEdit multiline rows={2} value={lead.signal} editable={editable} placeholder={t('crm.signalHint')} onSave={(signal) => patch.mutate({ signal })} />
-                  </DetailField>
-                  <DetailField label={t('crm.source')}>
-                    <InlineEdit value={lead.sourceTitle} editable={editable} placeholder={t('crm.sourceHint')} onSave={(sourceTitle) => patch.mutate({ sourceTitle })} />
-                  </DetailField>
-                  <DetailField label={t('crm.sourceLink')}>
-                    <InlineEdit
-                      value={lead.sourceUrl}
-                      editable={editable}
-                      inputType="url"
-                      placeholder="https://…"
-                      display={urlHost(lead.sourceUrl)}
-                      onSave={(sourceUrl) => patch.mutate({ sourceUrl })}
-                    />
-                    {lead.sourceCheckedAt && (
-                      <p className="mt-0.5 px-1.5 text-xs text-faint">{t('crm.sourceChecked')} · {fmtDate(lead.sourceCheckedAt)}</p>
-                    )}
-                  </DetailField>
-                  <DetailField label={t('crm.suggestedChannel')}>
-                    <InlineEdit value={lead.suggestedChannel} editable={editable} placeholder={t('crm.suggestedChannelHint')} onSave={(suggestedChannel) => patch.mutate({ suggestedChannel })} />
-                  </DetailField>
-                  <DetailField label={t('crm.score')}>
-                    <InlineEdit value={lead.score} editable={editable} inputType="number" placeholder={t('crm.scoreHint')} onSave={(score) => patch.mutate({ score: score === null ? null : Number(score) })} />
-                  </DetailField>
+                  {(editable || lead.product) && (
+                    <DetailField label={t('crm.product')}>
+                      <InlineEdit multiline rows={2} value={lead.product} editable={editable} placeholder={t('crm.productHint')} onSave={(product) => patch.mutate({ product })} />
+                    </DetailField>
+                  )}
+                  {(editable || lead.signal) && (
+                    <DetailField label={t('crm.signal')}>
+                      <InlineEdit multiline rows={2} value={lead.signal} editable={editable} placeholder={t('crm.signalHint')} onSave={(signal) => patch.mutate({ signal })} />
+                    </DetailField>
+                  )}
+                  {(editable || lead.sourceTitle) && (
+                    <DetailField label={t('crm.source')}>
+                      <InlineEdit value={lead.sourceTitle} editable={editable} placeholder={t('crm.sourceHint')} onSave={(sourceTitle) => patch.mutate({ sourceTitle })} />
+                    </DetailField>
+                  )}
+                  {(editable || lead.sourceUrl) && (
+                    <DetailField label={t('crm.sourceLink')}>
+                      <InlineEdit
+                        value={lead.sourceUrl}
+                        editable={editable}
+                        inputType="url"
+                        placeholder="https://…"
+                        display={urlHost(lead.sourceUrl)}
+                        onSave={(sourceUrl) => patch.mutate({ sourceUrl })}
+                      />
+                      {lead.sourceCheckedAt && (
+                        <p className="mt-0.5 px-1.5 text-xs text-faint">{t('crm.sourceChecked')} · {fmtDate(lead.sourceCheckedAt)}</p>
+                      )}
+                    </DetailField>
+                  )}
+                  {(editable || lead.suggestedChannel) && (
+                    <DetailField label={t('crm.suggestedChannel')}>
+                      <InlineEdit value={lead.suggestedChannel} editable={editable} placeholder={t('crm.suggestedChannelHint')} onSave={(suggestedChannel) => patch.mutate({ suggestedChannel })} />
+                    </DetailField>
+                  )}
+                  {(editable || lead.score != null) && (
+                    <DetailField label={t('crm.score')}>
+                      <InlineEdit value={lead.score} editable={editable} inputType="number" placeholder={t('crm.scoreHint')} onSave={(score) => patch.mutate({ score: score === null ? null : Number(score) })} />
+                    </DetailField>
+                  )}
                 </div>
               </Card>
             </section>
@@ -194,10 +216,10 @@ export function LeadDetailPage({ id }: { id: string }) {
             <section>
               <SectionHeader icon={<Target size={15} />} title={t('crm.qualification')} />
               <div className="grid gap-3 md:grid-cols-2">
-                <QualificationCard title={t('crm.painSignal')} hint={t('crm.painSignalHint')} value={lead.painSignal} editable={editable} onSave={(painSignal) => patch.mutate({ painSignal })} />
-                <QualificationCard title={t('crm.whyFit')} hint={t('crm.whyFitHint')} value={lead.whyFit} editable={editable} onSave={(whyFit) => patch.mutate({ whyFit })} />
-                <QualificationCard title={t('crm.whyNow')} hint={t('crm.whyNowHint')} value={lead.whyNow} editable={editable} onSave={(whyNow) => patch.mutate({ whyNow })} />
-                <QualificationCard title={t('crm.evidence')} hint={t('crm.evidenceHint')} value={lead.evidence} editable={editable} onSave={(evidence) => patch.mutate({ evidence })} />
+                {(editable || lead.painSignal) && <QualificationCard title={t('crm.painSignal')} hint={t('crm.painSignalHint')} value={lead.painSignal} editable={editable} onSave={(painSignal) => patch.mutate({ painSignal })} />}
+                {(editable || lead.whyFit) && <QualificationCard title={t('crm.whyFit')} hint={t('crm.whyFitHint')} value={lead.whyFit} editable={editable} onSave={(whyFit) => patch.mutate({ whyFit })} />}
+                {(editable || lead.whyNow) && <QualificationCard title={t('crm.whyNow')} hint={t('crm.whyNowHint')} value={lead.whyNow} editable={editable} onSave={(whyNow) => patch.mutate({ whyNow })} />}
+                {(editable || lead.evidence) && <QualificationCard title={t('crm.evidence')} hint={t('crm.evidenceHint')} value={lead.evidence} editable={editable} onSave={(evidence) => patch.mutate({ evidence })} />}
               </div>
               {(editable || lead.caution) && (
                 <div className="mt-3 flex gap-2 rounded-lg border border-warning/30 bg-warning/5 p-3">
@@ -247,7 +269,9 @@ export function LeadDetailPage({ id }: { id: string }) {
           </div>
         </main>
 
-        <aside className="order-1 shrink-0 space-y-6 overflow-auto border-b border-border p-4 min-[1050px]:order-2 min-[1050px]:w-80 min-[1050px]:border-b-0 min-[1050px]:border-l">
+        {/* The rail absorbs surplus width (280→400px with the viewport), so long
+          * names get room on exactly the screens that have room to give. */}
+        <aside className="order-1 shrink-0 space-y-6 overflow-auto border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-[clamp(280px,23vw,400px)] min-[1100px]:border-b-0 min-[1100px]:border-l">
           <div>
             <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('crm.properties')}</h2>
             <div className="space-y-0.5">
@@ -274,7 +298,8 @@ export function LeadDetailPage({ id }: { id: string }) {
                 <Link to={`/companies/${lead.companyId}`} className="block">
                   <RailChip>
                     <Building2 size={15} className="shrink-0 text-muted-foreground" />
-                    <span className="truncate">{lead.companyName || lead.title}</span>
+                    {/* Wrap, never truncate: the name is the row's whole point. */}
+                    <span className="min-w-0 flex-1 break-words">{lead.companyName || lead.title}</span>
                     <ExternalLink size={12} className="ml-auto shrink-0 text-faint opacity-0 transition-opacity group-hover:opacity-100" />
                   </RailChip>
                 </Link>
@@ -298,7 +323,7 @@ export function LeadDetailPage({ id }: { id: string }) {
                         ]}
                         trigger={(
                           <RailChip caret empty={!lead.contact}>
-                            <span className="truncate">
+                            <span className="min-w-0 flex-1 break-words">
                               {lead.contact
                                 ? [lead.contact.firstName, lead.contact.lastName].filter(Boolean).join(' ')
                                 : t('crm.noContact')}
@@ -364,6 +389,9 @@ export function LeadDetailPage({ id }: { id: string }) {
           leadId={id}
           defaultType={['new', 'needs_review', 'ready'].includes(lead.status) ? 'outreach' : 'follow_up'}
         />
+      )}
+      {completing && next && (
+        <CompleteActivityDialog activity={next} onClose={() => setCompleting(false)} />
       )}
     </div>
   );

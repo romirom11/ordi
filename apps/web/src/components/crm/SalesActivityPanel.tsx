@@ -24,6 +24,9 @@ import {
 } from './shared';
 import { SectionHeader } from './detail';
 
+/** History rows shown before "show all" – enough to read the recent story. */
+const VISIBLE_ACTIVITIES = 8;
+
 function toLocalInput(date: Date): string {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
   return local.toISOString().slice(0, 16);
@@ -52,7 +55,12 @@ export function SalesActivityPanel({ leadId, dealId, companyId, contactId, canWr
   const [complete, setComplete] = useState<SalesActivity | null>(null);
   const [edit, setEdit] = useState<SalesActivity | null>(null);
   const [cancel, setCancel] = useState<SalesActivity | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const activities = activitiesQ.data ?? [];
+  // A worked record accumulates dozens of rows; unbounded they push notes and
+  // files below three screens of history. Recent rows tell the story – the
+  // rest expand on demand.
+  const visibleActivities = showAll ? activities : activities.slice(0, VISIBLE_ACTIVITIES);
   const qc = useQueryClient();
   const cancelMutation = useMutation({
     mutationFn: (activity: SalesActivity) => api.post(`/sales-activities/${activity.id}/cancel`, {
@@ -100,7 +108,7 @@ export function SalesActivityPanel({ leadId, dealId, companyId, contactId, canWr
         />
       ) : (
         <div className="divide-y divide-border rounded-lg border border-border">
-          {activities.map((activity) => (
+          {visibleActivities.map((activity) => (
             <div key={activity.id} className="flex items-start gap-3 px-3 py-2.5">
               <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${
                 activity.status === 'completed' ? 'bg-success' : activity.status === 'cancelled' ? 'bg-faint' : 'bg-primary'
@@ -145,6 +153,17 @@ export function SalesActivityPanel({ leadId, dealId, companyId, contactId, canWr
               )}
             </div>
           ))}
+          {activities.length > VISIBLE_ACTIVITIES && (
+            <button
+              type="button"
+              onClick={() => setShowAll((v) => !v)}
+              className="w-full px-3 py-2 text-left text-[13px] text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+            >
+              {showAll
+                ? t('crm.collapseActivities')
+                : t('crm.showAllActivities').replace('{n}', String(activities.length))}
+            </button>
+          )}
         </div>
       )}
       {/* Mounted on open: its template and user lookups fire on mount, and the
