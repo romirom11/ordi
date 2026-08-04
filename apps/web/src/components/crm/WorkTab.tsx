@@ -3,7 +3,8 @@ import { AlertCircle, CalendarClock, CalendarDays, Check, Clock3, Inbox, PauseCi
 import { useNavigate, useOpen } from '../../lib/router';
 import { useCan } from '../../lib/auth';
 import { useT } from '../../lib/i18n';
-import { Button, EmptyState, Select, Skeleton, fmtRelative } from '../ui';
+import { Button, EmptyState, Skeleton, fmtRelative } from '../ui';
+import { SearchSelect } from '../SearchSelect';
 import { CompleteActivityDialog, ScheduleActivityDialog } from './SalesActivityPanel';
 import {
   salesActivityTypeLabel, useSalesWork,
@@ -58,10 +59,16 @@ export function WorkTab() {
       <div className="mx-auto max-w-5xl space-y-6">
         <div className="flex items-start justify-between gap-3">
           <h2 className="text-base font-semibold">{t('crm.workTitle')}</h2>
-          <Select value={scope} onChange={(event) => setScope(event.target.value as 'mine' | 'all')}>
-            <option value="mine">{t('crm.workMine')}</option>
-            <option value="all">{t('crm.workTeam')}</option>
-          </Select>
+          <SearchSelect
+            width={170}
+            align="end"
+            value={scope}
+            onChange={(next) => setScope(next as 'mine' | 'all')}
+            options={[
+              { value: 'mine', label: t('crm.workMine') },
+              { value: 'all', label: t('crm.workTeam') },
+            ]}
+          />
         </div>
         {total === 0 && (
           <EmptyState

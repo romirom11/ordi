@@ -135,6 +135,7 @@ export interface Lead {
   ownerId?: string | null;
   convertedDealId?: string | null;
   nextActivity?: SalesActivity | null;
+  customFields?: Record<string, unknown>;
   createdAt?: string | null;
   version?: number;
 }
@@ -270,7 +271,7 @@ export function useAllDeals() {
  * Like useAllDeals: the list is bounded (200 max) and `truncated` says out loud
  * when there are more leads than the table shows.
  */
-export function useLeads(params: { q?: string; status?: string; companyId?: string } = {}) {
+export function useLeads(params: { q?: string; status?: string; companyId?: string; ownerId?: string } = {}) {
   return useQuery<{ leads: Lead[]; truncated: boolean }>({
     queryKey: ['leads', params],
     queryFn: () => api.get<{ data: Lead[]; truncated?: boolean }>(`/leads${qs({ ...params, limit: 200 })}`)
@@ -385,6 +386,12 @@ export function useCompanies(q = '', status = '') {
 }
 
 export { useUsersLookup, useUserMap } from '../../lib/queries';
+
+/* Table sorting lives in ../tableSort – re-exported so CRM tables keep one import site. */
+export {
+  SortHeader, sortRows, useStatusRank, useTableSort,
+  type SortDir, type SortState,
+} from '../tableSort';
 
 export function StatusPill({ status, className }: { status: string; className?: string }) {
   const t = useT();

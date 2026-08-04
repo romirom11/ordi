@@ -4,8 +4,9 @@ import { FileText, Pencil, Plus, Workflow, X } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { extendDict, useT } from '../../lib/i18n';
 import { useCan } from '../../lib/auth';
-import { Badge, Button, Card, EmptySection, Input, Select, Spinner, Textarea } from '../ui';
+import { Badge, Button, Card, EmptySection, Input, Spinner, Textarea } from '../ui';
 import { Dialog, toast } from '../overlays';
+import { SearchSelect } from '../SearchSelect';
 import {
   SALES_ACTIVITY_TYPES,
   salesActivityTypeLabel,
@@ -289,11 +290,12 @@ function TemplateDialog({ value, onClose }: {
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label={t('crm.activityType')}>
-            <Select className="w-full" value={activityType} onChange={(event) => setActivityType(event.target.value)}>
-              {SALES_ACTIVITY_TYPES.map((type) => (
-                <option key={type} value={type}>{salesActivityTypeLabel(t, type)}</option>
-              ))}
-            </Select>
+            <SearchSelect
+              className="w-full"
+              value={activityType}
+              onChange={setActivityType}
+              options={SALES_ACTIVITY_TYPES.map((type) => ({ value: type, label: salesActivityTypeLabel(t, type) }))}
+            />
           </Field>
           <Field label={t('crm.channel')}>
             <Input value={channel} onChange={(event) => setChannel(event.target.value)} placeholder="LinkedIn" />
@@ -446,22 +448,24 @@ function SequenceDialog({ value, onClose }: {
                 <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-muted text-[11px] font-medium">
                   {index + 1}
                 </span>
-                <Select
+                <SearchSelect
                   className="min-w-0 flex-1"
                   value={step.templateId}
                   disabled={stepsLocked}
-                  onChange={(event) => patchStep(index, { templateId: event.target.value })}
-                >
-                  <option value="">{t('crm.noTemplate')}</option>
-                  {step.templateId && !templatesQ.data?.some((template) => template.id === step.templateId) && (
-                    <option value={step.templateId}>{t('crm.inactive')}</option>
-                  )}
-                  {(templatesQ.data ?? []).map((template) => (
-                    <option key={template.id} value={template.id} disabled={!template.active}>
-                      {template.name}{template.active ? '' : ` · ${t('crm.inactive')}`}
-                    </option>
-                  ))}
-                </Select>
+                  onChange={(templateId) => patchStep(index, { templateId })}
+                  options={[
+                    { value: '', label: t('crm.noTemplate') },
+                    ...(step.templateId && !templatesQ.data?.some((template) => template.id === step.templateId)
+                      ? [{ value: step.templateId, label: t('crm.inactive') }]
+                      : []),
+                    ...(templatesQ.data ?? []).map((template) => ({
+                      value: template.id,
+                      label: template.name,
+                      hint: template.active ? undefined : t('crm.inactive'),
+                      disabled: !template.active,
+                    })),
+                  ]}
+                />
                 <Input
                   className="w-28"
                   min={0}
@@ -487,15 +491,13 @@ function SequenceDialog({ value, onClose }: {
               {!step.templateId && (
                 <>
                   <div className="grid grid-cols-2 gap-2">
-                    <Select
+                    <SearchSelect
+                      className="w-full"
                       value={step.activityType}
                       disabled={stepsLocked}
-                      onChange={(event) => patchStep(index, { activityType: event.target.value })}
-                    >
-                      {SALES_ACTIVITY_TYPES.map((type) => (
-                        <option key={type} value={type}>{salesActivityTypeLabel(t, type)}</option>
-                      ))}
-                    </Select>
+                      onChange={(activityType) => patchStep(index, { activityType })}
+                      options={SALES_ACTIVITY_TYPES.map((type) => ({ value: type, label: salesActivityTypeLabel(t, type) }))}
+                    />
                     <Input
                       value={step.channel}
                       disabled={stepsLocked}

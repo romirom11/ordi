@@ -4,12 +4,14 @@
  */
 import { useEffect, useState, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Building2, FolderKanban, Plus } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { useT } from '../../lib/i18n';
-import { Button, Input, Select, Spinner } from '../ui';
+import { Button, Input, Spinner } from '../ui';
 import { Dialog, toast } from '../overlays';
+import { SearchSelect } from '../SearchSelect';
 import {
-  CURRENCIES, COMPANY_STATUSES, NEW_LEAD_STATUSES, useCompanies, useDealStages,
+  CURRENCIES, COMPANY_STATUSES, NEW_LEAD_STATUSES, StatusPill, useCompanies, useDealStages,
   useProjectsLookup, type Company, type Stage,
 } from './shared';
 
@@ -71,14 +73,21 @@ export function NewClientDialog({ open, onClose, onCreated }: {
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label={t('common.status')}>
-            <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-full">
-              {COMPANY_STATUSES.map((s) => <option key={s} value={s}>{t(`crm.status.${s}`)}</option>)}
-            </Select>
+            <SearchSelect
+              className="w-full"
+              value={status}
+              onChange={setStatus}
+              options={COMPANY_STATUSES.map((s) => ({ value: s, label: t(`crm.status.${s}`), render: <StatusPill status={s} /> }))}
+            />
           </Field>
           <Field label={t('common.currency')}>
-            <Select value={currency} onChange={(e) => setCurrency(e.target.value)} className="w-full">
-              {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-            </Select>
+            <SearchSelect
+              className="w-full"
+              width={140}
+              value={currency}
+              onChange={setCurrency}
+              options={CURRENCIES.map((c) => ({ value: c, label: c }))}
+            />
           </Field>
         </div>
         {error && <p className="text-[13px] text-destructive">{error}</p>}
@@ -168,11 +177,18 @@ export function NewLeadDialog({ open, onClose, lockedCompanyId, onCreated }: {
       <form onSubmit={submit} className="space-y-3 px-4 pb-4 pt-1">
         {!lockedCompanyId && (
           <Field label={t('crm.company')}>
-            <Select value={companyId} onChange={(e) => setCompanyId(e.target.value)} className="w-full">
-              <option value="">{companiesQ.isLoading ? t('common.loading') : t('common.select')}</option>
-              <option value={NEW_COMPANY}>{t('crm.newCompanyOption')}</option>
-              {(companiesQ.data ?? []).map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
-            </Select>
+            <SearchSelect
+              className="w-full"
+              value={companyId}
+              onChange={setCompanyId}
+              placeholder={companiesQ.isLoading ? t('common.loading') : t('common.select')}
+              options={[
+                { value: NEW_COMPANY, label: t('crm.newCompanyOption'), icon: <Plus size={14} /> },
+                ...(companiesQ.data ?? []).map((company) => ({
+                  value: company.id, label: company.name, icon: <Building2 size={14} />,
+                })),
+              ]}
+            />
           </Field>
         )}
         {creatingCompany && (
@@ -192,11 +208,14 @@ export function NewLeadDialog({ open, onClose, lockedCompanyId, onCreated }: {
           <Input value={product} onChange={(e) => setProduct(e.target.value)} placeholder="AI / workflow pilot" />
         </Field>
         <Field label={t('common.status')}>
-          <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-full">
-            {NEW_LEAD_STATUSES.map((value) => (
-              <option key={value} value={value}>{t(`crm.status.${value}`)}</option>
-            ))}
-          </Select>
+          <SearchSelect
+            className="w-full"
+            value={status}
+            onChange={setStatus}
+            options={NEW_LEAD_STATUSES.map((value) => ({
+              value, label: t(`crm.status.${value}`), render: <StatusPill status={value} />,
+            }))}
+          />
         </Field>
         {error && <p className="text-[13px] text-destructive">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
@@ -269,10 +288,13 @@ export function NewDealDialog({ open, onClose, lockedCompanyId, defaultStageId, 
         </Field>
         {!lockedCompanyId && (
           <Field label={t('crm.client')}>
-            <Select value={companyId} onChange={(e) => setCompanyId(e.target.value)} className="w-full">
-              <option value="">{companiesQ.isLoading ? t('common.loading') : t('common.select')}</option>
-              {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </Select>
+            <SearchSelect
+              className="w-full"
+              value={companyId}
+              onChange={setCompanyId}
+              placeholder={companiesQ.isLoading ? t('common.loading') : t('common.select')}
+              options={companies.map((c) => ({ value: c.id, label: c.name, icon: <Building2 size={14} /> }))}
+            />
           </Field>
         )}
         <div className="grid grid-cols-2 gap-3">
@@ -280,22 +302,36 @@ export function NewDealDialog({ open, onClose, lockedCompanyId, defaultStageId, 
             <Input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
           </Field>
           <Field label={t('common.currency')}>
-            <Select value={currency} onChange={(e) => setCurrency(e.target.value)} className="w-full">
-              {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-            </Select>
+            <SearchSelect
+              className="w-full"
+              width={140}
+              value={currency}
+              onChange={setCurrency}
+              options={CURRENCIES.map((c) => ({ value: c, label: c }))}
+            />
           </Field>
         </div>
         <Field label={t('deals.stage')}>
-          <Select value={effectiveStage} onChange={(e) => setStageId(e.target.value)} className="w-full">
-            {stages.map((s: Stage) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </Select>
+          <SearchSelect
+            className="w-full"
+            value={effectiveStage}
+            onChange={setStageId}
+            options={stages.map((s: Stage) => ({ value: s.id, label: s.name }))}
+          />
         </Field>
         {projects.length > 0 && (
           <Field label={`${t('crm.project')} · ${t('crm.linkProjectHint')}`}>
-            <Select value={projectId} onChange={(e) => setProjectId(e.target.value)} className="w-full">
-              <option value="">{t('crm.noProject')}</option>
-              {projects.map((p) => <option key={p.id} value={p.id}>{p.name}{p.key ? ` (${p.key})` : ''}</option>)}
-            </Select>
+            <SearchSelect
+              className="w-full"
+              value={projectId}
+              onChange={setProjectId}
+              options={[
+                { value: '', label: t('crm.noProject') },
+                ...projects.map((p) => ({
+                  value: p.id, label: p.name, hint: p.key ?? undefined, icon: <FolderKanban size={14} />,
+                })),
+              ]}
+            />
           </Field>
         )}
         {error && <p className="text-[13px] text-destructive">{error}</p>}

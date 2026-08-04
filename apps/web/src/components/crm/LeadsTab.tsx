@@ -6,12 +6,15 @@ import { useOpen } from '../../lib/router';
 import { useTabs } from '../../lib/tabs';
 import { useCan } from '../../lib/auth';
 import { useT } from '../../lib/i18n';
-import { Avatar, Button, EmptyState, Input, Select, Skeleton, fmtRelative } from '../ui';
+import { Avatar, Button, EmptyState, Input, Skeleton, fmtRelative } from '../ui';
 import { ContextMenu, ConfirmDialog, toast, type ContextMenuEntry } from '../overlays';
+import { SearchSelect } from '../SearchSelect';
 import {
-  LEAD_STATUSES, WRITABLE_LEAD_STATUSES, StatusPill, salesActivityTypeLabel,
-  useLeads, useUserMap, useUsersLookup, type Lead,
+  LEAD_STATUSES, WRITABLE_LEAD_STATUSES, SortHeader, StatusPill, salesActivityTypeLabel,
+  sortRows, useLeads, useStatusRank, useTableSort, useUserMap, useUsersLookup, type Lead,
 } from './shared';
+
+type LeadSortKey = 'title' | 'company' | 'status' | 'score' | 'next' | 'owner';
 
 /**
  * The header and the rows are separate elements, so one template shared between
@@ -34,7 +37,8 @@ export function LeadsTab() {
   const qc = useQueryClient();
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
-  const leadsQ = useLeads({ q, status });
+  const [ownerId, setOwnerId] = useState('');
+  const leadsQ = useLeads({ q, status, ownerId });
   // Who is on the hook for each lead – the table had no way to tell, so a team
   // could not see whose pipeline was whose without opening every record.
   const userById = useUserMap();
@@ -140,6 +144,21 @@ export function LeadsTab() {
 
   const columns = canWrite ? LEAD_COLUMNS_SELECTABLE : LEAD_COLUMNS;
 
+  const { sort, toggle: toggleSort } = useTableSort<LeadSortKey>();
+  const statusRank = useStatusRank(LEAD_STATUSES);
+  // The list is bounded at 200, so sorting happens on the loaded rows; the
+  // truncation banner above the table already says when that is not everything.
+  const sortedLeads = useMemo(() => sortRows(leads, sort, (lead, key) => {
+    switch (key) {
+      case 'title': return lead.title.toLowerCase();
+      case 'company': return lead.companyName?.toLowerCase() || null;
+      case 'status': return statusRank.get(lead.status) ?? null;
+      case 'score': return lead.score ?? null;
+      case 'next': return lead.nextActivity?.dueAt ?? null;
+      case 'owner': return (lead.ownerId && userById.get(lead.ownerId)?.name.toLowerCase()) || null;
+    }
+  }), [leads, sort, statusRank, userById]);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2">
@@ -147,10 +166,28 @@ export function LeadsTab() {
           <Search size={14} className="absolute left-2.5 top-2 text-faint" />
           <Input className="pl-8" value={q} onChange={(event) => setQ(event.target.value)} placeholder={t('crm.searchLeads')} />
         </div>
-        <Select value={status} onChange={(event) => setStatus(event.target.value)}>
-          <option value="">{t('common.allStatuses')}</option>
-          {LEAD_STATUSES.map((value) => <option key={value} value={value}>{t(`crm.status.${value}`)}</option>)}
-        </Select>
+        <SearchSelect
+          width={200}
+          value={status}
+          onChange={setStatus}
+          options={[
+            { value: '', label: t('common.allStatuses') },
+            ...LEAD_STATUSES.map((value) => ({
+              value, label: t(`crm.status.${value}`), render: <StatusPill status={value} />,
+            })),
+          ]}
+        />
+        <SearchSelect
+          width={220}
+          value={ownerId}
+          onChange={setOwnerId}
+          options={[
+            { value: '', label: t('crm.allOwners') },
+            ...(usersQ.data ?? []).map((user) => ({
+              value: user.id, label: user.name, icon: <Avatar name={user.name} src={user.avatar} size={16} />,
+            })),
+          ]}
+        />
       </div>
       {visibleSelected.size > 0 && (
         <div className="flex flex-wrap items-center gap-2 border-b border-border bg-primary/[0.04] px-4 py-2">
@@ -159,23 +196,27 @@ export function LeadsTab() {
           </span>
           <span className="flex items-center gap-1.5">
             <UserCircle2 size={14} className="text-muted-foreground" />
-            <Select
+            <SearchSelect
+              width={220}
               value=""
               disabled={bulk.isPending}
-              onChange={(event) => { if (event.target.value) bulk.mutate({ ownerId: event.target.value }); }}
-            >
-              <option value="">{t('crm.changeOwner')}</option>
-              {(usersQ.data ?? []).map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}
-            </Select>
+              placeholder={t('crm.changeOwner')}
+              onChange={(ownerId) => { if (ownerId) bulk.mutate({ ownerId }); }}
+              options={(usersQ.data ?? []).map((user) => ({
+                value: user.id, label: user.name, icon: <Avatar name={user.name} src={user.avatar} size={16} />,
+              }))}
+            />
           </span>
-          <Select
+          <SearchSelect
+            width={200}
             value=""
             disabled={bulk.isPending}
-            onChange={(event) => { if (event.target.value) bulk.mutate({ status: event.target.value }); }}
-          >
-            <option value="">{t('crm.changeStatus')}</option>
-            {BULK_STATUSES.map((value) => <option key={value} value={value}>{t(`crm.status.${value}`)}</option>)}
-          </Select>
+            placeholder={t('crm.changeStatus')}
+            onChange={(next) => { if (next) bulk.mutate({ status: next }); }}
+            options={BULK_STATUSES.map((value) => ({
+              value, label: t(`crm.status.${value}`), render: <StatusPill status={value} />,
+            }))}
+          />
           <Button size="xs" variant="ghost" onClick={() => setSelected(new Set())}>
             <X size={12} /> {t('crm.clearSelection')}
           </Button>
@@ -191,7 +232,7 @@ export function LeadsTab() {
         ) : leads.length === 0 ? (
           <EmptyState
             icon={<Target size={20} />}
-            title={q || status ? t('crm.noMatch') : t('crm.tabLeads')}
+            title={q || status || ownerId ? t('crm.noMatch') : t('crm.tabLeads')}
             hint={t('crm.leadsHint')}
           />
         ) : (
@@ -205,14 +246,14 @@ export function LeadsTab() {
                   onChange={() => setSelected(allSelected ? new Set() : new Set(leads.map((lead) => lead.id)))}
                 />
               )}
-              <span>{t('crm.lead')}</span>
-              <span>{t('crm.company')}</span>
-              <span>{t('common.status')}</span>
-              <span>{t('crm.score')}</span>
-              <span>{t('crm.nextAction')}</span>
-              <span>{t('crm.owner')}</span>
+              <SortHeader label={t('crm.lead')} sortKey="title" sort={sort} onToggle={toggleSort} />
+              <SortHeader label={t('crm.company')} sortKey="company" sort={sort} onToggle={toggleSort} />
+              <SortHeader label={t('common.status')} sortKey="status" sort={sort} onToggle={toggleSort} />
+              <SortHeader label={t('crm.score')} sortKey="score" sort={sort} onToggle={toggleSort} />
+              <SortHeader label={t('crm.nextAction')} sortKey="next" sort={sort} onToggle={toggleSort} />
+              <SortHeader label={t('crm.owner')} sortKey="owner" sort={sort} onToggle={toggleSort} />
             </div>
-            {leads.map((lead, i) => {
+            {sortedLeads.map((lead, i) => {
               const next = lead.nextActivity;
               return (
                 // The whole row still opens the lead, as it did before the

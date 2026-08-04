@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { PERMISSIONS, PERMISSION_META, type Permission } from '@ordi/shared';
+import { CUSTOM_FIELD_ENTITIES, PERMISSIONS, PERMISSION_META, type Permission } from '@ordi/shared';
 import {
   Building2, ArrowLeftRight, Users as UsersIcon, Shield, SlidersHorizontal, Wallet, Plug,
   ScrollText, Inbox, Plus, Copy, Upload, Trash2, Lock, Globe, ImageIcon, ChevronRight,
@@ -865,7 +865,8 @@ function RoleEditor({ role, grouped, onBack }: { role: Role; grouped: { domain: 
 /* ────────────────────────────── Custom fields ────────────────────────────── */
 
 interface CustomField { id: string; key: string; label?: string | null; type?: string | null; required?: boolean }
-const ENTITY_TYPES = ['companies', 'contacts', 'deals', 'projects', 'tasks', 'invoices', 'quotes', 'employees', 'applicants'];
+/** The shared enum is what the API validates against – a local copy drifts (it already missed leads once). */
+const ENTITY_TYPES = CUSTOM_FIELD_ENTITIES;
 const FIELD_TYPES = ['text', 'number', 'date', 'select', 'multiselect', 'checkbox', 'url', 'user'];
 
 function CustomFieldsPanel() {
