@@ -20,7 +20,8 @@ const TABLES = [
   'sales_digest_runs', 'sales_activities', 'sales_sequence_enrollments', 'sales_sequence_steps', 'sales_sequences',
   'sales_message_templates', 'leads', 'deals', 'contacts', 'companies', 'notes', 'attachments', 'activity_log', 'events', 'processed_events',
   'email_deliveries',
-  'dead_letter_events', 'notifications', 'sessions', 'api_tokens', 'oauth_auth_codes', 'oauth_clients', 'invites', 'role_permissions',
+  'dead_letter_events', 'notifications', 'sessions', 'api_tokens', 'oauth_auth_codes', 'oauth_clients',
+  'invites', 'password_resets', 'role_permissions',
   'roles', 'users', 'deal_stages', 'applicant_stages', 'leave_types', 'tax_rates',
   'number_sequences', 'task_number_counters', 'custom_field_definitions',
 ];

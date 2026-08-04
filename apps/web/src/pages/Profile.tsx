@@ -24,6 +24,12 @@ extendDict({
     'profile.avatarTooLarge': 'Image too large after processing – try a simpler image.',
     'profile.twoFactorEnabled': 'Two-factor authentication enabled.',
     'profile.twoFactorDisabled': 'Two-factor authentication disabled.',
+    'profile.password': 'Password',
+    'profile.passwordHint': 'Changing it signs you out everywhere else and cancels any pending reset link.',
+    'profile.changePassword': 'Change password',
+    'profile.currentPassword': 'Current password',
+    'profile.passwordChanged': 'Password changed.',
+    'profile.passwordChangeFailed': 'Could not change the password.',
   },
   uk: {
     'profile.profileInfo': 'Профіль',
@@ -39,6 +45,12 @@ extendDict({
     'profile.avatarTooLarge': 'Зображення завелике після обробки – оберіть простіше.',
     'profile.twoFactorEnabled': 'Двофакторну автентифікацію увімкнено.',
     'profile.twoFactorDisabled': 'Двофакторну автентифікацію вимкнено.',
+    'profile.password': 'Пароль',
+    'profile.passwordHint': 'Зміна пароля завершує всі інші сесії та скасовує невикористане посилання на відновлення.',
+    'profile.changePassword': 'Змінити пароль',
+    'profile.currentPassword': 'Поточний пароль',
+    'profile.passwordChanged': 'Пароль змінено.',
+    'profile.passwordChangeFailed': 'Не вдалося змінити пароль.',
   },
 });
 
@@ -83,6 +95,7 @@ export function ProfilePage() {
         <div>
           <h2 className="mb-2 px-0.5 text-xs font-semibold uppercase tracking-wide text-faint">{t('profile.security')}</h2>
           <div className="space-y-4">
+            <PasswordSection />
             <TokensSection />
             <TotpSection />
           </div>
@@ -466,6 +479,82 @@ function TokensSection() {
             ))}
           </tbody>
         </table>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * Change my own password. The current one is required, so this stays a change
+ * rather than a takeover – and the API drops every other session on success,
+ * which the copy says out loud before anyone wonders why their phone signed out.
+ */
+function PasswordSection() {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const reset = () => { setCurrent(''); setNext(''); setConfirm(''); setError(null); };
+
+  const change = useMutation({
+    mutationFn: () => api.post('/me/password', { currentPassword: current, newPassword: next }),
+    onSuccess: () => {
+      setOpen(false);
+      reset();
+      toast(t('profile.passwordChanged'));
+    },
+    onError: (e) => setError(e instanceof ApiError ? e.message : t('profile.passwordChangeFailed')),
+  });
+
+  return (
+    <Card className="p-4">
+      <div className="mb-1 flex items-center gap-2 text-sm font-medium">
+        <KeyRound size={15} className="text-muted-foreground" />
+        {t('profile.password')}
+      </div>
+      <p className="mb-3 text-xs text-muted-foreground">{t('profile.passwordHint')}</p>
+
+      {!open ? (
+        <Button size="sm" variant="outline" onClick={() => setOpen(true)}>{t('profile.changePassword')}</Button>
+      ) : (
+        <form
+          className="max-w-sm space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setError(null);
+            if (next.length < 8) { setError(t('auth.passwordMin')); return; }
+            if (next !== confirm) { setError(t('auth.passwordsDontMatch')); return; }
+            change.mutate();
+          }}
+        >
+          <label className="block space-y-1.5 text-xs text-muted-foreground">
+            <span className="block">{t('profile.currentPassword')}</span>
+            <Input type="password" autoComplete="current-password" autoFocus required
+              value={current} onChange={(e) => setCurrent(e.target.value)} />
+          </label>
+          <label className="block space-y-1.5 text-xs text-muted-foreground">
+            <span className="block">{t('auth.newPassword')}</span>
+            <Input type="password" autoComplete="new-password" required
+              value={next} onChange={(e) => setNext(e.target.value)} placeholder={t('auth.passwordMin')} />
+          </label>
+          <label className="block space-y-1.5 text-xs text-muted-foreground">
+            <span className="block">{t('auth.confirmPassword')}</span>
+            <Input type="password" autoComplete="new-password" required
+              value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+          </label>
+          {error && <p className="text-xs text-destructive">{error}</p>}
+          <div className="flex items-center gap-3 pt-1">
+            <Button type="submit" size="sm" disabled={change.isPending || !current || !next}>
+              {change.isPending ? <Spinner /> : t('common.save')}
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => { setOpen(false); reset(); }}>
+              {t('common.cancel')}
+            </Button>
+          </div>
+        </form>
       )}
     </Card>
   );

@@ -13,6 +13,8 @@ import { AppRoutes } from './routes';
 import { LoginPage } from './pages/Login';
 import { SetupPage } from './pages/Setup';
 import { AcceptInvitePage } from './pages/AcceptInvite';
+import { ForgotPasswordPage } from './pages/ForgotPassword';
+import { ResetPasswordPage } from './pages/ResetPassword';
 import { DesktopAuthPage } from './pages/DesktopAuth';
 import { OAuthConsentPage } from './pages/OAuthConsent';
 import { PublicInvoicePage } from './pages/public/Invoice';
@@ -118,6 +120,8 @@ function Root() {
   if (path.startsWith('/setup')) return <I18nProvider locale={guessLocale()}><SetupPage /></I18nProvider>;
   if (path.startsWith('/login')) return <I18nProvider locale={guessLocale()}><LoginPage /></I18nProvider>;
   if (path.startsWith('/accept-invite')) return <I18nProvider locale={guessLocale()}><AcceptInvitePage /></I18nProvider>;
+  if (path.startsWith('/forgot-password')) return <I18nProvider locale={guessLocale()}><ForgotPasswordPage /></I18nProvider>;
+  if (path.startsWith('/reset-password')) return <I18nProvider locale={guessLocale()}><ResetPasswordPage /></I18nProvider>;
   if (path.startsWith('/desktop-auth')) return <I18nProvider locale={guessLocale()}><DesktopAuthPage /></I18nProvider>;
   if (path.startsWith('/oauth/authorize')) return <I18nProvider locale={guessLocale()}><OAuthConsentPage /></I18nProvider>;
   if (path.startsWith('/i/')) return <I18nProvider locale={guessLocale()}><PublicInvoicePage token={path.split('/i/')[1]!} /></I18nProvider>;

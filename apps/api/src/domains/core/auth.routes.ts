@@ -4,26 +4,21 @@ import { getDb, schema, eq, and, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import { z } from 'zod';
 import * as OTPAuth from 'otpauth';
-import { loginSchema, acceptInviteSchema, createApiTokenSchema, validateTokenScope } from '@ordi/shared';
+import {
+  loginSchema, acceptInviteSchema, createApiTokenSchema, validateTokenScope,
+  forgotPasswordSchema, resetPasswordSchema,
+} from '@ordi/shared';
 import type { AppEnv } from '../../context';
 import { env } from '../../env';
 import { err } from '../../lib/errors';
 import { SESSION_COOKIE, requireAuth, currentActor } from '../../core/auth';
 import { hashPassword, verifyPassword, generateToken, sha256 } from '../../lib/crypto';
+import { checkRate } from '../../lib/rate-limit';
 import { effectivePermissions } from '../../core/rbac';
 import { writeActivity } from '../../core/activity';
-
-const rateLimit = new Map<string, { count: number; resetAt: number }>();
-function checkRate(key: string, max: number, windowMs: number): void {
-  const now = Date.now();
-  const rec = rateLimit.get(key);
-  if (!rec || rec.resetAt < now) {
-    rateLimit.set(key, { count: 1, resetAt: now + windowMs });
-    return;
-  }
-  rec.count += 1;
-  if (rec.count > max) throw err.rateLimited('Too many attempts');
-}
+import {
+  createPasswordReset, resolvePasswordReset, consumePasswordReset, sendPasswordResetEmail,
+} from '../../core/password-reset';
 
 export function authRoutes() {
   const app = new Hono<AppEnv>();
@@ -99,6 +94,69 @@ export function authRoutes() {
     });
     await db.update(schema.invites).set({ acceptedAt: new Date() }).where(eq(schema.invites.id, invite.id));
     return c.json({ ok: true, userId });
+  });
+
+  // ── Password reset (PRD §6) ────────────────────────────────────────────────
+  // A forgotten password is self-serve: ask here, receive a one-time link.
+  // The answer is the same whether or not the address belongs to anyone – this
+  // endpoint is public, and a different answer would enumerate the workspace.
+  app.post('/forgot-password', async (c) => {
+    const ip = c.req.header('x-forwarded-for') ?? 'local';
+    const body = forgotPasswordSchema.parse(await c.req.json());
+    const email = body.email.toLowerCase();
+    checkRate(`forgot-ip:${ip}`, 10, 15 * 60_000);
+    checkRate(`forgot-email:${email}`, 5, 15 * 60_000);
+
+    const { db } = getDb();
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.email, email));
+    // Agents sign in with API tokens and have no password to reset.
+    if (user && user.isActive && user.actorType === 'user') {
+      const { resetUrl } = await createPasswordReset(user.id, 'self');
+      await sendPasswordResetEmail({ to: user.email, resetUrl, locale: user.locale });
+      await writeActivity(db, {
+        entityType: 'user', entityId: user.id, action: 'password_reset_requested',
+        actorId: user.id, actorType: 'user', diff: {},
+      });
+    }
+    return c.json({ ok: true });
+  });
+
+  /** What the reset page shows before asking for a new password. */
+  app.get('/reset-password/:token', async (c) => {
+    const grant = await resolvePasswordReset(c.req.param('token'));
+    if (!grant) throw err.notFound('This reset link is invalid or expired');
+    const { db } = getDb();
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, grant.userId));
+    if (!user || !user.isActive) throw err.notFound('This reset link is invalid or expired');
+    return c.json({ email: user.email, name: user.name });
+  });
+
+  app.post('/reset-password', async (c) => {
+    const ip = c.req.header('x-forwarded-for') ?? 'local';
+    checkRate(`reset:${ip}`, 20, 15 * 60_000);
+    const body = resetPasswordSchema.parse(await c.req.json());
+    const grant = await resolvePasswordReset(body.token);
+    if (!grant) throw err.notFound('This reset link is invalid or expired');
+
+    const { db } = getDb();
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, grant.userId));
+    if (!user || !user.isActive) throw err.notFound('This reset link is invalid or expired');
+
+    await db.update(schema.users).set({
+      passwordHash: hashPassword(body.password),
+      // Whoever ends up holding the account should not inherit a lockout from
+      // the failed attempts that led here.
+      failedLogins: 0, lockedUntil: null,
+    }).where(eq(schema.users.id, user.id));
+    await consumePasswordReset(grant.id);
+    // A reset is how an account is taken back, so every session opened with the
+    // old password goes – web cookies and desktop bearer tokens alike.
+    await db.delete(schema.sessions).where(eq(schema.sessions.userId, user.id));
+    await writeActivity(db, {
+      entityType: 'user', entityId: user.id, action: 'password_reset',
+      actorId: user.id, actorType: 'user', diff: {},
+    });
+    return c.json({ ok: true });
   });
 
   // ── API tokens (PRD §6, §4.5.5) ──

@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { KeyRound, Globe } from 'lucide-react';
 import { api, ApiError, setSessionToken } from '../lib/api';
+import { Link } from '../lib/router';
 import { isTauri, beginBrowserLogin, BrowserLoginError, completeBrowserLogin, hasPendingBrowserLogin, listenForAuthDeepLink, openInBrowser } from '../lib/desktop';
 import { Button, Input, Card, Spinner } from '../components/ui';
 import { BrandMark } from '../components/BrandMark';
@@ -109,7 +110,12 @@ export function LoginPage() {
             />
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">{t('auth.password')}</label>
+            <div className="flex items-baseline justify-between gap-2">
+              <label className="text-xs font-medium text-muted-foreground">{t('auth.password')}</label>
+              <Link to="/forgot-password" className="text-xs text-muted-foreground hover:text-foreground">
+                {t('auth.forgotPassword')}
+              </Link>
+            </div>
             <Input
               type="password"
               autoComplete="current-password"

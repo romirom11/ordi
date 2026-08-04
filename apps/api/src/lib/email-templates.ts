@@ -53,6 +53,13 @@ const EN: Dict = {
   'invite.cta': 'Accept invitation',
   'invite.expiry': 'This invitation link is personal – do not forward it.',
 
+  'reset.subject': 'Reset your {workspace} password',
+  'reset.heading': 'Reset your password',
+  'reset.body': 'We received a request to reset the password for your {workspace} account. Choose a new one with the link below.',
+  'reset.bodyAdmin': 'An administrator started a password reset for your {workspace} account. Choose a new password with the link below.',
+  'reset.cta': 'Choose a new password',
+  'reset.note': 'The link works once and expires in an hour. If you did not expect this, ignore this email – your password stays as it is.',
+
   'invoice.subject': 'Invoice {number} from {workspace}',
   'invoice.heading': 'Invoice {number}',
   'invoice.body': 'Please find invoice {number} for {amount} attached. It is due on {dueDate}.',
@@ -122,6 +129,13 @@ const UK: Dict = {
   'invite.body': 'Вас запросили до спільної роботи в {workspace} на ordi. Створіть обліковий запис, щоб почати.',
   'invite.cta': 'Прийняти запрошення',
   'invite.expiry': 'Це персональне посилання – не пересилайте його іншим.',
+
+  'reset.subject': 'Відновлення пароля в {workspace}',
+  'reset.heading': 'Відновлення пароля',
+  'reset.body': 'Ми отримали запит на відновлення пароля для вашого облікового запису в {workspace}. Створіть новий пароль за посиланням нижче.',
+  'reset.bodyAdmin': 'Адміністратор розпочав відновлення пароля для вашого облікового запису в {workspace}. Створіть новий пароль за посиланням нижче.',
+  'reset.cta': 'Створити новий пароль',
+  'reset.note': 'Посилання одноразове і діє годину. Якщо ви цього не очікували – просто проігноруйте лист, пароль залишиться попереднім.',
 
   'invoice.subject': 'Рахунок {number} від {workspace}',
   'invoice.heading': 'Рахунок {number}',
