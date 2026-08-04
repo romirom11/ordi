@@ -105,6 +105,26 @@ export const desktopAuthRequests = pgTable('desktop_auth_requests', {
   expiresIdx: index('desktop_auth_expires_idx').on(t.expiresAt),
 }));
 
+/**
+ * Password reset grants – "forgot password" from the sign-in screen, and the
+ * link an admin with users.manage hands to someone who lost theirs.
+ *
+ * Only the sha256 of the token is stored: the raw value lives in the emailed
+ * link alone, so a database dump cannot be replayed into someone's account.
+ */
+export const passwordResets = pgTable('password_resets', {
+  id: pk(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  tokenHash: text('token_hash').notNull().unique(),
+  /** 'self' when the user asked, 'admin' when someone reset it for them. */
+  requestedBy: text('requested_by').notNull().default('self'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  ...timestamps,
+}, (t) => ({
+  userIdx: index('password_resets_user_idx').on(t.userId),
+}));
+
 export const invites = pgTable('invites', {
   id: pk(),
   email: text('email').notNull(),

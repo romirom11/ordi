@@ -5,6 +5,7 @@ import {
   Building2, ArrowLeftRight, Users as UsersIcon, Shield, SlidersHorizontal, Wallet, Plug,
   ScrollText, Inbox, Plus, Copy, Upload, Trash2, Lock, Globe, ImageIcon, ChevronRight,
   ChevronLeft, MoreHorizontal, Check, RotateCcw, Boxes, Receipt, FolderKanban, Bot, CalendarClock,
+  KeyRound,
 } from 'lucide-react';
 import { api, qs } from '../lib/api';
 import { Link } from '../lib/router';
@@ -73,6 +74,11 @@ extendDict({
     'settings.revokeInvite': 'Revoke invite',
     'settings.inviteResent': 'Invitation sent again',
     'settings.inviteRevoked': 'Invitation revoked',
+    'settings.resetPassword': 'Reset password',
+    'settings.resetPasswordSent': 'Reset link sent',
+    'settings.resetPasswordNoEmail': 'Reset link created – email not sent',
+    'settings.resetPasswordCopyHint': 'Share this link so {name} can choose a new password. It works once and expires in an hour.',
+    'settings.resetPasswordEmailFailed': 'The reset link was created, but the email could not be sent. Share this link instead, and check your SMTP settings.',
     'settings.newVersion': '{version} is available',
     'settings.noUsers': 'No members yet',
     'settings.permissions': 'Permissions',
@@ -133,6 +139,11 @@ extendDict({
     'settings.revokeInvite': 'Скасувати запрошення',
     'settings.inviteResent': 'Запрошення надіслано ще раз',
     'settings.inviteRevoked': 'Запрошення скасовано',
+    'settings.resetPassword': 'Скинути пароль',
+    'settings.resetPasswordSent': 'Посилання надіслано',
+    'settings.resetPasswordNoEmail': 'Посилання створено – лист не надіслано',
+    'settings.resetPasswordCopyHint': 'Надішліть це посилання, щоб {name} задав(ла) новий пароль. Воно одноразове і діє годину.',
+    'settings.resetPasswordEmailFailed': 'Посилання створено, але лист не вдалося надіслати. Передайте його вручну і перевірте налаштування SMTP.',
     'settings.newVersion': 'Доступна {version}',
     'settings.noUsers': 'Ще немає учасників',
     'settings.permissions': 'Дозволи',
@@ -519,7 +530,7 @@ function WorkspacePanel() {
 
 /* ────────────────────────────── Users ────────────────────────────── */
 
-interface UserRow { id: string; name?: string | null; email?: string | null; roleId?: string | null; isActive?: boolean; avatar?: string | null }
+interface UserRow { id: string; name?: string | null; email?: string | null; roleId?: string | null; isActive?: boolean; avatar?: string | null; actorType?: string | null }
 interface PendingInvite { id: string; email: string; name?: string | null; roleId?: string | null; expiresAt?: string; inviteUrl: string }
 interface Role { id: string; key?: string; name: string; isSystem?: boolean; permissions?: string[]; userCount?: number }
 
@@ -541,6 +552,23 @@ function UsersPanel() {
   const setActive = useMutation({
     mutationFn: ({ id, active }: { id: string; active: boolean }) => api.post(`/users/${id}/${active ? 'reactivate' : 'deactivate'}`),
     onSuccess: (_r, v) => { qc.invalidateQueries({ queryKey: ['users'] }); toast(v.active ? t('settings.userReactivated') : t('settings.userDeactivated')); },
+    onError: () => toast.error(t('settings.saveFailed')),
+  });
+
+  // Someone who lost their password gets a one-time link, not a password an
+  // admin picked for them – the link is shown here too, because an instance
+  // without SMTP configured still has to be able to hand it over.
+  const [resetLink, setResetLink] = useState<{ name: string; url: string; emailSent: boolean } | null>(null);
+  const resetPassword = useMutation({
+    mutationFn: async (u: UserRow) => ({
+      user: u,
+      res: await api.post<{ resetUrl: string; emailSent?: boolean }>(`/users/${u.id}/reset-password`, {}),
+    }),
+    onSuccess: ({ user, res }) => {
+      setResetLink({ name: user.name || user.email || '', url: res.resetUrl, emailSent: res.emailSent !== false });
+      if (res.emailSent === false) toast.info(t('settings.resetPasswordNoEmail'));
+      else toast(t('settings.resetPasswordSent'));
+    },
     onError: () => toast.error(t('settings.saveFailed')),
   });
 
@@ -617,7 +645,13 @@ function UsersPanel() {
                 {u.isActive === false ? (
                   <MenuItem icon={<RotateCcw size={14} />} onSelect={() => setActive.mutate({ id: u.id, active: true })}>{t('settings.reactivate')}</MenuItem>
                 ) : (
-                  <MenuItem icon={<Trash2 size={14} />} danger onSelect={() => setActive.mutate({ id: u.id, active: false })}>{t('settings.deactivate')}</MenuItem>
+                  <>
+                    {/* Agents authenticate with API tokens – they have no password to reset. */}
+                    {u.actorType !== 'agent' && (
+                      <MenuItem icon={<KeyRound size={14} />} onSelect={() => resetPassword.mutate(u)}>{t('settings.resetPassword')}</MenuItem>
+                    )}
+                    <MenuItem icon={<Trash2 size={14} />} danger onSelect={() => setActive.mutate({ id: u.id, active: false })}>{t('settings.deactivate')}</MenuItem>
+                  </>
                 )}
               </DropdownMenu>
             </AnimatedRow>
@@ -626,6 +660,25 @@ function UsersPanel() {
       )}
 
       <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} roles={roleList} />
+
+      <Dialog open={!!resetLink} onClose={() => setResetLink(null)} title={t('settings.resetPassword')} width={420}>
+        <div className="space-y-3 p-4">
+          <div className={cn('rounded-md border p-3', resetLink?.emailSent ? 'border-border bg-muted/50' : 'border-warning/40 bg-warning/5')}>
+            <p className="mb-2 text-xs text-muted-foreground">
+              {resetLink?.emailSent
+                ? t('settings.resetPasswordCopyHint').replace('{name}', resetLink.name)
+                : t('settings.resetPasswordEmailFailed')}
+            </p>
+            <div className="flex items-center gap-2">
+              <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{resetLink?.url}</span>
+              <Button size="xs" variant="outline" onClick={() => { navigator.clipboard?.writeText(resetLink?.url ?? ''); toast(t('common.copy')); }}><Copy size={12} /></Button>
+            </div>
+          </div>
+          <div className="flex justify-end pt-1">
+            <Button variant="ghost" size="sm" onClick={() => setResetLink(null)}>{t('common.close')}</Button>
+          </div>
+        </div>
+      </Dialog>
     </div>
   );
 }

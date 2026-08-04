@@ -10,6 +10,7 @@ import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { trySendEmail } from '../../lib/email';
 import { asLocale, loadBranding, renderEmail, tr } from '../../lib/email-templates';
+import { createPasswordReset, sendPasswordResetEmail } from '../../core/password-reset';
 import { env } from '../../env';
 
 export function usersRoutes() {
@@ -130,6 +131,34 @@ export function usersRoutes() {
       html: rendered.html,
     });
     return c.json({ id, inviteUrl, emailSent: delivery.sent, emailError: delivery.error }, 201);
+  });
+
+  /**
+   * Reset someone's password for them – the answer to "I lost mine and the
+   * email never arrives". The admin never learns or sets the password: they
+   * hand over a one-time link and the user picks their own, exactly like the
+   * self-serve flow. The link comes back in the response too, because a
+   * self-hosted instance without SMTP is the common case.
+   */
+  app.post('/:id/reset-password', guard('users.manage'), async (c) => {
+    const actor = currentActor(c);
+    const { db } = getDb();
+    const [target] = await db.select().from(schema.users).where(eq(schema.users.id, c.req.param('id')));
+    if (!target) throw err.notFound();
+    if (!target.isActive) throw err.domain('Reactivate this user before resetting their password');
+    if (target.actorType !== 'user') throw err.domain('Agents sign in with API tokens, not a password');
+
+    const { resetUrl, expiresAt } = await createPasswordReset(target.id, 'admin');
+    const delivery = await sendPasswordResetEmail({
+      to: target.email, resetUrl, locale: target.locale, byAdmin: true,
+    });
+    await writeActivity(db, {
+      entityType: 'user', entityId: target.id, action: 'password_reset_requested',
+      actorId: actor.userId, actorType: actor.actorType, diff: { by: 'admin' },
+    });
+    return c.json({
+      resetUrl, expiresAt, emailSent: delivery.sent, emailError: delivery.error,
+    });
   });
 
   app.patch('/:id/role', guard('users.manage'), async (c) => {
