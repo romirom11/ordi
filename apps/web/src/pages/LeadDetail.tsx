@@ -128,13 +128,10 @@ export function LeadDetailPage({ id }: { id: string }) {
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col min-[1100px]:flex-row">
-        {/*
-          * The content column is capped at a readable measure and centered;
-          * the rail flexes with the viewport (clamp) instead of a fixed 320px,
-          * so surplus width goes where values used to truncate.
-          */}
+        {/* Content takes the full width up to the rail; the rail flexes with
+          * the viewport instead of a fixed 320px. */}
         <main className="order-2 min-w-0 flex-1 overflow-auto min-[1100px]:order-1">
-          <div className="mx-auto w-full max-w-[760px] space-y-7 px-6 py-6">
+          <div className="w-full space-y-7 px-6 py-6">
             <Card className={`p-4 ${next ? 'border-primary/30' : 'border-warning/40'}`}>
               <div className="flex items-start gap-3">
                 {next ? <CheckCircle2 size={18} className="mt-0.5 text-primary" /> : <AlertTriangle size={18} className="mt-0.5 text-warning" />}
