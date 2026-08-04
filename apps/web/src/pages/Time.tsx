@@ -7,6 +7,7 @@ import {
   SegmentedControl, Select, Reveal, fmtMoney, appLocale, cn,
 } from '../components/ui';
 import { Dialog, toast } from '../components/overlays';
+import { SortHeader, sortRows, useTableSort } from '../components/tableSort';
 import { ChevronLeft, ChevronRight, Plus, Play, Square, Clock, Timer } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
 import { DateField } from '../components/DatePicker';
@@ -461,6 +462,8 @@ function MyWeekView() {
 
 /* ───────────────────────── Reports ───────────────────────── */
 
+type ReportSortKey = 'name' | 'hours' | 'billable';
+
 function ReportsView() {
   const t = useT();
   const [groupBy, setGroupBy] = useState<'project' | 'user' | 'company'>('project');
@@ -470,6 +473,14 @@ function ReportsView() {
   });
   const rows = report.data?.data ?? [];
   const hoursOf = (r: ReportRow): number => (r.hours != null ? Number(r.hours) : r.seconds != null ? Number(r.seconds) / 3600 : 0);
+  const { sort, toggle: toggleSort } = useTableSort<ReportSortKey>();
+  const sorted = sortRows(rows, sort, (r, key) => {
+    switch (key) {
+      case 'name': return (r.label ?? r.name ?? r.key ?? '').toLowerCase() || null;
+      case 'hours': return hoursOf(r);
+      case 'billable': return r.billableAmount != null ? Number(r.billableAmount) : null;
+    }
+  });
 
   return (
     <PageBody>
@@ -488,10 +499,15 @@ function ReportsView() {
       <Card className="overflow-hidden">
         <table className="w-full text-[13px]">
           <thead>
-            <tr className="border-b border-border text-left text-xs text-muted-foreground">
-              <th className="px-4 py-2 font-medium">{t(groupBy === 'project' ? 'time.groupProject' : groupBy === 'user' ? 'time.groupUser' : 'time.groupCompany')}</th>
-              <th className="px-4 py-2 text-right font-medium">{t('time.hours')}</th>
-              <th className="px-4 py-2 text-right font-medium">{t('time.billable')}</th>
+            <tr className="border-b border-border text-left text-[11px]">
+              <th className="px-4 py-2">
+                <SortHeader
+                  label={t(groupBy === 'project' ? 'time.groupProject' : groupBy === 'user' ? 'time.groupUser' : 'time.groupCompany')}
+                  sortKey="name" sort={sort} onToggle={toggleSort}
+                />
+              </th>
+              <th className="px-4 py-2"><SortHeader label={t('time.hours')} sortKey="hours" sort={sort} onToggle={toggleSort} className="w-full justify-end" /></th>
+              <th className="px-4 py-2"><SortHeader label={t('time.billable')} sortKey="billable" sort={sort} onToggle={toggleSort} className="w-full justify-end" /></th>
             </tr>
           </thead>
           <tbody>
@@ -501,7 +517,7 @@ function ReportsView() {
             {!report.isLoading && rows.length === 0 && (
               <tr><td colSpan={3} className="px-4 py-10 text-center text-muted-foreground">{t('time.noReportData')}</td></tr>
             )}
-            {rows.map((r, i) => (
+            {sorted.map((r, i) => (
               <tr key={r.key ?? r.name ?? r.label ?? String(i)} className="row-enter border-b border-border transition-colors duration-150 last:border-0 hover:bg-muted/40" style={{ ['--i' as string]: Math.min(i, 10) }}>
                 <td className="px-4 py-2 font-medium">{r.label ?? r.name ?? r.key ?? '–'}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{hoursOf(r).toFixed(1)}</td>

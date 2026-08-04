@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { appOrigin, api, qs, ApiError } from '../lib/api';
 import { useNavigate, useOpen, type OpenIntent } from '../lib/router';
@@ -9,6 +9,7 @@ import { Dialog, ContextMenu, toast, type ContextMenuEntry } from '../components
 import { Plus, Trash2, Wallet, AlertTriangle, CheckCircle2, Receipt, FileStack, Copy, ExternalLink, Link2 } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
 import { RecurringExpensesSection } from '../components/finance/subscriptions';
+import { SortHeader, sortRows, useStatusRank, useTableSort } from '../components/tableSort';
 import { TransactionsTab, AddIncomeDialog } from '../components/finance/ledger';
 import { DateField } from '../components/DatePicker';
 
@@ -31,6 +32,7 @@ extendDict({
     'finance.copyLink': 'Copy link',
     'finance.copyPublicLink': 'Copy public link',
     'finance.linkCopied': 'Link copied',
+    'finance.colNumber': 'Number',
   },
   uk: {
     'finance.newExpense': 'Нова витрата',
@@ -50,6 +52,7 @@ extendDict({
     'finance.copyLink': 'Скопіювати посилання',
     'finance.copyPublicLink': 'Скопіювати публічне посилання',
     'finance.linkCopied': 'Посилання скопійовано',
+    'finance.colNumber': 'Номер',
   },
 });
 
@@ -273,31 +276,50 @@ function Tile({ label, value, icon, tone }: { label: string; value: string; icon
   );
 }
 
+type ProfitSortKey = 'name' | 'revenue' | 'cost' | 'margin' | 'pct';
+
+/** Cost and margin come in several API shapes – one place derives them for cells and sorting alike. */
+function profitDerived(r: ProfitRow) {
+  const cost = Number(r.cost ?? (Number(r.laborCost ?? 0) + Number(r.expenseCost ?? 0)));
+  const margin = Number(r.margin ?? Number(r.revenue ?? 0) - cost);
+  const marginPct = r.marginPct ?? r.marginPercent;
+  return { cost, margin, marginPct };
+}
+
 function ProfitabilityView() {
   const t = useT();
   const prof = useQuery({ queryKey: ['profitability', 'project'], queryFn: () => api.get<{ rows: ProfitRow[] }>('/finance/profitability' + qs({ scope: 'project' })) });
   const rows = prof.data?.rows ?? [];
+  const { sort, toggle: toggleSort } = useTableSort<ProfitSortKey>();
+  const sorted = sortRows(rows, sort, (r, key) => {
+    const d = profitDerived(r);
+    switch (key) {
+      case 'name': return (r.label ?? r.name ?? '').toLowerCase() || null;
+      case 'revenue': return Number(r.revenue ?? 0);
+      case 'cost': return d.cost;
+      case 'margin': return d.margin;
+      case 'pct': return d.marginPct != null ? Number(d.marginPct) : null;
+    }
+  });
   return (
     <Card className="overflow-hidden">
       <div className="border-b border-border px-4 py-2.5 text-[13px] font-medium">{t('finance.profitabilityByProject')}</div>
       <table className="w-full text-[13px]">
         <thead>
-          <tr className="text-left text-xs text-muted-foreground">
-            <th className="px-4 py-2 font-medium">{t('time.groupProject')}</th>
-            <th className="px-4 py-2 text-right font-medium">{t('finance.revenue')}</th>
-            <th className="px-4 py-2 text-right font-medium">{t('finance.cost')}</th>
-            <th className="px-4 py-2 text-right font-medium">{t('finance.margin')}</th>
-            <th className="px-4 py-2 text-right font-medium">%</th>
+          <tr className="text-left text-[11px]">
+            <th className="px-4 py-2"><SortHeader label={t('time.groupProject')} sortKey="name" sort={sort} onToggle={toggleSort} /></th>
+            <th className="px-4 py-2"><SortHeader label={t('finance.revenue')} sortKey="revenue" sort={sort} onToggle={toggleSort} className="w-full justify-end" /></th>
+            <th className="px-4 py-2"><SortHeader label={t('finance.cost')} sortKey="cost" sort={sort} onToggle={toggleSort} className="w-full justify-end" /></th>
+            <th className="px-4 py-2"><SortHeader label={t('finance.margin')} sortKey="margin" sort={sort} onToggle={toggleSort} className="w-full justify-end" /></th>
+            <th className="px-4 py-2"><SortHeader label="%" sortKey="pct" sort={sort} onToggle={toggleSort} className="w-full justify-end" /></th>
           </tr>
         </thead>
         <tbody>
           {prof.isLoading && <tr><td colSpan={5} className="px-4 py-3"><Skeleton className="h-5 w-full" /></td></tr>}
           {!prof.isLoading && rows.length === 0 && <tr><td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">{t('finance.noProfitability')}</td></tr>}
-          {rows.map((r, i) => {
+          {sorted.map((r, i) => {
             const cur = r.currency ?? 'USD';
-            const cost = Number(r.cost ?? (Number(r.laborCost ?? 0) + Number(r.expenseCost ?? 0)));
-            const margin = Number(r.margin ?? Number(r.revenue ?? 0) - cost);
-            const marginPct = r.marginPct ?? r.marginPercent;
+            const { cost, margin, marginPct } = profitDerived(r);
             return (
               <tr key={r.projectId ?? r.name ?? r.label ?? String(i)} className="border-t border-border">
                 <td className="px-4 py-2">{r.label ?? r.name ?? '–'}</td>
@@ -465,6 +487,12 @@ function QuotesView() {
   );
 }
 
+/** Lifecycle order per document kind, so the status column sorts by progress. */
+const INVOICE_STATUS_ORDER = ['draft', 'sent', 'viewed', 'partially_paid', 'overdue', 'paid', 'canceled'];
+const QUOTE_STATUS_ORDER = ['draft', 'sent', 'viewed', 'accepted', 'declined', 'expired'];
+
+type DocSortKey = 'number' | 'company' | 'status' | 'date' | 'total';
+
 function DocTable({ rows, loading, kind, onRow, companies }: {
   rows: DocRow[]; loading: boolean; kind: 'invoice' | 'quote'; onRow?: (id: string, e?: OpenIntent) => void; companies?: Company[];
 }) {
@@ -473,6 +501,22 @@ function DocTable({ rows, loading, kind, onRow, companies }: {
   // The list endpoints return companyId only – resolve names client-side.
   const companyName = (r: DocRow): string | null =>
     r.companyName ?? (r.companyId ? companies?.find((c) => c.id === r.companyId)?.name ?? null : null);
+
+  const { sort, toggle: toggleSort } = useTableSort<DocSortKey>();
+  const statusRank = useStatusRank(kind === 'invoice' ? INVOICE_STATUS_ORDER : QUOTE_STATUS_ORDER);
+  const sorted = useMemo(() => sortRows(rows, sort, (r, key) => {
+    switch (key) {
+      case 'number': return r.number?.toLowerCase() || null;
+      case 'company': return companyName(r)?.toLowerCase() || null;
+      case 'status': {
+        const s = (kind === 'invoice' && (r.isOverdue || r.is_overdue)) ? 'overdue' : r.status;
+        return s ? statusRank.get(s) ?? null : null;
+      }
+      case 'date': return (kind === 'invoice' ? r.dueDate : r.validUntil) ?? null;
+      case 'total': return r.total != null ? Number(r.total) : null;
+    }
+  }), [rows, sort, statusRank, kind, companies]);
+
   if (loading) {
     return (
       <div className="overflow-hidden rounded-xl border border-border">
@@ -494,7 +538,18 @@ function DocTable({ rows, loading, kind, onRow, companies }: {
   }
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
-      {rows.map((r, i) => {
+      {/* The lists never had a header – these double as the sort controls. */}
+      <div className="flex items-center gap-3 border-b border-border bg-muted/30 px-4 py-2 text-[11px]">
+        <SortHeader label={t('finance.colNumber')} sortKey="number" sort={sort} onToggle={toggleSort} className="w-28 shrink-0" />
+        <SortHeader label={t('common.company')} sortKey="company" sort={sort} onToggle={toggleSort} className="min-w-0 flex-1" />
+        <SortHeader label={t('common.status')} sortKey="status" sort={sort} onToggle={toggleSort} className="w-24 shrink-0" />
+        <SortHeader
+          label={kind === 'invoice' ? t('finance.dueDate') : t('public.validUntil')}
+          sortKey="date" sort={sort} onToggle={toggleSort} className="w-20 shrink-0 justify-end"
+        />
+        <SortHeader label={t('public.amount')} sortKey="total" sort={sort} onToggle={toggleSort} className="w-24 shrink-0 justify-end" />
+      </div>
+      {sorted.map((r, i) => {
         const overdue = kind === 'invoice' && (r.isOverdue || r.is_overdue || r.status === 'overdue');
         const detailUrl = `/finance/invoices/${r.id}`;
         const row = (
@@ -513,7 +568,7 @@ function DocTable({ rows, loading, kind, onRow, companies }: {
           >
             <span className="w-28 shrink-0 truncate font-mono text-xs text-muted-foreground">{r.number ?? r.id.slice(0, 8)}</span>
             <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{companyName(r) ?? '–'}</span>
-            <StatusPill status={r.status} overdue={overdue} />
+            <span className="flex w-24 shrink-0"><StatusPill status={r.status} overdue={overdue} /></span>
             <span className="w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
               {fmtDate(kind === 'invoice' ? r.dueDate : r.validUntil)}
             </span>
