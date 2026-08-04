@@ -3,6 +3,26 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.22.0
+
+- Every native browser dropdown in the CRM is replaced by an app-styled
+  **SearchSelect** – a dropdown with a search box from 8 options, keyboard
+  navigation and inline actions (the lead's contact picker can create a
+  contact without leaving the flow). Company and contact rows in the lead
+  rail link out to the company record.
+- Tables sort: leads and clients by any column (statuses in funnel order,
+  empty values last), the invoice/quote lists gain a header row that doubles
+  as the sort controls, profitability and time reports sort too. Leads gain
+  an owner filter.
+- The lead, deal and company pages share one layout: full-width content
+  beside a rail that flexes 280–400px with the viewport. Rail values wrap
+  instead of truncating, empty fields hide on read-only records, sales
+  history shows 8 rows with "Show all N", and the lead's next-action card
+  offers Complete / Schedule in place.
+- MCP's `update_lead`/`create_lead` stop silently dropping `suggestedChannel`
+  and the other research fields, and custom fields open up to leads across
+  the API, MCP, settings and the lead page.
+
 ## v1.21.0
 
 - Prose-length CRM fields read fully instead of truncating. The lead's
