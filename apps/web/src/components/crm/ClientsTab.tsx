@@ -14,9 +14,12 @@ import { Avatar, Button, Checkbox, Input, EmptyState, Skeleton, Tooltip, cn, fmt
 import { ContextMenu, ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, toast, type ContextMenuEntry } from '../overlays';
 import { BulkBar, RowCheckbox, bulkMessage, runBulk, useSelection } from '../bulk';
 import {
-  COMPANY_STATUSES, StatusPill, useAllDeals, useCompanies, useDealStages, useUserMap,
+  COMPANY_STATUSES, SortHeader, StatusPill, sortRows, useAllDeals, useCompanies,
+  useDealStages, useStatusRank, useTableSort, useUserMap,
   type Company, type Deal, type Stage,
 } from './shared';
+
+type CompanySortKey = 'name' | 'status' | 'deals' | 'owner';
 
 function useDebounced<T>(value: T, delay = 250): T {
   const [v, setV] = useState(value);
@@ -78,7 +81,25 @@ export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
   const canDelete = can('crm.delete');
   const canWrite = can('crm.write');
 
-  const sel = useSelection(companies);
+  const rollup = useMemo(
+    () => rollupDeals(dealsQ.data?.deals ?? [], stagesQ.data ?? []),
+    [dealsQ.data, stagesQ.data],
+  );
+  const userMap = useUserMap();
+
+  const { sort, toggle: toggleSort } = useTableSort<CompanySortKey>();
+  const statusRank = useStatusRank(COMPANY_STATUSES);
+  const sortedCompanies = useMemo(() => sortRows(companies, sort, (c, key) => {
+    switch (key) {
+      case 'name': return c.name.toLowerCase();
+      case 'status': return statusRank.get(c.status) ?? null;
+      case 'deals': return rollup.get(c.id)?.value ?? null;
+      case 'owner': return (c.ownerId && userMap.get(c.ownerId)?.name.toLowerCase()) || null;
+    }
+  }), [companies, sort, statusRank, rollup, userMap]);
+
+  // Selection follows the sorted order so shift-range picks what the eye sees.
+  const sel = useSelection(sortedCompanies);
   const [bulkDelete, setBulkDelete] = useState(false);
   const [bulkPending, setBulkPending] = useState(false);
 
@@ -122,12 +143,6 @@ export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
     }
     return items;
   };
-  const rollup = useMemo(
-    () => rollupDeals(dealsQ.data?.deals ?? [], stagesQ.data ?? []),
-    [dealsQ.data, stagesQ.data],
-  );
-  const userMap = useUserMap();
-
   const chips: { key: string; label: string }[] = [
     { key: '', label: t('common.all') },
     ...COMPANY_STATUSES.map((s) => ({ key: s, label: t(`crm.status.${s}`) })),
@@ -181,13 +196,13 @@ export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
               <span className="flex items-center" title={t('bulk.selectAll')}>
                 <Checkbox checked={sel.allSelected} onChange={sel.toggleAll} />
               </span>
-              <span>{t('common.name')}</span>
-              <span>{t('common.status')}</span>
-              <span className="text-right">{t('crm.colDeals')}</span>
-              <span className="text-right">{t('crm.owner')}</span>
+              <SortHeader label={t('common.name')} sortKey="name" sort={sort} onToggle={toggleSort} />
+              <SortHeader label={t('common.status')} sortKey="status" sort={sort} onToggle={toggleSort} />
+              <SortHeader label={t('crm.colDeals')} sortKey="deals" sort={sort} onToggle={toggleSort} className="justify-end" />
+              <SortHeader label={t('crm.owner')} sortKey="owner" sort={sort} onToggle={toggleSort} className="justify-end" />
             </div>
             <div className="space-y-px">
-              {companies.map((c, i) => {
+              {sortedCompanies.map((c, i) => {
                 const r = rollup.get(c.id);
                 const owner = c.ownerId ? userMap.get(c.ownerId) : undefined;
                 return (

@@ -10,9 +10,11 @@ import { Avatar, Button, EmptyState, Input, Skeleton, fmtRelative } from '../ui'
 import { ContextMenu, ConfirmDialog, toast, type ContextMenuEntry } from '../overlays';
 import { SearchSelect } from '../SearchSelect';
 import {
-  LEAD_STATUSES, WRITABLE_LEAD_STATUSES, StatusPill, salesActivityTypeLabel,
-  useLeads, useUserMap, useUsersLookup, type Lead,
+  LEAD_STATUSES, WRITABLE_LEAD_STATUSES, SortHeader, StatusPill, salesActivityTypeLabel,
+  sortRows, useLeads, useStatusRank, useTableSort, useUserMap, useUsersLookup, type Lead,
 } from './shared';
+
+type LeadSortKey = 'title' | 'company' | 'status' | 'score' | 'next' | 'owner';
 
 /**
  * The header and the rows are separate elements, so one template shared between
@@ -35,7 +37,8 @@ export function LeadsTab() {
   const qc = useQueryClient();
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
-  const leadsQ = useLeads({ q, status });
+  const [ownerId, setOwnerId] = useState('');
+  const leadsQ = useLeads({ q, status, ownerId });
   // Who is on the hook for each lead – the table had no way to tell, so a team
   // could not see whose pipeline was whose without opening every record.
   const userById = useUserMap();
@@ -141,6 +144,21 @@ export function LeadsTab() {
 
   const columns = canWrite ? LEAD_COLUMNS_SELECTABLE : LEAD_COLUMNS;
 
+  const { sort, toggle: toggleSort } = useTableSort<LeadSortKey>();
+  const statusRank = useStatusRank(LEAD_STATUSES);
+  // The list is bounded at 200, so sorting happens on the loaded rows; the
+  // truncation banner above the table already says when that is not everything.
+  const sortedLeads = useMemo(() => sortRows(leads, sort, (lead, key) => {
+    switch (key) {
+      case 'title': return lead.title.toLowerCase();
+      case 'company': return lead.companyName?.toLowerCase() || null;
+      case 'status': return statusRank.get(lead.status) ?? null;
+      case 'score': return lead.score ?? null;
+      case 'next': return lead.nextActivity?.dueAt ?? null;
+      case 'owner': return (lead.ownerId && userById.get(lead.ownerId)?.name.toLowerCase()) || null;
+    }
+  }), [leads, sort, statusRank, userById]);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2">
@@ -156,6 +174,17 @@ export function LeadsTab() {
             { value: '', label: t('common.allStatuses') },
             ...LEAD_STATUSES.map((value) => ({
               value, label: t(`crm.status.${value}`), render: <StatusPill status={value} />,
+            })),
+          ]}
+        />
+        <SearchSelect
+          width={220}
+          value={ownerId}
+          onChange={setOwnerId}
+          options={[
+            { value: '', label: t('crm.allOwners') },
+            ...(usersQ.data ?? []).map((user) => ({
+              value: user.id, label: user.name, icon: <Avatar name={user.name} src={user.avatar} size={16} />,
             })),
           ]}
         />
@@ -203,7 +232,7 @@ export function LeadsTab() {
         ) : leads.length === 0 ? (
           <EmptyState
             icon={<Target size={20} />}
-            title={q || status ? t('crm.noMatch') : t('crm.tabLeads')}
+            title={q || status || ownerId ? t('crm.noMatch') : t('crm.tabLeads')}
             hint={t('crm.leadsHint')}
           />
         ) : (
@@ -217,14 +246,14 @@ export function LeadsTab() {
                   onChange={() => setSelected(allSelected ? new Set() : new Set(leads.map((lead) => lead.id)))}
                 />
               )}
-              <span>{t('crm.lead')}</span>
-              <span>{t('crm.company')}</span>
-              <span>{t('common.status')}</span>
-              <span>{t('crm.score')}</span>
-              <span>{t('crm.nextAction')}</span>
-              <span>{t('crm.owner')}</span>
+              <SortHeader label={t('crm.lead')} sortKey="title" sort={sort} onToggle={toggleSort} />
+              <SortHeader label={t('crm.company')} sortKey="company" sort={sort} onToggle={toggleSort} />
+              <SortHeader label={t('common.status')} sortKey="status" sort={sort} onToggle={toggleSort} />
+              <SortHeader label={t('crm.score')} sortKey="score" sort={sort} onToggle={toggleSort} />
+              <SortHeader label={t('crm.nextAction')} sortKey="next" sort={sort} onToggle={toggleSort} />
+              <SortHeader label={t('crm.owner')} sortKey="owner" sort={sort} onToggle={toggleSort} />
             </div>
-            {leads.map((lead, i) => {
+            {sortedLeads.map((lead, i) => {
               const next = lead.nextActivity;
               return (
                 // The whole row still opens the lead, as it did before the
