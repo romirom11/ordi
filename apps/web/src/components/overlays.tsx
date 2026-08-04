@@ -57,7 +57,6 @@ export function Dialog({ open, onClose, children, width = 480, title, hideClose 
           maxWidth: width,
           animation: `${closing ? 'modal-out' : 'modal-in'} ${closing ? 'var(--duration-quick)' : 'var(--duration-fast)'} var(--ease-smooth-out) both`,
         }}
-        onMouseDown={(e) => e.stopPropagation()}
       >
         {(title || !hideClose) && (
           <div className="flex items-center justify-between px-4 pb-0 pt-3.5">
@@ -101,9 +100,16 @@ export function useMenuClose(): () => void {
   return useContext(MenuCtx).close;
 }
 
-export function DropdownMenu({ trigger, children, align = 'start', side = 'bottom', width, disabled, className }: {
+export function DropdownMenu({ trigger, children, align = 'start', side = 'bottom', width, matchAnchorWidth, disabled, className }: {
   trigger: ReactNode; children: ReactNode; align?: 'start' | 'end'; side?: 'bottom' | 'top' | 'right';
-  width?: number; disabled?: boolean; className?: string;
+  width?: number;
+  /**
+   * Never render narrower than the trigger – `width` becomes a minimum. A
+   * select whose menu is half its own control wraps every option for no
+   * reason, so anything shaped like a form control opts in.
+   */
+  matchAnchorWidth?: boolean;
+  disabled?: boolean; className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -119,15 +125,16 @@ export function DropdownMenu({ trigger, children, align = 'start', side = 'botto
   useLayoutEffect(() => {
     if (!open || !anchorRef.current) return;
     const r = anchorRef.current.getBoundingClientRect();
-    const mw = width ?? menuRef.current?.offsetWidth ?? 200;
+    const own = matchAnchorWidth ? Math.max(width ?? 0, r.width) : width;
+    const mw = own ?? menuRef.current?.offsetWidth ?? 200;
     const mh = menuRef.current?.offsetHeight ?? 200;
     let top = side === 'top' ? r.top - mh - 6 : side === 'right' ? r.top : r.bottom + 6;
     let left = side === 'right' ? r.right + 6 : align === 'end' ? r.right - mw : r.left;
     // Clamp to viewport
     left = Math.min(Math.max(8, left), window.innerWidth - mw - 8);
     if (top + mh > window.innerHeight - 8) top = Math.max(8, window.innerHeight - mh - 8);
-    setPos({ top, left, width });
-  }, [open, align, side, width]);
+    setPos({ top, left, width: own });
+  }, [open, align, side, width, matchAnchorWidth]);
 
   useEffect(() => {
     if (!open) return;
@@ -136,9 +143,12 @@ export function DropdownMenu({ trigger, children, align = 'start', side = 'botto
       close();
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
-    document.addEventListener('mousedown', onDown);
+    // Capture phase: a bubble-phase listener never fires for clicks inside a
+    // Dialog, whose panel stops mousedown before it reaches the document – so
+    // opening a second picker left the first menu hanging open over it.
+    document.addEventListener('mousedown', onDown, true);
     window.addEventListener('keydown', onKey);
-    return () => { document.removeEventListener('mousedown', onDown); window.removeEventListener('keydown', onKey); };
+    return () => { document.removeEventListener('mousedown', onDown, true); window.removeEventListener('keydown', onKey); };
   }, [open, close]);
 
   return (
