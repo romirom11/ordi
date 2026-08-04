@@ -141,6 +141,7 @@ const ROWS: Row[] = [
   ['/auth/totp/enable', 'post', 'Confirm code and enable TOTP', null, 'free', 'core'],
   ['/auth/totp/disable', 'post', 'Confirm code and disable TOTP', null, 'free', 'core'],
   ['/me', 'get', 'Current profile, permissions and memberships', null, undefined, 'core'],
+  ['/me/password', 'post', 'Change my password (session only; ends my other sessions)', null, 'free', 'core'],
   ['/users', 'get', 'List users', 'users.manage', undefined, 'core'],
   ['/users/{id}/reset-password', 'post', 'Send a user a password reset link (also returned, for instances without SMTP)', 'users.manage', undefined, 'core'],
   ['/roles', 'get', 'List roles and permissions', 'roles.manage', undefined, 'core'],

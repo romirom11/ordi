@@ -13,28 +13,12 @@ import { env } from '../../env';
 import { err } from '../../lib/errors';
 import { SESSION_COOKIE, requireAuth, currentActor } from '../../core/auth';
 import { hashPassword, verifyPassword, generateToken, sha256 } from '../../lib/crypto';
+import { checkRate } from '../../lib/rate-limit';
 import { effectivePermissions } from '../../core/rbac';
 import { writeActivity } from '../../core/activity';
 import {
   createPasswordReset, resolvePasswordReset, consumePasswordReset, sendPasswordResetEmail,
 } from '../../core/password-reset';
-
-const rateLimit = new Map<string, { count: number; resetAt: number }>();
-function checkRate(key: string, max: number, windowMs: number): void {
-  const now = Date.now();
-  const rec = rateLimit.get(key);
-  if (!rec || rec.resetAt < now) {
-    // Some keys are attacker-chosen (the address on a forgot-password form),
-    // so finished windows get swept instead of accumulating forever.
-    if (rateLimit.size > 5_000) {
-      for (const [k, v] of rateLimit) if (v.resetAt < now) rateLimit.delete(k);
-    }
-    rateLimit.set(key, { count: 1, resetAt: now + windowMs });
-    return;
-  }
-  rec.count += 1;
-  if (rec.count > max) throw err.rateLimited('Too many attempts');
-}
 
 export function authRoutes() {
   const app = new Hono<AppEnv>();

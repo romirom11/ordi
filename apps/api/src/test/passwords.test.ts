@@ -1,12 +1,12 @@
 /**
- * Password reset (PRD §6): the self-serve "forgot password" flow and the admin
- * one for the person whose reset email never arrives.
+ * Passwords (PRD §6): the self-serve "forgot password" flow, the admin reset
+ * for the person whose email never arrives, and changing your own.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { getDb, schema, eq } from '@ordi/db';
 import { ulid } from 'ulid';
-import { resetDb, seedRolesAndUsers, reqAs, anon, json } from './helpers';
-import { verifyPassword, sha256 } from '../lib/crypto';
+import { app, resetDb, seedRolesAndUsers, reqAs, anon, json } from './helpers';
+import { verifyPassword, generateToken, sha256 } from '../lib/crypto';
 
 let users: Awaited<ReturnType<typeof seedRolesAndUsers>>;
 
@@ -133,5 +133,64 @@ describe('admin-issued reset', () => {
       id: agentId, email: 'agent@test.local', name: 'Agent', roleId: role!.id, actorType: 'agent',
     });
     expect((await reqAs(users.owner!.cookie).post(`/users/${agentId}/reset-password`, {})).status).toBe(422);
+  });
+});
+
+describe('changing my own password', () => {
+  it('needs the current one, and keeps me signed in while dropping my other sessions', async () => {
+    const me = users.member!;
+    const { db } = getDb();
+    // A second device of the same person – it must not survive the change.
+    const otherToken = generateToken();
+    await db.insert(schema.sessions).values({
+      id: ulid(), userId: me.userId, token: otherToken, expiresAt: new Date(Date.now() + 3600_000),
+    });
+
+    const wrong = await reqAs(me.cookie)
+      .post('/me/password', { currentPassword: 'not-my-password', newPassword: 'chosen-by-me-1' });
+    expect(wrong.status).toBe(400);
+
+    const res = await reqAs(me.cookie)
+      .post('/me/password', { currentPassword: 'password', newPassword: 'chosen-by-me-1' });
+    expect(res.status).toBe(200);
+
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, me.userId));
+    expect(verifyPassword('chosen-by-me-1', user!.passwordHash)).toBe(true);
+    // This session keeps working; the other device is signed out.
+    expect((await reqAs(me.cookie).get('/me')).status).toBe(200);
+    expect((await reqAs(`ordi_session=${otherToken}`).get('/me')).status).toBe(401);
+
+    expect((await anon().post('/auth/login', { email: 'member@test.local', password: 'chosen-by-me-1' })).status).toBe(200);
+  });
+
+  it('rejects a short new password', async () => {
+    const res = await reqAs(users.member!.cookie)
+      .post('/me/password', { currentPassword: 'password', newPassword: 'short' });
+    expect(res.status).toBe(400);
+  });
+
+  it('is closed to API tokens – a scoped credential cannot take the account', async () => {
+    const created = await json(reqAs(users.owner!.cookie)
+      .post('/auth/tokens', { name: 'ci', scopes: ['projects.read'], readOnly: true }));
+    const res = await app.request('/api/v1/me/password', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${created.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ currentPassword: 'password', newPassword: 'token-chosen-1' }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it('needs a session at all', async () => {
+    const res = await anon().post('/me/password', { currentPassword: 'password', newPassword: 'anon-chosen-1' });
+    expect(res.status).toBe(401);
+  });
+
+  it('retires a reset link someone issued in the meantime', async () => {
+    const issued = await json(reqAs(users.owner!.cookie).post(`/users/${users.member!.userId}/reset-password`, {}));
+    const changed = await reqAs(users.member!.cookie)
+      .post('/me/password', { currentPassword: 'password', newPassword: 'chosen-by-me-1' });
+    expect(changed.status).toBe(200);
+
+    expect((await anon().get(`/auth/reset-password/${tokenOf(issued.resetUrl)}`)).status).toBe(404);
   });
 });
