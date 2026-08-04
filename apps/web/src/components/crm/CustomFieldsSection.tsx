@@ -36,9 +36,14 @@ export function CustomFieldsSection({ entityType, values: valuesProp, editable, 
     queryFn: () => api.get<{ data: FieldDef[] }>(`/custom-fields?entityType=${entityType}`).then((r) => r.data),
     staleTime: 5 * 60_000,
   });
-  const defs = (defsQ.data ?? []).filter((f) => !f.deprecated);
-  if (defs.length === 0) return null;
   const values = valuesProp ?? {};
+  const isEmpty = (v: unknown) => v == null || v === '' || (Array.isArray(v) && v.length === 0);
+  // Empty fields render only while they can be filled – a read-only record
+  // showing a grid of dashes says nothing.
+  const defs = (defsQ.data ?? [])
+    .filter((f) => !f.deprecated)
+    .filter((f) => editable || !isEmpty(values[f.key]));
+  if (defs.length === 0) return null;
   const save = (key: string, v: unknown) => onSave({ ...values, [key]: v });
 
   return (

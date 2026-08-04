@@ -134,7 +134,7 @@ export function CompanyDetailPage({ id }: { id: string }) {
             <CompanyActivity companyId={id} users={usersQ.data ?? []} />
           </div>
         </div>
-        <aside className="order-1 shrink-0 space-y-6 overflow-auto border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-80 min-[1100px]:border-b-0 min-[1100px]:border-l">
+        <aside className="order-1 shrink-0 space-y-6 overflow-auto border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-[clamp(280px,23vw,400px)] min-[1100px]:border-b-0 min-[1100px]:border-l">
           <CompanyRail
             company={c}
             loading={companyQ.isLoading}
@@ -690,7 +690,7 @@ function ProjectsRail({ companyId }: { companyId: string }) {
               className="flex min-h-7 items-center gap-2 rounded-md px-1.5 py-1 text-[13px] transition-colors hover:bg-muted"
             >
               <FolderKanban size={14} className="shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1 truncate">{p.name}</span>
+              <span className="min-w-0 flex-1 break-words">{p.name}</span>
               {p.key && <span className="shrink-0 font-mono text-[11px] text-faint">{p.key}</span>}
             </Link>
           ))}

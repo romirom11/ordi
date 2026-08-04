@@ -166,7 +166,8 @@ export function DealDetailPage({ id }: { id: string }) {
             <ActivitySection dealId={id} />
           </div>
         </div>
-        <aside className="order-1 shrink-0 space-y-6 overflow-auto border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-80 min-[1100px]:border-b-0 min-[1100px]:border-l">
+        {/* Same flexible rail as the lead page: it absorbs surplus width. */}
+        <aside className="order-1 shrink-0 space-y-6 overflow-auto border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-[clamp(280px,23vw,400px)] min-[1100px]:border-b-0 min-[1100px]:border-l">
           <DealRail
             deal={d}
             stage={stage}
@@ -255,7 +256,7 @@ function DealRail({
             <Link to={`/companies/${company.id}`} className="block">
               <RailChip>
                 <Avatar name={company.name} size={18} />
-                <span className="truncate">{company.name}</span>
+                <span className="min-w-0 flex-1 break-words">{company.name}</span>
               </RailChip>
             </Link>
           ) : (
@@ -273,7 +274,7 @@ function DealRail({
                   trigger={
                     <RailChip empty={!project} caret>
                       <FolderKanban size={14} className={project ? 'shrink-0 text-muted-foreground' : 'shrink-0 text-faint'} />
-                      <span className="truncate">{project ? project.name : t('crm.noProject')}</span>
+                      <span className="min-w-0 flex-1 break-words">{project ? project.name : t('crm.noProject')}</span>
                     </RailChip>
                   }
                 >
@@ -292,7 +293,7 @@ function DealRail({
               ) : (
                 <RailChip empty={!project} disabled>
                   <FolderKanban size={14} className="shrink-0 text-faint" />
-                  <span className="truncate">{project ? project.name : t('crm.noProject')}</span>
+                  <span className="min-w-0 flex-1 break-words">{project ? project.name : t('crm.noProject')}</span>
                 </RailChip>
               )}
             </div>
@@ -317,8 +318,8 @@ function DealRail({
               trigger={
                 <RailChip empty={!owner} caret>
                   {owner
-                    ? <><Avatar name={owner.name} src={owner.avatar} size={18} /><span className="truncate">{owner.name}</span></>
-                    : <><UserCircle2 size={16} className="text-faint" /><span className="truncate">{t('crm.noOwner')}</span></>}
+                    ? <><Avatar name={owner.name} src={owner.avatar} size={18} /><span className="min-w-0 flex-1 break-words">{owner.name}</span></>
+                    : <><UserCircle2 size={16} className="text-faint" /><span className="min-w-0 flex-1 break-words">{t('crm.noOwner')}</span></>}
                 </RailChip>
               }
             >
@@ -334,7 +335,7 @@ function DealRail({
             </DropdownMenu>
           ) : (
             <RailChip empty={!owner} disabled>
-              {owner ? <><Avatar name={owner.name} src={owner.avatar} size={18} /><span className="truncate">{owner.name}</span></> : t('crm.noOwner')}
+              {owner ? <><Avatar name={owner.name} src={owner.avatar} size={18} /><span className="min-w-0 flex-1 break-words">{owner.name}</span></> : t('crm.noOwner')}
             </RailChip>
           )}
         </RailField>
@@ -372,7 +373,8 @@ function DealRail({
 
         {stage?.isLost && deal.lostReason && (
           <RailField label={t('crm.lostReasonLabel')}>
-            <RailChip disabled><span className="truncate text-destructive">{deal.lostReason}</span></RailChip>
+            {/* A user-typed sentence – the one rail value that must never truncate. */}
+            <RailChip disabled><span className="min-w-0 flex-1 break-words text-destructive">{deal.lostReason}</span></RailChip>
           </RailField>
         )}
 
