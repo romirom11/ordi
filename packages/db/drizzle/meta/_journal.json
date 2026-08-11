@@ -183,6 +183,13 @@
       "when": 1785854777266,
       "tag": "0025_parallel_punisher",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1786443196607,
+      "tag": "0026_equal_black_bolt",
+      "breakpoints": true
     }
   ]
 }

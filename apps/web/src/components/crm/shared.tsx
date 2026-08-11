@@ -136,6 +136,7 @@ export interface Lead {
   convertedDealId?: string | null;
   nextActivity?: SalesActivity | null;
   customFields?: Record<string, unknown>;
+  labelIds?: string[];
   createdAt?: string | null;
   version?: number;
 }

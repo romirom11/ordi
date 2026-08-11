@@ -157,6 +157,7 @@ export const leadInputSchema = z.object({
   disqualifiedReason: z.string().nullable().optional(),
   ownerId: idSchema.nullable().optional(),
   customFields: customFieldsSchema.optional(),
+  labelIds: z.array(idSchema).max(50).optional(),
 });
 export const leadUpdateSchema = leadInputSchema.partial().extend({ version: z.number().int().optional() });
 

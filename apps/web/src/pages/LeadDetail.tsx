@@ -19,6 +19,7 @@ import {
   DetailField, EditableName, InlineEdit, NotesSection, OwnerRailValue, SectionHeader,
 } from '../components/crm/detail';
 import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
+import { LeadLabelsRailPicker } from '../components/crm/LeadLabels';
 import { FilesSection } from '../components/FilesSection';
 import { CompleteActivityDialog, SalesActivityPanel, ScheduleActivityDialog } from '../components/crm/SalesActivityPanel';
 import { ContactDialog } from '../components/crm/dialogs';
@@ -364,6 +365,13 @@ export function LeadDetailPage({ id }: { id: string }) {
                   users={usersQ.data ?? []}
                   editable={editable}
                   onPick={(ownerId) => patch.mutate({ ownerId })}
+                />
+              </RailField>
+              <RailField label={t('crm.labels')}>
+                <LeadLabelsRailPicker
+                  value={lead.labelIds ?? []}
+                  disabled={!editable}
+                  onChange={(labelIds) => patch.mutate({ labelIds })}
                 />
               </RailField>
               <RailField label={t('crm.created')}><RailChip disabled>{fmtDate(lead.createdAt)}</RailChip></RailField>
