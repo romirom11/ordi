@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { CUSTOM_FIELD_ENTITIES, PERMISSIONS, PERMISSION_META, type Permission } from '@ordi/shared';
+import { PERMISSIONS, PERMISSION_META, type Permission } from '@ordi/shared';
 import {
   Building2, ArrowLeftRight, Users as UsersIcon, Shield, SlidersHorizontal, Wallet, Plug,
   ScrollText, Inbox, Plus, Copy, Upload, Trash2, Lock, Globe, ImageIcon, ChevronRight,
@@ -22,6 +22,7 @@ import { ModulesPanel } from '../components/settings/ModulesPanel';
 import { ChartOfAccountsBlock, ExpenseCategoriesBlock } from '../components/finance/accounts';
 import { ProjectTypesPanel } from '../components/settings/ProjectTypesPanel';
 import { LeaveTypesPanel } from '../components/settings/LeaveTypesPanel';
+import { CustomFieldsPanel } from '../components/settings/CustomFieldsPanel';
 import { SectionHead, SettingRow, Field, RowList, AnimatedRow } from '../components/settings/primitives';
 import { downscaleImage } from '../components/settings/image';
 import { usePageTitle } from '../lib/tabs';
@@ -51,7 +52,6 @@ extendDict({
     'settings.estimateUnit': 'Estimate unit',
     'settings.usersDesc': 'People with access to this workspace.',
     'settings.rolesDesc': 'Define what each role can do.',
-    'settings.customFieldsDesc': 'Add custom fields to any entity type.',
     'settings.financeDesc': 'Tax rates and finance defaults.',
     'settings.integrationsDesc': 'Connect GitHub and Slack, and send outgoing webhooks.',
     'settings.auditDesc': 'Immutable record of changes across the workspace.',
@@ -116,7 +116,6 @@ extendDict({
     'settings.estimateUnit': 'Одиниця оцінки',
     'settings.usersDesc': 'Люди з доступом до цього робочого простору.',
     'settings.rolesDesc': 'Визначте, що може робити кожна роль.',
-    'settings.customFieldsDesc': 'Додавайте власні поля до будь-якого типу сутностей.',
     'settings.financeDesc': 'Податкові ставки та фінансові налаштування.',
     'settings.integrationsDesc': 'Підключіть GitHub і Slack та надсилайте вихідні вебхуки.',
     'settings.auditDesc': 'Незмінний запис змін у робочому просторі.',
@@ -911,76 +910,6 @@ function RoleEditor({ role, grouped, onBack }: { role: Role; grouped: { domain: 
         danger
         pending={del.isPending}
       />
-    </div>
-  );
-}
-
-/* ────────────────────────────── Custom fields ────────────────────────────── */
-
-interface CustomField { id: string; key: string; label?: string | null; type?: string | null; required?: boolean }
-/** The shared enum is what the API validates against – a local copy drifts (it already missed leads once). */
-const ENTITY_TYPES = CUSTOM_FIELD_ENTITIES;
-const FIELD_TYPES = ['text', 'number', 'date', 'select', 'multiselect', 'checkbox', 'url', 'user'];
-
-function CustomFieldsPanel() {
-  const t = useT();
-  const qc = useQueryClient();
-  const [entityType, setEntityType] = useState('companies');
-  const fields = useQuery({ queryKey: ['customFields', entityType], queryFn: () => api.get<{ data: CustomField[] }>('/custom-fields' + qs({ entityType })) });
-  const [form, setForm] = useState({ key: '', label: '', type: 'text' });
-  // Content first: the add form appears when adding is what you came to do.
-  const [adding, setAdding] = useState(false);
-  const create = useMutation({
-    mutationFn: () => api.post('/custom-fields', { entityType, key: form.key, label: form.label, type: form.type }),
-    onSuccess: () => { setForm({ key: '', label: '', type: 'text' }); setAdding(false); qc.invalidateQueries({ queryKey: ['customFields', entityType] }); toast(t('common.saved')); },
-    onError: () => toast.error(t('settings.saveFailed')),
-  });
-  const rows = fields.data?.data ?? [];
-
-  return (
-    <div>
-      <SectionHead title={t('settings.customFields')} desc={t('settings.customFieldsDesc')}
-        actions={
-          <div className="flex items-center gap-2">
-            <Select value={entityType} onChange={(e) => setEntityType(e.target.value)} className="w-36">
-              {ENTITY_TYPES.map((et) => <option key={et} value={et}>{et}</option>)}
-            </Select>
-            {!adding && <Button size="sm" onClick={() => setAdding(true)}><Plus size={14} /> {t('settings.addField')}</Button>}
-          </div>
-        } />
-
-      {adding && (
-        <Card className="anim-pop-in mb-4 p-3">
-          <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); if (form.key && form.label) create.mutate(); }}>
-            <Field label={t('projects.key')} className="w-32"><Input autoFocus value={form.key} onChange={(e) => setForm((f) => ({ ...f, key: e.target.value }))} placeholder="budget" /></Field>
-            <Field label={t('settings.fieldLabel')} className="w-40"><Input value={form.label} onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))} /></Field>
-            <Field label={t('dashboards.type')} className="w-32">
-              <Select value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))} className="w-full">
-                {FIELD_TYPES.map((ft) => <option key={ft} value={ft}>{ft}</option>)}
-              </Select>
-            </Field>
-            <Button type="submit" size="sm" disabled={!form.key || !form.label || create.isPending}><Plus size={14} /> {t('settings.addField')}</Button>
-            <Button type="button" size="sm" variant="ghost" onClick={() => setAdding(false)}>{t('common.cancel')}</Button>
-          </form>
-        </Card>
-      )}
-
-      {fields.isLoading ? (
-        <Skeleton className="h-24 w-full" />
-      ) : rows.length === 0 ? (
-        <EmptyState icon={<SlidersHorizontal size={18} />} title={t('settings.noCustomFields')} />
-      ) : (
-        <RowList>
-          {rows.map((f) => (
-            <div key={f.id} className="flex items-center gap-3 border-b border-border px-3 py-2.5 text-[13px] last:border-0">
-              <span className="font-mono text-[11px] text-muted-foreground">{f.key}</span>
-              <span className="flex-1">{f.label ?? '–'}</span>
-              <Badge>{f.type ?? '–'}</Badge>
-              {f.required && <Badge className="bg-warning/15 text-warning">{t('settings.required')}</Badge>}
-            </div>
-          ))}
-        </RowList>
-      )}
     </div>
   );
 }
