@@ -126,6 +126,10 @@ export const LEAVE_TRANSITIONS: Record<LeaveRequestStatus, LeaveRequestStatus[]>
   canceled: [],
 };
 
+/** What a KB page shows: an editable rich-text article, or an uploaded PDF viewed inline. */
+export const KB_PAGE_TYPES = ['article', 'pdf'] as const;
+export type KbPageType = (typeof KB_PAGE_TYPES)[number];
+
 export const MAX_SUBTASK_DEPTH = 5;
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 export const SOFT_LOCK_TTL_SECONDS = 120;

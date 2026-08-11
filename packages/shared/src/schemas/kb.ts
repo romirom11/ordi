@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { idSchema, richTextSchema } from './common';
-import { VISIBILITY, SPACE_MEMBER_ROLES } from '../constants';
+import { VISIBILITY, SPACE_MEMBER_ROLES, KB_PAGE_TYPES } from '../constants';
 
 export const spaceInputSchema = z.object({
   name: z.string().min(1),
@@ -19,8 +19,11 @@ export const pageInputSchema = z.object({
   spaceId: idSchema,
   parentId: idSchema.nullable().optional(),
   title: z.string().min(1),
+  type: z.enum(KB_PAGE_TYPES).default('article'),
   body: richTextSchema.optional(),
   icon: z.string().nullable().optional(),
+  /** Attachment id of the uploaded document – required when type is 'pdf'. */
+  fileId: idSchema.nullable().optional(),
   isTemplate: z.boolean().default(false),
   /** Pages are born visible; a draft is an explicit choice, not a default. */
   published: z.boolean().default(true),
@@ -31,6 +34,7 @@ export const pageUpdateSchema = z.object({
   title: z.string().min(1).optional(),
   body: richTextSchema.optional(),
   icon: z.string().nullable().optional(),
+  fileId: idSchema.nullable().optional(),
   parentId: idSchema.nullable().optional(),
   spaceId: idSchema.optional(),
   published: z.boolean().optional(),

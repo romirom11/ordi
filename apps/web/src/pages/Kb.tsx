@@ -15,10 +15,12 @@ import {
 import {
   Plus, History, FileText, ChevronRight, RotateCcw, Folder, FolderOpen,
   MoreHorizontal, Pencil, Globe, EyeOff, BookOpen, FileQuestion, Lock,
-  Link2, ExternalLink, Trash2,
+  Link2, ExternalLink, Trash2, File as FileIcon, Upload,
 } from 'lucide-react';
 import { RichEditor, EMPTY_DOC } from '../components/richtext/RichEditor';
 import { SpaceAccessDialog, type AccessSpace } from '../components/kb/SpaceAccessDialog';
+import { uploadPdf, resolveFileSrc, uploadErrorKey, UploadError } from '../lib/uploads';
+import { openExternal } from '../lib/desktop';
 import { useT, extendDict } from '../lib/i18n';
 
 extendDict({
@@ -58,6 +60,18 @@ extendDict({
     'kb.deleteSpaceBody': 'The space and all of its pages will be removed. This cannot be undone.',
     'kb.spaceDeleted': 'Space deleted',
     'kb.deleteSpaceFailed': 'Could not delete the space',
+    'kb.pageType': 'Type',
+    'kb.typeArticle': 'Article',
+    'kb.typeArticleHint': 'A page you write and edit',
+    'kb.typePdf': 'PDF',
+    'kb.typePdfHint': 'An uploaded document, viewed inline',
+    'kb.pdfFile': 'PDF file',
+    'kb.choosePdf': 'Choose a PDF…',
+    'kb.replacePdf': 'Replace file',
+    'kb.pdfReplaced': 'File replaced',
+    'kb.pdfMissing': 'The file behind this page is gone',
+    'kb.pdfMissingHint': 'It may have been deleted from storage. Upload a replacement to restore the page.',
+    'uploads.notPdf': 'Only a PDF file can go here',
   },
   uk: {
     'kb.rename': 'Перейменувати',
@@ -95,13 +109,36 @@ extendDict({
     'kb.deleteSpaceBody': 'Простір і всі його сторінки буде видалено. Цю дію не можна скасувати.',
     'kb.spaceDeleted': 'Простір видалено',
     'kb.deleteSpaceFailed': 'Не вдалося видалити простір',
+    'kb.pageType': 'Тип',
+    'kb.typeArticle': 'Стаття',
+    'kb.typeArticleHint': 'Сторінка, яку ви пишете та редагуєте',
+    'kb.typePdf': 'PDF',
+    'kb.typePdfHint': 'Завантажений документ, який переглядають тут же',
+    'kb.pdfFile': 'PDF-файл',
+    'kb.choosePdf': 'Обрати PDF…',
+    'kb.replacePdf': 'Замінити файл',
+    'kb.pdfReplaced': 'Файл замінено',
+    'kb.pdfMissing': 'Файл цієї сторінки зник',
+    'kb.pdfMissingHint': 'Можливо, його видалили зі сховища. Завантажте новий, щоб відновити сторінку.',
+    'uploads.notPdf': 'Сюди можна додати лише PDF-файл',
   },
 });
 
 interface Space { id: string; name: string; icon?: string | null; visibility?: string; version?: number }
-interface FlatPage { id: string; title: string; parentId: string | null; position?: number; published?: boolean; version?: number }
+interface FlatPage { id: string; title: string; parentId: string | null; position?: number; published?: boolean; version?: number; type?: string }
 interface PageNode extends FlatPage { children: PageNode[] }
-interface PageDetail { id: string; title: string; body: unknown; spaceId: string; updatedAt?: string; version?: number; published?: boolean }
+interface PageFile { id: string; src: string; filename: string; size: number; mime: string }
+interface PageDetail {
+  id: string; title: string; body: unknown; spaceId: string; updatedAt?: string; version?: number; published?: boolean;
+  type?: string; file?: PageFile;
+}
+
+function fmtSize(bytes?: number | null): string {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 interface Version { id?: string; versionNo: number; title: string; authorId?: string | null; createdAt: string }
 
 function buildTree(pages: FlatPage[]): PageNode[] {
@@ -203,7 +240,9 @@ function PageTree({ nodes, spaceId, activeId, depth, canWrite, expandedPages, on
               <span onClick={(e) => { e.stopPropagation(); if (hasChildren) onTogglePage(n.id); }}>
                 <Caret open={isOpen} visible={hasChildren} />
               </span>
-              <FileText size={13} className="shrink-0 text-faint" />
+              {n.type === 'pdf'
+                ? <FileIcon size={13} className="shrink-0 text-faint" />
+                : <FileText size={13} className="shrink-0 text-faint" />}
               <span className="min-w-0 flex-1 truncate">{n.title || t('kb.untitled')}</span>
               {/* Published is the norm now – mark the exception. Viewers never receive drafts, so this only shows to editors. */}
               {!n.published && <span className="shrink-0 text-faint" title={t('kb.draftHint')}><EyeOff size={11} /></span>}
@@ -367,6 +406,79 @@ function NameDialog({ open, onClose, onSubmit, title, label, placeholder, initia
   );
 }
 
+type NewPageValue = { title: string; type: 'article' | 'pdf'; file: File | null };
+
+/** Create-page dialog: name it, pick what it is, and – for a pdf – hand over the file. */
+function NewPageDialog({ open, onClose, onSubmit, title, pending }: {
+  open: boolean; onClose: () => void; onSubmit: (value: NewPageValue) => void; title: string; pending?: boolean;
+}) {
+  const t = useT();
+  const [name, setName] = useState('');
+  const [type, setType] = useState<'article' | 'pdf'>('article');
+  const [file, setFile] = useState<File | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (open) { setName(''); setType('article'); setFile(null); } }, [open]);
+
+  const canSubmit = !!name.trim() && (type === 'article' || !!file);
+  const typeOptions = [
+    { key: 'article' as const, icon: <FileText size={15} />, label: t('kb.typeArticle'), hint: t('kb.typeArticleHint') },
+    { key: 'pdf' as const, icon: <FileIcon size={15} />, label: t('kb.typePdf'), hint: t('kb.typePdfHint') },
+  ];
+
+  return (
+    <Dialog open={open} onClose={onClose} title={title} width={420}>
+      <form
+        className="space-y-3 px-4 pb-4 pt-1"
+        onSubmit={(e) => { e.preventDefault(); if (canSubmit) onSubmit({ title: name.trim(), type, file }); }}
+      >
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">{t('kb.pageTitle')}</label>
+          <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t('kb.pageTitle')} />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">{t('kb.pageType')}</label>
+          <div className="grid grid-cols-2 gap-2">
+            {typeOptions.map((o) => (
+              <button
+                key={o.key}
+                type="button"
+                onClick={() => setType(o.key)}
+                className={cn(
+                  'flex flex-col gap-1 rounded-md border px-3 py-2 text-left transition-colors duration-150',
+                  type === o.key ? 'border-primary bg-primary/5 text-foreground' : 'border-border text-muted-foreground hover:bg-muted/60',
+                )}
+              >
+                <span className="flex items-center gap-1.5 text-[13px] font-medium">{o.icon}{o.label}</span>
+                <span className="text-xs text-faint">{o.hint}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        {type === 'pdf' && (
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">{t('kb.pdfFile')}</label>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/pdf,.pdf"
+              className="hidden"
+              onChange={(e) => { setFile(e.target.files?.[0] ?? null); e.target.value = ''; }}
+            />
+            <Button type="button" variant="outline" size="sm" className="w-full justify-start gap-2" onClick={() => fileRef.current?.click()}>
+              <Upload size={13} />
+              <span className="min-w-0 truncate">{file ? `${file.name} · ${fmtSize(file.size)}` : t('kb.choosePdf')}</span>
+            </Button>
+          </div>
+        )}
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="ghost" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button type="submit" size="sm" disabled={pending || !canSubmit}>{pending ? <Spinner /> : t('common.create')}</Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
 export function KbPage({ spaceId, pageId }: { spaceId?: string; pageId?: string }) {
   const t = useT();
   const qc = useQueryClient();
@@ -397,14 +509,20 @@ export function KbPage({ spaceId, pageId }: { spaceId?: string; pageId?: string 
 
   const [newPageCtx, setNewPageCtx] = useState<{ spaceId: string; parentId: string | null } | null>(null);
   const createPage = useMutation({
-    mutationFn: (vars: { spaceId: string; parentId: string | null; title: string }) =>
-      api.post<{ id: string }>('/pages', { spaceId: vars.spaceId, title: vars.title, parentId: vars.parentId, body: EMPTY_DOC }),
+    mutationFn: async (vars: { spaceId: string; parentId: string | null } & NewPageValue) => {
+      // The file goes up first – the page only exists once its document does.
+      const fileId = vars.type === 'pdf' && vars.file ? (await uploadPdf(vars.file)).id : undefined;
+      return api.post<{ id: string }>('/pages', {
+        spaceId: vars.spaceId, title: vars.title, parentId: vars.parentId,
+        type: vars.type, fileId, body: EMPTY_DOC,
+      });
+    },
     onSuccess: (p, vars) => {
       setNewPageCtx(null);
       qc.invalidateQueries({ queryKey: ['spacePages', vars.spaceId] });
       if (p?.id) navigate(`/kb/${vars.spaceId}/${p.id}`);
     },
-    onError: () => toast.error(t('kb.createPageFailed')),
+    onError: (e) => toast.error(e instanceof UploadError ? t(uploadErrorKey(e)) : t('kb.createPageFailed')),
   });
 
   const [renameCtx, setRenameCtx] = useState<{ spaceId: string; page: FlatPage } | null>(null);
@@ -558,13 +676,11 @@ export function KbPage({ spaceId, pageId }: { spaceId?: string; pageId?: string 
         placeholder={t('kb.spaceName')}
         pending={createSpace.isPending}
       />
-      <NameDialog
+      <NewPageDialog
         open={!!newPageCtx}
         onClose={() => setNewPageCtx(null)}
-        onSubmit={(title) => newPageCtx && createPage.mutate({ ...newPageCtx, title })}
+        onSubmit={(value) => newPageCtx && createPage.mutate({ ...newPageCtx, ...value })}
         title={newPageCtx?.parentId ? t('kb.newSubpage') : t('kb.newPage')}
-        label={t('kb.pageTitle')}
-        placeholder={t('kb.pageTitle')}
         pending={createPage.isPending}
       />
       <NameDialog
@@ -775,14 +891,18 @@ function PageDetailView({ pageId, spaceId, canWrite }: { pageId: string; spaceId
           <p className="mb-5 mt-1 text-xs text-faint">
             {page.data.updatedAt ? `${t('kb.updated')} ${fmtDate(page.data.updatedAt)}` : ' '}
           </p>
-          <RichEditor
-            value={bodyDoc}
-            onChange={setBodyDoc}
-            editable={canWrite}
-            compact={false}
-            placeholder={t('kb.bodyPlaceholder')}
-            onSubmit={() => { if (!save.isPending) save.mutate(); }}
-          />
+          {page.data.type === 'pdf' ? (
+            <PdfPageView page={page.data} pageId={pageId} canWrite={canWrite} />
+          ) : (
+            <RichEditor
+              value={bodyDoc}
+              onChange={setBodyDoc}
+              editable={canWrite}
+              compact={false}
+              placeholder={t('kb.bodyPlaceholder')}
+              onSubmit={() => { if (!save.isPending) save.mutate(); }}
+            />
+          )}
         </div>
         {showVersions && <VersionsPanel pageId={pageId} />}
       </div>
@@ -798,6 +918,85 @@ function PageDetailView({ pageId, spaceId, canWrite }: { pageId: string; spaceId
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Inline viewer for a pdf page: the browser's native viewer in a frame, like FilePreview. */
+function PdfPageView({ page, pageId, canWrite }: { page: PageDetail; pageId: string; canWrite: boolean }) {
+  const t = useT();
+  const qc = useQueryClient();
+  const replaceRef = useRef<HTMLInputElement>(null);
+
+  const replace = useMutation({
+    mutationFn: async (file: File) => {
+      const up = await uploadPdf(file);
+      return api.patch(`/pages/${pageId}`, { fileId: up.id, version: page.version });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['page', pageId] });
+      toast(t('kb.pdfReplaced'));
+    },
+    onError: (e) => {
+      if (e instanceof UploadError) toast.error(t(uploadErrorKey(e)));
+      else if (e instanceof ApiError && e.status === 409) {
+        qc.invalidateQueries({ queryKey: ['page', pageId] });
+        toast.error(t('kb.conflict'));
+      } else toast.error(t('kb.saveFailed'));
+    },
+  });
+
+  const replaceInput = canWrite && (
+    <input
+      ref={replaceRef}
+      type="file"
+      accept="application/pdf,.pdf"
+      className="hidden"
+      onChange={(e) => { const f = e.target.files?.[0]; if (f) replace.mutate(f); e.target.value = ''; }}
+    />
+  );
+
+  if (!page.file) {
+    return (
+      <div>
+        {replaceInput}
+        <EmptyState
+          icon={<FileQuestion size={20} />}
+          title={t('kb.pdfMissing')}
+          hint={canWrite ? t('kb.pdfMissingHint') : undefined}
+          action={canWrite ? (
+            <Button size="sm" variant="outline" onClick={() => replaceRef.current?.click()} disabled={replace.isPending}>
+              {replace.isPending ? <Spinner /> : t('kb.replacePdf')}
+            </Button>
+          ) : undefined}
+        />
+      </div>
+    );
+  }
+
+  const href = resolveFileSrc(page.file.src);
+  return (
+    <div className="space-y-2">
+      {replaceInput}
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <FileIcon size={13} className="shrink-0 text-faint" />
+        <span className="min-w-0 truncate">{page.file.filename}</span>
+        <span className="shrink-0 text-faint">{fmtSize(page.file.size)}</span>
+        <span className="flex-1" />
+        {canWrite && (
+          <Button size="sm" variant="ghost" onClick={() => replaceRef.current?.click()} disabled={replace.isPending}>
+            {replace.isPending ? <Spinner /> : (<><Upload size={13} className="mr-1" />{t('kb.replacePdf')}</>)}
+          </Button>
+        )}
+        <Button size="sm" variant="ghost" onClick={() => openExternal(href)}>
+          <ExternalLink size={13} className="mr-1" />{t('kb.openNewTab')}
+        </Button>
+      </div>
+      <iframe
+        src={href}
+        title={page.file.filename}
+        className="h-[75vh] w-full rounded-lg border border-border bg-muted/30"
+      />
     </div>
   );
 }
