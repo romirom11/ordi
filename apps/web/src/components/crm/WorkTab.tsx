@@ -56,7 +56,7 @@ export function WorkTab() {
 
   return (
     <div className="flex-1 overflow-auto p-6">
-      <div className="mx-auto max-w-5xl space-y-6">
+      <div className="space-y-6">
         <div className="flex items-start justify-between gap-3">
           <h2 className="text-base font-semibold">{t('crm.workTitle')}</h2>
           <SearchSelect

@@ -3,6 +3,26 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.23.0
+
+- **Custom fields become manageable.** The settings panel could only list and
+  create definitions – a select field created there had no way to receive its
+  choices, and nothing could be renamed or removed. It now edits (label,
+  required, show-in-list, sortable, indexed, deprecate), deletes with a
+  confirmation that explains stored values survive on records, and carries an
+  options editor for select/multiselect with values auto-derived from labels.
+  Key and type stay immutable per the PRD's non-destructive-edit rule.
+- **Leads get first-class labels**: a third label vocabulary (scope `lead`,
+  same table and endpoints as task and project labels) with a `lead_labels`
+  join table. The lead rail gets the same picker tasks use – search,
+  multi-select, inline create – and the leads table shows the chips next to
+  the title. `labelIds` rides the lead create/update API and lands in the
+  activity trail.
+- The leads tab gains a **company filter** beside status and owner (the API
+  always accepted `companyId`; the UI never sent it).
+- The CRM **work queue uses the full page width** instead of a centered
+  5xl column.
+
 ## v1.22.1
 
 - CRM dropdowns take the width of the field they belong to instead of a fixed

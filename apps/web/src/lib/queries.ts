@@ -37,11 +37,11 @@ export interface ProjectMember {
 }
 
 /**
- * Which vocabulary a label belongs to. Task labels ("Bug", "Frontend") and
- * project labels ("Retainer", "Internal") are separate sets – a picker only
- * ever shows its own.
+ * Which vocabulary a label belongs to. Task labels ("Bug", "Frontend"),
+ * project labels ("Retainer", "Internal") and lead labels are separate sets –
+ * a picker only ever shows its own.
  */
-export type LabelScope = 'task' | 'project';
+export type LabelScope = 'task' | 'project' | 'lead';
 
 export interface LabelLookup { id: string; name: string; color?: string | null; scope?: LabelScope }
 

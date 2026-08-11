@@ -1,7 +1,7 @@
 import { pgTable, text, boolean, integer, numeric, jsonb, index, uniqueIndex, primaryKey, timestamp } from 'drizzle-orm/pg-core';
 import { pk, timestamps, createdBy, version, deletedAt, customFields, position } from './_shared';
 import { users } from './core';
-import { companies } from './crm';
+import { companies, leads } from './crm';
 
 export const projectTypes = pgTable('project_types', {
   id: pk(),
@@ -209,6 +209,18 @@ export const taskLabels = pgTable('task_labels', {
   labelId: text('label_id').notNull().references(() => labels.id, { onDelete: 'cascade' }),
 }, (t) => ({
   pk: primaryKey({ columns: [t.taskId, t.labelId] }),
+}));
+
+/**
+ * Labels attached to a lead (scope `lead`). Lives here with the other label
+ * join tables because this module already imports from crm – the reverse
+ * import would be circular.
+ */
+export const leadLabels = pgTable('lead_labels', {
+  leadId: text('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+  labelId: text('label_id').notNull().references(() => labels.id, { onDelete: 'cascade' }),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.leadId, t.labelId] }),
 }));
 
 export const taskRelations = pgTable('task_relations', {

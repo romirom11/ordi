@@ -25,11 +25,40 @@ const LEAD_UPDATE_FIELDS = [
   'nurtureUntil', 'disqualifiedReason', 'ownerId',
 ] as const satisfies readonly (keyof LeadUpdate)[];
 
-async function enrichLeads<T extends { companyId: string; contactId: string | null }>(rows: T[]) {
+/**
+ * Labels come in scoped vocabularies (`labels.scope`); a lead takes lead
+ * labels only – same rule assertLabelScope enforces for tasks and projects.
+ */
+async function assertLeadLabels(ids: string[], dbOrTx: DbReader = getDb().db): Promise<void> {
+  if (ids.length === 0) return;
+  const rows = await dbOrTx.select({ id: schema.labels.id, scope: schema.labels.scope })
+    .from(schema.labels).where(inArray(schema.labels.id, ids));
+  const byId = new Map(rows.map((row) => [row.id, row.scope]));
+  const missing = ids.filter((id) => !byId.has(id));
+  if (missing.length) throw err.validation(`Unknown labels: ${missing.join(', ')}`);
+  const wrong = ids.filter((id) => byId.get(id) !== 'lead');
+  if (wrong.length) throw err.domain(`Not lead labels: ${wrong.join(', ')}`);
+}
+
+async function labelIdsByLead(leadIds: string[], dbOrTx: DbReader = getDb().db) {
+  const rows = leadIds.length
+    ? await dbOrTx.select({ leadId: schema.leadLabels.leadId, labelId: schema.leadLabels.labelId })
+      .from(schema.leadLabels).where(inArray(schema.leadLabels.leadId, leadIds))
+    : [];
+  const map = new Map<string, string[]>();
+  for (const row of rows) {
+    const list = map.get(row.leadId);
+    if (list) list.push(row.labelId);
+    else map.set(row.leadId, [row.labelId]);
+  }
+  return map;
+}
+
+async function enrichLeads<T extends { id: string; companyId: string; contactId: string | null }>(rows: T[]) {
   const { db } = getDb();
   const companyIds = [...new Set(rows.map((row) => row.companyId))];
   const contactIds = [...new Set(rows.map((row) => row.contactId).filter(Boolean) as string[])];
-  const [companyRows, contactRows] = await Promise.all([
+  const [companyRows, contactRows, labelMap] = await Promise.all([
     companyIds.length
       ? db.select({ id: schema.companies.id, name: schema.companies.name }).from(schema.companies).where(inArray(schema.companies.id, companyIds))
       : [],
@@ -44,6 +73,7 @@ async function enrichLeads<T extends { companyId: string; contactId: string | nu
         isNull(schema.contacts.deletedAt),
       ))
       : [],
+    labelIdsByLead(rows.map((row) => row.id)),
   ]);
   const companiesById = new Map(companyRows.map((row) => [row.id, row.name]));
   const contactsById = new Map(contactRows.map((row) => [row.id, row]));
@@ -51,6 +81,7 @@ async function enrichLeads<T extends { companyId: string; contactId: string | nu
     ...row,
     companyName: companiesById.get(row.companyId) ?? '',
     contact: row.contactId ? contactsById.get(row.contactId) ?? null : null,
+    labelIds: labelMap.get(row.id) ?? [],
   }));
 }
 
@@ -125,6 +156,7 @@ export async function createLead(actor: Actor, input: LeadInput) {
   if (input.status === 'nurture' && !input.nurtureUntil) {
     throw err.validation('A nurture return date is required');
   }
+  await assertLeadLabels(input.labelIds ?? []);
   const { db } = getDb();
   const id = ulid();
   await db.insert(schema.leads).values({
@@ -154,6 +186,9 @@ export async function createLead(actor: Actor, input: LeadInput) {
     customFields: input.customFields ?? {},
     createdBy: actor.userId,
   });
+  if (input.labelIds?.length) {
+    await db.insert(schema.leadLabels).values(input.labelIds.map((labelId) => ({ leadId: id, labelId })));
+  }
   await writeActivity(db, {
     entityType: 'lead',
     entityId: id,
@@ -192,6 +227,14 @@ export async function updateLead(actor: Actor, id: string, input: LeadUpdate) {
     }
     await tx.update(schema.leads).set(patch)
       .where(and(eq(schema.leads.id, id), eq(schema.leads.version, before.version)));
+    // Lead labels: replace the join set when labelIds is provided, like projects.
+    if (input.labelIds !== undefined) {
+      await assertLeadLabels(input.labelIds, tx);
+      await tx.delete(schema.leadLabels).where(eq(schema.leadLabels.leadId, id));
+      if (input.labelIds.length) {
+        await tx.insert(schema.leadLabels).values(input.labelIds.map((labelId) => ({ leadId: id, labelId })));
+      }
+    }
     if (
       CANCELS_PLANNED_LEAD_STATUSES.has(nextStatus)
       && (input.status !== undefined || input.nurtureUntil !== undefined)
@@ -208,7 +251,7 @@ export async function updateLead(actor: Actor, id: string, input: LeadUpdate) {
       entityId: id,
       action: 'updated',
       before,
-      after: patch,
+      after: input.labelIds !== undefined ? { ...patch, labelIds: input.labelIds } : patch,
       actorId: actor.userId,
       actorType: actor.actorType,
     });

@@ -11,8 +11,9 @@ import { ContextMenu, ConfirmDialog, toast, type ContextMenuEntry } from '../ove
 import { SearchSelect } from '../SearchSelect';
 import {
   LEAD_STATUSES, WRITABLE_LEAD_STATUSES, SortHeader, StatusPill, salesActivityTypeLabel,
-  sortRows, useLeads, useStatusRank, useTableSort, useUserMap, useUsersLookup, type Lead,
+  sortRows, useCompanies, useLeads, useStatusRank, useTableSort, useUserMap, useUsersLookup, type Lead,
 } from './shared';
+import { LeadLabelChips } from './LeadLabels';
 
 type LeadSortKey = 'title' | 'company' | 'status' | 'score' | 'next' | 'owner';
 
@@ -38,7 +39,9 @@ export function LeadsTab() {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const [ownerId, setOwnerId] = useState('');
-  const leadsQ = useLeads({ q, status, ownerId });
+  const [companyId, setCompanyId] = useState('');
+  const leadsQ = useLeads({ q, status, ownerId, companyId });
+  const companiesQ = useCompanies();
   // Who is on the hook for each lead – the table had no way to tell, so a team
   // could not see whose pipeline was whose without opening every record.
   const userById = useUserMap();
@@ -179,6 +182,17 @@ export function LeadsTab() {
         />
         <SearchSelect
           width={220}
+          value={companyId}
+          onChange={setCompanyId}
+          options={[
+            { value: '', label: t('crm.allCompanies') },
+            ...(companiesQ.data ?? []).map((company) => ({
+              value: company.id, label: company.name, icon: <Building2 size={14} className="text-muted-foreground" />,
+            })),
+          ]}
+        />
+        <SearchSelect
+          width={220}
           value={ownerId}
           onChange={setOwnerId}
           options={[
@@ -232,7 +246,7 @@ export function LeadsTab() {
         ) : leads.length === 0 ? (
           <EmptyState
             icon={<Target size={20} />}
-            title={q || status || ownerId ? t('crm.noMatch') : t('crm.tabLeads')}
+            title={q || status || ownerId || companyId ? t('crm.noMatch') : t('crm.tabLeads')}
             hint={t('crm.leadsHint')}
           />
         ) : (
@@ -279,7 +293,10 @@ export function LeadsTab() {
                     onAuxClick={(e) => { e.stopPropagation(); open(`/leads/${lead.id}`, e); }}
                     className="min-w-0 text-left"
                   >
-                    <span className="block truncate text-[13px] font-medium">{lead.title}</span>
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate text-[13px] font-medium">{lead.title}</span>
+                      <LeadLabelChips labelIds={lead.labelIds} max={2} />
+                    </span>
                     <span className="block truncate text-xs text-muted-foreground">{lead.product || lead.signal || '—'}</span>
                   </button>
                   <span className="truncate text-[13px] text-muted-foreground">{lead.companyName || '—'}</span>

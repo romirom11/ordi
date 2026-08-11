@@ -129,9 +129,9 @@ export function tasksRoutes() {
   app.delete('/comments/:id', async (c) => c.json(await svc.deleteComment(currentActor(c), c.req.param('id'))));
 
   // ── Labels (workspace-level, PRD §8.3) ──
-  // Two vocabularies in one table: `?scope=task|project` picks one, no scope
-  // returns the whole catalog. Pickers always ask for their own scope – a task
-  // has no business offering "retainer", nor a project "Bug".
+  // Scoped vocabularies in one table: `?scope=task|project|lead` picks one, no
+  // scope returns the whole catalog. Pickers always ask for their own scope –
+  // a task has no business offering "retainer", nor a project "Bug".
   app.get('/labels', async (c) => {
     const { db } = getDb();
     const scope = c.req.query('scope');
