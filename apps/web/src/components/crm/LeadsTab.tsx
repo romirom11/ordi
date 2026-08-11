@@ -6,6 +6,7 @@ import { useOpen } from '../../lib/router';
 import { useTabs } from '../../lib/tabs';
 import { useCan } from '../../lib/auth';
 import { useT } from '../../lib/i18n';
+import { usePersistedState, stringPref } from '../../lib/prefs';
 import { Avatar, Button, EmptyState, Input, Skeleton, fmtRelative } from '../ui';
 import { ContextMenu, ConfirmDialog, toast, type ContextMenuEntry } from '../overlays';
 import { SearchSelect } from '../SearchSelect';
@@ -36,10 +37,10 @@ export function LeadsTab() {
   const can = useCan();
   const open = useOpen();
   const qc = useQueryClient();
-  const [q, setQ] = useState('');
-  const [status, setStatus] = useState('');
-  const [ownerId, setOwnerId] = useState('');
-  const [companyId, setCompanyId] = useState('');
+  const [q, setQ] = usePersistedState('ordi:view:crm.leads.q', '', stringPref());
+  const [status, setStatus] = usePersistedState('ordi:view:crm.leads.status', '', stringPref());
+  const [ownerId, setOwnerId] = usePersistedState('ordi:view:crm.leads.owner', '', stringPref());
+  const [companyId, setCompanyId] = usePersistedState('ordi:view:crm.leads.company', '', stringPref());
   const leadsQ = useLeads({ q, status, ownerId, companyId });
   const companiesQ = useCompanies();
   // Who is on the hook for each lead – the table had no way to tell, so a team
@@ -147,7 +148,10 @@ export function LeadsTab() {
 
   const columns = canWrite ? LEAD_COLUMNS_SELECTABLE : LEAD_COLUMNS;
 
-  const { sort, toggle: toggleSort } = useTableSort<LeadSortKey>();
+  const { sort, toggle: toggleSort } = useTableSort<LeadSortKey>({
+    key: 'ordi:view:crm.leads.sort',
+    keys: ['title', 'company', 'status', 'score', 'next', 'owner'],
+  });
   const statusRank = useStatusRank(LEAD_STATUSES);
   // The list is bounded at 200, so sorting happens on the loaded rows; the
   // truncation banner above the table already says when that is not everything.

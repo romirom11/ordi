@@ -38,9 +38,10 @@ import { TasksToolbar } from '../components/project/TasksToolbar';
 import type { LabelLite } from '../components/project/FilterPopover';
 import { useLabels } from '../lib/queries';
 import {
-  EMPTY_FILTERS, PRIORITIES, PRIORITY_LABEL_KEY, applyFilters, loadPrefs, orderTasks, savePrefs,
+  EMPTY_FILTERS, PRIORITIES, PRIORITY_LABEL_KEY, applyFilters, loadPrefs, orderTasks, sanitizeFilters, savePrefs,
   type Grouping, type TaskFilters, type TaskViewPrefs,
 } from '../components/project/taskViewPrefs';
+import { usePersistedState } from '../lib/prefs';
 import { useT, extendDict } from '../lib/i18n';
 import { DateField } from '../components/DatePicker';
 
@@ -475,8 +476,10 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, canWrite, 
   const qc = useQueryClient();
 
   const [prefs, setPrefsState] = useState<TaskViewPrefs>(() => loadPrefs(id));
-  const [filters, setFilters] = useState<TaskFilters>(EMPTY_FILTERS);
-  useEffect(() => { setPrefsState(loadPrefs(id)); setFilters(EMPTY_FILTERS); }, [id]);
+  // Filters persist per project, like the display prefs above them – leaving
+  // and coming back should not silently unfilter the list.
+  const [filters, setFilters] = usePersistedState<TaskFilters>(`ordi:tasksfilters:${id}`, EMPTY_FILTERS, sanitizeFilters);
+  useEffect(() => { setPrefsState(loadPrefs(id)); }, [id]);
   const updatePrefs = (patch: Partial<TaskViewPrefs>) =>
     setPrefsState((p) => { const next = { ...p, ...patch }; savePrefs(id, next); return next; });
 

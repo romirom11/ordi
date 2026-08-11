@@ -8,6 +8,7 @@ import { Button, Input, Select, Card, PageHeader, EmptyState, Reveal, Skeleton, 
 import { Dialog, ContextMenu, toast, type ContextMenuEntry } from '../components/overlays';
 import { Plus, Trash2, Wallet, AlertTriangle, CheckCircle2, Receipt, FileStack, Copy, ExternalLink, Link2 } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
+import { usePersistedState, oneOfPref, stringPref } from '../lib/prefs';
 import { RecurringExpensesSection } from '../components/finance/subscriptions';
 import { SortHeader, sortRows, useStatusRank, useTableSort } from '../components/tableSort';
 import { TransactionsTab, AddIncomeDialog } from '../components/finance/ledger';
@@ -118,7 +119,10 @@ type Tab = 'dashboard' | 'invoices' | 'quotes' | 'expenses' | 'transactions';
 export function FinancePage() {
   const t = useT();
   const can = useCan();
-  const [tab, setTab] = useState<Tab>('dashboard');
+  const [tab, setTab] = usePersistedState<Tab>(
+    'ordi:view:finance.tab', 'dashboard',
+    oneOfPref(['dashboard', 'invoices', 'quotes', 'expenses', 'transactions'], 'dashboard'),
+  );
   const [incomeOpen, setIncomeOpen] = useState(false);
   const tabs: { key: Tab; label: string }[] = [
     { key: 'dashboard', label: t('nav.dashboard') },
@@ -400,7 +404,7 @@ function InvoicesView() {
   const navigate = useNavigate();
   const open = useOpen();
   const can = useCan();
-  const [status, setStatus] = useState('');
+  const [status, setStatus] = usePersistedState('ordi:view:finance.invoices.status', '', stringPref());
   const [showForm, setShowForm] = useState(false);
   const companies = useCompanies();
   const invoices = useQuery({ queryKey: ['invoices', status], queryFn: () => api.get<{ data: DocRow[] }>('/invoices' + qs({ status })) });
@@ -446,7 +450,7 @@ function QuotesView() {
   const t = useT();
   const qc = useQueryClient();
   const can = useCan();
-  const [status, setStatus] = useState('');
+  const [status, setStatus] = usePersistedState('ordi:view:finance.quotes.status', '', stringPref());
   const [showForm, setShowForm] = useState(false);
   const companies = useCompanies();
   const quotes = useQuery({ queryKey: ['quotes', status], queryFn: () => api.get<{ data: DocRow[] }>('/quotes' + qs({ status })) });
@@ -502,7 +506,10 @@ function DocTable({ rows, loading, kind, onRow, companies }: {
   const companyName = (r: DocRow): string | null =>
     r.companyName ?? (r.companyId ? companies?.find((c) => c.id === r.companyId)?.name ?? null : null);
 
-  const { sort, toggle: toggleSort } = useTableSort<DocSortKey>();
+  const { sort, toggle: toggleSort } = useTableSort<DocSortKey>({
+    key: `ordi:view:finance.${kind}s.sort`,
+    keys: ['number', 'company', 'status', 'date', 'total'],
+  });
   const statusRank = useStatusRank(kind === 'invoice' ? INVOICE_STATUS_ORDER : QUOTE_STATUS_ORDER);
   const sorted = useMemo(() => sortRows(rows, sort, (r, key) => {
     switch (key) {

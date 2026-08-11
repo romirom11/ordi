@@ -3,9 +3,10 @@
  * comparator, and the clickable header. Shared by the CRM tables, the finance
  * lists and the time reports so every table sorts the same way.
  */
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { cn } from './ui';
+import { usePersistedState } from '../lib/prefs';
 
 export type SortDir = 'asc' | 'desc';
 export interface SortState<K extends string = string> { key: K; dir: SortDir }
@@ -13,9 +14,21 @@ export interface SortState<K extends string = string> { key: K; dir: SortDir }
 /**
  * First click ascending, second descending, third back to the server's
  * default order. Null when unsorted.
+ *
+ * Pass `persist` (an `ordi:view:*` scope plus the allowed keys) and the chosen
+ * sort survives leaving the page; the key list guards against a stale stored
+ * key after columns change.
  */
-export function useTableSort<K extends string>() {
-  const [sort, setSort] = useState<SortState<K> | null>(null);
+export function useTableSort<K extends string>(persist?: { key: string; keys: readonly K[] }) {
+  const [sort, setSort] = usePersistedState<SortState<K> | null>(
+    persist?.key,
+    null,
+    (raw) => {
+      const o = raw as { key?: unknown; dir?: unknown } | null;
+      if (!o || !persist?.keys.includes(o.key as K)) return null;
+      return o.dir === 'asc' || o.dir === 'desc' ? { key: o.key as K, dir: o.dir } : null;
+    },
+  );
   const toggle = (key: K) => setSort((prev) => {
     if (prev?.key !== key) return { key, dir: 'asc' };
     return prev.dir === 'asc' ? { key, dir: 'desc' } : null;

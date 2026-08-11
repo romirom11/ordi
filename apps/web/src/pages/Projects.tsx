@@ -20,6 +20,7 @@ import { ProjectContextMenu } from '../components/project/contextMenus';
 import { PRIORITIES, PRIORITY_LABEL_KEY } from '../components/project/taskViewPrefs';
 import { textToDoc } from '@ordi/shared';
 import { useT, extendDict } from '../lib/i18n';
+import { usePersistedState, oneOfPref } from '../lib/prefs';
 
 extendDict({
   en: {
@@ -133,7 +134,7 @@ export function ProjectsPage() {
   const canWrite = can('projects.write') || can('projects.create');
   const canDelete = can('projects.delete');
   const [creating, setCreating] = useState(false);
-  const [filter, setFilter] = useState<Filter>('all');
+  const [filter, setFilter] = usePersistedState<Filter>('ordi:view:projects.filter', 'all', oneOfPref(FILTERS, 'all'));
 
 
   const { data, isLoading } = useQuery<Project[]>({

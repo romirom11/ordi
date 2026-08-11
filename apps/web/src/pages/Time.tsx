@@ -10,6 +10,7 @@ import { Dialog, toast } from '../components/overlays';
 import { SortHeader, sortRows, useTableSort } from '../components/tableSort';
 import { ChevronLeft, ChevronRight, Plus, Play, Square, Clock, Timer } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
+import { usePersistedState, oneOfPref } from '../lib/prefs';
 import { DateField } from '../components/DatePicker';
 
 extendDict({
@@ -159,22 +160,24 @@ function weekRangeLabel(weekStart: string): string {
 export function TimePage() {
   const t = useT();
   const can = useCan();
-  const [tab, setTab] = useState<'week' | 'reports'>('week');
+  const [tab, setTab] = usePersistedState<'week' | 'reports'>('ordi:view:time.tab', 'week', oneOfPref(['week', 'reports'], 'week'));
   const canReports = can('time.read_all');
 
   const tabs = [
     { key: 'week' as const, label: t('time.myWeek') },
     ...(canReports ? [{ key: 'reports' as const, label: t('time.reports') }] : []),
   ];
+  // A remembered tab the user can no longer open falls back to their week.
+  const activeTab = tab === 'reports' && !canReports ? 'week' : tab;
 
   return (
     <div>
       <PageHeader
         title={t('nav.time')}
         breadcrumbs={<Breadcrumbs items={[{ label: t('nav.time') }]} />}
-        actions={<SegmentedControl options={tabs} value={tab} onChange={setTab} />}
+        actions={<SegmentedControl options={tabs} value={activeTab} onChange={setTab} />}
       />
-      <Reveal key={tab}>{tab === 'week' ? <MyWeekView /> : <ReportsView />}</Reveal>
+      <Reveal key={activeTab}>{activeTab === 'week' ? <MyWeekView /> : <ReportsView />}</Reveal>
     </div>
   );
 }
@@ -466,14 +469,19 @@ type ReportSortKey = 'name' | 'hours' | 'billable';
 
 function ReportsView() {
   const t = useT();
-  const [groupBy, setGroupBy] = useState<'project' | 'user' | 'company'>('project');
+  const [groupBy, setGroupBy] = usePersistedState<'project' | 'user' | 'company'>(
+    'ordi:view:time.reports.groupBy', 'project', oneOfPref(['project', 'user', 'company'], 'project'),
+  );
   const report = useQuery({
     queryKey: ['timeReport', groupBy],
     queryFn: () => api.get<{ data: ReportRow[] }>('/time/reports' + qs({ groupBy })),
   });
   const rows = report.data?.data ?? [];
   const hoursOf = (r: ReportRow): number => (r.hours != null ? Number(r.hours) : r.seconds != null ? Number(r.seconds) / 3600 : 0);
-  const { sort, toggle: toggleSort } = useTableSort<ReportSortKey>();
+  const { sort, toggle: toggleSort } = useTableSort<ReportSortKey>({
+    key: 'ordi:view:time.reports.sort',
+    keys: ['name', 'hours', 'billable'],
+  });
   const sorted = sortRows(rows, sort, (r, key) => {
     switch (key) {
       case 'name': return (r.label ?? r.name ?? r.key ?? '').toLowerCase() || null;

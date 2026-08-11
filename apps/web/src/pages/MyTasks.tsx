@@ -19,6 +19,7 @@ import {
   Badge, EmptyState, PageHeader, PriorityIcon, SegmentedControl, Skeleton, StatusIcon, cn, fmtDate,
 } from '../components/ui';
 import { useT, extendDict } from '../lib/i18n';
+import { usePersistedState, oneOfPref } from '../lib/prefs';
 
 extendDict({
   en: {
@@ -103,7 +104,7 @@ export function MyTasksPage() {
   const t = useT();
   const navigate = useNavigate();
   const open = useOpen();
-  const [tab, setTab] = useState<Tab>('assigned');
+  const [tab, setTab] = usePersistedState<Tab>('ordi:view:myTasks.tab', 'assigned', oneOfPref(['assigned', 'created'], 'assigned'));
 
   const { data, isLoading } = useQuery<MeTasksResponse>({
     queryKey: ['me-tasks'],
