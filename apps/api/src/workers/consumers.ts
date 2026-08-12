@@ -99,7 +99,12 @@ function notificationLink(type: string, payload: Record<string, unknown>): strin
     case 'task.assigned':
     case 'task.status_changed':
     case 'comment.mentioned':
-      return projectId && taskId ? appLink(`/projects/${projectId}/tasks/${taskId}`) : appLink('/my-tasks');
+      if (projectId && taskId) return appLink(`/projects/${projectId}/tasks/${taskId}`);
+      // A KB page mention lands on the page, not on an unrelated task list.
+      if (payload.pageId && payload.spaceId) {
+        return appLink(`/kb/${payload.spaceId as string}/${payload.pageId as string}`);
+      }
+      return appLink('/my-tasks');
     case 'invoice.paid':
       return payload.invoiceId ? appLink(`/finance/invoices/${payload.invoiceId as string}`) : appLink('/finance');
     case 'quote.accepted':
@@ -133,10 +138,48 @@ async function liveSalesDigest(userId: string, localDate: string): Promise<Recor
   return summary.total ? { userId, localDate, ...summary } : null;
 }
 
+/**
+ * Fill the template vars an event's payload does not carry. Task events emit
+ * lean payloads (ref/ids only), but the email says “{ref} «{title}» → {status}”
+ * – without this the reader gets empty quotes and a subject that trails off.
+ * Current DB state is the right answer here: the notification describes the
+ * task as it stands when the worker runs.
+ */
+async function enrichNotifyPayload(ev: DomainEvent): Promise<Record<string, unknown>> {
+  const { db } = getDb();
+  const p = { ...(ev.payload as Record<string, unknown>) };
+  const taskId = (p.taskId as string | undefined)
+    ?? (ev.aggregateType === 'task' ? ev.aggregateId : undefined);
+  if (taskId && (!p.title || !p.statusName)) {
+    const [task] = await db.select({ title: schema.tasks.title, statusId: schema.tasks.statusId })
+      .from(schema.tasks).where(eq(schema.tasks.id, taskId));
+    if (task) {
+      if (!p.title) p.title = task.title;
+      if (!p.statusName && task.statusId) {
+        const [st] = await db.select({ name: schema.taskStatuses.name })
+          .from(schema.taskStatuses).where(eq(schema.taskStatuses.id, task.statusId));
+        if (st?.name) p.statusName = st.name;
+      }
+    }
+  }
+  // A KB mention reuses the comment.mentioned template – give it the page title.
+  if (!p.title && p.pageId) {
+    const [page] = await db.select({ title: schema.kbPages.title })
+      .from(schema.kbPages).where(eq(schema.kbPages.id, p.pageId as string));
+    if (page?.title) p.title = page.title;
+  }
+  if (!p.actorName && ev.actorId && ev.actorType === 'user') {
+    const [actor] = await db.select({ name: schema.users.name })
+      .from(schema.users).where(eq(schema.users.id, ev.actorId));
+    if (actor?.name) p.actorName = actor.name;
+  }
+  return p;
+}
+
 const notifications: Consumer = {
   name: 'notifications',
   async handle(ev) {
-    const p = ev.payload as any;
+    const p = (await enrichNotifyPayload(ev)) as any;
     switch (ev.type) {
       case 'task.assigned':
         await notify(ev.id, p.assigneeIds ?? [], 'task.assigned', p.ref ?? null, p);
