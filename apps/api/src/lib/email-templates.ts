@@ -24,6 +24,18 @@ export interface Branding {
 
 const DEFAULT_ACCENT = '#5e6ad2';
 
+/**
+ * The stored logo is a data: URI (Settings downscales and inlines it), and
+ * mail clients – Gmail first among them – refuse data: images. Emails link
+ * the public logo route instead, which streams those same bytes.
+ */
+function emailLogoUrl(logo: string | null): string | null {
+  if (!logo) return null;
+  if (logo.startsWith('data:')) return appLink('/api/v1/branding/logo');
+  if (logo.startsWith('/')) return appLink(logo);
+  return logo;
+}
+
 /** Workspace name/logo/accent, with safe fallbacks when settings are missing. */
 export async function loadBranding(): Promise<Branding> {
   try {
@@ -33,7 +45,7 @@ export async function loadBranding(): Promise<Branding> {
     const accent = typeof invoiceSettings.accentColor === 'string' && /^#[0-9a-f]{3,8}$/i.test(invoiceSettings.accentColor)
       ? invoiceSettings.accentColor
       : DEFAULT_ACCENT;
-    return { workspaceName: row?.name || 'ordi', logo: row?.logo ?? null, accent };
+    return { workspaceName: row?.name || 'ordi', logo: emailLogoUrl(row?.logo ?? null), accent };
   } catch {
     return { workspaceName: 'ordi', logo: null, accent: DEFAULT_ACCENT };
   }

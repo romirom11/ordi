@@ -1,6 +1,6 @@
 import { pgTable, text, boolean, integer, jsonb, timestamp, index, primaryKey } from 'drizzle-orm/pg-core';
 import { pk, timestamps, createdBy, version, deletedAt, position } from './_shared';
-import { users } from './core';
+import { users, attachments } from './core';
 import { projects } from './projects';
 
 export const kbSpaces = pgTable('kb_spaces', {
@@ -29,8 +29,11 @@ export const kbPages = pgTable('kb_pages', {
   spaceId: text('space_id').notNull().references(() => kbSpaces.id, { onDelete: 'cascade' }),
   parentId: text('parent_id'),
   title: text('title').notNull(),
+  type: text('type').notNull().default('article'), // article | pdf
   body: jsonb('body').notNull().default({}),
   icon: text('icon'),
+  // The uploaded document a non-article page displays instead of a body.
+  fileId: text('file_id').references(() => attachments.id, { onDelete: 'set null' }),
   position: position(),
   isTemplate: boolean('is_template').notNull().default(false),
   published: boolean('published').notNull().default(true),

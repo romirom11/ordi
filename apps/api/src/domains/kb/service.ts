@@ -13,6 +13,7 @@ import { writeActivity } from '../../core/activity';
 import { emit } from '../../core/events';
 import { assertVersion } from '../../core/locking';
 import { assertSpace, assertProject, effectiveProjectRole, accessibleSpaceIds, editableSpaceIds } from '../../core/access';
+import { fileSrc } from '../../lib/file-tokens';
 
 const SOFT_LOCK_TTL_MS = 120 * 1000; // SOFT_LOCK_TTL_SECONDS
 
@@ -162,6 +163,28 @@ export function tiptapToMarkdown(doc: unknown): string {
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal access & data helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The uploaded document a 'pdf' page displays. The upload endpoint accepts any
+ * mime, so the pdf-ness is enforced here – where the page commits to rendering
+ * the file inline.
+ */
+async function assertPdfAttachment(fileId: string) {
+  const { db } = getDb();
+  const [att] = await db
+    .select()
+    .from(schema.attachments)
+    .where(eq(schema.attachments.id, fileId))
+    .limit(1);
+  if (!att) throw err.validation('Uploaded file not found');
+  if (att.mime !== 'application/pdf') throw err.validation('The file must be a PDF');
+  return att;
+}
+
+/** File payload the client renders the inline viewer from. */
+function pageFile(att: { id: string; filename: string; size: number; mime: string }) {
+  return { id: att.id, filename: att.filename, size: att.size, mime: att.mime, src: fileSrc(att.id) };
+}
 
 async function loadSpace(id: string): Promise<SpaceRow> {
   const { db } = getDb();
@@ -487,6 +510,13 @@ export async function createPage(actor: Actor, input: any): Promise<string> {
     .limit(1);
   const position = appendPosition(last?.position != null ? Number(last.position) : null);
 
+  const type = input.type ?? 'article';
+  const fileId = input.fileId ?? null;
+  if (type === 'pdf') {
+    if (!fileId) throw err.validation('A PDF page needs an uploaded file');
+    await assertPdfAttachment(fileId);
+  }
+
   const id = ulid();
   const body = input.body ?? {};
   await db.insert(schema.kbPages).values({
@@ -494,6 +524,8 @@ export async function createPage(actor: Actor, input: any): Promise<string> {
     spaceId: input.spaceId,
     parentId,
     title: input.title,
+    type,
+    fileId,
     body,
     icon: input.icon ?? null,
     position: String(position),
@@ -541,6 +573,15 @@ export async function getPage(actor: Actor, id: string, includeBacklinks: boolea
 
   const out: Record<string, unknown> = { ...pg, mentions, links, canEdit: isEditor };
 
+  if (pg.fileId) {
+    const [att] = await db
+      .select()
+      .from(schema.attachments)
+      .where(eq(schema.attachments.id, pg.fileId))
+      .limit(1);
+    if (att) out.file = pageFile(att);
+  }
+
   if (includeBacklinks) {
     // A backlink names the page that links here – filter by what the actor may
     // see of *that* page, or a private space's titles surface on public ones.
@@ -582,8 +623,15 @@ export async function updatePage(actor: Actor, id: string, input: any) {
   }
 
   const patch: Record<string, unknown> = {};
-  for (const k of ['title', 'body', 'icon', 'parentId', 'spaceId', 'published', 'visibility']) {
+  for (const k of ['title', 'body', 'icon', 'fileId', 'parentId', 'spaceId', 'published', 'visibility']) {
     if (input[k] !== undefined) patch[k] = input[k];
+  }
+  // Only a pdf page has a document to swap – and swapping must keep it a
+  // working viewer, so the replacement is validated like the original.
+  if (input.fileId !== undefined) {
+    if (before.type !== 'pdf') delete patch.fileId;
+    else if (!input.fileId) throw err.validation('A PDF page needs an uploaded file');
+    else await assertPdfAttachment(input.fileId);
   }
   await db
     .update(schema.kbPages)
@@ -748,6 +796,16 @@ export async function exportPage(actor: Actor, id: string): Promise<{ markdown: 
   await assertSpace(actor, pg.spaceId, 'viewer');
   const isEditor = await isSpaceEditor(actor, pg.spaceId);
   if (!canSeePage(pg, actor, isEditor)) throw err.notFound('Page not found');
+  // A pdf page has no rich-text body – export the (signed) link to the document.
+  if (pg.type === 'pdf' && pg.fileId) {
+    const [att] = await getDb().db
+      .select()
+      .from(schema.attachments)
+      .where(eq(schema.attachments.id, pg.fileId))
+      .limit(1);
+    const link = att ? `[${att.filename}](${fileSrc(att.id)})` : '';
+    return { markdown: `# ${pg.title}\n\n${link}`.trim() + '\n' };
+  }
   const body = tiptapToMarkdown(pg.body);
   const markdown = `# ${pg.title}\n\n${body}`.trim() + '\n';
   return { markdown };
@@ -913,6 +971,8 @@ export async function duplicatePage(actor: Actor, id: string, input: any): Promi
     spaceId: targetSpaceId,
     parentId,
     title,
+    type: source.type,
+    fileId: source.fileId,
     body: source.body,
     icon: source.icon,
     position: String(position),

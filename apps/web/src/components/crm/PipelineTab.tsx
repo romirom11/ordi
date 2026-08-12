@@ -11,6 +11,7 @@ import { useNavigate, useOpen } from '../../lib/router';
 import { useTabs } from '../../lib/tabs';
 import { useCan } from '../../lib/auth';
 import { useT } from '../../lib/i18n';
+import { usePersistedState, stringPref } from '../../lib/prefs';
 import { Avatar, EmptyState, Skeleton, Tooltip, cn, fmtMoney, fmtDate } from '../ui';
 import { ContextMenu, ConfirmDialog, toast, type ContextMenuEntry } from '../overlays';
 import { LostReasonDialog } from './dialogs';
@@ -47,7 +48,7 @@ export function PipelineTab() {
 
   // Filter by linked project: '' = all, 'none' = unlinked, otherwise a project id.
   // Chips appear only once at least one deal is linked – zero setup, zero noise.
-  const [projectFilter, setProjectFilter] = useState('');
+  const [projectFilter, setProjectFilter] = usePersistedState('ordi:view:crm.pipeline.project', '', stringPref());
   const linkedProjectIds = useMemo(
     () => [...new Set(allDeals.map((d) => d.projectId).filter((x): x is string => !!x))],
     [allDeals],

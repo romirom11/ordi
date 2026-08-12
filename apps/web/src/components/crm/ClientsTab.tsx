@@ -10,6 +10,7 @@ import { useTabs } from '../../lib/tabs';
 import { useCan } from '../../lib/auth';
 import { appOrigin, api, ApiError } from '../../lib/api';
 import { useT } from '../../lib/i18n';
+import { usePersistedState, stringPref } from '../../lib/prefs';
 import { Avatar, Button, Checkbox, Input, EmptyState, Skeleton, Tooltip, cn, fmtMoney } from '../ui';
 import { ContextMenu, ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, toast, type ContextMenuEntry } from '../overlays';
 import { BulkBar, RowCheckbox, bulkMessage, runBulk, useSelection } from '../bulk';
@@ -52,8 +53,8 @@ export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
   const tabs = useTabs();
   const can = useCan();
   const qc = useQueryClient();
-  const [q, setQ] = useState('');
-  const [status, setStatus] = useState('');
+  const [q, setQ] = usePersistedState('ordi:view:crm.clients.q', '', stringPref());
+  const [status, setStatus] = usePersistedState('ordi:view:crm.clients.status', '', stringPref());
   const [toDelete, setToDelete] = useState<Company | null>(null);
   const debouncedQ = useDebounced(q);
 
@@ -87,7 +88,10 @@ export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
   );
   const userMap = useUserMap();
 
-  const { sort, toggle: toggleSort } = useTableSort<CompanySortKey>();
+  const { sort, toggle: toggleSort } = useTableSort<CompanySortKey>({
+    key: 'ordi:view:crm.clients.sort',
+    keys: ['name', 'status', 'deals', 'owner'],
+  });
   const statusRank = useStatusRank(COMPANY_STATUSES);
   const sortedCompanies = useMemo(() => sortRows(companies, sort, (c, key) => {
     switch (key) {

@@ -16,6 +16,7 @@ import {
 import { api, qs, ApiError } from '../../lib/api';
 import { useCan } from '../../lib/auth';
 import { useT, extendDict } from '../../lib/i18n';
+import { usePersistedState, stringPref } from '../../lib/prefs';
 import {
   Badge, Button, Card, EmptyState, Input, Select, Skeleton, Spinner, cn, fmtMoney, fmtDate,
 } from '../ui';
@@ -152,9 +153,9 @@ export function TransactionsTab() {
   const t = useT();
   const can = useCan();
   const qc = useQueryClient();
-  const [accountId, setAccountId] = useState('');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
+  const [accountId, setAccountId] = usePersistedState('ordi:view:finance.ledger.account', '', stringPref());
+  const [from, setFrom] = usePersistedState('ordi:view:finance.ledger.from', '', stringPref());
+  const [to, setTo] = usePersistedState('ordi:view:finance.ledger.to', '', stringPref());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [toVoid, setToVoid] = useState<LedgerTx | null>(null);
   const [incomeOpen, setIncomeOpen] = useState(false);

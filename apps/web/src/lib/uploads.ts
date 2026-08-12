@@ -61,6 +61,18 @@ export async function uploadImage(file: File): Promise<Uploaded> {
   return uploadAttachment(file);
 }
 
+/** PDFs only – a knowledge-base pdf page renders its file inline and nothing else would. */
+export async function uploadPdf(file: File): Promise<Uploaded> {
+  const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+  if (!isPdf) throw new UploadError('uploads.notPdf');
+  // Some platforms hand over a .pdf with an empty mime; the server keys the
+  // inline viewer off the stored mime, so pin it here.
+  if (file.type !== 'application/pdf') {
+    file = new File([file], file.name, { type: 'application/pdf' });
+  }
+  return uploadAttachment(file);
+}
+
 /**
  * Turn a stored file path into something an <img> can load.
  *

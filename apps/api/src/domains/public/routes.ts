@@ -83,6 +83,24 @@ export function publicRoutes() {
     return c.body(object.body);
   });
 
+  /**
+   * Workspace logo for mail clients. The logo lives in settings as a data:
+   * URI, which Gmail and friends refuse to render inside an email – so emails
+   * link here and the same bytes stream from the app's own origin. The logo
+   * already shows on public invoice/quote pages, so this leaks nothing new.
+   */
+  app.get('/branding/logo', async (c) => {
+    const { db } = getDb();
+    const [ws] = await db.select({ logo: schema.workspaceSettings.logo })
+      .from(schema.workspaceSettings).where(eq(schema.workspaceSettings.id, 'workspace'));
+    const m = /^data:(image\/[\w.+-]+);base64,([A-Za-z0-9+/=\s]+)$/.exec(ws?.logo ?? '');
+    if (!m) throw err.notFound();
+    c.header('Content-Type', m[1]!);
+    // Not immutable – a replaced logo should show up in new opens within the hour.
+    c.header('Cache-Control', 'public, max-age=3600');
+    return c.body(Uint8Array.from(Buffer.from(m[2]!, 'base64')));
+  });
+
   app.get('/i/:token', async (c) => {
     const { db } = getDb();
     const token = c.req.param('token');

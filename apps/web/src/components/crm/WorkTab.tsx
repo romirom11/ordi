@@ -3,6 +3,7 @@ import { AlertCircle, CalendarClock, CalendarDays, Check, Clock3, Inbox, PauseCi
 import { useNavigate, useOpen } from '../../lib/router';
 import { useCan } from '../../lib/auth';
 import { useT } from '../../lib/i18n';
+import { usePersistedState, oneOfPref } from '../../lib/prefs';
 import { Button, EmptyState, Skeleton, fmtRelative } from '../ui';
 import { SearchSelect } from '../SearchSelect';
 import { CompleteActivityDialog, ScheduleActivityDialog } from './SalesActivityPanel';
@@ -15,7 +16,7 @@ export function WorkTab() {
   const t = useT();
   const can = useCan();
   const navigate = useNavigate();
-  const [scope, setScope] = useState<'mine' | 'all'>('mine');
+  const [scope, setScope] = usePersistedState<'mine' | 'all'>('ordi:view:crm.work.scope', 'mine', oneOfPref(['mine', 'all'], 'mine'));
   const workQ = useSalesWork(scope);
   const [complete, setComplete] = useState<SalesActivity | null>(null);
   const [schedule, setSchedule] = useState<SalesWorkItem | null>(null);

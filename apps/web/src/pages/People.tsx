@@ -17,6 +17,7 @@ import { CreateProfileDialog, type CreateProfileTarget } from '../components/peo
 import { OrgStructureView } from '../components/people/OrgStructureView';
 import { useLeaveTypes } from '../lib/queries';
 import { useT, extendDict } from '../lib/i18n';
+import { usePersistedState, oneOfPref, stringPref } from '../lib/prefs';
 import { DateField } from '../components/DatePicker';
 
 extendDict({
@@ -141,7 +142,10 @@ type Tab = 'employees' | 'leave' | 'recruiting' | 'org' | 'dashboard';
 export function PeoplePage() {
   const t = useT();
   const can = useCan();
-  const [tab, setTab] = useState<Tab>('employees');
+  const [tab, setTab] = usePersistedState<Tab>(
+    'ordi:view:people.tab', 'employees',
+    oneOfPref(['employees', 'leave', 'recruiting', 'org', 'dashboard'], 'employees'),
+  );
 
   if (!can('people.read')) {
     return <EmptyState icon={<Users size={20} />} title={t('resourcing.noAccess')} hint={t('people.noAccessHint')} />;
@@ -154,18 +158,20 @@ export function PeoplePage() {
     { key: 'org', label: t('people.org'), icon: <Network size={13} />, show: can('people.write') },
     { key: 'dashboard', label: t('nav.dashboard'), icon: <LayoutGrid size={13} />, show: true },
   ];
+  // A remembered tab the user can no longer open falls back to the directory.
+  const activeTab = tabs.some((tb) => tb.key === tab && tb.show) ? tab : 'employees';
 
   return (
     <div>
       <PageHeader
         title={t('nav.people')}
-        actions={<SegmentedControl options={tabs.filter((tb) => tb.show)} value={tab} onChange={(v) => setTab(v as Tab)} />}
+        actions={<SegmentedControl options={tabs.filter((tb) => tb.show)} value={activeTab} onChange={(v) => setTab(v as Tab)} />}
       />
-      {tab === 'employees' && <DirectoryView />}
-      {tab === 'leave' && <LeaveView />}
-      {tab === 'recruiting' && can('people.recruit') && <RecruitingView />}
-      {tab === 'org' && can('people.write') && <OrgStructureView />}
-      {tab === 'dashboard' && <PeopleDashboardView />}
+      {activeTab === 'employees' && <DirectoryView />}
+      {activeTab === 'leave' && <LeaveView />}
+      {activeTab === 'recruiting' && can('people.recruit') && <RecruitingView />}
+      {activeTab === 'org' && can('people.write') && <OrgStructureView />}
+      {activeTab === 'dashboard' && <PeopleDashboardView />}
     </div>
   );
 }
@@ -190,8 +196,11 @@ function DirectoryView() {
   const open = useOpen();
   const tabs = useTabs();
   const canWrite = can('people.write');
-  const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState<DirFilter>('all');
+  const [query, setQuery] = usePersistedState('ordi:view:people.directory.q', '', stringPref());
+  const [filter, setFilter] = usePersistedState<DirFilter>(
+    'ordi:view:people.directory.filter', 'all',
+    oneOfPref(['all', 'active', 'deactivated', 'no_profile'], 'all'),
+  );
   const [createTarget, setCreateTarget] = useState<CreateProfileTarget | null>(null);
 
   const directory = useQuery({ queryKey: ['peopleDirectory'], queryFn: () => api.get<{ data: DirectoryRow[] }>('/people/directory') });
@@ -494,7 +503,7 @@ function RecruitingView() {
   const qc = useQueryClient();
   const openings = useQuery({ queryKey: ['jobOpenings'], queryFn: () => api.get<{ data: JobOpening[] }>('/job-openings') });
   const stages = useQuery({ queryKey: ['applicantStages'], queryFn: () => api.get<{ data: ApplicantStage[] }>('/applicant-stages') });
-  const [openingId, setOpeningId] = useState<string>('');
+  const [openingId, setOpeningId] = usePersistedState('ordi:view:people.recruiting.opening', '', stringPref());
   const list = openings.data?.data ?? [];
   const activeOpening = openingId || list[0]?.id || '';
   const applicants = useQuery({
