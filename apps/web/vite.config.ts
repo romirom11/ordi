@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath, URL } from 'node:url';
 import { readFileSync } from 'node:fs';
@@ -10,6 +10,8 @@ const pkg = JSON.parse(readFileSync(fileURLToPath(new URL('./package.json', impo
 export default defineConfig({
   plugins: [react()],
   define: { __APP_VERSION__: JSON.stringify(pkg.version) },
+  // Unit tests only – e2e/*.spec.ts belong to Playwright, not vitest.
+  test: { include: ['src/**/*.test.{ts,tsx}'] },
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
