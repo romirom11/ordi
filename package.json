@@ -1,6 +1,6 @@
 {
   "name": "ordi",
-  "version": "1.24.0",
+  "version": "1.25.0",
   "private": true,
   "description": "The operations system for small agencies and product teams: projects, CRM, knowledge base, time, finance and people in one self-hosted app.",
   "license": "AGPL-3.0-only",

@@ -3,6 +3,24 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.25.0
+
+- **One dashboard for everyone**: personal work tiles plus a two-week team
+  card (absences, holidays, birthdays) deep-linking the HR calendar; the
+  role-gated finance/pipeline widgets moved out to Finance and custom
+  dashboards. Actor avatars in the activity feed; the onboarding checklist
+  is admin-only and disappears when complete.
+- **Personal contacts move to custom fields**: the employee card stops
+  hardcoding personal email, phone and telegram (the v1.24.0 telegram column
+  is dropped); it keeps the work email, birthday and documents.
+- **Icons for custom fields and field groups**, picked from a curated set in
+  their dialogs and shown on cards, the questionnaire, settings and the
+  access matrix.
+- **Date picker** gains year and month grids behind its title – no more
+  paging month by month to reach a birth year; comment avatars show profile
+  photos; the people directory prefers the HR card's full name over the
+  account name.
+
 ## v1.24.0
 
 - **The knowledge base hosts PDFs**: a page is an article or a PDF document,
@@ -17,15 +35,11 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   principal; `people.write` roles keep full access; enforcement is
   server-side. Self-writable groups form the **HR questionnaire** on the
   profile page, with a fill-status badge and a last-updated stamp on the card.
-- The **employee card** gains the work email, birthday and a documents
-  section with inline PDF preview; personal contacts live in custom fields.
-  Fields and groups can carry **icons** from a curated set.
+- The **employee card** gains work/personal email, phone, telegram, birthday
+  and a documents section with inline PDF preview.
 - **Custom fields render everywhere** – employee card, companies, projects,
   tasks, invoices, and contacts via their dialog (previously leads and deals
   only).
-- **One dashboard for everyone**: personal work tiles plus a two-week team
-  card (absences, holidays, birthdays) that deep-links the HR calendar;
-  finance/pipeline tiles moved out to Finance and custom dashboards.
 - **List views remember their state**: sorting, filters, search and tabs
   survive navigation across CRM, projects, finance, time, people and
   per-project task filters.
