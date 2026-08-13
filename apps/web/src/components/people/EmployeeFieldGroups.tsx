@@ -14,6 +14,7 @@ import {
   CustomFieldsGrid, fieldValueIsEmpty, useFieldDefs, type FieldDef,
 } from '../crm/CustomFieldsSection';
 import { SectionHeader } from '../crm/detail';
+import { FieldIcon } from '../fieldIcons';
 
 extendDict({
   en: {
@@ -24,7 +25,7 @@ extendDict({
   },
 });
 
-export interface FieldGroupLite { id: string; name: string; position: number }
+export interface FieldGroupLite { id: string; name: string; icon?: string | null; position: number }
 
 export function useFieldGroups(entityType: string) {
   return useQuery<FieldGroupLite[]>({
@@ -67,7 +68,7 @@ export function EmployeeFieldGroups({ values, fieldAccess, canWrite, questionnai
         if (shown.length === 0) return null;
         return (
           <div key={g.id}>
-            <SectionHeader icon={<SlidersHorizontal size={15} />} title={g.name} />
+            <SectionHeader icon={<FieldIcon name={g.icon} size={15} fallback={<SlidersHorizontal size={15} />} />} title={g.name} />
             <Card className="p-4">
               <CustomFieldsGrid defs={shown} values={values} editable={editable} onSave={onSave} />
             </Card>

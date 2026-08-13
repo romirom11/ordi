@@ -171,7 +171,6 @@ export async function createEmployee(actor: Actor, input: any): Promise<string> 
     lastName: input.lastName ?? '',
     email: input.email ?? null,
     phone: input.phone ?? null,
-    telegram: input.telegram ?? null,
     positionId: input.positionId ?? null,
     departmentId: input.departmentId ?? null,
     employmentType: input.employmentType ?? 'full_time',
@@ -194,7 +193,7 @@ export async function updateEmployee(actor: Actor, id: string, input: any) {
   const before = await loadEmployee(id);
   assertVersion(before, input.version, stripEmployee(actor, before));
   const patch: Record<string, unknown> = {};
-  for (const k of ['userId', 'firstName', 'lastName', 'email', 'phone', 'telegram', 'positionId', 'departmentId',
+  for (const k of ['userId', 'firstName', 'lastName', 'email', 'phone', 'positionId', 'departmentId',
     'employmentType', 'managerId', 'birthday', 'joinDate', 'probationEnd', 'status', 'emergencyContact', 'sensitive', 'customFields']) {
     if (input[k] !== undefined) patch[k] = input[k];
   }
@@ -514,11 +513,12 @@ export async function myHrFields(actor: Actor) {
     .map((g) => ({
       id: g.id,
       name: g.name,
+      icon: g.icon,
       level: selfLevels.get(g.id)!,
       fields: defs
         .filter((d) => d.groupId === g.id && !d.deprecated)
         .map((d) => ({
-          id: d.id, key: d.key, label: d.label, type: d.type,
+          id: d.id, key: d.key, label: d.label, type: d.type, icon: d.icon,
           options: d.options, required: d.required,
           value: cf[d.key] ?? null,
         })),

@@ -1,5 +1,5 @@
 {
-  "id": "89fe5743-72e9-461d-bc79-7f5da9019ccf",
+  "id": "6cafaa58-cb53-40b2-ab59-9d9b8c8d7222",
   "prevId": "5207b872-9127-4665-b268-24bda820c5c0",
   "version": "7",
   "dialect": "postgresql",
@@ -371,6 +371,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "icon": {
+          "name": "icon",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "group_id": {
           "name": "group_id",
           "type": "text",
@@ -559,6 +565,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "icon": {
+          "name": "icon",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "position": {
           "name": "position",
@@ -10950,12 +10962,6 @@
         },
         "phone": {
           "name": "phone",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "telegram": {
-          "name": "telegram",
           "type": "text",
           "primaryKey": false,
           "notNull": false

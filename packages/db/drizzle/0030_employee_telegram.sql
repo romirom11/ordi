@@ -1,1 +1,0 @@
-ALTER TABLE "employees" ADD COLUMN "telegram" text;

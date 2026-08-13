@@ -38,6 +38,7 @@ export function customFieldsRoutes() {
       options: body.options ?? [], required: body.required, position: body.position,
       showInList: body.showInList, isSortable: body.isSortable, indexed: body.indexed,
       groupId: body.groupId ?? null,
+      icon: body.icon ?? null,
     });
     invalidateRegistry(body.entityType);
     if (body.indexed) await ensureExpressionIndex(body.entityType, body.key, body.type);
@@ -67,6 +68,7 @@ export function customFieldsRoutes() {
       ...(patch.indexed !== undefined ? { indexed: patch.indexed } : {}),
       ...(patch.deprecated !== undefined ? { deprecated: patch.deprecated } : {}),
       ...(patch.groupId !== undefined ? { groupId: patch.groupId || null } : {}),
+      ...(patch.icon !== undefined ? { icon: patch.icon || null } : {}),
     }).where(eq(schema.customFieldDefinitions.id, id));
     invalidateRegistry(def.entityType);
     if (patch.indexed === true) await ensureExpressionIndex(def.entityType, def.key, def.type as any);

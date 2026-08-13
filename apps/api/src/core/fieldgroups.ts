@@ -23,6 +23,7 @@ export interface FieldGroupRow {
   id: string;
   entityType: string;
   name: string;
+  icon: string | null;
   position: number;
 }
 
@@ -42,6 +43,7 @@ export async function loadFieldGroups(): Promise<{ groups: FieldGroupRow[]; gran
     id: schema.customFieldGroups.id,
     entityType: schema.customFieldGroups.entityType,
     name: schema.customFieldGroups.name,
+    icon: schema.customFieldGroups.icon,
     position: schema.customFieldGroups.position,
   }).from(schema.customFieldGroups).orderBy(asc(schema.customFieldGroups.position), asc(schema.customFieldGroups.name));
   const grants = await db.select({

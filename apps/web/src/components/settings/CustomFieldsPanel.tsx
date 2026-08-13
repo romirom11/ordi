@@ -15,6 +15,7 @@ import { api, ApiError, qs } from '../../lib/api';
 import { Badge, Button, EmptyState, IconButton, Input, Select, Skeleton, Spinner, Switch } from '../ui';
 import { Dialog, ConfirmDialog, toast } from '../overlays';
 import { SectionHead, Field, RowList, AnimatedRow, Disclosure } from './primitives';
+import { FieldIcon, IconPicker } from '../fieldIcons';
 import { useT, extendDict } from '../../lib/i18n';
 
 extendDict({
@@ -86,10 +87,10 @@ interface CustomField {
   id: string; key: string; label?: string | null; type?: string | null;
   options?: { value: string; label: string }[] | null;
   required?: boolean; position?: number; showInList?: boolean; isSortable?: boolean;
-  indexed?: boolean; deprecated?: boolean; groupId?: string | null;
+  indexed?: boolean; deprecated?: boolean; groupId?: string | null; icon?: string | null;
 }
 
-interface FieldGroup { id: string; name: string; position?: number }
+interface FieldGroup { id: string; name: string; icon?: string | null; position?: number }
 
 /** Group management + the access story live on employees for now. */
 const GROUPED_ENTITY = 'employees';
@@ -152,6 +153,7 @@ export function CustomFieldsPanel() {
         <RowList>
           {rows.map((f, i) => (
             <AnimatedRow key={f.id} index={i} className="group flex items-center gap-3 border-b border-border px-3 py-2.5 text-[13px] last:border-0">
+              <FieldIcon name={f.icon} size={14} className="shrink-0 text-faint" />
               <span className="font-mono text-[11px] text-muted-foreground">{f.key}</span>
               <span className={f.deprecated ? 'flex-1 text-muted-foreground line-through' : 'flex-1'}>{f.label ?? '–'}</span>
               {groupName(f.groupId) && <Badge className="bg-primary/10 text-primary">{groupName(f.groupId)}</Badge>}
@@ -203,6 +205,7 @@ function FieldGroupsBlock({ groups, entityType }: { groups: FieldGroup[]; entity
   const qc = useQueryClient();
   const [dialog, setDialog] = useState<{ group: FieldGroup | null } | null>(null);
   const [name, setName] = useState('');
+  const [icon, setIcon] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<FieldGroup | null>(null);
 
   const invalidate = () => {
@@ -212,8 +215,8 @@ function FieldGroupsBlock({ groups, entityType }: { groups: FieldGroup[]; entity
 
   const save = useMutation({
     mutationFn: () => dialog?.group
-      ? api.patch(`/custom-field-groups/${dialog.group.id}`, { name: name.trim() })
-      : api.post('/custom-field-groups', { entityType, name: name.trim(), position: groups.length }),
+      ? api.patch(`/custom-field-groups/${dialog.group.id}`, { name: name.trim(), icon })
+      : api.post('/custom-field-groups', { entityType, name: name.trim(), icon, position: groups.length }),
     onSuccess: () => { setDialog(null); invalidate(); toast(t('common.saved')); },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('settings.saveFailed')),
   });
@@ -227,7 +230,7 @@ function FieldGroupsBlock({ groups, entityType }: { groups: FieldGroup[]; entity
     <div className="mt-8">
       <div className="mb-1 flex items-center justify-between">
         <h3 className="text-sm font-semibold">{t('cfields.groups')}</h3>
-        <Button size="sm" variant="outline" onClick={() => { setName(''); setDialog({ group: null }); }}>
+        <Button size="sm" variant="outline" onClick={() => { setName(''); setIcon(null); setDialog({ group: null }); }}>
           <Plus size={13} /> {t('cfields.addGroup')}
         </Button>
       </div>
@@ -236,9 +239,10 @@ function FieldGroupsBlock({ groups, entityType }: { groups: FieldGroup[]; entity
         <RowList>
           {groups.map((g, i) => (
             <AnimatedRow key={g.id} index={i} className="group flex items-center gap-3 border-b border-border px-3 py-2.5 text-[13px] last:border-0">
+              <FieldIcon name={g.icon} size={14} className="shrink-0 text-faint" />
               <span className="flex-1 font-medium">{g.name}</span>
               <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100">
-                <IconButton size="sm" aria-label={t('cfields.renameGroup')} onClick={() => { setName(g.name); setDialog({ group: g }); }}><Pencil size={14} /></IconButton>
+                <IconButton size="sm" aria-label={t('cfields.renameGroup')} onClick={() => { setName(g.name); setIcon(g.icon ?? null); setDialog({ group: g }); }}><Pencil size={14} /></IconButton>
                 <IconButton size="sm" aria-label={t('common.delete')} className="text-destructive" onClick={() => setDeleting(g)}><Trash2 size={14} /></IconButton>
               </div>
             </AnimatedRow>
@@ -249,7 +253,10 @@ function FieldGroupsBlock({ groups, entityType }: { groups: FieldGroup[]; entity
       <Dialog open={!!dialog} onClose={() => setDialog(null)} title={dialog?.group ? t('cfields.renameGroup') : t('cfields.addGroup')} width={380}>
         <form className="space-y-3 p-4" onSubmit={(e: FormEvent) => { e.preventDefault(); if (name.trim()) save.mutate(); }}>
           <Field label={t('cfields.groupName')}>
-            <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+            <div className="flex items-center gap-2">
+              <IconPicker value={icon} onChange={setIcon} />
+              <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} className="flex-1" />
+            </div>
           </Field>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={() => setDialog(null)}>{t('common.cancel')}</Button>
@@ -291,6 +298,7 @@ function FieldDialog({ open, entityType, field, groups, onClose, onSaved }: {
   const [indexed, setIndexed] = useState(false);
   const [deprecated, setDeprecated] = useState(false);
   const [groupId, setGroupId] = useState('');
+  const [icon, setIcon] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -304,6 +312,7 @@ function FieldDialog({ open, entityType, field, groups, onClose, onSaved }: {
     setIndexed(field?.indexed ?? false);
     setDeprecated(field?.deprecated ?? false);
     setGroupId(field?.groupId ?? '');
+    setIcon(field?.icon ?? null);
   }, [open, field]);
 
   const hasOptions = OPTION_TYPES.includes(type);
@@ -317,8 +326,8 @@ function FieldDialog({ open, entityType, field, groups, onClose, onSaved }: {
       const opts = hasOptions ? { options: cleanOptions } : {};
       const group = groups.length ? { groupId: groupId || null } : {};
       return field
-        ? api.patch(`/custom-fields/${field.id}`, { label: label.trim(), ...opts, ...flags, ...group, deprecated })
-        : api.post('/custom-fields', { entityType, key, label: label.trim(), type, ...opts, ...flags, ...group });
+        ? api.patch(`/custom-fields/${field.id}`, { label: label.trim(), icon, ...opts, ...flags, ...group, deprecated })
+        : api.post('/custom-fields', { entityType, key, label: label.trim(), type, icon, ...opts, ...flags, ...group });
     },
     onSuccess: () => { onSaved(); toast(t('common.saved')); onClose(); },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('settings.saveFailed')),
@@ -348,7 +357,10 @@ function FieldDialog({ open, entityType, field, groups, onClose, onSaved }: {
         <p className="-mt-2 text-xs text-muted-foreground">{field ? t('cfields.immutableHint') : t('cfields.keyHint')}</p>
 
         <Field label={t('settings.fieldLabel')}>
-          <Input autoFocus={!!field} value={label} onChange={(e) => setLabel(e.target.value)} />
+          <div className="flex items-center gap-2">
+            <IconPicker value={icon} onChange={setIcon} />
+            <Input autoFocus={!!field} value={label} onChange={(e) => setLabel(e.target.value)} className="flex-1" />
+          </div>
         </Field>
 
         {groups.length > 0 && (
