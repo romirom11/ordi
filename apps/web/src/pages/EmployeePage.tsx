@@ -8,6 +8,7 @@ import {
   fmtMoney, fmtDate, cn,
 } from '../components/ui';
 import { DropdownMenu, MenuItem, toast } from '../components/overlays';
+import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
 import { CompensationDialog } from '../components/people/CompensationDialog';
 import { EditEmployeeDialog } from '../components/people/EditEmployeeDialog';
 import {
@@ -63,6 +64,7 @@ interface EmployeeDetail {
   phone?: string | null; positionId?: string | null; departmentId?: string | null; employmentType?: string | null;
   managerId?: string | null; joinDate?: string | null; probationEnd?: string | null; exitDate?: string | null;
   status?: string | null; version?: number; user?: EmployeeUser | null;
+  customFields?: Record<string, unknown>;
 }
 interface Compensation { id?: string; compType?: string; amount?: number | string; currency?: string; effectiveFrom?: string | null; effectiveTo?: string | null }
 interface Position { id: string; title: string }
@@ -109,6 +111,13 @@ export function EmployeePage({ id }: { id: string }) {
     queryKey: ['compensation', id],
     queryFn: () => api.get<{ data: Compensation[] }>(`/employees/${id}/compensation`),
     enabled: canComp,
+  });
+
+  const saveCustomFields = useMutation({
+    mutationFn: (customFields: Record<string, unknown>) =>
+      api.patch(`/employees/${id}`, { customFields, version: employee.data?.version }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['employee', id] }),
+    onError: () => toast.error(t('people.editFailed')),
   });
 
   const lifecycle = useMutation({
@@ -219,6 +228,16 @@ export function EmployeePage({ id }: { id: string }) {
             {e.exitDate && <InfoRow icon={<CalendarClock size={13} />} label={t('people.exitDate')} value={fmtDate(e.exitDate)} />}
           </div>
         </section>
+
+        {/* Workspace-defined employee fields – same card leads and deals use */}
+        <div className="mb-6">
+          <CustomFieldsSection
+            entityType="employees"
+            values={e.customFields}
+            editable={canWrite}
+            onSave={(cf) => saveCustomFields.mutate(cf)}
+          />
+        </div>
 
         {/* Compensation – only rendered when the viewer can read compensation */}
         {canComp && (

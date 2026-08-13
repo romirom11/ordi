@@ -1,12 +1,14 @@
 /**
- * Workspace-defined custom fields for a CRM record (lead or deal), rendered as
- * a two-column card in the wide content column. Extracted from the deal page
- * when leads gained custom fields, so both records edit them identically.
+ * Workspace-defined custom fields for a record, rendered as a two-column card
+ * in the wide content column. Extracted from the deal page when leads gained
+ * custom fields; any entity from the custom-fields registry (leads, deals,
+ * employees, …) edits them identically.
  *
  * Values carry free text and URLs – prose-length content that truncated into
  * unreadability in the 320px rail, which is why this lives in the wide column.
  */
 import { useState } from 'react';
+import type { CustomFieldEntity } from '@ordi/shared';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, SlidersHorizontal } from 'lucide-react';
 import { api } from '../../lib/api';
@@ -23,7 +25,7 @@ export interface FieldDef {
 }
 
 export function CustomFieldsSection({ entityType, values: valuesProp, editable, onSave }: {
-  entityType: 'leads' | 'deals';
+  entityType: CustomFieldEntity;
   values?: Record<string, unknown>;
   editable: boolean;
   /** Receives the full value map with the changed key applied; the API merges by key. */
