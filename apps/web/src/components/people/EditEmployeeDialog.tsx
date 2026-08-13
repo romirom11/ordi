@@ -41,6 +41,7 @@ export interface EditableEmployee {
   id: string; firstName?: string | null; lastName?: string | null; email?: string | null;
   phone?: string | null; positionId?: string | null; departmentId?: string | null;
   managerId?: string | null; employmentType?: string | null; joinDate?: string | null;
+  birthday?: string | null;
   version?: number;
 }
 
@@ -59,6 +60,7 @@ function formFrom(e: EditableEmployee) {
     managerId: e.managerId ?? '',
     employmentType: e.employmentType ?? 'full_time',
     joinDate: e.joinDate ?? '',
+    birthday: e.birthday ?? '',
   };
 }
 
@@ -91,6 +93,7 @@ export function EditEmployeeDialog({ employee, open, onClose }: {
       managerId: form.managerId || null,
       employmentType: form.employmentType,
       joinDate: form.joinDate || null,
+      birthday: form.birthday || null,
       ...(typeof employee.version === 'number' ? { version: employee.version } : {}),
     }),
     onSuccess: () => {
@@ -171,6 +174,12 @@ export function EditEmployeeDialog({ employee, open, onClose }: {
           <div className="space-y-1">
             {label(t('people.joinDate'))}
             <DateField value={form.joinDate} onChange={(v) => setForm((f) => ({ ...f, joinDate: v ?? '' }))} />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            {label(t('people.birthday'))}
+            <DateField value={form.birthday} onChange={(v) => setForm((f) => ({ ...f, birthday: v ?? '' }))} />
           </div>
         </div>
         <div className="flex justify-end gap-2 pt-1">

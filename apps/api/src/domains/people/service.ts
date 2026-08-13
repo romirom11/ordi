@@ -153,6 +153,7 @@ export async function createEmployee(actor: Actor, input: any): Promise<string> 
     departmentId: input.departmentId ?? null,
     employmentType: input.employmentType ?? 'full_time',
     managerId: input.managerId ?? null,
+    birthday: input.birthday ?? null,
     joinDate: input.joinDate ?? null,
     probationEnd: input.probationEnd ?? null,
     status: input.status ?? 'active',
@@ -171,7 +172,7 @@ export async function updateEmployee(actor: Actor, id: string, input: any) {
   assertVersion(before, input.version, stripEmployee(actor, before));
   const patch: Record<string, unknown> = {};
   for (const k of ['userId', 'firstName', 'lastName', 'email', 'phone', 'positionId', 'departmentId',
-    'employmentType', 'managerId', 'joinDate', 'probationEnd', 'status', 'emergencyContact', 'sensitive', 'customFields']) {
+    'employmentType', 'managerId', 'birthday', 'joinDate', 'probationEnd', 'status', 'emergencyContact', 'sensitive', 'customFields']) {
     if (input[k] !== undefined) patch[k] = input[k];
   }
   await db.update(schema.employees).set(patch)
