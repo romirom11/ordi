@@ -265,7 +265,7 @@ export function EmployeePage({ id }: { id: string }) {
           onSave={(cf) => saveCustomFields.mutate(cf)}
         />
 
-        <EmployeeDocuments employeeId={id} canWrite={canWrite} />
+        {can('people.read_documents') && <EmployeeDocuments employeeId={id} canWrite={canWrite} />}
 
         {/* Compensation – only rendered when the viewer can read compensation */}
         {canComp && (

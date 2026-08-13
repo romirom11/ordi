@@ -5,7 +5,7 @@ import {
   Building2, ArrowLeftRight, Users as UsersIcon, Shield, SlidersHorizontal, Wallet, Plug,
   ScrollText, Inbox, Plus, Copy, Upload, Trash2, Lock, Globe, ImageIcon, ChevronRight,
   ChevronLeft, MoreHorizontal, Check, RotateCcw, Boxes, Receipt, FolderKanban, Bot, CalendarClock,
-  KeyRound,
+  KeyRound, Sun,
 } from 'lucide-react';
 import { api, qs } from '../lib/api';
 import { Link } from '../lib/router';
@@ -22,6 +22,7 @@ import { ModulesPanel } from '../components/settings/ModulesPanel';
 import { ChartOfAccountsBlock, ExpenseCategoriesBlock } from '../components/finance/accounts';
 import { ProjectTypesPanel } from '../components/settings/ProjectTypesPanel';
 import { LeaveTypesPanel } from '../components/settings/LeaveTypesPanel';
+import { HolidaysPanel } from '../components/settings/HolidaysPanel';
 import { CustomFieldsPanel } from '../components/settings/CustomFieldsPanel';
 import { FieldGroupMatrix } from '../components/settings/FieldGroupMatrix';
 import { SectionHead, SettingRow, Field, RowList, AnimatedRow } from '../components/settings/primitives';
@@ -241,6 +242,7 @@ const GROUPS: NavGroup[] = [
       { id: 'modules', label: 'settings.modules', perm: 'settings.manage', icon: Boxes },
       { id: 'project-types', label: 'settings.projectTypes', perm: 'settings.manage', icon: FolderKanban },
       { id: 'leave-types', label: 'settings.leaveTypes', perm: 'people.manage_leave', icon: CalendarClock },
+      { id: 'holidays', label: 'settings.holidays', perm: 'people.manage_leave', icon: Sun },
       { id: 'custom-fields', label: 'settings.customFields', perm: 'settings.manage', icon: SlidersHorizontal },
       { id: 'finance', label: 'nav.finance', perm: 'finance.settings', icon: Wallet },
       { id: 'invoices', label: 'settings.invoices', perm: 'finance.settings', icon: Receipt },
@@ -351,6 +353,7 @@ export function SettingsPage({ section }: { section?: string }) {
             {active.id === 'modules' && <ModulesPanel />}
             {active.id === 'project-types' && <ProjectTypesPanel />}
             {active.id === 'leave-types' && <LeaveTypesPanel />}
+            {active.id === 'holidays' && <HolidaysPanel />}
             {active.id === 'custom-fields' && <CustomFieldsPanel />}
             {active.id === 'finance' && <FinancePanel />}
             {active.id === 'invoices' && <InvoicesPanel />}

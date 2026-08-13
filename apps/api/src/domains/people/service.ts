@@ -4,14 +4,14 @@
  * here: persona/emergency fields, compensation and salary ranges are stripped or
  * audited on read. Leave math comes from @ordi/shared pure calc (never re-implemented).
  */
-import { getDb, schema, eq, and, isNull, inArray, desc, asc, sql } from '@ordi/db';
+import { getDb, schema, eq, and, isNull, inArray, desc, asc, gte, lte, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import { leaveDays, availableBalance, carryForward, rangesOverlap, LEAVE_TRANSITIONS } from '@ordi/shared';
 import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
 import { writeActivity, recordSensitiveAccess } from '../../core/activity';
 import { emit } from '../../core/events';
-import { assertVersion } from '../../core/locking';
+import { assertVersion, assertUpdated } from '../../core/locking';
 import { employeeFieldAccess, loadFieldGroups, selfGrantLevels, stripGroupedValues } from '../../core/fieldgroups';
 import { mergeCustomFields } from '../../core/customfields';
 
@@ -188,7 +188,10 @@ export async function createEmployee(actor: Actor, input: any): Promise<string> 
     customFields: input.customFields ?? {},
     createdBy: actor.userId,
   });
-  await writeActivity(db, { entityType: 'employee', entityId: id, action: 'created', after: input, actorId: actor.userId, actorType: actor.actorType });
+  // Grouped custom fields are access-controlled – their values stay out of the
+  // people.read-gated audit feed.
+  const loggedInput = { ...input, ...(input.customFields !== undefined ? { customFields: '[custom fields]' } : {}) };
+  await writeActivity(db, { entityType: 'employee', entityId: id, action: 'created', after: loggedInput, actorId: actor.userId, actorType: actor.actorType });
   return id;
 }
 
@@ -201,9 +204,23 @@ export async function updateEmployee(actor: Actor, id: string, input: any) {
     'employmentType', 'managerId', 'birthday', 'joinDate', 'probationEnd', 'status', 'emergencyContact', 'sensitive', 'customFields']) {
     if (input[k] !== undefined) patch[k] = input[k];
   }
-  await db.update(schema.employees).set(patch)
-    .where(and(eq(schema.employees.id, id), eq(schema.employees.version, before.version)));
-  await writeActivity(db, { entityType: 'employee', entityId: id, action: 'updated', before, after: patch, actorId: actor.userId, actorType: actor.actorType });
+  // Merge, never assign: a client PATCHing one custom field must not erase the
+  // rest (incl. the questionnaire) – same contract as every other domain.
+  if (patch.customFields !== undefined) patch.customFields = mergeCustomFields(before.customFields, patch.customFields);
+  const updated = await db.update(schema.employees).set(patch)
+    .where(and(eq(schema.employees.id, id), eq(schema.employees.version, before.version)))
+    .returning({ id: schema.employees.id });
+  assertUpdated(updated[0], stripEmployee(actor, await loadEmployee(id)));
+  // Audit only the touched keys (a whole-row `before` logged every untouched
+  // field as cleared), and never the customFields payload – grouped fields are
+  // access-controlled and the audit feed is only people.read-gated.
+  const beforeTouched = Object.fromEntries(Object.keys(patch).map((k) => [k, (before as any)[k]]));
+  const loggedAfter = { ...patch };
+  if (patch.customFields !== undefined) {
+    beforeTouched.customFields = '[custom fields]';
+    loggedAfter.customFields = '[custom fields updated]';
+  }
+  await writeActivity(db, { entityType: 'employee', entityId: id, action: 'updated', before: beforeTouched, after: loggedAfter, actorId: actor.userId, actorType: actor.actorType });
   return stripEmployee(actor, await loadEmployee(id));
 }
 
@@ -221,27 +238,46 @@ export async function employeeLifecycle(actor: Actor, id: string, input: { actio
   const patch: Record<string, unknown> = {};
   switch (input.action) {
     case 'onboard':
+      // Employees are created 'active', so onboard must work regardless of
+      // status – but the checklist consumer only runs on the first onboard
+      // (see alreadyOnboarded below), or it would duplicate its output.
       patch.status = 'active';
+      patch.exitDate = null;
       break;
     case 'exit':
+      if (before.status === 'terminated') throw err.domain('Employee is already terminated');
       patch.status = 'terminated';
       patch.exitDate = input.exitDate ?? new Date().toISOString().slice(0, 10);
       break;
     case 'set_leave':
+      if (before.status === 'terminated') throw err.domain('A terminated employee cannot go on leave – reactivate first');
       patch.status = 'on_leave';
       break;
     case 'reactivate':
+      if (before.status === 'active') throw err.domain('Employee is already active');
       patch.status = 'active';
+      // A reactivated employee is not exiting any more.
+      patch.exitDate = null;
       break;
     default:
       throw err.validation('Unknown lifecycle action');
   }
+  // Checked before this call's own activity row lands below.
+  const alreadyOnboarded = input.action === 'onboard'
+    ? (await db.select({ id: schema.activityLog.id }).from(schema.activityLog)
+      .where(and(
+        eq(schema.activityLog.entityType, 'employee'),
+        eq(schema.activityLog.entityId, id),
+        eq(schema.activityLog.action, 'lifecycle_onboard'),
+      )).limit(1)).length > 0
+    : false;
+
   await db.update(schema.employees).set(patch).where(eq(schema.employees.id, id));
   await writeActivity(db, { entityType: 'employee', entityId: id, action: `lifecycle_${input.action}`, before: { status: before.status }, after: patch, actorId: actor.userId, actorType: actor.actorType });
 
   if (input.action === 'onboard') {
     // payload can trigger the onboarding checklist consumer (Projects, via bus). No cross-domain write here.
-    await emit({ type: 'employee.onboarded', aggregateType: 'employee', aggregateId: id, payload: { employeeId: id, userId: before.userId, runOnboarding: true }, actorId: actor.userId, actorType: actor.actorType });
+    await emit({ type: 'employee.onboarded', aggregateType: 'employee', aggregateId: id, payload: { employeeId: id, userId: before.userId, runOnboarding: !alreadyOnboarded }, actorId: actor.userId, actorType: actor.actorType });
   } else if (input.action === 'exit') {
     await emit({ type: 'employee.exited', aggregateType: 'employee', aggregateId: id, payload: { employeeId: id, userId: before.userId, exitDate: patch.exitDate }, actorId: actor.userId, actorType: actor.actorType });
   }
@@ -272,10 +308,20 @@ export async function listEmployeeDocuments(employeeId: string) {
 export async function addEmployeeDocument(actor: Actor, employeeId: string, input: { attachmentId: string; type?: string }): Promise<string> {
   const { db } = getDb();
   await loadEmployee(employeeId);
+  const [att] = await db.select().from(schema.attachments).where(eq(schema.attachments.id, input.attachmentId));
+  if (!att) throw err.validation('Unknown attachment');
+  if (att.entityType && !(att.entityType === 'employee' && att.entityId === employeeId)) {
+    throw err.domain('Attachment already belongs to another record');
+  }
   const id = ulid();
   await db.insert(schema.employeeDocuments).values({
     id, employeeId, attachmentId: input.attachmentId, type: input.type ?? 'other',
   });
+  // Claim the file for this employee: entity-less attachments hand out their
+  // signed URL to any authenticated user, an employee-bound one answers to
+  // people.read_documents (attachments.routes READ_PERM).
+  await db.update(schema.attachments).set({ entityType: 'employee', entityId: employeeId })
+    .where(eq(schema.attachments.id, input.attachmentId));
   await writeActivity(db, { entityType: 'employee', entityId: employeeId, action: 'document_added', after: { attachmentId: input.attachmentId, type: input.type ?? 'other' }, actorId: actor.userId, actorType: actor.actorType });
   return id;
 }
@@ -311,7 +357,8 @@ export async function updateDepartment(id: string, input: any) {
 
 export async function deleteDepartment(id: string) {
   const { db } = getDb();
-  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.employees).where(eq(schema.employees.departmentId, id)) as any[];
+  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.employees)
+    .where(and(eq(schema.employees.departmentId, id), isNull(schema.employees.deletedAt))) as any[];
   if (Number(n) > 0) throw err.domain('Department has employees; reassign them first');
   await db.delete(schema.departments).where(eq(schema.departments.id, id));
 }
@@ -338,7 +385,8 @@ export async function updatePosition(id: string, input: any) {
 
 export async function deletePosition(id: string) {
   const { db } = getDb();
-  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.employees).where(eq(schema.employees.positionId, id)) as any[];
+  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.employees)
+    .where(and(eq(schema.employees.positionId, id), isNull(schema.employees.deletedAt))) as any[];
   if (Number(n) > 0) throw err.domain('Position is in use; reassign employees first');
   await db.delete(schema.positions).where(eq(schema.positions.id, id));
 }
@@ -382,9 +430,11 @@ export async function deleteLeaveType(id: string) {
 // ─── leave balances (PRD §12.2) ───
 export async function listLeaveBalances(employeeId?: string) {
   const { db } = getDb();
-  return db.select().from(schema.leaveBalances).where(
+  return db.select().from(schema.leaveBalances).where(and(
     employeeId ? eq(schema.leaveBalances.employeeId, employeeId) : undefined,
-  ).orderBy(desc(schema.leaveBalances.period));
+    // Balances of soft-deleted employees are noise in every consumer.
+    sql`exists (select 1 from employees e where e.id = ${schema.leaveBalances.employeeId} and e.deleted_at is null)`,
+  )).orderBy(desc(schema.leaveBalances.period));
 }
 
 /**
@@ -447,12 +497,33 @@ async function managerUserId(managerEmployeeId: string | null): Promise<string |
 
 async function findApproverFallback(): Promise<string | null> {
   const { db } = getDb();
+  // Deterministic pick – without the ORDER BY the approver was whatever row the
+  // planner returned first, which could differ between requests.
   const rows = await db.select({ userId: schema.users.id })
     .from(schema.users)
     .innerJoin(schema.rolePermissions, eq(schema.rolePermissions.roleId, schema.users.roleId))
     .where(and(eq(schema.rolePermissions.permission, 'people.approve_leave'), eq(schema.users.isActive, true)))
+    .orderBy(asc(schema.users.createdAt), asc(schema.users.id))
     .limit(1);
   return rows[0]?.userId ?? null;
+}
+
+/**
+ * Public-holiday dates that apply to an employee within a date range: the
+ * calendars assigned to them, or – while assignment has no UI – every calendar.
+ */
+async function employeeHolidaySet(employeeId: string, fromDate: string, toDate: string): Promise<Set<string>> {
+  const { db } = getDb();
+  const assigned = await db.select({ calendarId: schema.employeeHolidayCalendar.calendarId })
+    .from(schema.employeeHolidayCalendar)
+    .where(eq(schema.employeeHolidayCalendar.employeeId, employeeId));
+  const rows = await db.select({ date: schema.holidays.date }).from(schema.holidays)
+    .where(and(
+      gte(schema.holidays.date, fromDate.slice(0, 10)),
+      lte(schema.holidays.date, toDate.slice(0, 10)),
+      assigned.length ? inArray(schema.holidays.calendarId, assigned.map((a) => a.calendarId)) : undefined,
+    ));
+  return new Set(rows.map((r) => r.date.slice(0, 10)));
 }
 
 /**
@@ -483,6 +554,7 @@ export async function listLeaveRequests(params: { employeeId?: string; status?: 
     .where(and(
       params.employeeId ? eq(schema.leaveRequests.employeeId, params.employeeId) : undefined,
       params.status ? eq(schema.leaveRequests.status, params.status) : undefined,
+      isNull(schema.employees.deletedAt),
     )).orderBy(desc(schema.leaveRequests.fromDate));
 }
 
@@ -592,7 +664,8 @@ export async function createLeaveRequest(actor: Actor, input: any) {
     }
   }
 
-  const days = leaveDays(input.fromDate, input.toDate, input.halfDay ?? false);
+  const days = leaveDays(input.fromDate, input.toDate, input.halfDay ?? false,
+    await employeeHolidaySet(employee.id, input.fromDate, input.toDate));
   const approverId = (await managerUserId(employee.managerId)) ?? (await findApproverFallback());
 
   const id = ulid();
@@ -609,56 +682,65 @@ export async function createLeaveRequest(actor: Actor, input: any) {
   return { id, employeeId: employee.id, days, approverId };
 }
 
-async function adjustBalanceUsed(employeeId: string, leaveTypeId: string, period: string, delta: number) {
-  const { db } = getDb();
-  const [bal] = await db.select().from(schema.leaveBalances).where(and(
+/** Atomic read-modify-write on a balance row; runs inside the caller's transaction. */
+async function adjustBalanceUsed(tx: Pick<ReturnType<typeof getDb>['db'], 'select' | 'update' | 'insert'>, employeeId: string, leaveTypeId: string, period: string, delta: number) {
+  const [bal] = await tx.select().from(schema.leaveBalances).where(and(
     eq(schema.leaveBalances.employeeId, employeeId),
     eq(schema.leaveBalances.leaveTypeId, leaveTypeId),
     eq(schema.leaveBalances.period, period),
-  ));
+  )).for('update');
   if (bal) {
     const next = Math.max(0, Number(bal.used) + delta);
-    await db.update(schema.leaveBalances).set({ used: String(next) }).where(eq(schema.leaveBalances.id, bal.id));
+    await tx.update(schema.leaveBalances).set({ used: String(next) }).where(eq(schema.leaveBalances.id, bal.id));
   } else if (delta !== 0) {
-    const [t] = await db.select().from(schema.leaveTypes).where(eq(schema.leaveTypes.id, leaveTypeId));
-    await db.insert(schema.leaveBalances).values({
+    const [t] = await tx.select().from(schema.leaveTypes).where(eq(schema.leaveTypes.id, leaveTypeId));
+    await tx.insert(schema.leaveBalances).values({
       id: ulid(), employeeId, leaveTypeId, period,
       allocated: String(t?.annualQuota ?? '0'), used: String(Math.max(0, delta)), carried: '0',
     });
   }
 }
 
-/** Approve / reject / cancel a leave request with transition + balance rules (PRD §12.2). */
+/**
+ * Approve / reject / cancel a leave request with transition + balance rules
+ * (PRD §12.2). The whole decision runs in one transaction with the request row
+ * locked – two concurrent approvals used to both pass the transition check and
+ * deduct the balance twice.
+ */
 export async function decideLeave(actor: Actor, id: string, newStatus: 'approved' | 'rejected' | 'canceled', comment: string) {
   const { db } = getDb();
-  const [req] = await db.select().from(schema.leaveRequests).where(eq(schema.leaveRequests.id, id));
-  if (!req) throw err.notFound('Leave request not found');
+  const { req, employee } = await db.transaction(async (tx) => {
+    const [req] = await tx.select().from(schema.leaveRequests).where(eq(schema.leaveRequests.id, id)).for('update');
+    if (!req) throw err.notFound('Leave request not found');
 
-  const allowed = LEAVE_TRANSITIONS[req.status as keyof typeof LEAVE_TRANSITIONS] ?? [];
-  if (!allowed.includes(newStatus)) throw err.domain(`Cannot transition leave from ${req.status} to ${newStatus}`);
+    const allowed = LEAVE_TRANSITIONS[req.status as keyof typeof LEAVE_TRANSITIONS] ?? [];
+    if (!allowed.includes(newStatus)) throw err.domain(`Cannot transition leave from ${req.status} to ${newStatus}`);
 
-  const employee = await loadEmployee(req.employeeId);
-  const isApprover = actor.access.permissions.has('people.approve_leave');
-  const isManager = (await managerUserId(employee.managerId)) === actor.userId;
-  const isOwn = employee.userId === actor.userId;
+    const employee = await loadEmployee(req.employeeId);
+    const isApprover = actor.access.permissions.has('people.approve_leave');
+    const isManager = (await managerUserId(employee.managerId)) === actor.userId;
+    const isOwn = employee.userId === actor.userId;
 
-  if (newStatus === 'canceled') {
-    if (!(isApprover || isManager || isOwn)) throw err.forbidden('Cannot cancel this leave request', 'people.approve_leave');
-  } else {
-    if (!(isApprover || isManager)) throw err.forbidden('Only the manager or an approver can decide leave', 'people.approve_leave');
-  }
+    if (newStatus === 'canceled') {
+      if (!(isApprover || isManager || isOwn)) throw err.forbidden('Cannot cancel this leave request', 'people.approve_leave');
+    } else {
+      if (!(isApprover || isManager)) throw err.forbidden('Only the manager or an approver can decide leave', 'people.approve_leave');
+    }
 
-  const [type] = await db.select().from(schema.leaveTypes).where(eq(schema.leaveTypes.id, req.leaveTypeId));
-  const days = leaveDays(req.fromDate, req.toDate, req.halfDay);
-  const period = req.fromDate.slice(0, 4);
-  if (type?.affectsBalance) {
-    if (req.status === 'pending' && newStatus === 'approved') await adjustBalanceUsed(req.employeeId, req.leaveTypeId, period, days);
-    else if (req.status === 'approved' && newStatus === 'canceled') await adjustBalanceUsed(req.employeeId, req.leaveTypeId, period, -days);
-  }
+    const [type] = await tx.select().from(schema.leaveTypes).where(eq(schema.leaveTypes.id, req.leaveTypeId));
+    const days = leaveDays(req.fromDate, req.toDate, req.halfDay,
+      await employeeHolidaySet(req.employeeId, req.fromDate, req.toDate));
+    const period = req.fromDate.slice(0, 4);
+    if (type?.affectsBalance) {
+      if (req.status === 'pending' && newStatus === 'approved') await adjustBalanceUsed(tx, req.employeeId, req.leaveTypeId, period, days);
+      else if (req.status === 'approved' && newStatus === 'canceled') await adjustBalanceUsed(tx, req.employeeId, req.leaveTypeId, period, -days);
+    }
 
-  await db.update(schema.leaveRequests).set({
-    status: newStatus, approverId: actor.userId, decidedAt: new Date(), decisionComment: comment,
-  }).where(eq(schema.leaveRequests.id, id));
+    await tx.update(schema.leaveRequests).set({
+      status: newStatus, approverId: actor.userId, decidedAt: new Date(), decisionComment: comment,
+    }).where(eq(schema.leaveRequests.id, id));
+    return { req, employee };
+  });
 
   await writeActivity(db, { entityType: 'leave_request', entityId: id, action: newStatus, before: { status: req.status }, after: { status: newStatus, comment }, actorId: actor.userId, actorType: actor.actorType });
   await emit({ type: 'leave.decided', aggregateType: 'leave_request', aggregateId: id, payload: { decision: newStatus, employeeUserId: employee.userId }, actorId: actor.userId, actorType: actor.actorType });
@@ -734,7 +816,8 @@ export async function updateApplicantStage(id: string, input: any) {
 
 export async function deleteApplicantStage(id: string) {
   const { db } = getDb();
-  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.applicants).where(eq(schema.applicants.stageId, id)) as any[];
+  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.applicants)
+    .where(and(eq(schema.applicants.stageId, id), isNull(schema.applicants.deletedAt))) as any[];
   if (Number(n) > 0) throw err.domain('Stage has applicants; move them first');
   await db.delete(schema.applicantStages).where(eq(schema.applicantStages.id, id));
 }
@@ -782,8 +865,14 @@ export async function updateJobOpening(actor: Actor, id: string, input: any, ver
   for (const k of ['title', 'departmentId', 'employmentType', 'description', 'status', 'positionsCount', 'hiringManagerId', 'salaryRange', 'publicEnabled']) {
     if (input[k] !== undefined) patch[k] = input[k];
   }
-  await db.update(schema.jobOpenings).set(patch).where(and(eq(schema.jobOpenings.id, id), eq(schema.jobOpenings.version, before.version)));
-  await writeActivity(db, { entityType: 'job_opening', entityId: id, action: 'updated', before, after: patch, actorId: actor.userId, actorType: actor.actorType });
+  const updated = await db.update(schema.jobOpenings).set(patch)
+    .where(and(eq(schema.jobOpenings.id, id), eq(schema.jobOpenings.version, before.version)))
+    .returning({ id: schema.jobOpenings.id });
+  assertUpdated(updated[0], stripOpening(actor, await loadJobOpening(id)));
+  // Log only the touched keys – a whole-row `before` recorded every untouched
+  // field as cleared and copied salaryRange into a normal-sensitivity record.
+  const beforeTouched = Object.fromEntries(Object.keys(patch).map((k) => [k, (before as any)[k]]));
+  await writeActivity(db, { entityType: 'job_opening', entityId: id, action: 'updated', before: beforeTouched, after: patch, actorId: actor.userId, actorType: actor.actorType });
   return stripOpening(actor, await loadJobOpening(id));
 }
 
@@ -835,7 +924,8 @@ export async function createApplicant(actor: Actor, input: any) {
     coverText: input.coverText ?? '', stageId, source: 'manual', createdFrom: 'manual',
     customFields: input.customFields ?? {},
   });
-  await writeActivity(db, { entityType: 'applicant', entityId: id, action: 'created', after: input, actorId: actor.userId, actorType: actor.actorType });
+  const loggedInput = { ...input, ...(input.customFields !== undefined ? { customFields: '[custom fields]' } : {}) };
+  await writeActivity(db, { entityType: 'applicant', entityId: id, action: 'created', after: loggedInput, actorId: actor.userId, actorType: actor.actorType });
   return { id, duplicateWarning: dup ? { existingId: dup.id } : null };
 }
 
@@ -856,6 +946,8 @@ export async function moveApplicant(actor: Actor, id: string, input: { stageId: 
 export async function hireApplicant(actor: Actor, id: string, input: any) {
   const { db } = getDb();
   const applicant = await loadApplicant(id);
+  // A second hire call would mint a duplicate employee and re-fire onboarding.
+  if (applicant.hiredEmployeeId) throw err.domain('Applicant is already hired', { employeeId: applicant.hiredEmployeeId });
   const parts = applicant.name.trim().split(/\s+/);
   const firstName = parts[0] ?? applicant.name;
   const lastName = parts.slice(1).join(' ');
@@ -1000,7 +1092,7 @@ export async function peopleDashboard() {
     select lr.id, lr.employee_id, lr.leave_type_id, lr.from_date, lr.to_date, lr.half_day,
            e.first_name, e.last_name
     from leave_requests lr join employees e on e.id = lr.employee_id
-    where lr.status = 'approved' and lr.from_date >= ${today}
+    where lr.status = 'approved' and lr.from_date >= ${today} and e.deleted_at is null
     order by lr.from_date asc limit 20`) as any[];
 
   const [openings] = await db.execute(sql`

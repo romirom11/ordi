@@ -29,15 +29,20 @@ export interface FieldGroupRow {
 
 interface GrantRow { groupId: string; principal: string; level: string }
 
-/** Per-process cache, same idiom as the custom-field registry. */
-let cache: { groups: FieldGroupRow[]; grants: GrantRow[] } | null = null;
+/**
+ * Per-process cache with a short TTL: `invalidateFieldGroups` only reaches the
+ * process that handled the settings write, so other processes/workers must
+ * age revoked grants out on their own (same idiom as core/modules).
+ */
+let cache: { at: number; groups: FieldGroupRow[]; grants: GrantRow[] } | null = null;
+const TTL_MS = 30_000;
 
 export function invalidateFieldGroups(): void {
   cache = null;
 }
 
 export async function loadFieldGroups(): Promise<{ groups: FieldGroupRow[]; grants: GrantRow[] }> {
-  if (cache) return cache;
+  if (cache && Date.now() - cache.at < TTL_MS) return cache;
   const { db } = getDb();
   const groups = await db.select({
     id: schema.customFieldGroups.id,
@@ -51,7 +56,7 @@ export async function loadFieldGroups(): Promise<{ groups: FieldGroupRow[]; gran
     principal: schema.customFieldGroupGrants.principal,
     level: schema.customFieldGroupGrants.level,
   }).from(schema.customFieldGroupGrants);
-  cache = { groups, grants };
+  cache = { at: Date.now(), groups, grants };
   return cache;
 }
 

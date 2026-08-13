@@ -41,6 +41,17 @@ extendDict({
     'intake.copyLink': 'Copy link',
     'intake.linkCopied': 'Link copied',
     'intake.formDisabledHint': 'The link stops working while the form is off.',
+    'intake.mailTitle': 'Email intake (IMAP mailbox)',
+    'intake.mailHint': 'Every unseen email in the folder becomes a request and is marked as read – use a dedicated mailbox that no human reads. Checked every 10 minutes.',
+    'intake.mailHost': 'IMAP host',
+    'intake.mailPort': 'Port',
+    'intake.mailSecure': 'Use TLS',
+    'intake.mailUser': 'User',
+    'intake.mailPass': 'Password',
+    'intake.mailPassKeep': 'Leave blank to keep the current password.',
+    'intake.mailFolder': 'Folder',
+    'intake.mailDisconnect': 'Disconnect',
+    'intake.mailDisconnected': 'Mailbox disconnected',
   },
   uk: {
     'intake.title': 'Запити',
@@ -69,6 +80,17 @@ extendDict({
     'intake.copyLink': 'Скопіювати посилання',
     'intake.linkCopied': 'Посилання скопійовано',
     'intake.formDisabledHint': 'Поки форма вимкнена, посилання не працює.',
+    'intake.mailTitle': 'Запити з пошти (IMAP-скринька)',
+    'intake.mailHint': 'Кожен непрочитаний лист у теці стає запитом і позначається прочитаним – використовуйте окрему скриньку, яку ніхто не читає. Перевірка кожні 10 хвилин.',
+    'intake.mailHost': 'IMAP-хост',
+    'intake.mailPort': 'Порт',
+    'intake.mailSecure': 'TLS-з’єднання',
+    'intake.mailUser': 'Користувач',
+    'intake.mailPass': 'Пароль',
+    'intake.mailPassKeep': 'Залиште порожнім, щоб зберегти поточний пароль.',
+    'intake.mailFolder': 'Тека',
+    'intake.mailDisconnect': 'Відключити',
+    'intake.mailDisconnected': 'Скриньку відключено',
   },
 });
 
@@ -277,7 +299,18 @@ function DeclineDialog({ item, onClose, onDeclined }: {
 
 /* ─────────────── Settings: enable the form, share the link ─────────────── */
 
-interface IntakeSettings { formToken: string; formEnabled: boolean }
+interface IntakeSettings {
+  formToken: string;
+  formEnabled: boolean;
+  mailbox?: {
+    host?: string;
+    port?: number | null;
+    secure?: boolean;
+    user?: string;
+    folder?: string;
+    hasPassword?: boolean;
+  } | null;
+}
 
 export function IntakeSettingsSection({ projectId }: { projectId: string }) {
   const t = useT();
@@ -331,9 +364,117 @@ export function IntakeSettingsSection({ projectId }: { projectId: string }) {
                 <Copy size={12} /> {t('intake.copyLink')}
               </Button>
             </div>
+            <MailboxSettings projectId={projectId} mailbox={settings.mailbox ?? null} />
           </>
         )}
       </div>
     </section>
+  );
+}
+
+/** IMAP mailbox form: emails in a dedicated folder become intake requests. */
+function MailboxSettings({ projectId, mailbox }: {
+  projectId: string;
+  mailbox: NonNullable<IntakeSettings['mailbox']> | null;
+}) {
+  const t = useT();
+  const qc = useQueryClient();
+  const [host, setHost] = useState(mailbox?.host ?? '');
+  const [port, setPort] = useState(mailbox?.port ? String(mailbox.port) : '');
+  const [secure, setSecure] = useState(mailbox?.secure ?? true);
+  const [user, setUser] = useState(mailbox?.user ?? '');
+  const [pass, setPass] = useState('');
+  const [folder, setFolder] = useState(mailbox?.folder ?? '');
+
+  const refresh = () => qc.invalidateQueries({ queryKey: ['intake-settings', projectId] });
+  const onError = (cause: unknown) => toast.error(cause instanceof ApiError ? cause.message : t('common.saveFailed'));
+
+  const save = useMutation({
+    mutationFn: () => api.patch(`/projects/${projectId}/intake-settings`, {
+      mailbox: {
+        host: host.trim(),
+        port: port.trim() ? Number(port) : undefined,
+        secure,
+        user: user.trim(),
+        pass: pass || undefined,
+        folder: folder.trim() || undefined,
+      },
+    }),
+    onSuccess: () => { setPass(''); refresh(); toast(t('common.saved')); },
+    onError,
+  });
+
+  const disconnect = useMutation({
+    mutationFn: () => api.patch(`/projects/${projectId}/intake-settings`, { mailbox: null }),
+    onSuccess: () => {
+      setHost(''); setPort(''); setSecure(true); setUser(''); setPass(''); setFolder('');
+      refresh();
+      toast(t('intake.mailDisconnected'));
+    },
+    onError,
+  });
+
+  const busy = save.isPending || disconnect.isPending;
+
+  return (
+    <form
+      className="space-y-3 border-t border-border py-3"
+      onSubmit={(event: FormEvent) => { event.preventDefault(); save.mutate(); }}
+    >
+      <div>
+        <p className="text-[13px] font-medium">{t('intake.mailTitle')}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{t('intake.mailHint')}</p>
+      </div>
+      <div className="grid grid-cols-[1fr_5.5rem] gap-2">
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">{t('intake.mailHost')}</label>
+          <Input value={host} onChange={(event) => setHost(event.target.value)} placeholder="imap.example.com" />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">{t('intake.mailPort')}</label>
+          <Input
+            type="number"
+            value={port}
+            onChange={(event) => setPort(event.target.value)}
+            placeholder={secure ? '993' : '143'}
+          />
+        </div>
+      </div>
+      <label className="flex items-center justify-between gap-4 text-[13px]">
+        {t('intake.mailSecure')}
+        <Switch checked={secure} onChange={setSecure} disabled={busy} label={t('intake.mailSecure')} />
+      </label>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">{t('intake.mailUser')}</label>
+          <Input value={user} onChange={(event) => setUser(event.target.value)} autoComplete="off" />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">{t('intake.mailPass')}</label>
+          <Input
+            type="password"
+            value={pass}
+            onChange={(event) => setPass(event.target.value)}
+            placeholder={mailbox?.hasPassword ? '••••••••' : undefined}
+            autoComplete="new-password"
+          />
+          {mailbox?.hasPassword && <p className="text-xs text-faint">{t('intake.mailPassKeep')}</p>}
+        </div>
+      </div>
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-muted-foreground">{t('intake.mailFolder')}</label>
+        <Input value={folder} onChange={(event) => setFolder(event.target.value)} placeholder="INBOX" />
+      </div>
+      <div className="flex items-center justify-end gap-2">
+        {mailbox && (
+          <Button type="button" size="sm" variant="destructive" disabled={busy} onClick={() => disconnect.mutate()}>
+            {disconnect.isPending ? <Spinner /> : t('intake.mailDisconnect')}
+          </Button>
+        )}
+        <Button type="submit" size="sm" disabled={busy || !host.trim() || !user.trim()}>
+          {save.isPending ? <Spinner /> : t('common.save')}
+        </Button>
+      </div>
+    </form>
   );
 }

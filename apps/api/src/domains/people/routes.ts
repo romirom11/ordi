@@ -8,6 +8,7 @@ import {
   applicantStageInputSchema, jobOpeningInputSchema, applicantInputSchema,
   applicantMoveSchema, hireApplicantSchema, interviewInputSchema,
   allocationInputSchema, compensationInputSchema, overheadSettingsSchema,
+  customFieldsSchema,
   type Permission,
 } from '@ordi/shared';
 import type { AppEnv, Actor } from '../../context';
@@ -22,6 +23,10 @@ function guardAny(...perms: Permission[]): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const actor = c.get('actor') as Actor | undefined;
     if (!actor) throw err.unauthenticated();
+    // Same read-only-token rule as `guard`: a mutating verb needs a writable token.
+    if (actor.readOnly && c.req.method !== 'GET' && c.req.method !== 'HEAD') {
+      throw err.forbidden('Read-only token', perms[0]);
+    }
     if (perms.some((p) => actor.access.permissions.has(p))) return next();
     throw err.forbidden(`Missing one of: ${perms.join(', ')}`, perms[0]);
   };
@@ -40,9 +45,14 @@ export function peopleRoutes() {
   app.get('/me/hr-fields', async (c) => c.json(await svc.myHrFields(currentActor(c))));
 
   app.patch('/me/hr-fields', async (c) => {
+    const actor = currentActor(c);
+    // No permission needed, but a read-only token is still read-only.
+    if (actor.readOnly) throw err.forbidden('Read-only token');
     const raw = await c.req.json();
-    const customFields = (raw && typeof raw.customFields === 'object' && raw.customFields !== null ? raw.customFields : {}) as Record<string, unknown>;
-    return c.json(await svc.updateMyHrFields(currentActor(c), { customFields }));
+    const customFields = customFieldsSchema.parse(
+      raw && typeof raw.customFields === 'object' && raw.customFields !== null ? raw.customFields : {},
+    );
+    return c.json(await svc.updateMyHrFields(actor, { customFields }));
   });
 
   // ── Employees (PRD §12.1) ──
@@ -77,8 +87,9 @@ export function peopleRoutes() {
     return c.json(await svc.employeeLifecycle(currentActor(c), c.req.param('id'), body));
   });
 
-  // ── Employee documents (PRD §12.1) ──
-  app.get('/employees/:id/documents', guard('people.read'), async (c) =>
+  // ── Employee documents (PRD §12.1). Contracts and ID scans are more
+  // sensitive than the directory, so they carry their own read permission. ──
+  app.get('/employees/:id/documents', guard('people.read_documents'), async (c) =>
     c.json({ data: await svc.listEmployeeDocuments(c.req.param('id')) }));
 
   app.post('/employees/:id/documents', guard('people.write'), async (c) => {
@@ -328,7 +339,10 @@ export function peopleRoutes() {
   app.get('/employees/:id/compensation', guard('people.read_compensation'), async (c) =>
     c.json({ data: await svc.listCompensation(currentActor(c), c.req.param('id')) }));
 
-  app.post('/compensation', guard('people.read_compensation'), async (c) => {
+  // Creating a record is a write: seeing compensation must not imply changing
+  // it, and a read-only token must not pass. Matches the UI, which offers the
+  // add button only to people.write holders who can also read compensation.
+  app.post('/compensation', guard('people.write'), guard('people.read_compensation'), async (c) => {
     const body = compensationInputSchema.parse(await c.req.json());
     return c.json({ id: await svc.createCompensation(currentActor(c), body) }, 201);
   });

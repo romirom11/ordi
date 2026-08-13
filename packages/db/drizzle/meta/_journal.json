@@ -232,6 +232,13 @@
       "when": 1786661190948,
       "tag": "0032_project_custom_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1786662895934,
+      "tag": "0033_people_read_documents",
+      "breakpoints": true
     }
   ]
 }

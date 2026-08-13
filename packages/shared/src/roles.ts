@@ -59,7 +59,7 @@ const FINANCE: Permission[] = [
 ];
 
 const HR: Permission[] = [
-  'people.read', 'people.read_sensitive', 'people.write',
+  'people.read', 'people.read_sensitive', 'people.read_documents', 'people.write',
   'people.manage_leave', 'people.approve_leave', 'people.recruit',
   'projects.read',
 ];
