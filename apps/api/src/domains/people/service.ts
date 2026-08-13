@@ -171,6 +171,7 @@ export async function createEmployee(actor: Actor, input: any): Promise<string> 
     lastName: input.lastName ?? '',
     email: input.email ?? null,
     phone: input.phone ?? null,
+    telegram: input.telegram ?? null,
     positionId: input.positionId ?? null,
     departmentId: input.departmentId ?? null,
     employmentType: input.employmentType ?? 'full_time',
@@ -193,7 +194,7 @@ export async function updateEmployee(actor: Actor, id: string, input: any) {
   const before = await loadEmployee(id);
   assertVersion(before, input.version, stripEmployee(actor, before));
   const patch: Record<string, unknown> = {};
-  for (const k of ['userId', 'firstName', 'lastName', 'email', 'phone', 'positionId', 'departmentId',
+  for (const k of ['userId', 'firstName', 'lastName', 'email', 'phone', 'telegram', 'positionId', 'departmentId',
     'employmentType', 'managerId', 'birthday', 'joinDate', 'probationEnd', 'status', 'emergencyContact', 'sensitive', 'customFields']) {
     if (input[k] !== undefined) patch[k] = input[k];
   }
@@ -248,7 +249,19 @@ export async function employeeLifecycle(actor: Actor, id: string, input: { actio
 export async function listEmployeeDocuments(employeeId: string) {
   const { db } = getDb();
   await loadEmployee(employeeId);
-  return db.select().from(schema.employeeDocuments)
+  // Joined with the attachment so the card can list names/sizes and preview
+  // without a round-trip per row.
+  return db.select({
+    id: schema.employeeDocuments.id,
+    employeeId: schema.employeeDocuments.employeeId,
+    attachmentId: schema.employeeDocuments.attachmentId,
+    type: schema.employeeDocuments.type,
+    createdAt: schema.employeeDocuments.createdAt,
+    filename: schema.attachments.filename,
+    size: schema.attachments.size,
+    mime: schema.attachments.mime,
+  }).from(schema.employeeDocuments)
+    .leftJoin(schema.attachments, eq(schema.attachments.id, schema.employeeDocuments.attachmentId))
     .where(eq(schema.employeeDocuments.employeeId, employeeId))
     .orderBy(desc(schema.employeeDocuments.createdAt));
 }
