@@ -225,6 +225,13 @@
       "when": 1786659808793,
       "tag": "0031_employee_location",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1786661190948,
+      "tag": "0032_project_custom_fields",
+      "breakpoints": true
     }
   ]
 }

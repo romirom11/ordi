@@ -1,9 +1,13 @@
 name: Release
 
 # Cut a release whenever master's package.json version has no tag yet:
-# create tag v<version> + a published GitHub release (notes from
+# create tag v<version> + a DRAFT GitHub release (notes from
 # docs/releases/v<version>.md), then dispatch the desktop builds for that
-# tag. The explicit dispatch matters – tags created with GITHUB_TOKEN do
+# tag. The desktop workflow publishes the release once every platform's
+# bundle is uploaded – publishing here would flip `releases/latest` (and
+# the desktop updater's latest.json URL) to a version whose binaries do
+# not exist yet, so every running app would offer an update it cannot
+# fetch. The explicit dispatch matters – tags created with GITHUB_TOKEN do
 # not fire the desktop workflow's own `push: tags` trigger.
 on:
   push:
@@ -28,17 +32,21 @@ jobs:
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Create tag and release
+      - name: Create tag and draft release
         if: steps.guard.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           V="${{ steps.v.outputs.version }}"
+          # A draft `gh release create` does not create the tag, and the desktop
+          # workflow is dispatched by tag ref – so push the tag explicitly first.
+          git tag "v$V" "$GITHUB_SHA"
+          git push origin "v$V"
           NOTES="docs/releases/v$V.md"
           if [ -f "$NOTES" ]; then
-            gh release create "v$V" --target "$GITHUB_SHA" --title "ordi v$V" --notes-file "$NOTES"
+            gh release create "v$V" --draft --title "ordi v$V" --notes-file "$NOTES"
           else
-            gh release create "v$V" --target "$GITHUB_SHA" --title "ordi v$V" --generate-notes
+            gh release create "v$V" --draft --title "ordi v$V" --generate-notes
           fi
       - name: Dispatch desktop builds for the tag
         if: steps.guard.outputs.exists == 'false'

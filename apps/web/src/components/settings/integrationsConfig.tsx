@@ -40,6 +40,8 @@ extendDict({
     'settings.oauthSecretKeep': 'Leave blank to keep the current secret',
     'settings.oauthCallback': 'Redirect URL to register with the provider:',
     'settings.credentials': 'Credentials',
+    'settings.slackSigningSecret': 'Signing secret',
+    'settings.slackSigningSecretHint': 'Verifies inbound Slack events and slash commands (Slack app → Basic Information).',
   },
   uk: {
     'settings.emailTitle': 'Пошта',
@@ -68,6 +70,8 @@ extendDict({
     'settings.oauthSecretKeep': 'Залиште порожнім, щоб не змінювати секрет',
     'settings.oauthCallback': 'Redirect URL, який треба вказати у провайдера:',
     'settings.credentials': 'Облікові дані',
+    'settings.slackSigningSecret': 'Signing secret',
+    'settings.slackSigningSecretHint': 'Перевіряє підпис вхідних подій та slash-команд Slack (Slack app → Basic Information).',
   },
 });
 
@@ -78,7 +82,7 @@ interface ConfigResponse {
   smtpSource: Source;
   github: { clientId: string; hasSecret: boolean } | null;
   githubSource: Source;
-  slack: { clientId: string; hasSecret: boolean } | null;
+  slack: { clientId: string; hasSecret: boolean; hasSigningSecret?: boolean } | null;
   slackSource: Source;
 }
 
@@ -247,15 +251,22 @@ export function OAuthCredentials({ provider, callbackPath }: { provider: 'github
   const source = (provider === 'github' ? cfg.data?.githubSource : cfg.data?.slackSource) ?? 'none';
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
+  const [signingSecret, setSigningSecret] = useState('');
+  const slackStored = provider === 'slack' ? cfg.data?.slack : null;
 
   useEffect(() => { setClientId(stored?.clientId ?? ''); }, [stored?.clientId]);
 
   const save = useMutation({
     mutationFn: () => api.patch('/settings/integrations-config', {
-      [provider]: { clientId, clientSecret: clientSecret || undefined },
+      [provider]: {
+        clientId,
+        clientSecret: clientSecret || undefined,
+        ...(provider === 'slack' ? { signingSecret: signingSecret || undefined } : {}),
+      },
     }),
     onSuccess: () => {
       setClientSecret('');
+      setSigningSecret('');
       qc.invalidateQueries({ queryKey: ['integrations-config'] });
       qc.invalidateQueries({ queryKey: provider === 'github' ? ['gitOAuthStatus'] : ['slackStatus'] });
       toast(t('common.saved'));
@@ -281,6 +292,16 @@ export function OAuthCredentials({ provider, callbackPath }: { provider: 'github
       </div>
       {stored?.hasSecret && !clientSecret && (
         <p className="mt-1.5 text-xs text-faint">{t('settings.oauthSecretKeep')}</p>
+      )}
+      {provider === 'slack' && (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <Field label={t('settings.slackSigningSecret')}>
+            <Input type="password" value={signingSecret}
+              placeholder={slackStored?.hasSigningSecret ? '••••••••' : ''}
+              onChange={(e) => setSigningSecret(e.target.value)} />
+          </Field>
+          <p className="self-end pb-2 text-xs text-muted-foreground">{t('settings.slackSigningSecretHint')}</p>
+        </div>
       )}
       <p className="mt-2.5 text-xs text-muted-foreground">
         {t('settings.oauthCallback')}{' '}

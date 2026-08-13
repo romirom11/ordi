@@ -70,6 +70,7 @@ export const integrationsConfigSchema = z.object({
   slack: z.object({
     clientId: z.string(),
     clientSecret: z.string().optional(),
+    signingSecret: z.string().optional(),
   }).optional(),
 });
 export type IntegrationsConfigInput = z.infer<typeof integrationsConfigSchema>;

@@ -22,6 +22,7 @@ import { RichEditor, EMPTY_DOC } from '../components/richtext/RichEditor';
 import { ProjectAccessPanel } from '../components/ProjectAccessPanel';
 import { FilesSection } from '../components/FilesSection';
 import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
+import { CustomFieldsPanel } from '../components/settings/CustomFieldsPanel';
 import { ProjectIcon } from '../components/project/ProjectIcon';
 import { PropertiesRail } from '../components/project/PropertiesRail';
 import { ProjectResources, type ProjectLink } from '../components/project/ProjectResources';
@@ -1365,9 +1366,12 @@ function SettingsTab({ project, isAdmin, onPatch, pending }: {
         <ProjectAccessPanel projectId={project.id} canManage={isAdmin} />
       </section>
 
-      {/* Intake form + task automation – the endpoints demand project admin. */}
+      {/* Intake form, project task fields + task automation – the endpoints demand project admin. */}
       {isAdmin && (
         <>
+          <section>
+            <CustomFieldsPanel projectId={project.id} />
+          </section>
           <IntakeSettingsSection projectId={project.id} />
           <ProjectAutomationSection projectId={project.id} />
         </>

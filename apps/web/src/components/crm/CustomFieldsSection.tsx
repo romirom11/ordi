@@ -12,6 +12,7 @@ import type { CustomFieldEntity } from '@ordi/shared';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, SlidersHorizontal } from 'lucide-react';
 import { api } from '../../lib/api';
+import { usePersistedState } from '../../lib/prefs';
 import { useT } from '../../lib/i18n';
 import { Avatar, Card, cn, fmtDate } from '../ui';
 import { DropdownMenu, MenuItem } from '../overlays';
@@ -30,11 +31,14 @@ export function fieldValueIsEmpty(v: unknown): boolean {
   return v == null || v === '' || (Array.isArray(v) && v.length === 0);
 }
 
-/** Fetch the (non-deprecated) definitions of one entity's custom fields. */
-export function useFieldDefs(entityType: CustomFieldEntity) {
+/** Fetch the (non-deprecated) definitions of one entity's custom fields.
+ * With projectId the project's own fields are included alongside global ones. */
+export function useFieldDefs(entityType: CustomFieldEntity, projectId?: string) {
   return useQuery<FieldDef[]>({
-    queryKey: ['custom-fields', entityType],
-    queryFn: () => api.get<{ data: FieldDef[] }>(`/custom-fields?entityType=${entityType}`).then((r) => r.data),
+    queryKey: ['custom-fields', entityType, projectId ?? null],
+    queryFn: () => api.get<{ data: FieldDef[] }>(
+      `/custom-fields?entityType=${entityType}${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ''}`,
+    ).then((r) => r.data),
     staleTime: 5 * 60_000,
   });
 }
@@ -67,16 +71,26 @@ export function CustomFieldsGrid({ defs, values: valuesProp, editable, onSave }:
   );
 }
 
-export function CustomFieldsSection({ entityType, values: valuesProp, editable, onSave }: {
+export function CustomFieldsSection({ entityType, projectId, values: valuesProp, editable, onSave, collapsible }: {
   entityType: CustomFieldEntity;
+  /** Include this project's own fields alongside the workspace-wide ones. */
+  projectId?: string;
   values?: Record<string, unknown>;
   editable: boolean;
   /** Receives the full value map with the changed key applied; the API merges by key. */
   onSave: (customFields: Record<string, unknown>) => void;
+  /** Collapsible with a persisted toggle; starts collapsed while every field is empty. */
+  collapsible?: boolean;
 }) {
   const t = useT();
-  const defsQ = useFieldDefs(entityType);
+  const defsQ = useFieldDefs(entityType, projectId);
   const values = valuesProp ?? {};
+  // null until the user has ever toggled – then their choice wins.
+  const [stored, setStored] = usePersistedState<boolean | null>(
+    collapsible ? `ordi:cf:collapsed:${entityType}` : undefined,
+    null,
+    (raw) => (typeof raw === 'boolean' ? raw : null),
+  );
   // Empty fields render only while they can be filled – a read-only record
   // showing a grid of dashes says nothing. Grouped fields belong to their
   // group's section (EmployeeFieldGroups) and are skipped here.
@@ -85,12 +99,31 @@ export function CustomFieldsSection({ entityType, values: valuesProp, editable, 
     .filter((f) => editable || !fieldValueIsEmpty(values[f.key]));
   if (defs.length === 0) return null;
 
+  const filled = defs.filter((f) => !fieldValueIsEmpty(values[f.key])).length;
+  const collapsed = collapsible ? (stored ?? filled === 0) : false;
+
   return (
     <section>
-      <SectionHeader icon={<SlidersHorizontal size={15} />} title={t('crm.customFields')} />
-      <Card className="p-4">
-        <CustomFieldsGrid defs={defs} values={values} editable={editable} onSave={onSave} />
-      </Card>
+      {collapsible ? (
+        <button
+          type="button"
+          aria-expanded={!collapsed}
+          onClick={() => setStored(!collapsed)}
+          className="mb-3 flex items-center gap-2 text-[13px] font-semibold transition-colors hover:text-foreground"
+        >
+          <span className="text-muted-foreground"><SlidersHorizontal size={15} /></span>
+          {t('crm.customFields')}
+          {filled > 0 && <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">{filled}</span>}
+          <ChevronDown size={14} className={cn('text-faint transition-transform', collapsed && '-rotate-90')} />
+        </button>
+      ) : (
+        <SectionHeader icon={<SlidersHorizontal size={15} />} title={t('crm.customFields')} />
+      )}
+      {!collapsed && (
+        <Card className="p-4">
+          <CustomFieldsGrid defs={defs} values={values} editable={editable} onSave={onSave} />
+        </Card>
+      )}
     </section>
   );
 }

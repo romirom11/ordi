@@ -31,6 +31,8 @@ export const env = {
   /** Slack app credentials for the workspace Slack connection (OAuth v2). */
   slackClientId: process.env.SLACK_CLIENT_ID ?? '',
   slackClientSecret: process.env.SLACK_CLIENT_SECRET ?? '',
+  /** Slack request-signing secret – verifies inbound events & slash commands. */
+  slackSigningSecret: process.env.SLACK_SIGNING_SECRET ?? '',
   /** 32-byte hex key for AES-256-GCM (git credentials, PRD §13.1). */
   encryptionKey: process.env.ENCRYPTION_KEY ?? '0'.repeat(64),
   smtpUrl: process.env.SMTP_URL ?? '',

@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { getDb, schema, eq, and, isNull, asc, desc, inArray } from '@ordi/db';
+import { getDb, schema, eq, and, isNull, asc, desc, inArray, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import {
   publicQuoteDecisionSchema, intakeSubmitSchema, careersApplySchema,
@@ -18,7 +18,7 @@ import {
   convertManifestCode, githubAppConfigured, getInstallation, listInstallationRepos,
   upsertInstallationConnection, syncInstallationRepos,
 } from '../integrations/github-app';
-import { storeGithubAppConfig } from '../../lib/runtime-config';
+import { storeGithubAppConfig, runtimeConfig } from '../../lib/runtime-config';
 
 /**
  * Public (unauthenticated) surface (PRD §11.2/11.3/11.8, §8.6, §12.3, §13.1).
@@ -457,6 +457,64 @@ export function publicRoutes() {
     } catch {
       return c.redirect(`${appUrl}/settings/integrations?slack=error`);
     }
+  });
+
+  // ── Inbound Slack (events + slash commands) – signed with the app's signing secret. ──
+
+  /** Slack v0 request signature: v0=HMAC(secret, "v0:<ts>:<raw>"), ±5 min replay window. */
+  async function slackSignatureOk(ts: string | undefined, signature: string | undefined, raw: string): Promise<boolean> {
+    const secret = (await runtimeConfig()).slack?.signingSecret;
+    if (!secret || !ts || !signature) return false;
+    if (Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false;
+    return signature === `v0=${hmacSha256(secret, `v0:${ts}:${raw}`)}`;
+  }
+
+  // Events API: today only the URL-verification handshake and an ack – the
+  // subscription exists so the Slack app can be wired up once and richer
+  // event handling can land without another app-config round.
+  app.post('/api/v1/integrations/slack/events', async (c) => {
+    const raw = await c.req.text();
+    if (!(await slackSignatureOk(c.req.header('x-slack-request-timestamp'), c.req.header('x-slack-signature'), raw))) {
+      return c.json({ error: 'bad signature' }, 401);
+    }
+    let payload: any;
+    try { payload = JSON.parse(raw); } catch { return c.json({ ok: true }); }
+    if (payload?.type === 'url_verification') return c.json({ challenge: payload.challenge });
+    return c.json({ ok: true });
+  });
+
+  // Slash command (`/ordi <request text>`): files an intake item on the project
+  // whose Slack channel this is – the same triage queue the public form and the
+  // mailbox feed, so no actor/permission question arises for the Slack user.
+  app.post('/api/v1/integrations/slack/commands', async (c) => {
+    const raw = await c.req.text();
+    if (!(await slackSignatureOk(c.req.header('x-slack-request-timestamp'), c.req.header('x-slack-signature'), raw))) {
+      return c.json({ error: 'bad signature' }, 401);
+    }
+    const form = new URLSearchParams(raw);
+    const channelId = form.get('channel_id') ?? '';
+    const text = (form.get('text') ?? '').trim();
+    const userName = form.get('user_name') ?? '';
+    const ephemeral = (t: string) => c.json({ response_type: 'ephemeral', text: t });
+
+    const { db } = getDb();
+    const [project] = await db.select({ id: schema.projects.id, name: schema.projects.name })
+      .from(schema.projects)
+      .where(and(isNull(schema.projects.deletedAt), sql`${schema.projects.settings}->>'slackChannelId' = ${channelId}`));
+    if (!project) {
+      return ephemeral('This channel is not linked to an ordi project. Link one in the project settings → Integrations.');
+    }
+    if (!text) return ephemeral('Usage: /ordi <request text> – files a request into the project intake queue.');
+
+    await db.insert(schema.intakeItems).values({
+      id: ulid(),
+      projectId: project.id,
+      source: 'slack',
+      requesterName: userName ? `${userName} (Slack)` : 'Slack',
+      title: text.slice(0, 500),
+      description: text.length > 500 ? text.slice(0, 20_000) : '',
+    });
+    return ephemeral(`Request filed to *${project.name}* – the team will triage it in the project's Requests tab.`);
   });
 
   // ── Incoming git webhook (PRD §13.1) – always 200 to avoid provider retries. ──

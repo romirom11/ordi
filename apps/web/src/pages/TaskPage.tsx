@@ -269,8 +269,10 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
             <div className="mt-6">
               <CustomFieldsSection
                 entityType="tasks"
+                projectId={projectId}
                 values={task.customFields}
                 editable
+                collapsible
                 onSave={(customFields) => patch({ customFields })}
               />
             </div>

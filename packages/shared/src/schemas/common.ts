@@ -37,6 +37,8 @@ export type CustomFieldFilter = z.infer<typeof customFieldFilterSchema>;
 
 export const customFieldDefinitionSchema = z.object({
   entityType: z.enum(CUSTOM_FIELD_ENTITIES),
+  /** null/absent = workspace-wide; set = the field exists only on this project's records. */
+  projectId: idSchema.nullable().optional(),
   key: z.string().regex(/^[a-z][a-z0-9_]*$/, 'lowercase snake_case'),
   label: z.string().min(1),
   type: z.enum(CUSTOM_FIELD_TYPES),

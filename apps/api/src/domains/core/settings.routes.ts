@@ -121,7 +121,7 @@ export function settingsRoutes() {
           hasPrivateKey: !!cfg.githubApp.privateKey, hasWebhookSecret: !!cfg.githubApp.webhookSecret,
         }
         : null,
-      slack: cfg.slack ? { clientId: cfg.slack.clientId, hasSecret: !!cfg.slack.clientSecret } : null,
+      slack: cfg.slack ? { clientId: cfg.slack.clientId, hasSecret: !!cfg.slack.clientSecret, hasSigningSecret: !!cfg.slack.signingSecret } : null,
       slackSource: cfg.slackSource,
     });
   });
@@ -142,7 +142,7 @@ export function settingsRoutes() {
       if (incoming === undefined) continue;
       const prev = (current[key] ?? {}) as Record<string, unknown>;
       const next = { ...prev, ...incoming } as Record<string, unknown>;
-      for (const secretKey of ['pass', 'clientSecret', 'privateKey', 'webhookSecret']) {
+      for (const secretKey of ['pass', 'clientSecret', 'privateKey', 'webhookSecret', 'signingSecret']) {
         if (next[secretKey] === '' || next[secretKey] === undefined) {
           if (prev[secretKey]) next[secretKey] = prev[secretKey];
           else delete next[secretKey];
