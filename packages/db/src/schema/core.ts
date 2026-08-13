@@ -152,12 +152,38 @@ export const apiTokens = pgTable('api_tokens', {
   hashIdx: uniqueIndex('api_tokens_hash_idx').on(t.hash),
 }));
 
+/**
+ * Field groups (PRD §5.5 extension): a named access boundary over custom
+ * fields. Role access is granted per group in the RBAC editor; dynamic
+ * principals ('self' on employees) cover the record's own person. Fields
+ * without a group keep the entity's default visibility.
+ */
+export const customFieldGroups = pgTable('custom_field_groups', {
+  id: pk(),
+  entityType: text('entity_type').notNull(),
+  name: text('name').notNull(),
+  position: integer('position').notNull().default(0),
+  ...timestamps,
+}, (t) => ({
+  entityIdx: index('cfg_entity_idx').on(t.entityType),
+}));
+
+export const customFieldGroupGrants = pgTable('custom_field_group_grants', {
+  groupId: text('group_id').notNull().references(() => customFieldGroups.id, { onDelete: 'cascade' }),
+  /** 'role:<roleId>' or a dynamic principal such as 'self' (the record's own person). */
+  principal: text('principal').notNull(),
+  level: text('level').notNull(), // read | write
+}, (t) => ({
+  pk: primaryKey({ columns: [t.groupId, t.principal] }),
+}));
+
 export const customFieldDefinitions = pgTable('custom_field_definitions', {
   id: pk(),
   entityType: text('entity_type').notNull(),
   key: text('key').notNull(),
   label: text('label').notNull(),
   type: text('type').notNull(),
+  groupId: text('group_id').references(() => customFieldGroups.id, { onDelete: 'set null' }),
   options: jsonb('options').notNull().default([]),
   required: boolean('required').notNull().default(false),
   position: integer('position').notNull().default(0),

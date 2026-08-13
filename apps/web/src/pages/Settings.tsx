@@ -23,6 +23,7 @@ import { ChartOfAccountsBlock, ExpenseCategoriesBlock } from '../components/fina
 import { ProjectTypesPanel } from '../components/settings/ProjectTypesPanel';
 import { LeaveTypesPanel } from '../components/settings/LeaveTypesPanel';
 import { CustomFieldsPanel } from '../components/settings/CustomFieldsPanel';
+import { FieldGroupMatrix } from '../components/settings/FieldGroupMatrix';
 import { SectionHead, SettingRow, Field, RowList, AnimatedRow } from '../components/settings/primitives';
 import { downscaleImage } from '../components/settings/image';
 import { usePageTitle } from '../lib/tabs';
@@ -816,6 +817,8 @@ function RolesPanel() {
           ))}
         </RowList>
       )}
+
+      {!roles.isLoading && <FieldGroupMatrix roles={roleList} />}
 
       <Dialog open={createOpen} onClose={() => setCreateOpen(false)} title={t('settings.createRole')} width={380}>
         <form className="space-y-3 p-4" onSubmit={(e) => { e.preventDefault(); if (newRole.trim()) create.mutate(); }}>

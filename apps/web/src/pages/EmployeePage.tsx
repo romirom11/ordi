@@ -9,6 +9,7 @@ import {
 } from '../components/ui';
 import { DropdownMenu, MenuItem, toast } from '../components/overlays';
 import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
+import { EmployeeFieldGroups } from '../components/people/EmployeeFieldGroups';
 import { CompensationDialog } from '../components/people/CompensationDialog';
 import { EditEmployeeDialog } from '../components/people/EditEmployeeDialog';
 import {
@@ -67,6 +68,8 @@ interface EmployeeDetail {
   managerId?: string | null; birthday?: string | null; joinDate?: string | null; probationEnd?: string | null; exitDate?: string | null;
   status?: string | null; version?: number; user?: EmployeeUser | null;
   customFields?: Record<string, unknown>;
+  fieldAccess?: Record<string, 'read' | 'write'>;
+  questionnaireUpdatedAt?: string | null;
 }
 interface Compensation { id?: string; compType?: string; amount?: number | string; currency?: string; effectiveFrom?: string | null; effectiveTo?: string | null }
 interface Position { id: string; title: string }
@@ -232,7 +235,8 @@ export function EmployeePage({ id }: { id: string }) {
           </div>
         </section>
 
-        {/* Workspace-defined employee fields – same card leads and deals use */}
+        {/* Workspace-defined employee fields: the ungrouped card plus one
+          * section per field group this viewer may see. */}
         <div className="mb-6">
           <CustomFieldsSection
             entityType="employees"
@@ -241,6 +245,13 @@ export function EmployeePage({ id }: { id: string }) {
             onSave={(cf) => saveCustomFields.mutate(cf)}
           />
         </div>
+        <EmployeeFieldGroups
+          values={e.customFields}
+          fieldAccess={e.fieldAccess}
+          canWrite={canWrite}
+          questionnaireUpdatedAt={e.questionnaireUpdatedAt}
+          onSave={(cf) => saveCustomFields.mutate(cf)}
+        />
 
         {/* Compensation – only rendered when the viewer can read compensation */}
         {canComp && (

@@ -39,6 +39,15 @@ extendDict({
     'cfields.deprecatedHint': 'Hide from records without losing stored values.',
     'cfields.deleteTitle': 'Delete custom field',
     'cfields.deleteConfirm': 'Delete “{label}”? The definition disappears everywhere; values already stored on records are kept but no longer shown. Deprecate instead to hide it reversibly.',
+    'cfields.groups': 'Field groups',
+    'cfields.groupsHint': 'Groups bound fields into access units – who sees each group is configured in Settings → Roles.',
+    'cfields.addGroup': 'Add group',
+    'cfields.groupName': 'Group name',
+    'cfields.renameGroup': 'Rename group',
+    'cfields.deleteGroupTitle': 'Delete field group',
+    'cfields.deleteGroupConfirm': 'Delete “{name}”? Its fields stay, but fall back to the ungrouped default visibility.',
+    'cfields.group': 'Group',
+    'cfields.noGroup': 'No group',
   },
   uk: {
     'settings.customFieldsDesc': 'Додавайте власні поля до будь-якого типу сутностей.',
@@ -61,6 +70,15 @@ extendDict({
     'cfields.deprecatedHint': 'Сховати з записів, не втрачаючи збережені значення.',
     'cfields.deleteTitle': 'Видалити кастомне поле',
     'cfields.deleteConfirm': 'Видалити «{label}»? Визначення зникне всюди; вже збережені значення залишаться в записах, але не показуватимуться. Щоб сховати оборотно – позначте поле застарілим.',
+    'cfields.groups': 'Групи полів',
+    'cfields.groupsHint': 'Групи об’єднують поля в одиниці доступу – хто бачить кожну групу, налаштовується в Налаштування → Ролі.',
+    'cfields.addGroup': 'Додати групу',
+    'cfields.groupName': 'Назва групи',
+    'cfields.renameGroup': 'Перейменувати групу',
+    'cfields.deleteGroupTitle': 'Видалити групу полів',
+    'cfields.deleteGroupConfirm': 'Видалити «{name}»? Поля залишаться, але повернуться до стандартної видимості без групи.',
+    'cfields.group': 'Група',
+    'cfields.noGroup': 'Без групи',
   },
 });
 
@@ -68,8 +86,13 @@ interface CustomField {
   id: string; key: string; label?: string | null; type?: string | null;
   options?: { value: string; label: string }[] | null;
   required?: boolean; position?: number; showInList?: boolean; isSortable?: boolean;
-  indexed?: boolean; deprecated?: boolean;
+  indexed?: boolean; deprecated?: boolean; groupId?: string | null;
 }
+
+interface FieldGroup { id: string; name: string; position?: number }
+
+/** Group management + the access story live on employees for now. */
+const GROUPED_ENTITY = 'employees';
 
 const OPTION_TYPES = ['select', 'multiselect'];
 
@@ -98,6 +121,14 @@ export function CustomFieldsPanel() {
     onError: (e) => { setDeleting(null); toast.error(e instanceof ApiError ? e.message : t('settings.saveFailed')); },
   });
 
+  const groupsQ = useQuery({
+    queryKey: ['fieldGroups', entityType],
+    queryFn: () => api.get<{ data: FieldGroup[] }>('/custom-field-groups' + qs({ entityType })).then((r) => r.data),
+    enabled: entityType === GROUPED_ENTITY,
+  });
+  const groups = groupsQ.data ?? [];
+  const groupName = (id?: string | null) => groups.find((g) => g.id === id)?.name;
+
   return (
     <div>
       <SectionHead
@@ -123,6 +154,7 @@ export function CustomFieldsPanel() {
             <AnimatedRow key={f.id} index={i} className="group flex items-center gap-3 border-b border-border px-3 py-2.5 text-[13px] last:border-0">
               <span className="font-mono text-[11px] text-muted-foreground">{f.key}</span>
               <span className={f.deprecated ? 'flex-1 text-muted-foreground line-through' : 'flex-1'}>{f.label ?? '–'}</span>
+              {groupName(f.groupId) && <Badge className="bg-primary/10 text-primary">{groupName(f.groupId)}</Badge>}
               {OPTION_TYPES.includes(f.type ?? '') && (
                 <span className="hidden max-w-56 truncate text-xs text-muted-foreground sm:block">
                   {(f.options ?? []).map((o) => o.label).join(' · ')}
@@ -140,10 +172,13 @@ export function CustomFieldsPanel() {
         </RowList>
       )}
 
+      {entityType === GROUPED_ENTITY && <FieldGroupsBlock groups={groups} entityType={entityType} />}
+
       <FieldDialog
         open={createOpen || !!editing}
         entityType={entityType}
         field={editing}
+        groups={entityType === GROUPED_ENTITY ? groups : []}
         onClose={() => { setCreateOpen(false); setEditing(null); }}
         onSaved={invalidate}
       />
@@ -162,11 +197,88 @@ export function CustomFieldsPanel() {
   );
 }
 
+/** Manage the entity's field groups: name + order; access lives in Settings → Roles. */
+function FieldGroupsBlock({ groups, entityType }: { groups: FieldGroup[]; entityType: string }) {
+  const t = useT();
+  const qc = useQueryClient();
+  const [dialog, setDialog] = useState<{ group: FieldGroup | null } | null>(null);
+  const [name, setName] = useState('');
+  const [deleting, setDeleting] = useState<FieldGroup | null>(null);
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['fieldGroups'] });
+    qc.invalidateQueries({ queryKey: ['fieldGroupGrants'] });
+  };
+
+  const save = useMutation({
+    mutationFn: () => dialog?.group
+      ? api.patch(`/custom-field-groups/${dialog.group.id}`, { name: name.trim() })
+      : api.post('/custom-field-groups', { entityType, name: name.trim(), position: groups.length }),
+    onSuccess: () => { setDialog(null); invalidate(); toast(t('common.saved')); },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('settings.saveFailed')),
+  });
+  const del = useMutation({
+    mutationFn: (id: string) => api.del(`/custom-field-groups/${id}`),
+    onSuccess: () => { setDeleting(null); invalidate(); qc.invalidateQueries({ queryKey: ['customFields'] }); qc.invalidateQueries({ queryKey: ['custom-fields'] }); toast(t('common.saved')); },
+    onError: (e) => { setDeleting(null); toast.error(e instanceof ApiError ? e.message : t('settings.saveFailed')); },
+  });
+
+  return (
+    <div className="mt-8">
+      <div className="mb-1 flex items-center justify-between">
+        <h3 className="text-sm font-semibold">{t('cfields.groups')}</h3>
+        <Button size="sm" variant="outline" onClick={() => { setName(''); setDialog({ group: null }); }}>
+          <Plus size={13} /> {t('cfields.addGroup')}
+        </Button>
+      </div>
+      <p className="mb-3 text-xs text-muted-foreground">{t('cfields.groupsHint')}</p>
+      {groups.length > 0 && (
+        <RowList>
+          {groups.map((g, i) => (
+            <AnimatedRow key={g.id} index={i} className="group flex items-center gap-3 border-b border-border px-3 py-2.5 text-[13px] last:border-0">
+              <span className="flex-1 font-medium">{g.name}</span>
+              <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100">
+                <IconButton size="sm" aria-label={t('cfields.renameGroup')} onClick={() => { setName(g.name); setDialog({ group: g }); }}><Pencil size={14} /></IconButton>
+                <IconButton size="sm" aria-label={t('common.delete')} className="text-destructive" onClick={() => setDeleting(g)}><Trash2 size={14} /></IconButton>
+              </div>
+            </AnimatedRow>
+          ))}
+        </RowList>
+      )}
+
+      <Dialog open={!!dialog} onClose={() => setDialog(null)} title={dialog?.group ? t('cfields.renameGroup') : t('cfields.addGroup')} width={380}>
+        <form className="space-y-3 p-4" onSubmit={(e: FormEvent) => { e.preventDefault(); if (name.trim()) save.mutate(); }}>
+          <Field label={t('cfields.groupName')}>
+            <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setDialog(null)}>{t('common.cancel')}</Button>
+            <Button type="submit" size="sm" disabled={!name.trim() || save.isPending}>
+              {save.isPending ? <Spinner /> : dialog?.group ? t('common.save') : t('common.create')}
+            </Button>
+          </div>
+        </form>
+      </Dialog>
+
+      <ConfirmDialog
+        open={!!deleting}
+        onClose={() => setDeleting(null)}
+        onConfirm={() => { if (deleting) del.mutate(deleting.id); }}
+        title={t('cfields.deleteGroupTitle')}
+        body={t('cfields.deleteGroupConfirm').replace('{name}', deleting?.name ?? '')}
+        confirmLabel={t('common.delete')}
+        danger
+        pending={del.isPending}
+      />
+    </div>
+  );
+}
+
 const KEY_RE = /^[a-z][a-z0-9_]*$/;
 const slug = (s: string) => s.toLowerCase().trim().replace(/['’]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 
-function FieldDialog({ open, entityType, field, onClose, onSaved }: {
-  open: boolean; entityType: string; field: CustomField | null; onClose: () => void; onSaved: () => void;
+function FieldDialog({ open, entityType, field, groups, onClose, onSaved }: {
+  open: boolean; entityType: string; field: CustomField | null; groups: FieldGroup[]; onClose: () => void; onSaved: () => void;
 }) {
   const t = useT();
   const [key, setKey] = useState('');
@@ -178,6 +290,7 @@ function FieldDialog({ open, entityType, field, onClose, onSaved }: {
   const [isSortable, setIsSortable] = useState(false);
   const [indexed, setIndexed] = useState(false);
   const [deprecated, setDeprecated] = useState(false);
+  const [groupId, setGroupId] = useState('');
 
   useEffect(() => {
     if (!open) return;
@@ -190,6 +303,7 @@ function FieldDialog({ open, entityType, field, onClose, onSaved }: {
     setIsSortable(field?.isSortable ?? false);
     setIndexed(field?.indexed ?? false);
     setDeprecated(field?.deprecated ?? false);
+    setGroupId(field?.groupId ?? '');
   }, [open, field]);
 
   const hasOptions = OPTION_TYPES.includes(type);
@@ -201,9 +315,10 @@ function FieldDialog({ open, entityType, field, onClose, onSaved }: {
     mutationFn: () => {
       const flags = { required, showInList, isSortable, indexed };
       const opts = hasOptions ? { options: cleanOptions } : {};
+      const group = groups.length ? { groupId: groupId || null } : {};
       return field
-        ? api.patch(`/custom-fields/${field.id}`, { label: label.trim(), ...opts, ...flags, deprecated })
-        : api.post('/custom-fields', { entityType, key, label: label.trim(), type, ...opts, ...flags });
+        ? api.patch(`/custom-fields/${field.id}`, { label: label.trim(), ...opts, ...flags, ...group, deprecated })
+        : api.post('/custom-fields', { entityType, key, label: label.trim(), type, ...opts, ...flags, ...group });
     },
     onSuccess: () => { onSaved(); toast(t('common.saved')); onClose(); },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('settings.saveFailed')),
@@ -235,6 +350,15 @@ function FieldDialog({ open, entityType, field, onClose, onSaved }: {
         <Field label={t('settings.fieldLabel')}>
           <Input autoFocus={!!field} value={label} onChange={(e) => setLabel(e.target.value)} />
         </Field>
+
+        {groups.length > 0 && (
+          <Field label={t('cfields.group')}>
+            <Select value={groupId} onChange={(e) => setGroupId(e.target.value)} className="w-full">
+              <option value="">{t('cfields.noGroup')}</option>
+              {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </Select>
+          </Field>
+        )}
 
         {hasOptions && (
           <div>

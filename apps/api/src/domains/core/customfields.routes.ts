@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { getDb, schema, eq, and, sql } from '@ordi/db';
+import { getDb, schema, eq, and, asc, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import { customFieldDefinitionSchema, CUSTOM_FIELD_ENTITIES } from '@ordi/shared';
 import type { AppEnv } from '../../context';
@@ -14,12 +14,14 @@ export function customFieldsRoutes() {
   app.use('*', requireAuth);
 
   // Read: any authenticated user can read definitions for entities they can see.
+  // Explicit position/creation order – a heap scan's order is not a contract.
   app.get('/', async (c) => {
     const entityType = c.req.query('entityType');
     const { db } = getDb();
+    const order = [asc(schema.customFieldDefinitions.position), asc(schema.customFieldDefinitions.createdAt)];
     const rows = entityType
-      ? await db.select().from(schema.customFieldDefinitions).where(eq(schema.customFieldDefinitions.entityType, entityType))
-      : await db.select().from(schema.customFieldDefinitions);
+      ? await db.select().from(schema.customFieldDefinitions).where(eq(schema.customFieldDefinitions.entityType, entityType)).orderBy(...order)
+      : await db.select().from(schema.customFieldDefinitions).orderBy(...order);
     return c.json({ data: rows });
   });
 
@@ -35,6 +37,7 @@ export function customFieldsRoutes() {
       id, entityType: body.entityType, key: body.key, label: body.label, type: body.type,
       options: body.options ?? [], required: body.required, position: body.position,
       showInList: body.showInList, isSortable: body.isSortable, indexed: body.indexed,
+      groupId: body.groupId ?? null,
     });
     invalidateRegistry(body.entityType);
     if (body.indexed) await ensureExpressionIndex(body.entityType, body.key, body.type);
@@ -63,6 +66,7 @@ export function customFieldsRoutes() {
       ...(patch.isSortable !== undefined ? { isSortable: patch.isSortable } : {}),
       ...(patch.indexed !== undefined ? { indexed: patch.indexed } : {}),
       ...(patch.deprecated !== undefined ? { deprecated: patch.deprecated } : {}),
+      ...(patch.groupId !== undefined ? { groupId: patch.groupId || null } : {}),
     }).where(eq(schema.customFieldDefinitions.id, id));
     invalidateRegistry(def.entityType);
     if (patch.indexed === true) await ensureExpressionIndex(def.entityType, def.key, def.type as any);

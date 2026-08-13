@@ -18,6 +18,7 @@ import { meRoutes } from './domains/core/me.routes';
 import { usersRoutes } from './domains/core/users.routes';
 import { rolesRoutes } from './domains/core/roles.routes';
 import { customFieldsRoutes } from './domains/core/customfields.routes';
+import { fieldGroupsRoutes } from './domains/core/fieldgroups.routes';
 import { searchRoutes } from './domains/core/search.routes';
 import { notificationsRoutes } from './domains/core/notifications.routes';
 import { savedViewsRoutes } from './domains/core/savedviews.routes';
@@ -125,6 +126,7 @@ export function createApp() {
   api.route('/users', usersRoutes());
   api.route('/roles', rolesRoutes());
   api.route('/custom-fields', customFieldsRoutes());
+  api.route('/custom-field-groups', fieldGroupsRoutes());
   api.route('/search', searchRoutes());
   api.route('/notifications', notificationsRoutes());
   api.route('/saved-views', savedViewsRoutes());

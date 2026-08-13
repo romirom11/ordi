@@ -12,6 +12,8 @@ import { err } from '../../lib/errors';
 import { writeActivity, recordSensitiveAccess } from '../../core/activity';
 import { emit } from '../../core/events';
 import { assertVersion } from '../../core/locking';
+import { employeeFieldAccess, loadFieldGroups, selfGrantLevels, stripGroupedValues } from '../../core/fieldgroups';
+import { mergeCustomFields } from '../../core/customfields';
 
 // ─── sensitivity helpers (PRD §12.8) ───
 function canSensitive(actor: Actor): boolean {
@@ -23,6 +25,23 @@ function stripEmployee(actor: Actor, e: any): any {
   if (!e || canSensitive(actor)) return e;
   const { sensitive, emergencyContact, ...rest } = e;
   return rest;
+}
+
+/** Definitions of the employees custom fields (full rows, deprecated included). */
+async function employeeFieldDefs() {
+  const { db } = getDb();
+  return db.select().from(schema.customFieldDefinitions)
+    .where(eq(schema.customFieldDefinitions.entityType, 'employees'))
+    .orderBy(asc(schema.customFieldDefinitions.position), asc(schema.customFieldDefinitions.key));
+}
+
+/** Apply field-group visibility to one employee row's customFields. */
+async function stripFieldGroups(actor: Actor, e: any): Promise<any> {
+  if (!e) return e;
+  const access = await employeeFieldAccess(actor, e);
+  if (access.full) return e;
+  const defs = await employeeFieldDefs();
+  return { ...e, customFields: stripGroupedValues(e.customFields, defs, access) };
 }
 
 /** Strip a job opening's salaryRange unless actor has people.read_sensitive. */
@@ -41,7 +60,8 @@ export async function listEmployees(actor: Actor, params: { status?: string; dep
     params.departmentId ? eq(schema.employees.departmentId, params.departmentId) : undefined,
     params.q ? sql`(${schema.employees.firstName} || ' ' || ${schema.employees.lastName}) ilike ${'%' + params.q + '%'}` : undefined,
   )).orderBy(asc(schema.employees.firstName));
-  return rows.map((r) => stripEmployee(actor, r));
+  const stripped = await Promise.all(rows.map((r) => stripFieldGroups(actor, r)));
+  return stripped.map((r) => stripEmployee(actor, r));
 }
 
 async function loadEmployee(id: string) {
@@ -55,7 +75,8 @@ async function loadEmployee(id: string) {
 export async function getEmployee(actor: Actor, id: string) {
   const { db } = getDb();
   const e = await loadEmployee(id);
-  const stripped = stripEmployee(actor, e);
+  const access = await employeeFieldAccess(actor, e);
+  const stripped = stripEmployee(actor, await stripFieldGroups(actor, e));
   let user: { id: string; name: string; email: string; avatar: string | null; isActive: boolean } | null = null;
   if (e.userId) {
     const [u] = await db.select({
@@ -64,7 +85,8 @@ export async function getEmployee(actor: Actor, id: string) {
     }).from(schema.users).where(eq(schema.users.id, e.userId));
     if (u) user = u;
   }
-  return { ...stripped, user };
+  // groupId → read|write for THIS viewer on THIS record; the card renders from it.
+  return { ...stripped, user, fieldAccess: Object.fromEntries(access.levels) };
 }
 
 /**
@@ -458,6 +480,67 @@ export async function employeeOfUser(userId: string) {
   const [e] = await db.select().from(schema.employees)
     .where(and(eq(schema.employees.userId, userId), isNull(schema.employees.deletedAt)));
   return e ?? null;
+}
+
+// ─── HR questionnaire: self-service field groups (PRD §5.5 extension) ───
+
+/**
+ * The groups the person may fill in about themselves, with definitions and
+ * their current values. Access here is by the 'self' principal only – an HR
+ * role's broad access does not turn every group into their questionnaire.
+ */
+export async function myHrFields(actor: Actor) {
+  const emp = await employeeOfUser(actor.userId);
+  if (!emp) return { linked: false as const, updatedAt: null, groups: [] };
+  const selfLevels = await selfGrantLevels();
+  const { groups } = await loadFieldGroups();
+  const defs = await employeeFieldDefs();
+  const cf = (emp.customFields && typeof emp.customFields === 'object' ? emp.customFields : {}) as Record<string, unknown>;
+  const out = groups
+    .filter((g) => g.entityType === 'employees' && selfLevels.has(g.id))
+    .map((g) => ({
+      id: g.id,
+      name: g.name,
+      level: selfLevels.get(g.id)!,
+      fields: defs
+        .filter((d) => d.groupId === g.id && !d.deprecated)
+        .map((d) => ({
+          id: d.id, key: d.key, label: d.label, type: d.type,
+          options: d.options, required: d.required,
+          value: cf[d.key] ?? null,
+        })),
+    }))
+    .filter((g) => g.fields.length > 0);
+  return { linked: true as const, updatedAt: emp.questionnaireUpdatedAt, groups: out };
+}
+
+/** Save the person's own answers – only keys of self-writable groups pass. */
+export async function updateMyHrFields(actor: Actor, input: { customFields: Record<string, unknown> }) {
+  const { db } = getDb();
+  const emp = await employeeOfUser(actor.userId);
+  if (!emp) throw err.domain('Your account is not linked to an employee record – ask HR to link it.');
+  const selfLevels = await selfGrantLevels();
+  const defs = await employeeFieldDefs();
+  const writable = new Set(
+    defs.filter((d) => d.groupId && selfLevels.get(d.groupId) === 'write' && !d.deprecated).map((d) => d.key),
+  );
+  const patch: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input.customFields ?? {})) {
+    if (!writable.has(key)) throw err.forbidden(`Field '${key}' is not self-editable`);
+    patch[key] = value;
+  }
+  if (Object.keys(patch).length) {
+    await db.update(schema.employees).set({
+      customFields: mergeCustomFields(emp.customFields, patch),
+      questionnaireUpdatedAt: new Date(),
+    }).where(eq(schema.employees.id, emp.id));
+    await writeActivity(db, {
+      entityType: 'employee', entityId: emp.id, action: 'questionnaire_updated',
+      after: { keys: Object.keys(patch) },
+      actorId: actor.userId, actorType: actor.actorType,
+    });
+  }
+  return myHrFields(actor);
 }
 
 export async function createLeaveRequest(actor: Actor, input: any) {
