@@ -19,8 +19,7 @@ test('People became HR and the calendar shows absences, holidays and birthdays',
   const me = await api<{ user: { id: string } }>(page, 'get', '/me');
   const emp = await api<{ id: string }>(page, 'post', '/employees', {
     firstName: 'Calla', lastName: 'Ndlela', userId: me.user.id,
-    birthday: `1993-${m}-27`, telegram: '@calla', email: 'calla@personal.test',
-    phone: '+380631234567', joinDate: '2024-05-01',
+    birthday: `1993-${m}-27`, joinDate: '2024-05-01',
   });
   const lt = await api<{ id: string }>(page, 'post', '/leave-types', { name: 'Vacation' });
   const lr = await api<{ id: string }>(page, 'post', '/leave-requests', {
@@ -49,7 +48,7 @@ test('People became HR and the calendar shows absences, holidays and birthdays',
   await expect(page.getByText('Approved absence')).toBeVisible();
 });
 
-test('the employee card carries contacts, telegram, documents and the questionnaire', async ({ page }) => {
+test('the employee card carries documents and the questionnaire with icons', async ({ page }) => {
   await login(page);
 
   const stamp = Date.now();
@@ -60,27 +59,29 @@ test('the employee card carries contacts, telegram, documents and the questionna
   let empId = employees.data.find((e) => e.userId === me.user.id)?.id;
   if (!empId) {
     empId = (await api<{ id: string }>(page, 'post', '/employees', {
-      firstName: 'Owner', lastName: 'Person', userId: me.user.id,
-      telegram: '@owner_person', email: 'owner.personal@test.local', birthday: '1990-01-15',
+      firstName: 'Owner', lastName: 'Person', userId: me.user.id, birthday: '1990-01-15',
     })).id;
   }
 
-  // A questionnaire group with a select field, self-writable.
+  // A questionnaire group with a select field, self-writable – both carrying icons.
   const group = await api<{ id: string }>(page, 'post', '/custom-field-groups', {
-    entityType: 'employees', name: `Анкета ${stamp}`,
+    entityType: 'employees', name: `Анкета ${stamp}`, icon: 'sparkles',
   });
   await api(page, 'post', '/custom-fields', {
-    entityType: 'employees', key: `tshirt_${stamp}`, label: 'T-shirt size', type: 'select', groupId: group.id,
+    entityType: 'employees', key: `tshirt_${stamp}`, label: 'T-shirt size', type: 'select', groupId: group.id, icon: 'shirt',
     options: [{ value: 's', label: 'S' }, { value: 'm', label: 'M' }, { value: 'l', label: 'L' }],
   });
   await api(page, 'put', `/custom-field-groups/${group.id}/grants`, {
     grants: [{ principal: 'self', level: 'write' }],
   });
 
-  // Fill it in on the profile page.
+  // Fill it in on the profile page: the select field renders as an empty
+  // "–" trigger inside the questionnaire card.
   await page.goto('/profile');
   await expect(page.getByText('HR questionnaire')).toBeVisible();
-  await page.getByText('T-shirt size', { exact: true }).locator('..').getByRole('button').first().click();
+  const qcard = page.getByText('These answers are visible to HR', { exact: false }).locator('..');
+  await expect(qcard.getByText('T-shirt size')).toBeVisible();
+  await qcard.getByRole('button', { name: '–' }).first().click();
   await page.getByRole('menuitem', { name: 'M', exact: true }).click();
   await expect(page.getByText(/Filled in|Partially filled/)).toBeVisible();
 
@@ -90,10 +91,8 @@ test('the employee card carries contacts, telegram, documents and the questionna
   await expect(page.getByText('T-shirt size', { exact: true })).toBeVisible();
   await expect(page.getByText('M', { exact: true }).first()).toBeVisible();
 
-  // Contact rows.
+  // The card names the login email; personal contacts live in custom fields now.
   await expect(page.getByText('Work email')).toBeVisible();
-  await expect(page.getByText('Personal email')).toBeVisible();
-  await expect(page.getByText('Telegram')).toBeVisible();
 
   // Documents: attach via API (upload rides the same pipeline the UI uses),
   // then the section lists it and opens the preview dialog.

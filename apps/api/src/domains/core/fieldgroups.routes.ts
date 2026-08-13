@@ -32,7 +32,7 @@ export function fieldGroupsRoutes() {
     const { db } = getDb();
     const id = ulid();
     await db.insert(schema.customFieldGroups).values({
-      id, entityType: body.entityType, name: body.name, position: body.position,
+      id, entityType: body.entityType, name: body.name, icon: body.icon ?? null, position: body.position,
     });
     invalidateFieldGroups();
     const actor = currentActor(c);
@@ -52,6 +52,7 @@ export function fieldGroupsRoutes() {
     if (!group) throw err.notFound();
     await db.update(schema.customFieldGroups).set({
       ...(typeof patch.name === 'string' && patch.name.trim() ? { name: patch.name.trim() } : {}),
+      ...(patch.icon !== undefined ? { icon: patch.icon || null } : {}),
       ...(typeof patch.position === 'number' ? { position: patch.position } : {}),
     }).where(eq(schema.customFieldGroups.id, id));
     invalidateFieldGroups();

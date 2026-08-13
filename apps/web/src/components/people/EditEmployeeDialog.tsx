@@ -38,8 +38,8 @@ interface Position { id: string; title: string }
 interface EmployeeLite { id: string; firstName?: string | null; lastName?: string | null; name?: string | null }
 
 export interface EditableEmployee {
-  id: string; firstName?: string | null; lastName?: string | null; email?: string | null;
-  phone?: string | null; telegram?: string | null; positionId?: string | null; departmentId?: string | null;
+  id: string; firstName?: string | null; lastName?: string | null;
+  positionId?: string | null; departmentId?: string | null;
   managerId?: string | null; employmentType?: string | null; joinDate?: string | null;
   birthday?: string | null;
   version?: number;
@@ -53,9 +53,6 @@ function formFrom(e: EditableEmployee) {
   return {
     firstName: e.firstName ?? '',
     lastName: e.lastName ?? '',
-    email: e.email ?? '',
-    phone: e.phone ?? '',
-    telegram: e.telegram ?? '',
     positionId: e.positionId ?? '',
     departmentId: e.departmentId ?? '',
     managerId: e.managerId ?? '',
@@ -87,9 +84,6 @@ export function EditEmployeeDialog({ employee, open, onClose }: {
     mutationFn: () => api.patch(`/employees/${employee.id}`, {
       firstName: form.firstName.trim(),
       lastName: form.lastName.trim(),
-      email: form.email.trim() || null,
-      phone: form.phone.trim() || null,
-      telegram: form.telegram.trim() || null,
       positionId: form.positionId || null,
       departmentId: form.departmentId || null,
       managerId: form.managerId || null,
@@ -135,16 +129,6 @@ export function EditEmployeeDialog({ employee, open, onClose }: {
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
-            {label(t('people.email'))}
-            <Input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
-          </div>
-          <div className="space-y-1">
-            {label(t('people.phone'))}
-            <Input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
             {label(t('people.position'))}
             <Select className="w-full" value={form.positionId} onChange={(e) => setForm((f) => ({ ...f, positionId: e.target.value }))}>
               <option value="">{t('people.noPosition')}</option>
@@ -182,10 +166,6 @@ export function EditEmployeeDialog({ employee, open, onClose }: {
           <div className="space-y-1">
             {label(t('people.birthday'))}
             <DateField value={form.birthday} onChange={(v) => setForm((f) => ({ ...f, birthday: v ?? '' }))} />
-          </div>
-          <div className="space-y-1">
-            {label(t('people.telegram'))}
-            <Input value={form.telegram} placeholder="@username" onChange={(e) => setForm((f) => ({ ...f, telegram: e.target.value }))} />
           </div>
         </div>
         <div className="flex justify-end gap-2 pt-1">

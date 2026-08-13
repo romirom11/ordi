@@ -17,8 +17,9 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   principal; `people.write` roles keep full access; enforcement is
   server-side. Self-writable groups form the **HR questionnaire** on the
   profile page, with a fill-status badge and a last-updated stamp on the card.
-- The **employee card** gains work/personal email, phone, telegram, birthday
-  and a documents section with inline PDF preview.
+- The **employee card** gains the work email, birthday and a documents
+  section with inline PDF preview; personal contacts live in custom fields.
+  Fields and groups can carry **icons** from a curated set.
 - **Custom fields render everywhere** – employee card, companies, projects,
   tasks, invoices, and contacts via their dialog (previously leads and deals
   only).

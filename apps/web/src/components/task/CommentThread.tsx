@@ -109,7 +109,12 @@ export function ActivityFeed({ taskId, comments, users }: {
               className="row-enter flex gap-2.5 py-1.5"
               style={{ ['--i' as string]: Math.min(i, 10) }}
             >
-              <Avatar name={item.comment.authorName ?? nameOf(item.comment.authorId)} size={22} className="mt-0.5" />
+              <Avatar
+                name={item.comment.authorName ?? nameOf(item.comment.authorId)}
+                src={users.find((u) => u.id === item.comment.authorId)?.avatar}
+                size={22}
+                className="mt-0.5"
+              />
               <div className="min-w-0 flex-1 rounded-lg border border-border bg-card px-3 py-2 transition-colors duration-150 hover:border-border-strong">
                 <p className="mb-1 flex items-baseline gap-2">
                   <span className="text-[13px] font-medium">{item.comment.authorName ?? nameOf(item.comment.authorId)}</span>

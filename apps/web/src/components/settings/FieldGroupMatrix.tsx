@@ -12,6 +12,7 @@ import { useT, extendDict } from '../../lib/i18n';
 import { Skeleton, Tooltip, cn } from '../ui';
 import { toast } from '../overlays';
 import { useFieldGroups } from '../people/EmployeeFieldGroups';
+import { FieldIcon } from '../fieldIcons';
 
 extendDict({
   en: {
@@ -146,7 +147,9 @@ export function FieldGroupMatrix({ roles }: { roles: MatrixRole[] }) {
           <tbody>
             {groups.map((g, i) => (
               <tr key={g.id} className={cn(i > 0 && 'border-t border-border')}>
-                <td className="px-3 py-1.5 font-medium">{g.name}</td>
+                <td className="px-3 py-1.5 font-medium">
+                  <span className="inline-flex items-center gap-1.5"><FieldIcon name={g.icon} size={13} className="text-faint" />{g.name}</span>
+                </td>
                 <td className="px-2 py-1.5 text-center">{cellFor(g.id, 'self', true, false)}</td>
                 {roles.map((r) => {
                   const hr = (r.permissions ?? []).includes('people.write');

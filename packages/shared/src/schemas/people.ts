@@ -15,7 +15,6 @@ export const employeeInputSchema = z.object({
   lastName: z.string().default(''),
   email: z.string().email().nullable().optional(),
   phone: z.string().nullable().optional(),
-  telegram: z.string().nullable().optional(),
   positionId: idSchema.nullable().optional(),
   departmentId: idSchema.nullable().optional(),
   employmentType: z.enum(EMPLOYMENT_TYPES).default('full_time'),
