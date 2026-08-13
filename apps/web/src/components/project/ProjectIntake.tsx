@@ -6,12 +6,23 @@
  */
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Copy, Inbox, Mail, X } from 'lucide-react';
+import { Check, Copy, Inbox, Mail, Paperclip, X } from 'lucide-react';
 import { api, appOrigin, ApiError } from '../../lib/api';
 import { useOpen } from '../../lib/router';
+import { resolveFileSrc } from '../../lib/uploads';
 import { Button, Card, EmptyState, Input, Select, Skeleton, Spinner, Switch, fmtDate } from '../ui';
 import { Dialog, toast } from '../overlays';
 import { useT, extendDict } from '../../lib/i18n';
+
+/** Fetch the signed URL for a request's file and open it in a new tab. */
+async function openIntakeAttachment(attachmentId: string): Promise<void> {
+  try {
+    const { url } = await api.get<{ url: string }>(`/attachments/${attachmentId}/url`);
+    window.open(resolveFileSrc(url), '_blank', 'noopener');
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : String(e));
+  }
+}
 
 extendDict({
   en: {
@@ -101,6 +112,8 @@ export interface IntakeItem {
   requesterName?: string | null;
   requesterEmail?: string | null;
   createdAt?: string;
+  /** Files that arrived with the request (email attachments). */
+  attachments?: Array<{ attachmentId: string; filename: string; size: number; mime: string }>;
 }
 
 interface StatusLite { id: string; name: string; isDefault?: boolean }
@@ -156,6 +169,21 @@ export function ProjectIntakeTab({ projectId, statuses, users }: {
               </p>
               {item.description && (
                 <p className="mt-2 whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">{item.description}</p>
+              )}
+              {(item.attachments ?? []).length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {item.attachments!.map((a) => (
+                    <button
+                      key={a.attachmentId}
+                      type="button"
+                      onClick={() => openIntakeAttachment(a.attachmentId)}
+                      className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      <Paperclip size={11} className="shrink-0 text-faint" />
+                      <span className="truncate">{a.filename}</span>
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
             <div className="flex shrink-0 items-center gap-1.5">

@@ -260,7 +260,6 @@ export function EmployeePage({ id }: { id: string }) {
         <EmployeeFieldGroups
           values={e.customFields}
           fieldAccess={e.fieldAccess}
-          canWrite={canWrite}
           questionnaireUpdatedAt={e.questionnaireUpdatedAt}
           onSave={(cf) => saveCustomFields.mutate(cf)}
         />

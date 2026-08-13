@@ -78,9 +78,14 @@ export function peopleRoutes() {
   app.get('/employees/:id', async (c) =>
     c.json(await svc.getEmployee(currentActor(c), c.req.param('id'))));
 
-  app.patch('/employees/:id', guard('people.write'), async (c) => {
+  // No static guard: people.write edits everything, while a role holding a
+  // WRITE grant on a field group may change exactly those fields – the service
+  // enforces the split (and rejects everything else without people.write).
+  app.patch('/employees/:id', async (c) => {
+    const actor = currentActor(c);
+    if (actor.readOnly) throw err.forbidden('Read-only token', 'people.write');
     const body = employeeUpdateSchema.parse(await c.req.json());
-    return c.json(await svc.updateEmployee(currentActor(c), c.req.param('id'), body));
+    return c.json(await svc.updateEmployee(actor, c.req.param('id'), body));
   });
 
   app.delete('/employees/:id', guard('people.write'), async (c) => {

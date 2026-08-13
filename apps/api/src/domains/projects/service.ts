@@ -979,6 +979,10 @@ export async function acceptIntake(actor: Actor, itemId: string, input: any) {
   });
   const { db } = getDb();
   await db.update(schema.intakeItems).set({ status: 'accepted', createdTaskId: task.id }).where(eq(schema.intakeItems.id, itemId));
+  // The request's files travel with it: re-bind them to the created task so
+  // they appear in the task's Files section under the task's access rules.
+  await db.update(schema.attachments).set({ entityType: 'task', entityId: task.id })
+    .where(and(eq(schema.attachments.entityType, 'intake_item'), eq(schema.attachments.entityId, itemId)));
   if (item.requesterEmail) {
     await sendIntakeMail(item.requesterEmail, 'intakeAccepted', item.title, null);
   }

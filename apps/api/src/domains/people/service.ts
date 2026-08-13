@@ -234,7 +234,28 @@ export async function createEmployee(actor: Actor, input: any): Promise<string> 
 export async function updateEmployee(actor: Actor, id: string, input: any) {
   const { db } = getDb();
   const before = await loadEmployee(id);
-  assertVersion(before, input.version, stripEmployee(actor, before));
+
+  // Without people.write the only thing a role may change is custom fields of
+  // groups it holds a WRITE grant on – that is what the grant level means.
+  // Editors round-trip the whole value map, so only *changed* keys are judged.
+  if (!actor.access.permissions.has('people.write')) {
+    const offered = Object.keys(input).filter((k) => input[k] !== undefined && !['customFields', 'version'].includes(k));
+    if (offered.length) throw err.forbidden('Missing permission people.write', 'people.write');
+    const access = await employeeFieldAccess(actor, before);
+    const defs = await employeeFieldDefs();
+    const writable = new Set(defs.filter((d) => d.groupId && access.levels.get(d.groupId) === 'write' && !d.deprecated).map((d) => d.key));
+    const beforeCf = (before.customFields && typeof before.customFields === 'object' ? before.customFields : {}) as Record<string, unknown>;
+    const changed = Object.entries((input.customFields ?? {}) as Record<string, unknown>)
+      .filter(([k, v]) => JSON.stringify(v ?? null) !== JSON.stringify(beforeCf[k] ?? null));
+    if (!changed.length) return getEmployee(actor, id);
+    for (const [k] of changed) {
+      if (!writable.has(k)) throw err.forbidden(`Field '${k}' is not writable for your role`, 'people.write');
+    }
+    input = { version: input.version, customFields: Object.fromEntries(changed) };
+  }
+
+  const conflictView = canReadPeople(actor) ? stripEmployee(actor, before) : publicEmployeeSlice(before as Record<string, unknown>);
+  assertVersion(before, input.version, conflictView);
   const patch: Record<string, unknown> = {};
   for (const k of ['userId', 'firstName', 'lastName', 'email', 'phone', 'location', 'positionId', 'departmentId',
     'employmentType', 'managerId', 'birthday', 'joinDate', 'probationEnd', 'status', 'customFields']) {
@@ -246,7 +267,7 @@ export async function updateEmployee(actor: Actor, id: string, input: any) {
   const updated = await db.update(schema.employees).set(patch)
     .where(and(eq(schema.employees.id, id), eq(schema.employees.version, before.version)))
     .returning({ id: schema.employees.id });
-  assertUpdated(updated[0], stripEmployee(actor, await loadEmployee(id)));
+  assertUpdated(updated[0], conflictView);
   // Audit only the touched keys (a whole-row `before` logged every untouched
   // field as cleared), and never the customFields payload – grouped fields are
   // access-controlled and the audit feed is only people.read-gated.
@@ -257,7 +278,8 @@ export async function updateEmployee(actor: Actor, id: string, input: any) {
     loggedAfter.customFields = '[custom fields updated]';
   }
   await writeActivity(db, { entityType: 'employee', entityId: id, action: 'updated', before: beforeTouched, after: loggedAfter, actorId: actor.userId, actorType: actor.actorType });
-  return stripEmployee(actor, await loadEmployee(id));
+  // The same filtered view a GET would serve this viewer.
+  return getEmployee(actor, id);
 }
 
 export async function softDeleteEmployee(actor: Actor, id: string) {
