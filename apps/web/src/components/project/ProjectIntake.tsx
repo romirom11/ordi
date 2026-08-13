@@ -10,6 +10,7 @@ import { Check, Copy, Inbox, Mail, Paperclip, X } from 'lucide-react';
 import { api, appOrigin, ApiError } from '../../lib/api';
 import { useOpen } from '../../lib/router';
 import { resolveFileSrc } from '../../lib/uploads';
+import { openExternal } from '../../lib/desktop';
 import { Button, Card, EmptyState, Input, Select, Skeleton, Spinner, Switch, fmtDate } from '../ui';
 import { Dialog, toast } from '../overlays';
 import { useT, extendDict } from '../../lib/i18n';
@@ -18,7 +19,7 @@ import { useT, extendDict } from '../../lib/i18n';
 async function openIntakeAttachment(attachmentId: string): Promise<void> {
   try {
     const { url } = await api.get<{ url: string }>(`/attachments/${attachmentId}/url`);
-    window.open(resolveFileSrc(url), '_blank', 'noopener');
+    openExternal(resolveFileSrc(url));
   } catch (e) {
     toast.error(e instanceof ApiError ? e.message : String(e));
   }
