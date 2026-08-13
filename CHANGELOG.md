@@ -23,6 +23,9 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 - **Custom fields render everywhere** – employee card, companies, projects,
   tasks, invoices, and contacts via their dialog (previously leads and deals
   only).
+- **One dashboard for everyone**: personal work tiles plus a two-week team
+  card (absences, holidays, birthdays) that deep-links the HR calendar;
+  finance/pipeline tiles moved out to Finance and custom dashboards.
 - **List views remember their state**: sorting, filters, search and tabs
   survive navigation across CRM, projects, finance, time, people and
   per-project task filters.
