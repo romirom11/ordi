@@ -60,6 +60,9 @@ export async function listEmployees(actor: Actor, params: { status?: string; dep
     params.departmentId ? eq(schema.employees.departmentId, params.departmentId) : undefined,
     params.q ? sql`(${schema.employees.firstName} || ' ' || ${schema.employees.lastName}) ilike ${'%' + params.q + '%'}` : undefined,
   )).orderBy(asc(schema.employees.firstName));
+  // Without people.read the list serves pickers (manager names on the open
+  // card): the public slice only, no custom fields or contact details.
+  if (!canReadPeople(actor)) return rows.map((r) => publicEmployeeSlice(r as Record<string, unknown>));
   const stripped = await Promise.all(rows.map((r) => stripFieldGroups(actor, r)));
   return stripped.map((r) => stripEmployee(actor, r));
 }
@@ -72,11 +75,30 @@ async function loadEmployee(id: string) {
   return e;
 }
 
+/**
+ * The slice of an employee record every authenticated colleague may see: who
+ * they are and where they sit in the org – the same facts the dashboard's
+ * team-events feed already treats as workspace-public. Everything else
+ * (contacts, employment dates, custom fields beyond granted groups) needs
+ * people.read or an explicit field-group grant.
+ */
+const PUBLIC_EMPLOYEE_FIELDS = [
+  'id', 'userId', 'firstName', 'lastName', 'positionId', 'departmentId', 'managerId',
+  'status', 'location', 'birthday', 'version',
+] as const;
+
+function canReadPeople(actor: Actor): boolean {
+  return actor.access.permissions.has('people.read') || actor.access.permissions.has('people.write');
+}
+
+function publicEmployeeSlice(e: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(PUBLIC_EMPLOYEE_FIELDS.map((k) => [k, e[k] ?? null]));
+}
+
 export async function getEmployee(actor: Actor, id: string) {
   const { db } = getDb();
   const e = await loadEmployee(id);
   const access = await employeeFieldAccess(actor, e);
-  const stripped = stripEmployee(actor, await stripFieldGroups(actor, e));
   let user: { id: string; name: string; email: string; avatar: string | null; isActive: boolean } | null = null;
   if (e.userId) {
     const [u] = await db.select({
@@ -85,6 +107,22 @@ export async function getEmployee(actor: Actor, id: string) {
     }).from(schema.users).where(eq(schema.users.id, e.userId));
     if (u) user = u;
   }
+
+  // Anyone signed in opens the card; without people.read it carries only the
+  // public slice plus the custom-field groups this viewer holds a grant on.
+  if (!canReadPeople(actor)) {
+    const defs = await employeeFieldDefs();
+    const grantedKeys = new Set(defs.filter((d) => d.groupId && access.levels.has(d.groupId)).map((d) => d.key));
+    const cf = (e.customFields && typeof e.customFields === 'object' ? e.customFields : {}) as Record<string, unknown>;
+    return {
+      ...publicEmployeeSlice(e as Record<string, unknown>),
+      customFields: Object.fromEntries(Object.entries(cf).filter(([k]) => grantedKeys.has(k))),
+      user,
+      fieldAccess: Object.fromEntries(access.levels),
+    };
+  }
+
+  const stripped = stripEmployee(actor, await stripFieldGroups(actor, e));
   // groupId → read|write for THIS viewer on THIS record; the card renders from it.
   return { ...stripped, user, fieldAccess: Object.fromEntries(access.levels) };
 }
@@ -183,8 +221,6 @@ export async function createEmployee(actor: Actor, input: any): Promise<string> 
     joinDate: input.joinDate ?? null,
     probationEnd: input.probationEnd ?? null,
     status: input.status ?? 'active',
-    emergencyContact: input.emergencyContact ?? null,
-    sensitive: input.sensitive ?? null,
     customFields: input.customFields ?? {},
     createdBy: actor.userId,
   });
@@ -201,7 +237,7 @@ export async function updateEmployee(actor: Actor, id: string, input: any) {
   assertVersion(before, input.version, stripEmployee(actor, before));
   const patch: Record<string, unknown> = {};
   for (const k of ['userId', 'firstName', 'lastName', 'email', 'phone', 'location', 'positionId', 'departmentId',
-    'employmentType', 'managerId', 'birthday', 'joinDate', 'probationEnd', 'status', 'emergencyContact', 'sensitive', 'customFields']) {
+    'employmentType', 'managerId', 'birthday', 'joinDate', 'probationEnd', 'status', 'customFields']) {
     if (input[k] !== undefined) patch[k] = input[k];
   }
   // Merge, never assign: a client PATCHing one custom field must not erase the
@@ -531,7 +567,7 @@ async function employeeHolidaySet(employeeId: string, fromDate: string, toDate: 
  * Without the joins the list rendered "–" for both, so a queue of pending
  * requests said nothing about who was asking for what.
  */
-export async function listLeaveRequests(params: { employeeId?: string; status?: string }) {
+export async function listLeaveRequests(params: { employeeId?: string; status?: string; approverId?: string }) {
   const { db } = getDb();
   return db.select({
     id: schema.leaveRequests.id,
@@ -553,6 +589,7 @@ export async function listLeaveRequests(params: { employeeId?: string; status?: 
     .leftJoin(schema.leaveTypes, eq(schema.leaveTypes.id, schema.leaveRequests.leaveTypeId))
     .where(and(
       params.employeeId ? eq(schema.leaveRequests.employeeId, params.employeeId) : undefined,
+      params.approverId ? eq(schema.leaveRequests.approverId, params.approverId) : undefined,
       params.status ? eq(schema.leaveRequests.status, params.status) : undefined,
       isNull(schema.employees.deletedAt),
     )).orderBy(desc(schema.leaveRequests.fromDate));

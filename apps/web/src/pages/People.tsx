@@ -158,17 +158,15 @@ export function PeoplePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabParam]);
 
-  if (!can('people.read')) {
-    return <EmptyState icon={<Users size={20} />} title={t('resourcing.noAccess')} hint={t('people.noAccessHint')} />;
-  }
-
+  // No page-level gate: the directory, calendar and own-leave views serve a
+  // public slice to everyone; HR-only tabs hide below.
   const tabs: { key: Tab; label: string; icon: ReactNode; show: boolean }[] = [
     { key: 'employees', label: t('people.employees'), icon: <Users size={13} />, show: true },
     { key: 'leave', label: t('people.leave'), icon: <CalendarClock size={13} />, show: true },
     { key: 'calendar', label: t('people.calendar'), icon: <CalendarDays size={13} />, show: true },
     { key: 'recruiting', label: t('people.recruiting'), icon: <Briefcase size={13} />, show: can('people.recruit') },
     { key: 'org', label: t('people.org'), icon: <Network size={13} />, show: can('people.write') },
-    { key: 'dashboard', label: t('nav.dashboard'), icon: <LayoutGrid size={13} />, show: true },
+    { key: 'dashboard', label: t('nav.dashboard'), icon: <LayoutGrid size={13} />, show: can('people.read') },
   ];
   // A remembered tab the user can no longer open falls back to the directory.
   const activeTab = tabs.some((tb) => tb.key === tab && tb.show) ? tab : 'employees';
@@ -184,7 +182,7 @@ export function PeoplePage() {
       {activeTab === 'calendar' && <TeamCalendar />}
       {activeTab === 'recruiting' && can('people.recruit') && <RecruitingView />}
       {activeTab === 'org' && can('people.write') && <OrgStructureView />}
-      {activeTab === 'dashboard' && <PeopleDashboardView />}
+      {activeTab === 'dashboard' && can('people.read') && <PeopleDashboardView />}
     </div>
   );
 }

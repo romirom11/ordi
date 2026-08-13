@@ -36,9 +36,13 @@ export function peopleRoutes() {
   const app = new Hono<AppEnv>();
   app.use('*', requireAuth);
 
-  // ── People directory (PRD §12): unified users ∪ employee profiles ──
-  app.get('/people/directory', guard('people.read'), async (c) =>
-    c.json({ data: await svc.peopleDirectory() }));
+  // ── People directory (PRD §12): unified users ∪ employee profiles.
+  // Open to anyone signed in – who works here, their role and how to reach
+  // them is the workspace's own phone book, not an HR read. ──
+  app.get('/people/directory', async (c) => {
+    currentActor(c);
+    return c.json({ data: await svc.peopleDirectory() });
+  });
 
   // ── HR questionnaire: the actor's own self-service fields. Deliberately
   // NOT behind people.read – filling in your own record is not reading HR. ──
@@ -55,8 +59,10 @@ export function peopleRoutes() {
     return c.json(await svc.updateMyHrFields(actor, { customFields }));
   });
 
-  // ── Employees (PRD §12.1) ──
-  app.get('/employees', guard('people.read'), async (c) => {
+  // ── Employees (PRD §12.1). List and card are open to any authenticated
+  // user – the service returns the public slice unless the actor holds
+  // people.read (see PUBLIC_EMPLOYEE_FIELDS). ──
+  app.get('/employees', async (c) => {
     const data = await svc.listEmployees(currentActor(c), {
       status: c.req.query('status'), departmentId: c.req.query('departmentId'), q: c.req.query('q'),
     });
@@ -69,7 +75,7 @@ export function peopleRoutes() {
     return c.json({ id }, 201);
   });
 
-  app.get('/employees/:id', guard('people.read'), async (c) =>
+  app.get('/employees/:id', async (c) =>
     c.json(await svc.getEmployee(currentActor(c), c.req.param('id'))));
 
   app.patch('/employees/:id', guard('people.write'), async (c) => {
@@ -156,8 +162,18 @@ export function peopleRoutes() {
   });
 
   // ── Leave balances (PRD §12.2) ──
-  app.get('/leave-balances', guard('people.read'), async (c) =>
-    c.json({ data: await svc.listLeaveBalances(c.req.query('employeeId')) }));
+  // Same self-service exception as leave requests: your own balance is yours
+  // to see; everyone's balances still need people.read.
+  app.get('/leave-balances', async (c) => {
+    const actor = currentActor(c);
+    const requested = c.req.query('employeeId');
+    if (actor.access.permissions.has('people.read')) {
+      return c.json({ data: await svc.listLeaveBalances(requested) });
+    }
+    const own = await svc.employeeOfUser(actor.userId);
+    if (!own || (requested && requested !== own.id)) throw err.forbidden('Missing permission people.read', 'people.read');
+    return c.json({ data: await svc.listLeaveBalances(own.id) });
+  });
 
   app.post('/leave-balances/accrue', guard('people.manage_leave'), async (c) => {
     const body = await c.req.json();
@@ -175,6 +191,11 @@ export function peopleRoutes() {
   app.get('/leave-requests', async (c) => {
     const actor = currentActor(c);
     const requested = c.req.query('employeeId');
+    // The requests waiting on *me*: how a manager without people.read sees
+    // (and only sees) their reports' pending leave.
+    if (c.req.query('scope') === 'approvals') {
+      return c.json({ data: await svc.listLeaveRequests({ approverId: actor.userId, status: c.req.query('status') ?? 'pending' }) });
+    }
     if (actor.access.permissions.has('people.read')) {
       return c.json({ data: await svc.listLeaveRequests({ employeeId: requested, status: c.req.query('status') }) });
     }
@@ -206,8 +227,10 @@ export function peopleRoutes() {
     return c.json(await svc.decideLeave(currentActor(c), c.req.param('id'), 'canceled', comment));
   });
 
-  // ── Holiday calendars (PRD §12.2) ──
-  app.get('/holiday-calendars', guard('people.read'), async (c) => c.json({ data: await svc.listHolidayCalendars() }));
+  // ── Holiday calendars (PRD §12.2). Reads are open: which days the company
+  // is off is workspace-public (the dashboard already shows it to everyone);
+  // managing calendars still needs people.manage_leave. ──
+  app.get('/holiday-calendars', async (c) => { currentActor(c); return c.json({ data: await svc.listHolidayCalendars() }); });
   app.post('/holiday-calendars', guard('people.manage_leave'), async (c) => {
     const body = holidayCalendarInputSchema.parse(await c.req.json());
     return c.json({ id: await svc.createHolidayCalendar(body) }, 201);
@@ -217,7 +240,7 @@ export function peopleRoutes() {
     return c.json({ ok: true });
   });
 
-  app.get('/holidays', guard('people.read'), async (c) => c.json({ data: await svc.listHolidays(c.req.query('calendarId')) }));
+  app.get('/holidays', async (c) => { currentActor(c); return c.json({ data: await svc.listHolidays(c.req.query('calendarId')) }); });
   app.post('/holidays', guard('people.manage_leave'), async (c) => {
     const body = holidayInputSchema.parse(await c.req.json());
     return c.json({ id: await svc.createHoliday(body) }, 201);

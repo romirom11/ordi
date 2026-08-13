@@ -52,11 +52,18 @@ describe('permission matrix – finance is invisible to member/guest', () => {
   }
 });
 
-describe('permission matrix – people is invisible to member/guest', () => {
+describe('permission matrix – people serves only the public slice below people.read', () => {
+  // The directory is the workspace's own phone book: anyone signed in reads
+  // the public slice (identity + org seat); contacts and custom fields need
+  // people.read (people-open-card.test.ts covers the field-level contract).
   for (const role of ['member', 'guest']) {
-    it(`${role} cannot read employees`, async () => {
+    it(`${role} reads employees without contact details`, async () => {
       const res = await reqAs(users[role]!.cookie).get('/employees');
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(200);
+      for (const row of (await json(res)).data as any[]) {
+        expect(row.email).toBeUndefined();
+        expect(row.customFields).toBeUndefined();
+      }
     });
   }
   it('HR can read employees', async () => {
@@ -155,7 +162,10 @@ describe('the Sales preset covers the sales workspace and stops there', () => {
     expect((await sales.get('/projects')).status).toBe(200);
     expect((await sales.get('/invoices')).status).toBe(200);
     expect((await sales.post('/invoices', { companyId: ulid(), currency: 'USD' })).status).toBe(403);
-    expect((await sales.get('/employees')).status).toBe(403);
+    // The employee list answers with the public slice only – no HR detail.
+    const employees = await sales.get('/employees');
+    expect(employees.status).toBe(200);
+    for (const row of (await json(employees)).data as any[]) expect(row.email).toBeUndefined();
   });
 });
 

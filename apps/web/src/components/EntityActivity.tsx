@@ -11,7 +11,7 @@ import {
   Sparkles, Trash2, UserMinus, UserPlus, type LucideIcon,
 } from 'lucide-react';
 import { api } from '../lib/api';
-import { Skeleton, fmtRelative } from './ui';
+import { Avatar, Skeleton, fmtRelative } from './ui';
 import { useT } from '../lib/i18n';
 
 export interface ActivityUser { id: string; name: string; avatar?: string | null }
@@ -56,10 +56,10 @@ export function EntityActivity({ entityType, entityId, users, title, labelFor, q
     queryFn: () => api.get<{ data: AuditEntry[] }>(`/audit/entity/${entityType}/${entityId}`).then((r) => r.data),
   });
 
-  const nameOf = useMemo(() => {
-    const map = new Map(users.map((u) => [u.id, u.name]));
-    return (id?: string | null) => (id ? map.get(id) : undefined) ?? t('common.someone');
-  }, [users, t]);
+  const userOf = useMemo(() => {
+    const map = new Map(users.map((u) => [u.id, u]));
+    return (id?: string | null) => (id ? map.get(id) : undefined);
+  }, [users]);
 
   const entries = useMemo(() => {
     const all = data ?? [];
@@ -86,17 +86,22 @@ export function EntityActivity({ entityType, entityId, users, title, labelFor, q
         <div className="space-y-0.5">
           {shown.map((e, i) => {
             const Icon = ACTION_ICON[e.action] ?? Pencil;
+            const actor = userOf(e.actorId);
             return (
               <div
                 key={e.id}
                 className="row-enter flex items-center gap-2.5 py-1"
                 style={{ ['--i' as string]: Math.min(i, 10) }}
               >
-                <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground">
-                  <Icon size={11} />
-                </span>
+                {actor ? (
+                  <Avatar name={actor.name} src={actor.avatar} size={20} />
+                ) : (
+                  <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground">
+                    <Icon size={11} />
+                  </span>
+                )}
                 <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground/80">{nameOf(e.actorId)}</span>{' '}
+                  <span className="font-medium text-foreground/80">{actor?.name ?? t('common.someone')}</span>{' '}
                   {labelFor(e.action)}
                   <span className="text-faint"> · {fmtRelative(e.createdAt)}</span>
                 </p>
