@@ -74,6 +74,43 @@ export function dashboardRoutes() {
       out.dealsByStage = deals;
     }
 
+    // Team events for the next two weeks: absences, holidays, birthdays.
+    // Deliberately not permission-gated – who is away and whose birthday is
+    // coming is workspace-public, the same call the HR calendar makes.
+    const horizon = new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10);
+    const leaves = await db.execute(sql`
+      select lr.from_date, lr.to_date, lr.status, lt.name as leave_type,
+        btrim(coalesce(e.first_name,'') || ' ' || coalesce(e.last_name,'')) as name
+      from leave_requests lr
+      join employees e on e.id = lr.employee_id and e.deleted_at is null
+      left join leave_types lt on lt.id = lr.leave_type_id
+      where lr.status in ('approved','pending') and lr.from_date <= ${horizon} and lr.to_date >= ${today}
+      order by lr.from_date limit 20`);
+    const holidays = await db.execute(sql`
+      select date, name from holidays where date >= ${today} and date <= ${horizon} order by date limit 10`);
+    const birthdays = await db.execute(sql`
+      select btrim(coalesce(first_name,'') || ' ' || coalesce(last_name,'')) as name, birthday
+      from employees where deleted_at is null and status != 'terminated' and birthday is not null`);
+    type TeamEvent = { kind: string; date: string; name: string; endDate?: string; label?: string | null; status?: string };
+    const events: TeamEvent[] = [];
+    for (const l of leaves as any[]) {
+      events.push({
+        kind: 'absence', date: l.from_date > today ? l.from_date : today, endDate: l.to_date,
+        name: l.name, label: l.leave_type, status: l.status,
+      });
+    }
+    for (const h of holidays as any[]) events.push({ kind: 'holiday', date: h.date, name: h.name });
+    const thisYear = Number(today.slice(0, 4));
+    for (const b of birthdays as any[]) {
+      const monthDay = String(b.birthday).slice(5, 10);
+      for (const year of [thisYear, thisYear + 1]) {
+        const date = `${year}-${monthDay}`;
+        if (date >= today && date <= horizon) events.push({ kind: 'birthday', date, name: b.name });
+      }
+    }
+    events.sort((a, b) => a.date.localeCompare(b.date) || a.kind.localeCompare(b.kind));
+    out.teamEvents = events.slice(0, 12);
+
     // Recent activity, filtered by access: sensitivity (normal only unless
     // privileged), entity domain (only types the actor's permissions cover; own
     // actions always visible) and then the resource itself – the domain check

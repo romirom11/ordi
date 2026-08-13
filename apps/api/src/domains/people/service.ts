@@ -130,10 +130,13 @@ export async function peopleDirectory() {
   for (const u of users) {
     const emp = byUserId.get(u.id) ?? (u.email ? byEmail.get(u.email.toLowerCase()) : undefined);
     if (emp) usedEmpIds.add(emp.id);
+    // The HR card is the curated name: an account often says just "Vasyl"
+    // while the employee record carries the full first + last name.
+    const cardName = emp ? [emp.firstName, emp.lastName].filter(Boolean).join(' ').trim() : '';
     rows.push({
       userId: u.id,
       employeeId: emp?.id ?? null,
-      name: u.name,
+      name: cardName || u.name,
       email: u.email,
       avatar: u.avatar ?? null,
       position: emp?.positionTitle ?? null,
