@@ -15,7 +15,7 @@ import {
   toDayValue, today, weekdayLabels, weekStartsOn,
 } from '../lib/dates';
 import { useT, extendDict } from '../lib/i18n';
-import { cn } from './ui';
+import { appLocale, cn } from './ui';
 
 extendDict({
   en: {
@@ -26,6 +26,9 @@ extendDict({
     'date.open': 'Open calendar',
     'date.placeholder': 'Pick a date',
     'date.time': 'Time',
+    'date.pickYear': 'Choose year',
+    'date.prevYears': 'Earlier years',
+    'date.nextYears': 'Later years',
   },
   uk: {
     'date.today': 'Сьогодні',
@@ -35,6 +38,9 @@ extendDict({
     'date.open': 'Відкрити календар',
     'date.placeholder': 'Оберіть дату',
     'date.time': 'Час',
+    'date.pickYear': 'Обрати рік',
+    'date.prevYears': 'Раніші роки',
+    'date.nextYears': 'Пізніші роки',
   },
 });
 
@@ -101,6 +107,77 @@ export function Calendar({ value, onSelect, min, max, footer }: {
     el.querySelector<HTMLElement>('[data-focused="true"]')?.focus();
   }, [focused]);
 
+  // Scrolling a birthday back twenty years one month at a time is not
+  // navigation. The title opens a year grid (pages of 12), a year opens the
+  // months, a month lands back on the days.
+  const [view, setView] = useState<'days' | 'months' | 'years'>('days');
+  const yearsStart = cursor.getFullYear() - ((cursor.getFullYear() - 1) % 12);
+  const monthNames = useMemo(
+    () => Array.from({ length: 12 }, (_, i) => new Date(2026, i, 1).toLocaleDateString(appLocale(), { month: 'short' })),
+    [],
+  );
+  const headerNav = (dir: -1 | 1) => {
+    if (view === 'days') setCursor(addMonths(cursor, dir));
+    else if (view === 'months') setCursor(new Date(cursor.getFullYear() + dir, cursor.getMonth(), 1));
+    else setCursor(new Date(cursor.getFullYear() + dir * 12, cursor.getMonth(), 1));
+  };
+  const pickCell = 'grid h-9 place-items-center rounded-md text-[13px] tabular-nums transition-colors duration-150 hover:bg-muted';
+
+  if (view !== 'days') {
+    return (
+      <div className="w-[248px] select-none p-2">
+        <div className="mb-1.5 flex items-center gap-1">
+          <button
+            type="button" aria-label={view === 'years' ? t('date.prevYears') : t('date.prevMonth')} onClick={() => headerNav(-1)}
+            className="grid h-6 w-6 place-items-center rounded-md text-faint transition-colors duration-150 hover:bg-muted hover:text-foreground"
+          >
+            <ChevronLeft size={15} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setView('years')}
+            className="flex-1 rounded-md py-0.5 text-center text-[13px] font-medium transition-colors duration-150 hover:bg-muted"
+          >
+            {view === 'years' ? `${yearsStart}–${yearsStart + 11}` : cursor.getFullYear()}
+          </button>
+          <button
+            type="button" aria-label={view === 'years' ? t('date.nextYears') : t('date.nextMonth')} onClick={() => headerNav(1)}
+            className="grid h-6 w-6 place-items-center rounded-md text-faint transition-colors duration-150 hover:bg-muted hover:text-foreground"
+          >
+            <ChevronRight size={15} />
+          </button>
+        </div>
+        <div className="grid grid-cols-3 gap-0.5">
+          {view === 'years'
+            ? Array.from({ length: 12 }, (_, i) => yearsStart + i).map((y) => (
+              <button
+                key={y} type="button"
+                onClick={() => { setCursor(new Date(y, cursor.getMonth(), 1)); setView('months'); }}
+                className={cn(pickCell, y === cursor.getFullYear() && 'bg-primary font-medium text-primary-foreground hover:bg-primary')}
+              >
+                {y}
+              </button>
+            ))
+            : monthNames.map((name, i) => (
+              <button
+                key={name} type="button"
+                onClick={() => {
+                  const next = new Date(cursor.getFullYear(), i, 1);
+                  setCursor(next);
+                  setFocused(new Date(cursor.getFullYear(), i, Math.min(focused.getDate(), 28)));
+                  setView('days');
+                }}
+                className={cn(pickCell, 'capitalize', i === cursor.getMonth() && 'bg-primary font-medium text-primary-foreground hover:bg-primary')}
+              >
+                {name}
+              </button>
+            ))}
+        </div>
+        {footer}
+      </div>
+    );
+  }
+
   return (
     <div className="w-[248px] select-none p-2">
       <div className="mb-1.5 flex items-center gap-1">
@@ -110,7 +187,14 @@ export function Calendar({ value, onSelect, min, max, footer }: {
         >
           <ChevronLeft size={15} />
         </button>
-        <span className="flex-1 text-center text-[13px] font-medium first-letter:uppercase">{formatMonthTitle(cursor)}</span>
+        <button
+          type="button"
+          title={t('date.pickYear')}
+          onClick={() => setView('years')}
+          className="flex-1 rounded-md py-0.5 text-center text-[13px] font-medium transition-colors duration-150 first-letter:uppercase hover:bg-muted"
+        >
+          {formatMonthTitle(cursor)}
+        </button>
         <button
           type="button" aria-label={t('date.nextMonth')} onClick={() => setCursor(addMonths(cursor, 1))}
           className="grid h-6 w-6 place-items-center rounded-md text-faint transition-colors duration-150 hover:bg-muted hover:text-foreground"

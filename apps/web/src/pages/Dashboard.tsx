@@ -3,13 +3,14 @@ import { useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle, Activity, CheckCircle2, ListTodo, Receipt, Handshake,
   FolderKanban, CheckSquare, MessageSquare, Users, Building2, BookText, Clock,
-  CalendarRange, User as UserIcon, Rocket, ChevronRight, X,
+  CalendarRange, User as UserIcon, Rocket, ChevronRight, X, Cake, Sun, CalendarDays,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useNavigate, useOpen } from '../lib/router';
 import { useMe, useCan } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
-import { Card, Kbd, PageHeader, Skeleton, EmptyState, PriorityIcon, ProgressBar, fmtMoney, fmtDate, fmtRelative, cn } from '../components/ui';
+import { Avatar, Card, Kbd, PageHeader, Skeleton, EmptyState, PriorityIcon, ProgressBar, appLocale, fmtDate, fmtRelative, cn } from '../components/ui';
+import { useUsersLookup } from '../lib/queries';
 import { extendDict, useT } from '../lib/i18n';
 
 extendDict({
@@ -20,6 +21,14 @@ extendDict({
     'dashboard.activeDealsValue': 'Active deals value',
     'dashboard.outstanding': 'Outstanding',
     'dashboard.you': 'You',
+    'dashboard.teamUpcoming': 'Team, next two weeks',
+    'dashboard.openCalendar': 'Open calendar',
+    'dashboard.teamQuiet': 'No absences, birthdays or holidays ahead.',
+    'dashboard.today': 'Today',
+    'dashboard.tomorrow': 'Tomorrow',
+    'dashboard.until': 'until {date}',
+    'dashboard.pendingApproval': 'pending approval',
+    'dashboard.birthday': 'Birthday',
     'dashboard.noDeals': 'No open deals',
     'dashboard.noDealsHint': 'Deals in progress will show up here.',
     'onboarding.title': 'Getting started',
@@ -87,6 +96,14 @@ extendDict({
     'dashboard.salesOverdue': 'Продажі прострочено',
     'dashboard.outstanding': 'Заборгованість',
     'dashboard.you': 'Ви',
+    'dashboard.teamUpcoming': 'Команда: найближчі два тижні',
+    'dashboard.openCalendar': 'Відкрити календар',
+    'dashboard.teamQuiet': 'Попереду без відсутностей, ДР і свят.',
+    'dashboard.today': 'Сьогодні',
+    'dashboard.tomorrow': 'Завтра',
+    'dashboard.until': 'до {date}',
+    'dashboard.pendingApproval': 'очікує погодження',
+    'dashboard.birthday': 'День народження',
     'dashboard.noDeals': 'Немає відкритих угод',
     'dashboard.noDealsHint': 'Угоди в роботі зʼявляться тут.',
     'onboarding.title': 'Початок роботи',
@@ -203,7 +220,10 @@ function CheckCircle({ done }: { done: boolean }) {
 function OnboardingChecklist({ hasTasks }: { hasTasks: boolean }) {
   const t = useT();
   const navigate = useNavigate();
-  const canCrm = useCan()('crm.read');
+  const can = useCan();
+  const canCrm = can('crm.read');
+  // Setup steps are the admin's homework – a member can complete none of them.
+  const isAdmin = can('settings.manage');
   const [dismissed, setDismissed] = useState(() => {
     try { return localStorage.getItem(ONBOARDING_HINT_KEY) === '1'; } catch { return false; }
   });
@@ -229,7 +249,7 @@ function OnboardingChecklist({ hasTasks }: { hasTasks: boolean }) {
   });
 
   const settled = projectsQ.isSuccess && usersQ.isSuccess && (!canCrm || companiesQ.isSuccess);
-  if (dismissed || !settled) return null;
+  if (!isAdmin || dismissed || !settled) return null;
 
   const items: OnboardingItem[] = [
     {
@@ -262,7 +282,8 @@ function OnboardingChecklist({ hasTasks }: { hasTasks: boolean }) {
 
   const total = items.length;
   const doneCount = items.filter((i) => i.done).length;
-  if (doneCount >= 4) return null;
+  // Fully done = gone for good; `>= 4` never fired for workspaces without CRM.
+  if (doneCount >= total) return null;
 
   const dismiss = () => {
     try { localStorage.setItem(ONBOARDING_HINT_KEY, '1'); } catch { /* private mode */ }
@@ -349,8 +370,6 @@ interface MeTasksResponse {
   week: MeTask[];
   later: MeTask[];
 }
-interface DealStageRow { stage?: string; count?: number; amount?: number | string }
-interface ReceivableRow { currency?: string; outstanding?: number | string }
 interface ActivityItem {
   id: string;
   entityType?: string;
@@ -359,14 +378,111 @@ interface ActivityItem {
   action?: string;
   createdAt?: string;
 }
+interface TeamEvent {
+  kind: 'absence' | 'birthday' | 'holiday';
+  date: string;
+  name: string;
+  endDate?: string;
+  label?: string | null;
+  status?: string;
+}
+
 interface DashboardData {
-  receivables?: ReceivableRow[];
-  overdue?: { count?: number; amount?: number | string };
-  dealsByStage?: DealStageRow[];
   recentActivity?: ActivityItem[];
   projectCount?: number;
-  /** Present only with crm.read; bucket counts from the CRM work queue. */
-  salesWork?: { overdue: number; dueToday: number };
+  /** Absences, holidays and birthdays for the next two weeks. */
+  teamEvents?: TeamEvent[];
+}
+
+/* ───────────────────────── Team calendar widget ───────────────────────── */
+
+const ABSENCE_COLORS = ['#6366f1', '#f59e0b', '#06b6d4', '#ec4899', '#a855f7', '#84cc16', '#f43f5e', '#22c55e'];
+function absenceColor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
+  return ABSENCE_COLORS[Math.abs(h) % ABSENCE_COLORS.length]!;
+}
+
+function localDay(offset = 0): string {
+  const d = new Date(Date.now() + offset * 86_400_000);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function TeamUpcomingCard({ events }: { events: TeamEvent[] }) {
+  const t = useT();
+  const navigate = useNavigate();
+  const today = localDay();
+  const tomorrow = localDay(1);
+
+  const byDate = new Map<string, TeamEvent[]>();
+  for (const e of events) {
+    const list = byDate.get(e.date);
+    if (list) list.push(e); else byDate.set(e.date, [e]);
+  }
+  const dayLabel = (date: string) =>
+    date === today ? t('dashboard.today')
+      : date === tomorrow ? t('dashboard.tomorrow')
+      : new Date(`${date}T00:00:00`).toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short' });
+
+  return (
+    <Card className="p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="flex items-center gap-1.5 text-sm font-semibold"><CalendarDays size={14} /> {t('dashboard.teamUpcoming')}</h2>
+        <button
+          onClick={() => navigate('/people?tab=calendar')}
+          className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {t('dashboard.openCalendar')}
+        </button>
+      </div>
+      {events.length === 0 ? (
+        <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+          <CheckCircle2 size={16} className="text-primary" /> {t('dashboard.teamQuiet')}
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {[...byDate.entries()].map(([date, list], gi) => (
+            <div key={date} className="row-enter" style={{ ['--i' as string]: Math.min(gi, 10) }}>
+              <div className={cn(
+                'mb-1 text-[11px] font-semibold uppercase tracking-wide first-letter:uppercase',
+                date === today ? 'text-primary' : 'text-faint',
+              )}>
+                {dayLabel(date)}
+              </div>
+              <div className="space-y-0.5">
+                {list.map((e, i) => (
+                  <div key={`${e.kind}-${e.name}-${i}`} className="flex items-center gap-2 rounded-md px-1.5 py-1 text-[13px]">
+                    {e.kind === 'birthday' ? (
+                      <Cake size={13} className="shrink-0 text-pink-500" />
+                    ) : e.kind === 'holiday' ? (
+                      <Sun size={13} className="shrink-0 text-warning" />
+                    ) : (
+                      <span
+                        className={cn('h-2 w-2 shrink-0 rounded-full', e.status === 'pending' && 'border bg-transparent')}
+                        style={e.status === 'pending'
+                          ? { borderColor: absenceColor(e.label ?? '') }
+                          : { backgroundColor: absenceColor(e.label ?? '') }}
+                      />
+                    )}
+                    <span className="min-w-0 truncate">{e.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                      {e.kind === 'birthday' ? t('dashboard.birthday') : e.kind === 'absence' ? (e.label ?? '') : ''}
+                      {e.kind === 'absence' && e.status === 'pending' ? ` · ${t('dashboard.pendingApproval')}` : ''}
+                    </span>
+                    {e.kind === 'absence' && e.endDate && e.endDate !== e.date && (
+                      <span className="shrink-0 text-xs tabular-nums text-faint">
+                        {t('dashboard.until').replace('{date}', fmtDate(e.endDate))}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
 }
 
 /* ───────────────────────── Helpers ───────────────────────── */
@@ -442,6 +558,7 @@ export function DashboardPage() {
     queryKey: ['me', 'tasks'],
     queryFn: () => api.get<MeTasksResponse>('/me/tasks'),
   });
+  const usersQ = useUsersLookup();
 
   const isLoading = dash.isLoading || meTasks.isLoading;
   const firstName = me.user.name.split(' ')[0] ?? me.user.name;
@@ -451,8 +568,8 @@ export function DashboardPage() {
       <div>
         <PageHeader title={`${t('dashboard.greeting')}, ${firstName}`} subtitle={t('dashboard.subtitle')} />
         <div className="space-y-4 p-6">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-[72px]" />)}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {[0, 1, 2].map((i) => <Skeleton key={i} className="h-[72px]" />)}
           </div>
           <div className="grid gap-4 xl:grid-cols-2">
             <Skeleton className="h-64" />
@@ -474,48 +591,15 @@ export function DashboardPage() {
   const totalOpen = openTaskRows.length;
   const overdueCount = meTasks.data?.overdue.length ?? 0;
 
-  const receivablesRows = dash.data?.receivables ?? [];
-  const outstandingTotal = receivablesRows.reduce((s, r) => s + Number(r.outstanding ?? 0), 0);
-  const outstandingCurrency = receivablesRows[0]?.currency ?? 'USD';
-
-  const dealsByStage = dash.data?.dealsByStage ?? [];
-  const dealsTotal = dealsByStage.reduce((s, d) => s + Number(d.amount ?? 0), 0);
-  const maxDealAmount = Math.max(1, ...dealsByStage.map((d) => Number(d.amount ?? 0)));
-
   const activity = dash.data?.recentActivity ?? [];
-  // Gated server-side like every other widget on this response.
-  const salesWork = dash.data?.salesWork;
-  const salesOverdue = salesWork?.overdue ?? 0;
-  const salesDueToday = salesWork?.dueToday ?? 0;
 
-
+  // One dashboard for everyone: personal work + the team, no role-dependent
+  // money tiles. Finance lives in Finance and in custom dashboards.
   const stats: { key: string; icon: ReactNode; label: string; value: string; accent?: boolean; onClick: () => void }[] = [
     { key: 'myTasks', icon: <ListTodo size={14} />, label: t('dashboard.myOpenTasks'), value: String(totalOpen), onClick: () => navigate('/my-tasks') },
     { key: 'overdue', icon: <AlertTriangle size={14} className={overdueCount > 0 ? 'text-destructive' : undefined} />, label: t('common.overdue'), value: String(overdueCount), accent: overdueCount > 0, onClick: () => navigate('/my-tasks') },
+    { key: 'projects', icon: <FolderKanban size={14} />, label: t('nav.projects'), value: String(dash.data?.projectCount ?? 0), onClick: () => navigate('/projects') },
   ];
-  if (salesWork && (salesOverdue > 0 || salesDueToday > 0)) {
-    stats.push({
-      key: 'salesOverdue',
-      icon: <Handshake size={14} className={salesOverdue > 0 ? 'text-destructive' : undefined} />,
-      label: t('dashboard.salesOverdue'),
-      value: String(salesOverdue),
-      accent: salesOverdue > 0,
-      onClick: () => navigate('/crm'),
-    });
-    stats.push({
-      key: 'salesToday',
-      icon: <Handshake size={14} />,
-      label: t('dashboard.salesDue'),
-      value: String(salesDueToday),
-      onClick: () => navigate('/crm'),
-    });
-  }
-  if (receivablesRows.length > 0) {
-    stats.push({ key: 'receivables', icon: <Receipt size={14} />, label: t('dashboard.outstanding'), value: fmtMoney(outstandingTotal, outstandingCurrency), onClick: () => navigate('/finance') });
-  }
-  if (dealsByStage.length > 0) {
-    stats.push({ key: 'deals', icon: <Handshake size={14} />, label: t('dashboard.activeDealsValue'), value: fmtMoney(dealsTotal), onClick: () => navigate('/deals') });
-  }
 
   return (
     <div>
@@ -525,7 +609,7 @@ export function DashboardPage() {
         <OnboardingChecklist hasTasks={totalOpen > 0} />
 
         {/* Stat tiles */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {stats.map((s, i) => (
             <button
               key={s.key}
@@ -574,28 +658,8 @@ export function DashboardPage() {
             )}
           </Card>
 
-          {/* Deals by stage */}
-          <Card className="p-4">
-            <h2 className="mb-3 text-sm font-semibold">{t('dashboard.dealsByStage')}</h2>
-            {dealsByStage.length === 0 ? (
-              <EmptyState title={t('dashboard.noDeals')} hint={t('dashboard.noDealsHint')} />
-            ) : (
-              <div className="space-y-3">
-                {dealsByStage.map((d, i) => {
-                  const amt = Number(d.amount ?? 0);
-                  return (
-                    <div key={d.stage ?? i} className="row-enter" style={{ ['--i' as string]: Math.min(i, 10) }}>
-                      <div className="mb-1 flex items-center justify-between text-xs">
-                        <span className="text-muted-foreground">{d.stage ?? t('deals.stage')}</span>
-                        <span className="tabular-nums">{d.count ?? 0} · {fmtMoney(amt)}</span>
-                      </div>
-                      <ProgressBar value={(amt / maxDealAmount) * 100} />
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </Card>
+          {/* Team calendar: who is away, birthdays, holidays */}
+          <TeamUpcomingCard events={dash.data?.teamEvents ?? []} />
 
           {/* Recent activity */}
           <Card className="p-4 xl:col-span-2">
@@ -604,22 +668,29 @@ export function DashboardPage() {
               <EmptyState title={t('dashboard.noActivity')} hint={t('dashboard.noActivityHint')} />
             ) : (
               <ul className="space-y-1">
-                {activity.slice(0, 12).map((a, i) => (
+                {activity.slice(0, 12).map((a, i) => {
+                  const actor = a.actorId ? usersQ.data?.find((u) => u.id === a.actorId) : undefined;
+                  return (
                   <li
                     key={a.id}
                     className="row-enter flex items-center gap-2.5 rounded-md px-1.5 py-1.5 text-[13px]"
                     style={{ ['--i' as string]: Math.min(i, 10) }}
                   >
-                    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
-                      {activityIcon(a.entityType)}
-                    </span>
+                    {actor ? (
+                      <Avatar name={actor.name} src={actor.avatar} size={24} />
+                    ) : (
+                      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
+                        {activityIcon(a.entityType)}
+                      </span>
+                    )}
                     <span className="flex-1 truncate">
                       {a.actorId === me.user.id && <span className="font-medium">{t('dashboard.you')} </span>}
                       <span className="text-muted-foreground">{activityText(a, t, a.actorId === me.user.id)}</span>
                     </span>
                     <span className="shrink-0 text-xs text-faint">{fmtRelative(a.createdAt)}</span>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </Card>

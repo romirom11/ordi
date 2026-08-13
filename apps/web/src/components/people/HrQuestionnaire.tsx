@@ -12,6 +12,7 @@ import { useT, extendDict } from '../../lib/i18n';
 import { Badge, Card, fmtDate } from '../ui';
 import { toast } from '../overlays';
 import { CustomFieldsGrid, fieldValueIsEmpty, type FieldDef } from '../crm/CustomFieldsSection';
+import { FieldIcon } from '../fieldIcons';
 
 extendDict({
   en: {
@@ -35,7 +36,7 @@ extendDict({
 });
 
 interface HrField extends FieldDef { value: unknown; required?: boolean }
-interface HrGroup { id: string; name: string; level: 'read' | 'write'; fields: HrField[] }
+interface HrGroup { id: string; name: string; icon?: string | null; level: 'read' | 'write'; fields: HrField[] }
 interface HrFieldsResponse { linked: boolean; updatedAt?: string | null; groups: HrGroup[] }
 
 export function HrQuestionnaireCard() {
@@ -75,7 +76,9 @@ export function HrQuestionnaireCard() {
         {data.groups.map((g) => (
           <div key={g.id}>
             {data.groups.length > 1 && (
-              <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">{g.name}</div>
+              <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+                <FieldIcon name={g.icon} size={12} />{g.name}
+              </div>
             )}
             <CustomFieldsGrid
               defs={g.fields}

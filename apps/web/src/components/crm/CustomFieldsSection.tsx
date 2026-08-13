@@ -18,11 +18,12 @@ import { DropdownMenu, MenuItem } from '../overlays';
 import { DateField } from '../DatePicker';
 import { useUsersLookup } from './shared';
 import { DetailField, SectionHeader } from './detail';
+import { FieldIcon } from '../fieldIcons';
 
 export interface FieldDef {
   id: string; key: string; label: string; type: string;
   options?: { value: string; label: string }[]; deprecated?: boolean;
-  groupId?: string | null;
+  groupId?: string | null; icon?: string | null;
 }
 
 export function fieldValueIsEmpty(v: unknown): boolean {
@@ -52,7 +53,12 @@ export function CustomFieldsGrid({ defs, values: valuesProp, editable, onSave }:
   return (
     <div className="grid gap-x-6 gap-y-3 md:grid-cols-2">
       {defs.map((f) => (
-        <DetailField key={f.id} label={f.label}>
+        <DetailField
+          key={f.id}
+          label={f.icon
+            ? <span className="inline-flex items-center gap-1.5"><FieldIcon name={f.icon} size={12} className="text-faint" />{f.label}</span>
+            : f.label}
+        >
           <CustomFieldValue field={f} value={values[f.key]} editable={editable} users={usersQ.data ?? []} onSave={(v) => save(f.key, v)} />
         </DetailField>
       ))}

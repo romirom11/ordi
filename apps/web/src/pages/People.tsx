@@ -1,7 +1,7 @@
-import { useMemo, useState, type ReactNode, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type ReactNode, type CSSProperties } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, qs, ApiError } from '../lib/api';
-import { useNavigate, useOpen, type OpenIntent } from '../lib/router';
+import { useNavigate, useOpen, useSearchParams, type OpenIntent } from '../lib/router';
 import { useTabs } from '../lib/tabs';
 import { useCan } from '../lib/auth';
 import {
@@ -147,6 +147,16 @@ export function PeoplePage() {
     'ordi:view:people.tab', 'employees',
     oneOfPref(['employees', 'leave', 'calendar', 'recruiting', 'org', 'dashboard'], 'employees'),
   );
+
+  // `?tab=` deep-links a specific tab (the dashboard's "open calendar").
+  const params = useSearchParams();
+  const tabParam = params.get('tab');
+  useEffect(() => {
+    if (tabParam && ['employees', 'leave', 'calendar', 'recruiting', 'org', 'dashboard'].includes(tabParam)) {
+      setTab(tabParam as Tab);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabParam]);
 
   if (!can('people.read')) {
     return <EmptyState icon={<Users size={20} />} title={t('resourcing.noAccess')} hint={t('people.noAccessHint')} />;

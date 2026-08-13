@@ -162,6 +162,7 @@ export const customFieldGroups = pgTable('custom_field_groups', {
   id: pk(),
   entityType: text('entity_type').notNull(),
   name: text('name').notNull(),
+  icon: text('icon'),
   position: integer('position').notNull().default(0),
   ...timestamps,
 }, (t) => ({
@@ -183,6 +184,7 @@ export const customFieldDefinitions = pgTable('custom_field_definitions', {
   key: text('key').notNull(),
   label: text('label').notNull(),
   type: text('type').notNull(),
+  icon: text('icon'),
   groupId: text('group_id').references(() => customFieldGroups.id, { onDelete: 'set null' }),
   options: jsonb('options').notNull().default([]),
   required: boolean('required').notNull().default(false),

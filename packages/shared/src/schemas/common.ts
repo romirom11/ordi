@@ -47,6 +47,8 @@ export const customFieldDefinitionSchema = z.object({
   isSortable: z.boolean().default(false),
   indexed: z.boolean().default(false),
   groupId: idSchema.nullable().optional(),
+  /** Lucide icon name from the curated FIELD_ICONS set; null = no icon. */
+  icon: z.string().nullable().optional(),
 });
 export type CustomFieldDefinitionInput = z.infer<typeof customFieldDefinitionSchema>;
 
@@ -54,6 +56,7 @@ export type CustomFieldDefinitionInput = z.infer<typeof customFieldDefinitionSch
 export const fieldGroupInputSchema = z.object({
   entityType: z.enum(CUSTOM_FIELD_ENTITIES),
   name: z.string().min(1),
+  icon: z.string().nullable().optional(),
   position: z.number().default(0),
 });
 
