@@ -174,6 +174,7 @@ export async function createEmployee(actor: Actor, input: any): Promise<string> 
     lastName: input.lastName ?? '',
     email: input.email ?? null,
     phone: input.phone ?? null,
+    location: input.location ?? null,
     positionId: input.positionId ?? null,
     departmentId: input.departmentId ?? null,
     employmentType: input.employmentType ?? 'full_time',
@@ -196,7 +197,7 @@ export async function updateEmployee(actor: Actor, id: string, input: any) {
   const before = await loadEmployee(id);
   assertVersion(before, input.version, stripEmployee(actor, before));
   const patch: Record<string, unknown> = {};
-  for (const k of ['userId', 'firstName', 'lastName', 'email', 'phone', 'positionId', 'departmentId',
+  for (const k of ['userId', 'firstName', 'lastName', 'email', 'phone', 'location', 'positionId', 'departmentId',
     'employmentType', 'managerId', 'birthday', 'joinDate', 'probationEnd', 'status', 'emergencyContact', 'sensitive', 'customFields']) {
     if (input[k] !== undefined) patch[k] = input[k];
   }

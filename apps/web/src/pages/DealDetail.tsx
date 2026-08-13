@@ -16,6 +16,7 @@ import { Link } from '../lib/router';
 import { useCan, useMe } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import { useT } from '../lib/i18n';
+import { RailResizeHandle, useRailWidth } from '../components/RailResize';
 import {
   Avatar, Badge, Button, Card, EmptySection, Input, RailChip, RailField, Skeleton,
   cn, fmtMoney, fmtDate, fmtRelative,
@@ -37,6 +38,7 @@ interface ActivityRow { id: string; action?: string; actorId?: string | null; cr
 
 export function DealDetailPage({ id }: { id: string }) {
   const t = useT();
+  const rail = useRailWidth('crm', 320);
   const qc = useQueryClient();
   const can = useCan();
   const canWrite = can('deals.write');
@@ -166,8 +168,8 @@ export function DealDetailPage({ id }: { id: string }) {
             <ActivitySection dealId={id} />
           </div>
         </div>
-        {/* Same flexible rail as the lead page: it absorbs surplus width. */}
-        <aside className="order-1 shrink-0 space-y-6 overflow-auto border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-[clamp(280px,23vw,400px)] min-[1100px]:border-b-0 min-[1100px]:border-l">
+        {/* Same rail as the lead page: width is user-draggable and persisted. */}
+        <aside style={rail.railStyle} className="relative order-1 shrink-0 space-y-6 overflow-auto border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-[var(--rail-w)] min-[1100px]:border-b-0 min-[1100px]:border-l">
           <DealRail
             deal={d}
             stage={stage}
@@ -183,6 +185,7 @@ export function DealDetailPage({ id }: { id: string }) {
             onPatch={(body) => patch.mutate(body)}
           />
           <FilesSection entityType="deal" entityId={id} canWrite={canWrite} variant="rail" />
+          <RailResizeHandle width={rail.width} base={rail.base} onWidth={rail.onWidth} className="!mt-0 min-[1100px]:block" />
         </aside>
       </div>
 

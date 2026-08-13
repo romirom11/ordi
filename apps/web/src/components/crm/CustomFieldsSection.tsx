@@ -55,6 +55,7 @@ export function CustomFieldsGrid({ defs, values: valuesProp, editable, onSave }:
       {defs.map((f) => (
         <DetailField
           key={f.id}
+          preserveCase
           label={f.icon
             ? <span className="inline-flex items-center gap-1.5"><FieldIcon name={f.icon} size={12} className="text-faint" />{f.label}</span>
             : f.label}

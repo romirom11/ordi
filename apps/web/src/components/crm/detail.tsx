@@ -232,11 +232,13 @@ export function SectionHeader({ icon, title, count, action }: { icon: React.Reac
 /**
  * A labelled value in a wide-column details grid – for the fields whose values
  * are prose-length and truncated into unreadability in the 320px rail.
+ * User-authored labels (custom fields) pass preserveCase – uppercasing text
+ * the workspace typed themselves mangles it.
  */
-export function DetailField({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
+export function DetailField({ label, children, preserveCase }: { label: React.ReactNode; children: React.ReactNode; preserveCase?: boolean }) {
   return (
     <div className="min-w-0">
-      <p className="mb-1 px-2 text-xs font-semibold uppercase tracking-wide text-faint">{label}</p>
+      <p className={`mb-1 px-2 text-xs font-semibold text-faint ${preserveCase ? '' : 'uppercase tracking-wide'}`}>{label}</p>
       {children}
     </div>
   );

@@ -43,6 +43,7 @@ import {
   type Grouping, type TaskFilters, type TaskViewPrefs,
 } from '../components/project/taskViewPrefs';
 import { usePersistedState } from '../lib/prefs';
+import { RailResizeHandle, useRailWidth } from '../components/RailResize';
 import { useT, extendDict } from '../lib/i18n';
 import { DateField } from '../components/DatePicker';
 
@@ -1072,6 +1073,7 @@ function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageM
   onOpenMilestoneTasks: (milestoneId: string) => void;
 }) {
   const t = useT();
+  const rail = useRailWidth('project', 280);
 
   // Debounced description editor. The API stores the description as a string
   // column, so the tiptap doc travels JSON-serialized (legacy plain text is
@@ -1092,7 +1094,7 @@ function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageM
   };
 
   return (
-    <PageBody width="full" className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_280px]">
+    <PageBody width="full" style={rail.railStyle} className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_var(--rail-w,280px)]">
       {/* Left: summary, resources, updates, description, milestones, activity */}
       <div className="order-2 min-w-0 space-y-7 lg:order-1">
         {project ? (
@@ -1138,7 +1140,8 @@ function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageM
       </div>
 
       {/* Right: properties rail (single source for project metadata) */}
-      <div className="order-1 lg:order-2">
+      <div className="relative order-1 lg:order-2">
+        <RailResizeHandle width={rail.width} base={rail.base} onWidth={rail.onWidth} className="lg:block" />
         {project ? (
           <PropertiesRail
             project={project}

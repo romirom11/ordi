@@ -227,11 +227,12 @@ export function Breadcrumbs({ items, className }: { items: BreadcrumbItem[]; cla
 }
 
 /** The one standard page content container – pages wrap their body in this. */
-export function PageBody({ children, width = 'default', className }: {
-  children: ReactNode; width?: 'default' | 'wide' | 'full'; className?: string;
+export function PageBody({ children, width = 'default', className, style }: {
+  children: ReactNode; width?: 'default' | 'wide' | 'full'; className?: string; style?: CSSProperties;
 }) {
   return (
     <div
+      style={style}
       className={cn(
         'w-full px-6 py-6',
         width === 'default' && 'mx-auto max-w-3xl',
