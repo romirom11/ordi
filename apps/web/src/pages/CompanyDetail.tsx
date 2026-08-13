@@ -33,6 +33,7 @@ import {
 } from '../components/crm/detail';
 import { FilesSection } from '../components/FilesSection';
 import { DealRows } from '../components/crm/DealRows';
+import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
 import { ContactDialog, NewDealDialog, NewLeadDialog } from '../components/crm/dialogs';
 import { NewProjectModal } from './Projects';
 import { useWorkspaceSettings, financeEnabled } from '../components/finance/workspace';
@@ -126,6 +127,14 @@ export function CompanyDetailPage({ id }: { id: string }) {
       <div className="flex min-h-0 flex-1 flex-col min-[1100px]:flex-row">
         <div className="order-2 min-w-0 flex-1 overflow-auto min-[1100px]:order-1">
           <div className="space-y-7 px-6 py-6">
+            {c && (
+              <CustomFieldsSection
+                entityType="companies"
+                values={c.customFields}
+                editable={canWrite}
+                onSave={(customFields) => patch.mutate({ customFields })}
+              />
+            )}
             <LeadsSection companyId={id} canWrite={canWrite} onAdd={() => setAddingLead(true)} />
             {can('deals.read') && <DealsSection companyId={id} canWrite={canAddDeal} onAdd={() => setAddingDeal(true)} />}
             <InvoicesSection companyId={id} />

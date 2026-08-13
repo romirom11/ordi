@@ -15,6 +15,7 @@ import { Button, EmptyState, IconButton, Kbd, Skeleton, Tooltip } from '../compo
 import { toast } from '../components/overlays';
 import { RichEditor, EMPTY_DOC } from '../components/richtext/RichEditor';
 import { PropertySidebar } from '../components/task/PropertySidebar';
+import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
 import { SubtaskList } from '../components/task/SubtaskList';
 import { ActivityFeed } from '../components/task/CommentThread';
 import type { TaskDetail, TaskPatch, TaskStatus, UserLite } from '../components/task/types';
@@ -260,6 +261,15 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
                 onChange={onDescChange}
                 placeholder={t('tasks.addDescription')}
                 compact
+              />
+            </div>
+
+            <div className="mt-6">
+              <CustomFieldsSection
+                entityType="tasks"
+                values={task.customFields}
+                editable
+                onSave={(customFields) => patch({ customFields })}
               />
             </div>
 

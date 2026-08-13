@@ -21,6 +21,7 @@ import { SpreadsheetView } from '../components/views/SpreadsheetView';
 import { RichEditor, EMPTY_DOC } from '../components/richtext/RichEditor';
 import { ProjectAccessPanel } from '../components/ProjectAccessPanel';
 import { FilesSection } from '../components/FilesSection';
+import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
 import { ProjectIcon } from '../components/project/ProjectIcon';
 import { PropertiesRail } from '../components/project/PropertiesRail';
 import { ProjectResources, type ProjectLink } from '../components/project/ProjectResources';
@@ -136,6 +137,7 @@ interface Project {
   leadId?: string | null; startDate?: string | null; targetDate?: string | null;
   visibility?: 'workspace' | 'private'; version?: number; settings?: Record<string, unknown>;
   summary?: string; priority?: string; links?: ProjectLink[]; labelIds?: string[];
+  customFields?: Record<string, unknown>;
 }
 interface TaskStatus {
   id: string; name: string; category?: string; color?: string; position?: number; isDefault?: boolean;
@@ -1112,6 +1114,13 @@ function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageM
               <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('projects.description')}</h2>
               <RichEditor key={project.id} value={doc} onChange={onDescChange} editable={canWrite} placeholder={t('projects.aboutPlaceholder')} />
             </section>
+
+            <CustomFieldsSection
+              entityType="projects"
+              values={project.customFields}
+              editable={canWrite}
+              onSave={(customFields) => onPatch({ customFields })}
+            />
 
             <ProjectMilestones projectId={id} canWrite={canWrite} onOpenTasks={onOpenMilestoneTasks} />
 
