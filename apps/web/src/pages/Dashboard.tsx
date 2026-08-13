@@ -9,7 +9,7 @@ import { api } from '../lib/api';
 import { useNavigate, useOpen } from '../lib/router';
 import { useMe, useCan } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
-import { Avatar, Card, Kbd, PageHeader, Skeleton, EmptyState, PriorityIcon, ProgressBar, appLocale, fmtMoney, fmtDate, fmtRelative, cn } from '../components/ui';
+import { Avatar, Card, Kbd, PageHeader, Skeleton, EmptyState, PriorityIcon, ProgressBar, appLocale, fmtDate, fmtRelative, cn } from '../components/ui';
 import { useUsersLookup } from '../lib/queries';
 import { extendDict, useT } from '../lib/i18n';
 
@@ -370,8 +370,6 @@ interface MeTasksResponse {
   week: MeTask[];
   later: MeTask[];
 }
-interface DealStageRow { stage?: string; count?: number; amount?: number | string }
-interface ReceivableRow { currency?: string; outstanding?: number | string }
 interface ActivityItem {
   id: string;
   entityType?: string;
@@ -390,13 +388,8 @@ interface TeamEvent {
 }
 
 interface DashboardData {
-  receivables?: ReceivableRow[];
-  overdue?: { count?: number; amount?: number | string };
-  dealsByStage?: DealStageRow[];
   recentActivity?: ActivityItem[];
   projectCount?: number;
-  /** Present only with crm.read; bucket counts from the CRM work queue. */
-  salesWork?: { overdue: number; dueToday: number };
   /** Absences, holidays and birthdays for the next two weeks. */
   teamEvents?: TeamEvent[];
 }
@@ -575,8 +568,8 @@ export function DashboardPage() {
       <div>
         <PageHeader title={`${t('dashboard.greeting')}, ${firstName}`} subtitle={t('dashboard.subtitle')} />
         <div className="space-y-4 p-6">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-[72px]" />)}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {[0, 1, 2].map((i) => <Skeleton key={i} className="h-[72px]" />)}
           </div>
           <div className="grid gap-4 xl:grid-cols-2">
             <Skeleton className="h-64" />
@@ -598,48 +591,15 @@ export function DashboardPage() {
   const totalOpen = openTaskRows.length;
   const overdueCount = meTasks.data?.overdue.length ?? 0;
 
-  const receivablesRows = dash.data?.receivables ?? [];
-  const outstandingTotal = receivablesRows.reduce((s, r) => s + Number(r.outstanding ?? 0), 0);
-  const outstandingCurrency = receivablesRows[0]?.currency ?? 'USD';
-
-  const dealsByStage = dash.data?.dealsByStage ?? [];
-  const dealsTotal = dealsByStage.reduce((s, d) => s + Number(d.amount ?? 0), 0);
-  const maxDealAmount = Math.max(1, ...dealsByStage.map((d) => Number(d.amount ?? 0)));
-
   const activity = dash.data?.recentActivity ?? [];
-  // Gated server-side like every other widget on this response.
-  const salesWork = dash.data?.salesWork;
-  const salesOverdue = salesWork?.overdue ?? 0;
-  const salesDueToday = salesWork?.dueToday ?? 0;
 
-
+  // One dashboard for everyone: personal work + the team, no role-dependent
+  // money tiles. Finance lives in Finance and in custom dashboards.
   const stats: { key: string; icon: ReactNode; label: string; value: string; accent?: boolean; onClick: () => void }[] = [
     { key: 'myTasks', icon: <ListTodo size={14} />, label: t('dashboard.myOpenTasks'), value: String(totalOpen), onClick: () => navigate('/my-tasks') },
     { key: 'overdue', icon: <AlertTriangle size={14} className={overdueCount > 0 ? 'text-destructive' : undefined} />, label: t('common.overdue'), value: String(overdueCount), accent: overdueCount > 0, onClick: () => navigate('/my-tasks') },
+    { key: 'projects', icon: <FolderKanban size={14} />, label: t('nav.projects'), value: String(dash.data?.projectCount ?? 0), onClick: () => navigate('/projects') },
   ];
-  if (salesWork && (salesOverdue > 0 || salesDueToday > 0)) {
-    stats.push({
-      key: 'salesOverdue',
-      icon: <Handshake size={14} className={salesOverdue > 0 ? 'text-destructive' : undefined} />,
-      label: t('dashboard.salesOverdue'),
-      value: String(salesOverdue),
-      accent: salesOverdue > 0,
-      onClick: () => navigate('/crm'),
-    });
-    stats.push({
-      key: 'salesToday',
-      icon: <Handshake size={14} />,
-      label: t('dashboard.salesDue'),
-      value: String(salesDueToday),
-      onClick: () => navigate('/crm'),
-    });
-  }
-  if (receivablesRows.length > 0) {
-    stats.push({ key: 'receivables', icon: <Receipt size={14} />, label: t('dashboard.outstanding'), value: fmtMoney(outstandingTotal, outstandingCurrency), onClick: () => navigate('/finance') });
-  }
-  if (dealsByStage.length > 0) {
-    stats.push({ key: 'deals', icon: <Handshake size={14} />, label: t('dashboard.activeDealsValue'), value: fmtMoney(dealsTotal), onClick: () => navigate('/deals') });
-  }
 
   return (
     <div>
@@ -649,7 +609,7 @@ export function DashboardPage() {
         <OnboardingChecklist hasTasks={totalOpen > 0} />
 
         {/* Stat tiles */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {stats.map((s, i) => (
             <button
               key={s.key}
@@ -701,29 +661,8 @@ export function DashboardPage() {
           {/* Team calendar: who is away, birthdays, holidays */}
           <TeamUpcomingCard events={dash.data?.teamEvents ?? []} />
 
-          {/* Deals by stage – only when there is a pipeline to show */}
-          {dealsByStage.length > 0 && (
-            <Card className="p-4">
-              <h2 className="mb-3 text-sm font-semibold">{t('dashboard.dealsByStage')}</h2>
-              <div className="space-y-3">
-                {dealsByStage.map((d, i) => {
-                  const amt = Number(d.amount ?? 0);
-                  return (
-                    <div key={d.stage ?? i} className="row-enter" style={{ ['--i' as string]: Math.min(i, 10) }}>
-                      <div className="mb-1 flex items-center justify-between text-xs">
-                        <span className="text-muted-foreground">{d.stage ?? t('deals.stage')}</span>
-                        <span className="tabular-nums">{d.count ?? 0} · {fmtMoney(amt)}</span>
-                      </div>
-                      <ProgressBar value={(amt / maxDealAmount) * 100} />
-                    </div>
-                  );
-                })}
-              </div>
-            </Card>
-          )}
-
           {/* Recent activity */}
-          <Card className={cn('p-4', dealsByStage.length === 0 && 'xl:col-span-2')}>
+          <Card className="p-4 xl:col-span-2">
             <h2 className="mb-3 flex items-center gap-1.5 text-sm font-semibold"><Activity size={14} /> {t('dashboard.recentActivity')}</h2>
             {activity.length === 0 ? (
               <EmptyState title={t('dashboard.noActivity')} hint={t('dashboard.noActivityHint')} />

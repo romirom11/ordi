@@ -7,7 +7,6 @@ import { requireAuth, currentActor } from '../../core/auth';
 import { scopeActivityToResources, visibleActivityTypes } from '../../core/activity';
 import { accessibleProjectIds } from '../../core/access';
 import { err } from '../../lib/errors';
-import { salesWorkCounts } from '../crm/work';
 
 export function dashboardRoutes() {
   const app = new Hono<AppEnv>();
@@ -40,39 +39,9 @@ export function dashboardRoutes() {
       upcoming: (myTasks as any[]).filter((t) => !t.due_date || t.due_date > today),
     };
 
-    if (perms.has('finance.read')) {
-      const rec = await db.execute(sql`
-        select currency, coalesce(sum(total - amount_paid),0) as outstanding
-        from invoices where deleted_at is null and status not in ('paid','canceled','draft')
-        group by currency`);
-      const overdue = await db.execute(sql`
-        select count(*)::int as count, coalesce(sum(total - amount_paid),0) as amount
-        from invoices where deleted_at is null and status not in ('paid','canceled','draft') and due_date < ${today}`);
-      out.receivables = rec;
-      out.overdue = (overdue as any[])[0];
-    }
-
-    /**
-     * A seller's day is not in `my open tasks` – that counts project work. Their
-     * queue lives in the CRM, so the counts belong here beside the other gated
-     * widgets rather than as a second request from the browser.
-     */
-    if (perms.has('crm.read')) {
-      out.salesWork = await salesWorkCounts({
-        userId: actor.userId,
-        timezone: actor.timezone,
-        access: { permissions: perms },
-      }, { scope: 'mine' });
-    }
-
-    if (perms.has('deals.read')) {
-      const deals = await db.execute(sql`
-        select s.name as stage, count(*)::int as count, coalesce(sum(d.amount),0) as amount
-        from deals d join deal_stages s on s.id = d.stage_id
-        where d.deleted_at is null and s.is_won = false and s.is_lost = false
-        group by s.name, s.position order by s.position`);
-      out.dealsByStage = deals;
-    }
+    // Finance and pipeline numbers deliberately do NOT live here: the home
+    // dashboard is the same for everyone – money views belong to Finance and
+    // to custom dashboards, where they are asked for, not defaulted.
 
     // Team events for the next two weeks: absences, holidays, birthdays.
     // Deliberately not permission-gated – who is away and whose birthday is
