@@ -35,6 +35,16 @@ export function peopleRoutes() {
   app.get('/people/directory', guard('people.read'), async (c) =>
     c.json({ data: await svc.peopleDirectory() }));
 
+  // ── HR questionnaire: the actor's own self-service fields. Deliberately
+  // NOT behind people.read – filling in your own record is not reading HR. ──
+  app.get('/me/hr-fields', async (c) => c.json(await svc.myHrFields(currentActor(c))));
+
+  app.patch('/me/hr-fields', async (c) => {
+    const raw = await c.req.json();
+    const customFields = (raw && typeof raw.customFields === 'object' && raw.customFields !== null ? raw.customFields : {}) as Record<string, unknown>;
+    return c.json(await svc.updateMyHrFields(currentActor(c), { customFields }));
+  });
+
   // ── Employees (PRD §12.1) ──
   app.get('/employees', guard('people.read'), async (c) => {
     const data = await svc.listEmployees(currentActor(c), {

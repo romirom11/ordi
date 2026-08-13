@@ -35,6 +35,8 @@ export const employees = pgTable('employees', {
   emergencyContact: jsonb('emergency_contact'),
   sensitive: jsonb('sensitive'),
   customFields: customFields(),
+  /** Last time the person saved their own (self-service) fields – the questionnaire. */
+  questionnaireUpdatedAt: timestamp('questionnaire_updated_at', { withTimezone: true }),
   createdBy: createdBy(),
   ...timestamps,
   version: version(),

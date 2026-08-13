@@ -8,6 +8,7 @@ import { Camera, Check, Copy, KeyRound, Plus, ShieldCheck, Trash2 } from 'lucide
 import { extendDict, useT } from '../lib/i18n';
 import { DATE_FORMATS, TIME_ZONES, formatSample, offsetLabel, rememberDateFormat, type DateFormat } from '../lib/dates';
 import { downscaleImage } from '../components/settings/image';
+import { HrQuestionnaireCard } from '../components/people/HrQuestionnaire';
 
 extendDict({
   en: {
@@ -90,6 +91,7 @@ export function ProfilePage() {
       />
       <PageBody className="space-y-4">
         <ProfileInfoCard />
+        <HrQuestionnaireCard />
         <PreferencesCard />
         <NotificationsSection />
         <div>
