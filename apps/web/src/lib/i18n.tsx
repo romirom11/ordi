@@ -19,7 +19,7 @@ const en: Dict = {
   'nav.knowledge': 'Knowledge',
   'nav.time': 'Time',
   'nav.finance': 'Finance',
-  'nav.people': 'People',
+  'nav.people': 'HR',
   'nav.resourcing': 'Resourcing',
   'nav.dashboards': 'Dashboards',
   'nav.settings': 'Settings',
@@ -83,6 +83,7 @@ const en: Dict = {
   // people
   'people.employees': 'Employees',
   'people.leave': 'Leave',
+  'people.calendar': 'Calendar',
   'people.recruiting': 'Recruiting',
   'people.requestLeave': 'Request leave',
   // kb
@@ -585,7 +586,7 @@ const uk: Dict = {
   'nav.knowledge': 'База знань',
   'nav.time': 'Час',
   'nav.finance': 'Фінанси',
-  'nav.people': 'Люди',
+  'nav.people': 'HR',
   'nav.resourcing': 'Завантаження',
   'nav.dashboards': 'Дашборди',
   'nav.settings': 'Налаштування',
@@ -644,6 +645,7 @@ const uk: Dict = {
   'finance.downloadPdf': 'Завантажити PDF',
   'people.employees': 'Співробітники',
   'people.leave': 'Відпустки',
+  'people.calendar': 'Календар',
   'people.recruiting': 'Рекрутинг',
   'people.requestLeave': 'Подати заявку',
   'kb.newPage': 'Нова сторінка',

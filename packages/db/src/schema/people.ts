@@ -27,6 +27,7 @@ export const employees = pgTable('employees', {
   departmentId: text('department_id').references(() => departments.id),
   employmentType: text('employment_type').notNull().default('full_time'),
   managerId: text('manager_id'),
+  birthday: text('birthday'),
   joinDate: text('join_date'),
   probationEnd: text('probation_end'),
   exitDate: text('exit_date'),

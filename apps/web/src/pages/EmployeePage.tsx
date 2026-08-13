@@ -13,7 +13,7 @@ import { CompensationDialog } from '../components/people/CompensationDialog';
 import { EditEmployeeDialog } from '../components/people/EditEmployeeDialog';
 import {
   Users, MoreHorizontal, UserCheck, UserX, Plus, Lock, Mail, Briefcase,
-  CalendarClock, UserCog, AtSign, Pencil,
+  CalendarClock, UserCog, AtSign, Pencil, Cake,
 } from 'lucide-react';
 import { usePageTitle } from '../lib/tabs';
 import { useT, extendDict } from '../lib/i18n';
@@ -27,6 +27,7 @@ extendDict({
     'people.typePartTime': 'Part-time',
     'people.typeContractor': 'Contractor',
     'people.joinDate': 'Join date',
+    'people.birthday': 'Birthday',
     'people.probationEnd': 'Probation ends',
     'people.exitDate': 'Exit date',
     'people.userAccount': 'User account',
@@ -41,6 +42,7 @@ extendDict({
     'people.typePartTime': 'Часткова зайнятість',
     'people.typeContractor': 'Підряд',
     'people.joinDate': 'Дата приєднання',
+    'people.birthday': 'День народження',
     'people.probationEnd': 'Кінець випробувального',
     'people.exitDate': 'Дата звільнення',
     'people.userAccount': 'Обліковий запис',
@@ -62,7 +64,7 @@ interface EmployeeUser { id: string; name: string; email: string; avatar?: strin
 interface EmployeeDetail {
   id: string; userId?: string | null; firstName?: string | null; lastName?: string | null; email?: string | null;
   phone?: string | null; positionId?: string | null; departmentId?: string | null; employmentType?: string | null;
-  managerId?: string | null; joinDate?: string | null; probationEnd?: string | null; exitDate?: string | null;
+  managerId?: string | null; birthday?: string | null; joinDate?: string | null; probationEnd?: string | null; exitDate?: string | null;
   status?: string | null; version?: number; user?: EmployeeUser | null;
   customFields?: Record<string, unknown>;
 }
@@ -224,6 +226,7 @@ export function EmployeePage({ id }: { id: string }) {
             <InfoRow icon={<UserCog size={13} />} label={t('people.manager')} value={managerName ?? '–'} />
             <InfoRow icon={<Briefcase size={13} />} label={t('people.employmentType')} value={e.employmentType ? t(EMP_TYPE_KEY[e.employmentType] ?? '') || e.employmentType : '–'} />
             <InfoRow icon={<CalendarClock size={13} />} label={t('people.joinDate')} value={e.joinDate ? fmtDate(e.joinDate) : '–'} />
+            <InfoRow icon={<Cake size={13} />} label={t('people.birthday')} value={e.birthday ? fmtDate(e.birthday) : '–'} />
             {e.probationEnd && <InfoRow icon={<CalendarClock size={13} />} label={t('people.probationEnd')} value={fmtDate(e.probationEnd)} />}
             {e.exitDate && <InfoRow icon={<CalendarClock size={13} />} label={t('people.exitDate')} value={fmtDate(e.exitDate)} />}
           </div>

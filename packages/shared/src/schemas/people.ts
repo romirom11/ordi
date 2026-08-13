@@ -19,6 +19,7 @@ export const employeeInputSchema = z.object({
   departmentId: idSchema.nullable().optional(),
   employmentType: z.enum(EMPLOYMENT_TYPES).default('full_time'),
   managerId: idSchema.nullable().optional(),
+  birthday: z.string().nullable().optional(),
   joinDate: z.string().nullable().optional(),
   probationEnd: z.string().nullable().optional(),
   status: z.enum(EMPLOYEE_STATUSES).default('active'),
