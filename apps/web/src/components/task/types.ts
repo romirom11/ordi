@@ -43,6 +43,7 @@ export interface TaskDetail {
   labels: TaskLabel[];
   comments: TaskComment[];
   gitLinks?: TaskGitLink[];
+  customFields?: Record<string, unknown>;
 }
 
 export interface TaskGitLink {
@@ -100,6 +101,7 @@ export interface TaskPatch {
   labelIds?: string[];
   parentId?: string | null;
   milestoneId?: string | null;
+  customFields?: Record<string, unknown>;
 }
 
 /** A project milestone as the task sidebar needs it. */

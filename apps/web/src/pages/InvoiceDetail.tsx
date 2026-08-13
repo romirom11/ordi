@@ -21,6 +21,7 @@ function openPdf(id: string): void {
   openExternal(`${appOrigin()}/api/v1/invoices/${id}/pdf`);
 }
 import { useWorkspaceSettings } from '../components/finance/workspace';
+import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
 import { DateField } from '../components/DatePicker';
 
 extendDict({
@@ -108,6 +109,8 @@ interface Invoice {
   createdAt?: string | null;
   sentAt?: string | null;
   viewedAt?: string | null;
+  version?: number;
+  customFields?: Record<string, unknown>;
 }
 
 /** Today as YYYY-MM-DD (local); the API requires a payment date even when the field is left blank. */
@@ -131,6 +134,13 @@ export function InvoiceDetailPage({ id }: { id: string }) {
     qc.invalidateQueries({ queryKey: ['invoice', id] });
     qc.invalidateQueries({ queryKey: ['invoices'] });
   };
+  const saveCustomFields = useMutation({
+    mutationFn: (customFields: Record<string, unknown>) =>
+      api.patch(`/invoices/${id}`, { customFields, version: invoice.data?.version }),
+    onSuccess: invalidate,
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
+  });
+
   const send = useMutation({
     mutationFn: () => api.post(`/invoices/${id}/send`),
     onSuccess: () => { toast(t('finance.sent')); invalidate(); },
@@ -323,6 +333,16 @@ export function InvoiceDetailPage({ id }: { id: string }) {
           <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-foreground/90">{settings.paymentDetails}</pre>
         </Card>
       )}
+
+      {/* Internal, not part of the printable document */}
+      <div className="mt-6">
+        <CustomFieldsSection
+          entityType="invoices"
+          values={iv.customFields}
+          editable={can('finance.write')}
+          onSave={(customFields) => saveCustomFields.mutate(customFields)}
+        />
+      </div>
 
       <Dialog open={showPayment} onClose={() => setShowPayment(false)} title={t('finance.recordPayment')} width={400}>
         <form
