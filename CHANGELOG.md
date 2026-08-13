@@ -3,6 +3,34 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.24.0
+
+- **The knowledge base hosts PDFs**: a page is an article or a PDF document,
+  chosen at creation; PDF pages upload through the existing attachments
+  pipeline and render inline via the browser's native viewer, with file
+  replacement and open-in-new-tab. Markdown export links the document.
+- **People becomes HR** with a new **team calendar** tab: a month grid of
+  approved/pending absences, public holidays and birthdays – a new employee
+  field that recurs yearly off the card.
+- **Field groups** turn employee custom fields into access units: role
+  grants live in a matrix under Settings → Roles beside a dynamic **Self**
+  principal; `people.write` roles keep full access; enforcement is
+  server-side. Self-writable groups form the **HR questionnaire** on the
+  profile page, with a fill-status badge and a last-updated stamp on the card.
+- The **employee card** gains work/personal email, phone, telegram, birthday
+  and a documents section with inline PDF preview.
+- **Custom fields render everywhere** – employee card, companies, projects,
+  tasks, invoices, and contacts via their dialog (previously leads and deals
+  only).
+- **List views remember their state**: sorting, filters, search and tabs
+  survive navigation across CRM, projects, finance, time, people and
+  per-project task filters.
+- Notification emails stop arriving half-empty (task title/status/actor
+  filled from current state) and the workspace logo renders in mail clients
+  via a new public route.
+- First **Playwright e2e suite** (KB PDF, HR calendar, questionnaire) with
+  its own CI job; 9 new API tests pin the field-group access rules.
+
 ## v1.23.0
 
 - **Custom fields become manageable.** The settings panel could only list and

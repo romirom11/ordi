@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { defineConfig, type UserConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath, URL } from 'node:url';
 import { readFileSync } from 'node:fs';
@@ -10,7 +10,8 @@ const pkg = JSON.parse(readFileSync(fileURLToPath(new URL('./package.json', impo
 export default defineConfig({
   plugins: [react()],
   define: { __APP_VERSION__: JSON.stringify(pkg.version) },
-  // Unit tests only – e2e/*.spec.ts belong to Playwright, not vitest.
+  // Unit tests only – e2e/*.spec.ts belong to Playwright, not vitest. The
+  // `test` key is vitest's; vite's own types don't know it, hence the cast.
   test: { include: ['src/**/*.test.{ts,tsx}'] },
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
@@ -24,4 +25,4 @@ export default defineConfig({
     },
   },
   build: { outDir: 'dist', sourcemap: true },
-});
+} as UserConfig);
