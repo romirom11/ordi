@@ -23,6 +23,7 @@ export const employees = pgTable('employees', {
   lastName: text('last_name').notNull().default(''),
   email: text('email'),
   phone: text('phone'),
+  telegram: text('telegram'),
   positionId: text('position_id').references(() => positions.id),
   departmentId: text('department_id').references(() => departments.id),
   employmentType: text('employment_type').notNull().default('full_time'),

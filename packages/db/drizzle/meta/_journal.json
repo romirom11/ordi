@@ -211,6 +211,13 @@
       "when": 1786648360889,
       "tag": "0029_field_groups",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1786649315401,
+      "tag": "0030_employee_telegram",
+      "breakpoints": true
     }
   ]
 }

@@ -39,7 +39,7 @@ interface EmployeeLite { id: string; firstName?: string | null; lastName?: strin
 
 export interface EditableEmployee {
   id: string; firstName?: string | null; lastName?: string | null; email?: string | null;
-  phone?: string | null; positionId?: string | null; departmentId?: string | null;
+  phone?: string | null; telegram?: string | null; positionId?: string | null; departmentId?: string | null;
   managerId?: string | null; employmentType?: string | null; joinDate?: string | null;
   birthday?: string | null;
   version?: number;
@@ -55,6 +55,7 @@ function formFrom(e: EditableEmployee) {
     lastName: e.lastName ?? '',
     email: e.email ?? '',
     phone: e.phone ?? '',
+    telegram: e.telegram ?? '',
     positionId: e.positionId ?? '',
     departmentId: e.departmentId ?? '',
     managerId: e.managerId ?? '',
@@ -88,6 +89,7 @@ export function EditEmployeeDialog({ employee, open, onClose }: {
       lastName: form.lastName.trim(),
       email: form.email.trim() || null,
       phone: form.phone.trim() || null,
+      telegram: form.telegram.trim() || null,
       positionId: form.positionId || null,
       departmentId: form.departmentId || null,
       managerId: form.managerId || null,
@@ -180,6 +182,10 @@ export function EditEmployeeDialog({ employee, open, onClose }: {
           <div className="space-y-1">
             {label(t('people.birthday'))}
             <DateField value={form.birthday} onChange={(v) => setForm((f) => ({ ...f, birthday: v ?? '' }))} />
+          </div>
+          <div className="space-y-1">
+            {label(t('people.telegram'))}
+            <Input value={form.telegram} placeholder="@username" onChange={(e) => setForm((f) => ({ ...f, telegram: e.target.value }))} />
           </div>
         </div>
         <div className="flex justify-end gap-2 pt-1">
