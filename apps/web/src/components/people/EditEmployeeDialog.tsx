@@ -39,8 +39,9 @@ interface EmployeeLite { id: string; firstName?: string | null; lastName?: strin
 
 export interface EditableEmployee {
   id: string; firstName?: string | null; lastName?: string | null; email?: string | null;
-  phone?: string | null; positionId?: string | null; departmentId?: string | null;
+  phone?: string | null; telegram?: string | null; positionId?: string | null; departmentId?: string | null;
   managerId?: string | null; employmentType?: string | null; joinDate?: string | null;
+  birthday?: string | null;
   version?: number;
 }
 
@@ -54,11 +55,13 @@ function formFrom(e: EditableEmployee) {
     lastName: e.lastName ?? '',
     email: e.email ?? '',
     phone: e.phone ?? '',
+    telegram: e.telegram ?? '',
     positionId: e.positionId ?? '',
     departmentId: e.departmentId ?? '',
     managerId: e.managerId ?? '',
     employmentType: e.employmentType ?? 'full_time',
     joinDate: e.joinDate ?? '',
+    birthday: e.birthday ?? '',
   };
 }
 
@@ -86,11 +89,13 @@ export function EditEmployeeDialog({ employee, open, onClose }: {
       lastName: form.lastName.trim(),
       email: form.email.trim() || null,
       phone: form.phone.trim() || null,
+      telegram: form.telegram.trim() || null,
       positionId: form.positionId || null,
       departmentId: form.departmentId || null,
       managerId: form.managerId || null,
       employmentType: form.employmentType,
       joinDate: form.joinDate || null,
+      birthday: form.birthday || null,
       ...(typeof employee.version === 'number' ? { version: employee.version } : {}),
     }),
     onSuccess: () => {
@@ -171,6 +176,16 @@ export function EditEmployeeDialog({ employee, open, onClose }: {
           <div className="space-y-1">
             {label(t('people.joinDate'))}
             <DateField value={form.joinDate} onChange={(v) => setForm((f) => ({ ...f, joinDate: v ?? '' }))} />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            {label(t('people.birthday'))}
+            <DateField value={form.birthday} onChange={(v) => setForm((f) => ({ ...f, birthday: v ?? '' }))} />
+          </div>
+          <div className="space-y-1">
+            {label(t('people.telegram'))}
+            <Input value={form.telegram} placeholder="@username" onChange={(e) => setForm((f) => ({ ...f, telegram: e.target.value }))} />
           </div>
         </div>
         <div className="flex justify-end gap-2 pt-1">

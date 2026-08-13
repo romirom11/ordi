@@ -197,6 +197,27 @@
       "when": 1786460144378,
       "tag": "0027_kb_page_pdf",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1786647958207,
+      "tag": "0028_employee_birthday",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1786648360889,
+      "tag": "0029_field_groups",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1786649315401,
+      "tag": "0030_employee_telegram",
+      "breakpoints": true
     }
   ]
 }

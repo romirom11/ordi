@@ -70,6 +70,9 @@ export function reqAs(cookie: string) {
     patch: (path: string, body?: unknown) => app.request(`/api/v1${path}`, {
       method: 'PATCH', headers: { cookie, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
     }),
+    put: (path: string, body?: unknown) => app.request(`/api/v1${path}`, {
+      method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
+    }),
     del: (path: string) => app.request(`/api/v1${path}`, { method: 'DELETE', headers: { cookie } }),
   };
 }

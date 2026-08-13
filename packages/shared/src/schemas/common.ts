@@ -46,8 +46,25 @@ export const customFieldDefinitionSchema = z.object({
   showInList: z.boolean().default(false),
   isSortable: z.boolean().default(false),
   indexed: z.boolean().default(false),
+  groupId: idSchema.nullable().optional(),
 });
 export type CustomFieldDefinitionInput = z.infer<typeof customFieldDefinitionSchema>;
+
+/** Field groups: an access boundary over custom fields (configured in RBAC). */
+export const fieldGroupInputSchema = z.object({
+  entityType: z.enum(CUSTOM_FIELD_ENTITIES),
+  name: z.string().min(1),
+  position: z.number().default(0),
+});
+
+export const FIELD_GROUP_LEVELS = ['read', 'write'] as const;
+export const fieldGroupGrantsSchema = z.object({
+  grants: z.array(z.object({
+    /** 'role:<roleId>' or a dynamic principal such as 'self'. */
+    principal: z.string().min(1),
+    level: z.enum(FIELD_GROUP_LEVELS),
+  })),
+});
 
 /** Tiptap rich-text document is stored as JSON. */
 export const richTextSchema = z.any();

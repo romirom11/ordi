@@ -10,9 +10,10 @@ import {
 } from '../components/ui';
 import { Dialog, DropdownMenu, MenuItem, ContextMenu, toast, type ContextMenuEntry } from '../components/overlays';
 import {
-  Plus, Check, X, UserPlus, Users, CalendarClock, Briefcase,
+  Plus, Check, X, UserPlus, Users, CalendarClock, CalendarDays, Briefcase,
   ChevronRight, LayoutGrid, Sparkles, ExternalLink, Copy, FilePlus, IdCard, Network,
 } from 'lucide-react';
+import { TeamCalendar } from '../components/people/TeamCalendar';
 import { CreateProfileDialog, type CreateProfileTarget } from '../components/people/CreateProfileDialog';
 import { OrgStructureView } from '../components/people/OrgStructureView';
 import { useLeaveTypes } from '../lib/queries';
@@ -137,14 +138,14 @@ function StatusPill({ status, meta }: { status: string; meta: Record<string, { c
   );
 }
 
-type Tab = 'employees' | 'leave' | 'recruiting' | 'org' | 'dashboard';
+type Tab = 'employees' | 'leave' | 'calendar' | 'recruiting' | 'org' | 'dashboard';
 
 export function PeoplePage() {
   const t = useT();
   const can = useCan();
   const [tab, setTab] = usePersistedState<Tab>(
     'ordi:view:people.tab', 'employees',
-    oneOfPref(['employees', 'leave', 'recruiting', 'org', 'dashboard'], 'employees'),
+    oneOfPref(['employees', 'leave', 'calendar', 'recruiting', 'org', 'dashboard'], 'employees'),
   );
 
   if (!can('people.read')) {
@@ -154,6 +155,7 @@ export function PeoplePage() {
   const tabs: { key: Tab; label: string; icon: ReactNode; show: boolean }[] = [
     { key: 'employees', label: t('people.employees'), icon: <Users size={13} />, show: true },
     { key: 'leave', label: t('people.leave'), icon: <CalendarClock size={13} />, show: true },
+    { key: 'calendar', label: t('people.calendar'), icon: <CalendarDays size={13} />, show: true },
     { key: 'recruiting', label: t('people.recruiting'), icon: <Briefcase size={13} />, show: can('people.recruit') },
     { key: 'org', label: t('people.org'), icon: <Network size={13} />, show: can('people.write') },
     { key: 'dashboard', label: t('nav.dashboard'), icon: <LayoutGrid size={13} />, show: true },
@@ -169,6 +171,7 @@ export function PeoplePage() {
       />
       {activeTab === 'employees' && <DirectoryView />}
       {activeTab === 'leave' && <LeaveView />}
+      {activeTab === 'calendar' && <TeamCalendar />}
       {activeTab === 'recruiting' && can('people.recruit') && <RecruitingView />}
       {activeTab === 'org' && can('people.write') && <OrgStructureView />}
       {activeTab === 'dashboard' && <PeopleDashboardView />}

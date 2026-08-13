@@ -1,12 +1,14 @@
 /**
- * Workspace-defined custom fields for a CRM record (lead or deal), rendered as
- * a two-column card in the wide content column. Extracted from the deal page
- * when leads gained custom fields, so both records edit them identically.
+ * Workspace-defined custom fields for a record, rendered as a two-column card
+ * in the wide content column. Extracted from the deal page when leads gained
+ * custom fields; any entity from the custom-fields registry (leads, deals,
+ * employees, …) edits them identically.
  *
  * Values carry free text and URLs – prose-length content that truncated into
  * unreadability in the 320px rail, which is why this lives in the wide column.
  */
 import { useState } from 'react';
+import type { CustomFieldEntity } from '@ordi/shared';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, SlidersHorizontal } from 'lucide-react';
 import { api } from '../../lib/api';
@@ -20,43 +22,67 @@ import { DetailField, SectionHeader } from './detail';
 export interface FieldDef {
   id: string; key: string; label: string; type: string;
   options?: { value: string; label: string }[]; deprecated?: boolean;
+  groupId?: string | null;
+}
+
+export function fieldValueIsEmpty(v: unknown): boolean {
+  return v == null || v === '' || (Array.isArray(v) && v.length === 0);
+}
+
+/** Fetch the (non-deprecated) definitions of one entity's custom fields. */
+export function useFieldDefs(entityType: CustomFieldEntity) {
+  return useQuery<FieldDef[]>({
+    queryKey: ['custom-fields', entityType],
+    queryFn: () => api.get<{ data: FieldDef[] }>(`/custom-fields?entityType=${entityType}`).then((r) => r.data),
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** The bare two-column grid of fields – reused wherever grouped fields render. */
+export function CustomFieldsGrid({ defs, values: valuesProp, editable, onSave }: {
+  defs: FieldDef[];
+  values?: Record<string, unknown>;
+  editable: boolean;
+  /** Receives the full value map with the changed key applied; the API merges by key. */
+  onSave: (customFields: Record<string, unknown>) => void;
+}) {
+  const usersQ = useUsersLookup();
+  const values = valuesProp ?? {};
+  const save = (key: string, v: unknown) => onSave({ ...values, [key]: v });
+  return (
+    <div className="grid gap-x-6 gap-y-3 md:grid-cols-2">
+      {defs.map((f) => (
+        <DetailField key={f.id} label={f.label}>
+          <CustomFieldValue field={f} value={values[f.key]} editable={editable} users={usersQ.data ?? []} onSave={(v) => save(f.key, v)} />
+        </DetailField>
+      ))}
+    </div>
+  );
 }
 
 export function CustomFieldsSection({ entityType, values: valuesProp, editable, onSave }: {
-  entityType: 'leads' | 'deals';
+  entityType: CustomFieldEntity;
   values?: Record<string, unknown>;
   editable: boolean;
   /** Receives the full value map with the changed key applied; the API merges by key. */
   onSave: (customFields: Record<string, unknown>) => void;
 }) {
   const t = useT();
-  const usersQ = useUsersLookup();
-  const defsQ = useQuery<FieldDef[]>({
-    queryKey: ['custom-fields', entityType],
-    queryFn: () => api.get<{ data: FieldDef[] }>(`/custom-fields?entityType=${entityType}`).then((r) => r.data),
-    staleTime: 5 * 60_000,
-  });
+  const defsQ = useFieldDefs(entityType);
   const values = valuesProp ?? {};
-  const isEmpty = (v: unknown) => v == null || v === '' || (Array.isArray(v) && v.length === 0);
   // Empty fields render only while they can be filled – a read-only record
-  // showing a grid of dashes says nothing.
+  // showing a grid of dashes says nothing. Grouped fields belong to their
+  // group's section (EmployeeFieldGroups) and are skipped here.
   const defs = (defsQ.data ?? [])
-    .filter((f) => !f.deprecated)
-    .filter((f) => editable || !isEmpty(values[f.key]));
+    .filter((f) => !f.deprecated && !f.groupId)
+    .filter((f) => editable || !fieldValueIsEmpty(values[f.key]));
   if (defs.length === 0) return null;
-  const save = (key: string, v: unknown) => onSave({ ...values, [key]: v });
 
   return (
     <section>
       <SectionHeader icon={<SlidersHorizontal size={15} />} title={t('crm.customFields')} />
       <Card className="p-4">
-        <div className="grid gap-x-6 gap-y-3 md:grid-cols-2">
-          {defs.map((f) => (
-            <DetailField key={f.id} label={f.label}>
-              <CustomFieldValue field={f} value={values[f.key]} editable={editable} users={usersQ.data ?? []} onSave={(v) => save(f.key, v)} />
-            </DetailField>
-          ))}
-        </div>
+        <CustomFieldsGrid defs={defs} values={values} editable={editable} onSave={onSave} />
       </Card>
     </section>
   );

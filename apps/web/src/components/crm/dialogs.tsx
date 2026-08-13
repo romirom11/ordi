@@ -14,6 +14,7 @@ import {
   CURRENCIES, COMPANY_STATUSES, NEW_LEAD_STATUSES, StatusPill, useCompanies, useDealStages,
   useProjectsLookup, type Company, type Stage,
 } from './shared';
+import { CustomFieldsSection } from './CustomFieldsSection';
 
 function errMsg(e: unknown, fallback: string): string {
   return e instanceof ApiError ? e.message : fallback;
@@ -347,7 +348,7 @@ export function NewDealDialog({ open, onClose, lockedCompanyId, defaultStageId, 
 /** Create or edit a contact: pass `contact` to edit, omit it to create. */
 export function ContactDialog({ open, onClose, companyId, contact, onCreated }: {
   open: boolean; onClose: () => void; companyId: string;
-  contact?: { id: string; firstName?: string | null; lastName?: string | null; email?: string | null; phone?: string | null; position?: string | null };
+  contact?: { id: string; firstName?: string | null; lastName?: string | null; email?: string | null; phone?: string | null; position?: string | null; customFields?: Record<string, unknown> };
   /** Fired only on create, so a lead can attach the contact it just made. */
   onCreated?: (created: { id: string }) => void;
 }) {
@@ -358,6 +359,9 @@ export function ContactDialog({ open, onClose, companyId, contact, onCreated }: 
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [position, setPosition] = useState('');
+  // Contacts have no detail page, so custom fields are drafted here and
+  // submitted with the rest of the form – not saved per keystroke.
+  const [cf, setCf] = useState<Record<string, unknown>>({});
   const [error, setError] = useState<string | null>(null);
 
   // Prefill from the contact being edited each time the dialog opens.
@@ -368,16 +372,18 @@ export function ContactDialog({ open, onClose, companyId, contact, onCreated }: 
     setEmail(contact?.email ?? '');
     setPhone(contact?.phone ?? '');
     setPosition(contact?.position ?? '');
+    setCf(contact?.customFields ?? {});
     setError(null);
   }, [open, contact]);
 
-  const reset = () => { setFirst(''); setLast(''); setEmail(''); setPhone(''); setPosition(''); setError(null); };
+  const reset = () => { setFirst(''); setLast(''); setEmail(''); setPhone(''); setPosition(''); setCf({}); setError(null); };
 
   const mut = useMutation({
     mutationFn: () => {
       const body = {
         firstName: first.trim(), lastName: last.trim() || (contact ? '' : undefined),
         email: email.trim() || null, phone: phone.trim() || null, position: position.trim() || null,
+        customFields: cf,
       };
       return contact
         ? api.patch(`/contacts/${contact.id}`, body).then(() => null)
@@ -422,6 +428,7 @@ export function ContactDialog({ open, onClose, companyId, contact, onCreated }: 
             <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
           </Field>
         </div>
+        <CustomFieldsSection entityType="contacts" values={cf} editable onSave={setCf} />
         {error && <p className="text-[13px] text-destructive">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="ghost" size="sm" onClick={() => { reset(); onClose(); }}>{t('common.cancel')}</Button>

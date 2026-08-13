@@ -96,6 +96,7 @@ export interface Company {
   paymentTermsDays?: number | null;
   createdAt?: string | null;
   version?: number;
+  customFields?: Record<string, unknown>;
 }
 export interface Stage {
   id: string; name: string; position: number; probability: number; isWon: boolean; isLost: boolean;
@@ -243,6 +244,7 @@ export function useProjectsLookup() {
 export interface Contact {
   id: string; firstName?: string | null; lastName?: string | null; email?: string | null;
   phone?: string | null; position?: string | null; isPrimary?: boolean;
+  customFields?: Record<string, unknown>; version?: number;
 }
 export interface UserLite { id: string; name: string; avatar?: string | null }
 

@@ -8,11 +8,14 @@ import {
   fmtMoney, fmtDate, cn,
 } from '../components/ui';
 import { DropdownMenu, MenuItem, toast } from '../components/overlays';
+import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
+import { EmployeeFieldGroups } from '../components/people/EmployeeFieldGroups';
+import { EmployeeDocuments } from '../components/people/EmployeeDocuments';
 import { CompensationDialog } from '../components/people/CompensationDialog';
 import { EditEmployeeDialog } from '../components/people/EditEmployeeDialog';
 import {
   Users, MoreHorizontal, UserCheck, UserX, Plus, Lock, Mail, Briefcase,
-  CalendarClock, UserCog, AtSign, Pencil,
+  CalendarClock, UserCog, AtSign, Pencil, Cake, Phone, Send,
 } from 'lucide-react';
 import { usePageTitle } from '../lib/tabs';
 import { useT, extendDict } from '../lib/i18n';
@@ -26,6 +29,10 @@ extendDict({
     'people.typePartTime': 'Part-time',
     'people.typeContractor': 'Contractor',
     'people.joinDate': 'Join date',
+    'people.birthday': 'Birthday',
+    'people.corpEmail': 'Work email',
+    'people.personalEmail': 'Personal email',
+    'people.telegram': 'Telegram',
     'people.probationEnd': 'Probation ends',
     'people.exitDate': 'Exit date',
     'people.userAccount': 'User account',
@@ -40,6 +47,10 @@ extendDict({
     'people.typePartTime': 'Часткова зайнятість',
     'people.typeContractor': 'Підряд',
     'people.joinDate': 'Дата приєднання',
+    'people.birthday': 'День народження',
+    'people.corpEmail': 'Робоча пошта',
+    'people.personalEmail': 'Особиста пошта',
+    'people.telegram': 'Телеграм',
     'people.probationEnd': 'Кінець випробувального',
     'people.exitDate': 'Дата звільнення',
     'people.userAccount': 'Обліковий запис',
@@ -60,9 +71,12 @@ const EMP_TYPE_KEY: Record<string, string> = {
 interface EmployeeUser { id: string; name: string; email: string; avatar?: string | null; isActive?: boolean }
 interface EmployeeDetail {
   id: string; userId?: string | null; firstName?: string | null; lastName?: string | null; email?: string | null;
-  phone?: string | null; positionId?: string | null; departmentId?: string | null; employmentType?: string | null;
-  managerId?: string | null; joinDate?: string | null; probationEnd?: string | null; exitDate?: string | null;
+  phone?: string | null; telegram?: string | null; positionId?: string | null; departmentId?: string | null; employmentType?: string | null;
+  managerId?: string | null; birthday?: string | null; joinDate?: string | null; probationEnd?: string | null; exitDate?: string | null;
   status?: string | null; version?: number; user?: EmployeeUser | null;
+  customFields?: Record<string, unknown>;
+  fieldAccess?: Record<string, 'read' | 'write'>;
+  questionnaireUpdatedAt?: string | null;
 }
 interface Compensation { id?: string; compType?: string; amount?: number | string; currency?: string; effectiveFrom?: string | null; effectiveTo?: string | null }
 interface Position { id: string; title: string }
@@ -109,6 +123,13 @@ export function EmployeePage({ id }: { id: string }) {
     queryKey: ['compensation', id],
     queryFn: () => api.get<{ data: Compensation[] }>(`/employees/${id}/compensation`),
     enabled: canComp,
+  });
+
+  const saveCustomFields = useMutation({
+    mutationFn: (customFields: Record<string, unknown>) =>
+      api.patch(`/employees/${id}`, { customFields, version: employee.data?.version }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['employee', id] }),
+    onError: () => toast.error(t('people.editFailed')),
   });
 
   const lifecycle = useMutation({
@@ -215,10 +236,41 @@ export function EmployeePage({ id }: { id: string }) {
             <InfoRow icon={<UserCog size={13} />} label={t('people.manager')} value={managerName ?? '–'} />
             <InfoRow icon={<Briefcase size={13} />} label={t('people.employmentType')} value={e.employmentType ? t(EMP_TYPE_KEY[e.employmentType] ?? '') || e.employmentType : '–'} />
             <InfoRow icon={<CalendarClock size={13} />} label={t('people.joinDate')} value={e.joinDate ? fmtDate(e.joinDate) : '–'} />
+            <InfoRow icon={<Cake size={13} />} label={t('people.birthday')} value={e.birthday ? fmtDate(e.birthday) : '–'} />
+            <InfoRow icon={<AtSign size={13} />} label={t('people.corpEmail')} value={e.user?.email ?? '–'} />
+            <InfoRow icon={<Mail size={13} />} label={t('people.personalEmail')} value={e.email ?? '–'} />
+            <InfoRow icon={<Phone size={13} />} label={t('people.phone')} value={e.phone ?? '–'} />
+            <InfoRow
+              icon={<Send size={13} />}
+              label={t('people.telegram')}
+              value={e.telegram
+                ? <a href={`https://t.me/${e.telegram.replace(/^@/, '')}`} target="_blank" rel="noreferrer" className="text-primary hover:underline">{e.telegram}</a>
+                : '–'}
+            />
             {e.probationEnd && <InfoRow icon={<CalendarClock size={13} />} label={t('people.probationEnd')} value={fmtDate(e.probationEnd)} />}
             {e.exitDate && <InfoRow icon={<CalendarClock size={13} />} label={t('people.exitDate')} value={fmtDate(e.exitDate)} />}
           </div>
         </section>
+
+        {/* Workspace-defined employee fields: the ungrouped card plus one
+          * section per field group this viewer may see. */}
+        <div className="mb-6">
+          <CustomFieldsSection
+            entityType="employees"
+            values={e.customFields}
+            editable={canWrite}
+            onSave={(cf) => saveCustomFields.mutate(cf)}
+          />
+        </div>
+        <EmployeeFieldGroups
+          values={e.customFields}
+          fieldAccess={e.fieldAccess}
+          canWrite={canWrite}
+          questionnaireUpdatedAt={e.questionnaireUpdatedAt}
+          onSave={(cf) => saveCustomFields.mutate(cf)}
+        />
+
+        <EmployeeDocuments employeeId={id} canWrite={canWrite} />
 
         {/* Compensation – only rendered when the viewer can read compensation */}
         {canComp && (
