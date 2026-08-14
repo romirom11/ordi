@@ -185,6 +185,33 @@ export function encryptIntegrationSecrets(patch: {
  * Store (or replace) the GitHub App credentials, e.g. right after the manifest
  * conversion handed them to us. Secrets are encrypted before they land.
  */
+/**
+ * Store (or replace) the Slack app credentials, e.g. right after the Manifest
+ * API created the app and handed them back. Secrets are encrypted before they
+ * land.
+ */
+export async function storeSlackAppConfig(slack: SlackAppConfig): Promise<void> {
+  const { db } = getDb();
+  const [existing] = await db.select().from(schema.workspaceSettings)
+    .where(eq(schema.workspaceSettings.id, 'workspace'));
+  const current = ((existing?.integrations ?? {}) as Record<string, unknown>);
+  const merged = {
+    ...current,
+    slack: {
+      clientId: slack.clientId,
+      clientSecret: encrypt(slack.clientSecret),
+      signingSecret: encrypt(slack.signingSecret),
+    },
+  };
+  if (existing) {
+    await db.update(schema.workspaceSettings).set({ integrations: merged })
+      .where(eq(schema.workspaceSettings.id, 'workspace'));
+  } else {
+    await db.insert(schema.workspaceSettings).values({ id: 'workspace', integrations: merged });
+  }
+  invalidateRuntimeConfig();
+}
+
 export async function storeGithubAppConfig(app: GithubAppConfig): Promise<void> {
   const { db } = getDb();
   const [existing] = await db.select().from(schema.workspaceSettings)

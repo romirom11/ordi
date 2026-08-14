@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Mail, KeyRound } from 'lucide-react';
-import { appOrigin, api } from '../../lib/api';
+import { appOrigin, api, ApiError } from '../../lib/api';
 import { Button, Input, Card, Switch, Spinner, cn } from '../ui';
 import { toast } from '../overlays';
 import { Field, Disclosure, StatusChip } from './primitives';
@@ -42,6 +42,27 @@ extendDict({
     'settings.credentials': 'Credentials',
     'settings.slackSigningSecret': 'Signing secret',
     'settings.slackSigningSecretHint': 'Verifies inbound Slack events and slash commands (Slack app → Basic Information).',
+    'settings.slackAutoTitle': 'Create the Slack app in one click',
+    'settings.slackAutoHint1': 'Open',
+    'settings.slackAutoHint2': ', scroll down to "Your App Configuration Tokens", press Generate for your workspace and paste the token below. ordi creates the app and fills in all credentials by itself.',
+    'settings.slackAutoCreate': 'Create Slack app',
+    'settings.slackAutoCreated': 'Slack app created and credentials saved. Now press "Connect Slack".',
+    'settings.slackAutoFailed': 'Could not create the Slack app',
+    'settings.slackAutoNote': 'The token is used once to create the app and is not stored.',
+    'settings.slackGuide': 'Manual setup: create the Slack app yourself',
+    'settings.slackGuide1': 'Open',
+    'settings.slackGuide1b': 'and press "Create new app" – choose "From a manifest" and your workspace.',
+    'settings.slackGuide2': 'Pick JSON and paste the manifest below – it already carries this instance\'s URLs.',
+    'settings.slackGuide3': 'Create the app, then open Basic Information → App Credentials and copy Client ID, Client secret and Signing secret into the fields above; press Save.',
+    'settings.slackGuide4': 'Press "Connect Slack" on this card and authorize the workspace.',
+    'settings.slackGuide5': 'In each project: Settings → Integrations → pick the Slack channel (invite the bot to private channels with /invite @ordi). Notifications post there, and /ordi in that channel files a request into the project.',
+    'settings.slackManifest': 'App manifest',
+    'settings.slackManifestCopy': 'Copy',
+    'settings.slackManifestCopied': 'Manifest copied',
+    'settings.slackManifestCopyFailed': 'Could not copy – select and copy the text manually',
+    'settings.slackAppDesc': 'Notifications and intake from ordi',
+    'settings.slackCmdDesc': 'File a request to this channel\'s project',
+    'settings.slackCmdHint': '[request text]',
   },
   uk: {
     'settings.emailTitle': 'Пошта',
@@ -72,6 +93,27 @@ extendDict({
     'settings.credentials': 'Облікові дані',
     'settings.slackSigningSecret': 'Signing secret',
     'settings.slackSigningSecretHint': 'Перевіряє підпис вхідних подій та slash-команд Slack (Slack app → Basic Information).',
+    'settings.slackAutoTitle': 'Створити Slack-застосунок одним кліком',
+    'settings.slackAutoHint1': 'Відкрийте',
+    'settings.slackAutoHint2': ', прокрутіть до "Your App Configuration Tokens", натисніть Generate для свого воркспейсу і вставте токен нижче. ordi сам створить застосунок і заповнить усі облікові дані.',
+    'settings.slackAutoCreate': 'Створити застосунок',
+    'settings.slackAutoCreated': 'Slack-застосунок створено, облікові дані збережено. Тепер натисніть "Підключити Slack".',
+    'settings.slackAutoFailed': 'Не вдалося створити Slack-застосунок',
+    'settings.slackAutoNote': 'Токен використовується один раз для створення застосунку і не зберігається.',
+    'settings.slackGuide': 'Ручне налаштування: створити Slack-застосунок самостійно',
+    'settings.slackGuide1': 'Відкрийте',
+    'settings.slackGuide1b': 'і натисніть "Create new app" – виберіть "From a manifest" та свій воркспейс.',
+    'settings.slackGuide2': 'Виберіть JSON і вставте маніфест нижче – у ньому вже прописані адреси цього інстансу.',
+    'settings.slackGuide3': 'Створіть застосунок, відкрийте Basic Information → App Credentials і скопіюйте Client ID, Client secret та Signing secret у поля вище; натисніть "Зберегти".',
+    'settings.slackGuide4': 'Натисніть "Підключити Slack" у цій картці й підтвердіть авторизацію.',
+    'settings.slackGuide5': 'У кожному проекті: Налаштування → Інтеграції → виберіть Slack-канал (у приватний канал запросіть бота командою /invite @ordi). Туди підуть сповіщення, а /ordi у цьому каналі створює запит у проект.',
+    'settings.slackManifest': 'Маніфест застосунку',
+    'settings.slackManifestCopy': 'Копіювати',
+    'settings.slackManifestCopied': 'Маніфест скопійовано',
+    'settings.slackManifestCopyFailed': 'Не вдалося скопіювати – виділіть і скопіюйте текст вручну',
+    'settings.slackAppDesc': 'Сповіщення та запити з ordi',
+    'settings.slackCmdDesc': 'Створити запит у проект цього каналу',
+    'settings.slackCmdHint': '[текст запиту]',
   },
 });
 
@@ -280,6 +322,7 @@ export function OAuthCredentials({ provider, callbackPath }: { provider: 'github
         <KeyRound size={12} /> {t('settings.credentials')}
       </div>
       <EnvNote source={source} />
+      {provider === 'slack' && <SlackAppAutoCreate />}
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label={t('settings.oauthClientId')}>
           <Input value={clientId} onChange={(e) => setClientId(e.target.value)} />
@@ -310,6 +353,112 @@ export function OAuthCredentials({ provider, callbackPath }: { provider: 'github
       <Button className="mt-3" size="sm" disabled={!clientId || save.isPending} onClick={() => save.mutate()}>
         {save.isPending ? <Spinner /> : t('common.save')}
       </Button>
+      {provider === 'slack' && <SlackAppGuide />}
+    </div>
+  );
+}
+
+/**
+ * The actual one-click path: paste an app configuration token, the server
+ * creates the Slack app via the Manifest API and stores every credential in
+ * one go. The manual guide below stays as the fallback.
+ */
+function SlackAppAutoCreate() {
+  const t = useT();
+  const qc = useQueryClient();
+  const [token, setToken] = useState('');
+  const create = useMutation({
+    mutationFn: () => api.post<{ ok: boolean; appId: string }>('/settings/integrations-config/slack-app', { configToken: token.trim() }),
+    onSuccess: () => {
+      setToken('');
+      qc.invalidateQueries({ queryKey: ['integrations-config'] });
+      qc.invalidateQueries({ queryKey: ['slackStatus'] });
+      toast(t('settings.slackAutoCreated'));
+    },
+    onError: (e: unknown) => toast.error(e instanceof ApiError ? e.message : t('settings.slackAutoFailed')),
+  });
+  return (
+    <div className="mb-4 rounded-md border border-primary/30 bg-primary/5 p-3">
+      <div className="text-xs font-semibold">{t('settings.slackAutoTitle')}</div>
+      <p className="mt-1 text-xs text-muted-foreground">
+        {t('settings.slackAutoHint1')}{' '}
+        <a href="https://api.slack.com/apps" target="_blank" rel="noreferrer" className="text-primary hover:underline">api.slack.com/apps</a>
+        {t('settings.slackAutoHint2')}
+      </p>
+      <div className="mt-2 flex gap-2">
+        <Input
+          className="flex-1 font-mono"
+          type="password"
+          placeholder="xoxe.xoxp-..."
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+        />
+        <Button size="sm" disabled={!token.trim() || create.isPending} onClick={() => create.mutate()}>
+          {create.isPending ? <Spinner /> : t('settings.slackAutoCreate')}
+        </Button>
+      </div>
+      <p className="mt-1.5 text-xs text-faint">{t('settings.slackAutoNote')}</p>
+    </div>
+  );
+}
+
+/**
+ * The manual fallback: how to mint the Slack app this card asks credentials
+ * for. Ships a ready manifest with this instance's URLs baked in, so the
+ * whole Slack side is "From a manifest → paste → create".
+ */
+function SlackAppGuide() {
+  const t = useT();
+  const manifest = JSON.stringify({
+    display_information: { name: 'ordi', description: t('settings.slackAppDesc') },
+    features: {
+      bot_user: { display_name: 'ordi', always_online: true },
+      slash_commands: [{
+        command: '/ordi',
+        url: `${appOrigin()}/api/v1/integrations/slack/commands`,
+        description: t('settings.slackCmdDesc'),
+        usage_hint: t('settings.slackCmdHint'),
+        should_escape: false,
+      }],
+    },
+    oauth_config: {
+      redirect_urls: [`${appOrigin()}/api/v1/integrations/slack/oauth/callback`],
+      scopes: { bot: ['channels:read', 'groups:read', 'chat:write', 'commands'] },
+    },
+    settings: { org_deploy_enabled: false, socket_mode_enabled: false, token_rotation_enabled: false },
+  }, null, 2);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(manifest);
+      toast(t('settings.slackManifestCopied'));
+    } catch {
+      toast.error(t('settings.slackManifestCopyFailed'));
+    }
+  };
+
+  return (
+    <div className="mt-4">
+      <Disclosure label={t('settings.slackGuide')}>
+        <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-xs text-muted-foreground">
+          <li>
+            {t('settings.slackGuide1')}{' '}
+            <a href="https://api.slack.com/apps" target="_blank" rel="noreferrer" className="text-primary hover:underline">api.slack.com/apps</a>
+            {' '}{t('settings.slackGuide1b')}
+          </li>
+          <li>{t('settings.slackGuide2')}</li>
+          <li>{t('settings.slackGuide3')}</li>
+          <li>{t('settings.slackGuide4')}</li>
+          <li>{t('settings.slackGuide5')}</li>
+        </ol>
+        <div className="mt-3">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground">{t('settings.slackManifest')}</span>
+            <Button size="xs" variant="outline" onClick={copy}>{t('settings.slackManifestCopy')}</Button>
+          </div>
+          <pre className="max-h-56 overflow-auto rounded-md border border-border bg-muted/40 p-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground">{manifest}</pre>
+        </div>
+      </Disclosure>
     </div>
   );
 }
