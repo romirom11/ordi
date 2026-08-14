@@ -3,6 +3,25 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.27.0
+
+- **Profile photos everywhere a person is shown**: `/users/lookup` keeps
+  deactivated users (historical records stop degrading to "Someone" or
+  initials), people-naming APIs carry the avatar, and the task rail, audit
+  rows, team calendar, dashboard team card, leave rows, manager row,
+  @mention dropdown and sidebar account menu all render the photo;
+  Resourcing works for non-admins via the open lookup.
+- **Recruiting tab creates things**: a "New opening" dialog and an "Add
+  applicant" dialog – both previously API/MCP-only.
+- **Slack sets itself up**: paste an app configuration token and the server
+  creates the Slack app via the Manifest API and stores its credentials
+  encrypted; a collapsible guide with a copyable, pre-filled manifest covers
+  the manual path; the channel picker sorts channels, marks private ones
+  with a lock and explains how to make them appear.
+- **Company pickers sorted and searchable**: alphabetical order everywhere a
+  company is picked, type-to-filter on the project pickers, and lookups
+  fetch up to 200 companies instead of the newest 50 in ULID order.
+
 ## v1.26.0
 
 - **Intake grows up**: the IMAP mailbox is configurable in project settings,
