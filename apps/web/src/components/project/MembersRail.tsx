@@ -8,7 +8,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Search, Settings2, Trash2, UserPlus, Users } from 'lucide-react';
 import { api } from '../../lib/api';
-import { useProjectMembers, useUsersLookup, type ProjectMemberRole } from '../../lib/queries';
+import { activeUsers, useProjectMembers, useUsersLookup, type ProjectMemberRole } from '../../lib/queries';
 import { useT, extendDict } from '../../lib/i18n';
 import { Avatar, AvatarGroup, Select, Spinner, cn } from '../ui';
 import { DropdownMenu, toast, useMenuClose } from '../overlays';
@@ -127,7 +127,7 @@ function MembersPanel({ projectId, canManage, onManageAll }: {
   const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
 
   const needle = query.trim().toLowerCase();
-  const addable = users
+  const addable = activeUsers(users)
     .filter((u) => !memberIds.has(u.id))
     .filter((u) => !needle || u.name.toLowerCase().includes(needle));
 

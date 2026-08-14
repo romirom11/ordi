@@ -7,7 +7,7 @@ import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Globe, Lock, Plus, Trash2, Users as UsersIcon } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
-import { useProjectMembers, useUsersLookup, type ProjectMemberRole } from '../lib/queries';
+import { activeUsers, useProjectMembers, useUsersLookup, type ProjectMemberRole } from '../lib/queries';
 import { useT, extendDict } from '../lib/i18n';
 import { Avatar, Badge, Button, IconButton, SegmentedControl, Select, Skeleton, Spinner, Switch, cn } from './ui';
 import { ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, toast } from './overlays';
@@ -105,7 +105,7 @@ export function ProjectAccessPanel({ projectId, canManage }: { projectId: string
 
   const memberList = members.data ?? [];
   const memberIds = new Set(memberList.map((m) => m.userId));
-  const addable = (lookup.data ?? []).filter((u) => !memberIds.has(u.id));
+  const addable = activeUsers(lookup.data).filter((u) => !memberIds.has(u.id));
   const visibility = project.data?.visibility ?? 'workspace';
 
   const roleOptions: { key: MemberRole; label: string }[] = [

@@ -6,6 +6,7 @@ import { Button, IconButton, Input, Select, Card, Avatar, PageHeader, PageBody, 
 import { Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator, toast } from '../components/overlays';
 import { ChevronLeft, ChevronRight, Plus, Trash2, Users } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
+import { activeUsers, useUsersLookup } from '../lib/queries';
 import { DateField } from '../components/DatePicker';
 
 extendDict({
@@ -47,7 +48,7 @@ interface Allocation {
   fromDate?: string | null;
   toDate?: string | null;
 }
-interface UserRow { id: string; name?: string | null; email?: string | null; avatar?: string | null }
+interface UserRow { id: string; name?: string | null; email?: string | null; avatar?: string | null; isActive?: boolean }
 interface ProjectRow { id: string; name?: string | null }
 interface LeaveRow {
   id: string;
@@ -145,17 +146,10 @@ function ResourcingView() {
       }
     },
   });
-  const users = useQuery({
-    queryKey: ['users', 'resourcing'],
-    queryFn: async (): Promise<{ data: UserRow[] }> => {
-      try {
-        return await api.get<{ data: UserRow[] }>('/users');
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 403) return { data: [] };
-        throw err;
-      }
-    },
-  });
+  // The open lookup, not admin-only GET /users: with the latter, anyone
+  // without users.manage saw raw ids instead of names and photos.
+  const usersQ = useUsersLookup();
+  const users = { data: { data: (usersQ.data ?? []) as UserRow[] }, isLoading: usersQ.isLoading };
   const projects = useQuery({
     queryKey: ['projects', 'resourcing'],
     queryFn: async (): Promise<{ data: ProjectRow[] }> => {
@@ -347,7 +341,7 @@ function ResourcingView() {
               <label className="text-xs font-medium text-muted-foreground">{t('time.groupUser')}</label>
               <Select value={form.userId} onChange={(e) => setForm((f) => ({ ...f, userId: e.target.value }))} className="block w-full">
                 <option value="">{t('common.select')}</option>
-                {(users.data?.data ?? []).map((u) => <option key={u.id} value={u.id}>{u.name ?? u.email ?? u.id.slice(0, 8)}</option>)}
+                {activeUsers(users.data?.data ?? []).map((u) => <option key={u.id} value={u.id}>{u.name ?? u.email ?? u.id.slice(0, 8)}</option>)}
               </Select>
             </div>
             <div className="space-y-1">

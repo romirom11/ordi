@@ -145,9 +145,11 @@ export async function peopleDirectory() {
     status: schema.employees.status,
     positionTitle: schema.positions.title,
     departmentName: schema.departments.name,
+    userAvatar: schema.users.avatar,
   }).from(schema.employees)
     .leftJoin(schema.positions, eq(schema.positions.id, schema.employees.positionId))
     .leftJoin(schema.departments, eq(schema.departments.id, schema.employees.departmentId))
+    .leftJoin(schema.users, eq(schema.users.id, schema.employees.userId))
     .where(isNull(schema.employees.deletedAt));
 
   type Emp = (typeof emps)[number];
@@ -191,7 +193,7 @@ export async function peopleDirectory() {
       employeeId: e.id,
       name: `${e.firstName} ${e.lastName}`.trim(),
       email: e.email ?? null,
-      avatar: null,
+      avatar: e.userAvatar ?? null,
       position: e.positionTitle ?? null,
       departmentName: e.departmentName ?? null,
       status: e.status === 'terminated' ? 'deactivated' : 'active',
@@ -605,9 +607,12 @@ export async function listLeaveRequests(params: { employeeId?: string; status?: 
     decisionComment: schema.leaveRequests.decisionComment,
     createdAt: schema.leaveRequests.createdAt,
     employeeName: sql<string>`btrim(coalesce(${schema.employees.firstName}, '') || ' ' || coalesce(${schema.employees.lastName}, ''))`,
+    employeeUserId: schema.employees.userId,
+    employeeAvatar: schema.users.avatar,
     leaveTypeName: schema.leaveTypes.name,
   }).from(schema.leaveRequests)
     .leftJoin(schema.employees, eq(schema.employees.id, schema.leaveRequests.employeeId))
+    .leftJoin(schema.users, eq(schema.users.id, schema.employees.userId))
     .leftJoin(schema.leaveTypes, eq(schema.leaveTypes.id, schema.leaveRequests.leaveTypeId))
     .where(and(
       params.employeeId ? eq(schema.leaveRequests.employeeId, params.employeeId) : undefined,

@@ -6,8 +6,9 @@ import { Avatar, RailChip, RailField, fmtDate } from '../ui';
 import { DropdownMenu, MenuItem, MenuLabel, MenuSeparator, useMenuClose } from '../overlays';
 import { Calendar } from '../DatePicker';
 import { useT, extendDict } from '../../lib/i18n';
+import { activeUsers } from '../../lib/queries';
 
-export interface UserLite { id: string; name: string; avatar?: string | null }
+export interface UserLite { id: string; name: string; avatar?: string | null; isActive?: boolean }
 export interface CompanyLite { id: string; name: string }
 
 extendDict({
@@ -57,7 +58,7 @@ export function LeadPicker({ value, users, onSelect, disabled }: {
       <MenuLabel>{t('projects.lead')}</MenuLabel>
       <MenuItem icon={<UserCircle2 size={16} />} onSelect={() => onSelect(null)} checked={!value}>{t('projects.noLead')}</MenuItem>
       <MenuSeparator />
-      {users.map((u) => (
+      {activeUsers(users).map((u) => (
         <MenuItem key={u.id} icon={<Avatar name={u.name} src={u.avatar} size={18} />} onSelect={() => onSelect(u.id)} checked={value === u.id}>
           {u.name}
         </MenuItem>

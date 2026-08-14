@@ -6,7 +6,7 @@ import {
 } from '../ui';
 import { Dialog, DropdownMenu, MenuItem, toast } from '../overlays';
 import { Globe, Lock, X, UserPlus, Users } from 'lucide-react';
-import { useUsersLookup } from '../../lib/queries';
+import { activeUsers, useUsersLookup } from '../../lib/queries';
 import { useT, extendDict } from '../../lib/i18n';
 
 extendDict({
@@ -75,7 +75,7 @@ export function SpaceAccessDialog({ space, open, onClose }: { space: AccessSpace
 
   const memberRows = members.data?.data ?? [];
   const memberIds = useMemo(() => new Set(memberRows.map((m) => m.userId)), [memberRows]);
-  const addable = (lookup.data ?? []).filter((u) => !memberIds.has(u.id));
+  const addable = activeUsers(lookup.data).filter((u) => !memberIds.has(u.id));
 
   const conflict = (e: unknown) => {
     if (e instanceof ApiError && (e.status === 409 || e.code === 'conflict')) {

@@ -4,6 +4,7 @@ export interface TaskAssignee {
   userId: string;
   name: string;
   email?: string;
+  avatar?: string | null;
 }
 
 export interface TaskLabel {
@@ -68,6 +69,8 @@ export interface UserLite {
   id: string;
   name: string;
   avatar?: string | null;
+  /** false = deactivated account; renderers keep it, pickers filter it. */
+  isActive?: boolean;
 }
 
 export interface SubtaskRow {

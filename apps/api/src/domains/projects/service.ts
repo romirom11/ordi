@@ -532,7 +532,7 @@ export async function getTask(actor: Actor, id: string, include: string[]) {
   const want = new Set(include);
 
   if (want.has('assignees')) {
-    out.assignees = await db.select({ userId: taskAssignees.userId, name: schema.users.name, email: schema.users.email })
+    out.assignees = await db.select({ userId: taskAssignees.userId, name: schema.users.name, email: schema.users.email, avatar: schema.users.avatar })
       .from(taskAssignees).innerJoin(schema.users, eq(schema.users.id, taskAssignees.userId)).where(eq(taskAssignees.taskId, id));
   }
   if (want.has('labels')) {

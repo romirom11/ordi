@@ -18,6 +18,7 @@ import {
   CalendarClock, UserCog, AtSign, Pencil, Cake, MapPin,
 } from 'lucide-react';
 import { usePageTitle } from '../lib/tabs';
+import { useUserMap } from '../lib/queries';
 import { useT, extendDict } from '../lib/i18n';
 
 extendDict({
@@ -79,7 +80,7 @@ interface EmployeeDetail {
 interface Compensation { id?: string; compType?: string; amount?: number | string; currency?: string; effectiveFrom?: string | null; effectiveTo?: string | null }
 interface Position { id: string; title: string }
 interface Department { id: string; name: string }
-interface EmployeeLite { id: string; firstName?: string | null; lastName?: string | null; name?: string | null }
+interface EmployeeLite { id: string; userId?: string | null; firstName?: string | null; lastName?: string | null; name?: string | null }
 
 function StatusPill({ status }: { status: string }) {
   const t = useT();
@@ -113,6 +114,7 @@ export function EmployeePage({ id }: { id: string }) {
   const [compOpen, setCompOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
 
+  const userMap = useUserMap();
   const employee = useQuery({ queryKey: ['employee', id], queryFn: () => api.get<EmployeeDetail>(`/employees/${id}`) });
   const positions = useQuery({ queryKey: ['positions'], queryFn: () => api.get<{ data: Position[] }>('/positions') });
   const departments = useQuery({ queryKey: ['departments'], queryFn: () => api.get<{ data: Department[] }>('/departments') });
@@ -145,12 +147,14 @@ export function EmployeePage({ id }: { id: string }) {
   const name = e ? ([e.firstName, e.lastName].filter(Boolean).join(' ') || e.user?.name || t('people.unnamed')) : t('people.employee');
   const positionTitle = useMemo(() => positions.data?.data.find((p) => p.id === e?.positionId)?.title ?? null, [positions.data, e?.positionId]);
   const departmentName = useMemo(() => departments.data?.data.find((d) => d.id === e?.departmentId)?.name ?? null, [departments.data, e?.departmentId]);
-  const managerName = useMemo(() => {
+  const manager = useMemo(() => {
     if (!e?.managerId) return null;
     const m = emps.data?.data.find((x) => x.id === e.managerId);
     if (!m) return null;
-    return m.name ?? ([m.firstName, m.lastName].filter(Boolean).join(' ') || null);
+    const name = m.name ?? ([m.firstName, m.lastName].filter(Boolean).join(' ') || null);
+    return name ? { name, userId: m.userId ?? null } : null;
   }, [emps.data, e?.managerId]);
+  const managerAvatar = manager?.userId ? userMap.get(manager.userId)?.avatar : undefined;
 
   const comp = compensation.data?.data ?? [];
   usePageTitle(e ? name : undefined);
@@ -225,7 +229,15 @@ export function EmployeePage({ id }: { id: string }) {
           <h2 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-faint">{t('people.basicInfo')}</h2>
           <div className="divide-y divide-border rounded-xl border border-border bg-card px-4">
             {/* Position and department are already stated in the hero. */}
-            <InfoRow icon={<UserCog size={13} />} label={t('people.manager')} value={managerName ?? '–'} />
+            <InfoRow
+              icon={<UserCog size={13} />}
+              label={t('people.manager')}
+              value={manager ? (
+                <span className="flex items-center gap-2">
+                  <Avatar name={manager.name} src={managerAvatar} size={18} />{manager.name}
+                </span>
+              ) : '–'}
+            />
             <InfoRow icon={<Briefcase size={13} />} label={t('people.employmentType')} value={e.employmentType ? t(EMP_TYPE_KEY[e.employmentType] ?? '') || e.employmentType : '–'} />
             <InfoRow icon={<MapPin size={13} />} label={t('people.location')} value={e.location || '–'} />
             <InfoRow icon={<CalendarClock size={13} />} label={t('people.joinDate')} value={e.joinDate ? fmtDate(e.joinDate) : '–'} />

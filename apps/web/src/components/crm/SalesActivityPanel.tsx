@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, Check, MoreHorizontal, Pencil, Play, Plus, Workflow, X } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
+import { activeUsers } from '../../lib/queries';
 import { useT } from '../../lib/i18n';
 import { Avatar, Button, EmptySection, Input, Spinner, Textarea, Tooltip, fmtDate, fmtRelative } from '../ui';
 import { DateField, DateTimeField } from '../DatePicker';
@@ -452,7 +453,7 @@ export function ScheduleActivityDialog({ open, onClose, leadId, dealId, defaultT
               onChange={setOwnerId}
               options={[
                 { value: '', label: t('crm.ownerDefault') },
-                ...(usersQ.data ?? []).map((user) => ({
+                ...activeUsers(usersQ.data).map((user) => ({
                   value: user.id, label: user.name, icon: <Avatar name={user.name} src={user.avatar} size={16} />,
                 })),
               ]}

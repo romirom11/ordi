@@ -126,10 +126,15 @@ export function ActivityFeed({ taskId, comments, users }: {
           ) : (
             <div
               key={`a-${item.entry.id}`}
-              className="row-enter flex items-center gap-2.5 py-1 pl-[7px]"
+              className="row-enter flex items-center gap-2.5 py-1 pl-[3px]"
               style={{ ['--i' as string]: Math.min(i, 10) }}
             >
-              <span className="mx-1 h-1.5 w-1.5 shrink-0 rounded-full bg-border-strong" />
+              {(() => {
+                const actor = item.entry.actorId ? users.find((u) => u.id === item.entry.actorId) : undefined;
+                return actor
+                  ? <Avatar name={actor.name} src={actor.avatar} size={16} className="shrink-0" />
+                  : <span className="mx-1 h-1.5 w-1.5 shrink-0 rounded-full bg-border-strong" />;
+              })()}
               <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
                 <span className="font-medium text-foreground/80">{nameOf(item.entry.actorId)}</span>{' '}
                 {t(`task.activity.${item.entry.action}`, item.entry.action)}

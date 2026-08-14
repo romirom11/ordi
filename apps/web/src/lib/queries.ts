@@ -16,15 +16,26 @@ export interface UserLookup {
   name: string;
   email?: string | null;
   avatar?: string | null;
+  /**
+   * Deactivated users are included so historical records (comments, audit
+   * rows, memberships) keep their name and photo. Pickers filter with
+   * `activeUsers()`; renderers must not.
+   */
+  isActive?: boolean;
 }
 
-/** Everyone the current user can assign work to / add as a member. */
+/** Everyone in the workspace, past and present – for resolving people on records. */
 export function useUsersLookup(): UseQueryResult<UserLookup[]> {
   return useQuery({
     queryKey: ['users-lookup'],
     queryFn: () => api.get<{ data: UserLookup[] }>('/users/lookup').then((r) => r.data),
     staleTime: 5 * 60_000,
   });
+}
+
+/** The pickable subset of a lookup result: people who can still be assigned. */
+export function activeUsers<T extends { isActive?: boolean }>(users: T[] | undefined): T[] {
+  return (users ?? []).filter((u) => u.isActive !== false);
 }
 
 export type ProjectMemberRole = 'admin' | 'member' | 'viewer';
