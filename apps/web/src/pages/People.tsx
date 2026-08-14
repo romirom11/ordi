@@ -57,6 +57,22 @@ extendDict({
     'people.noEmail': 'No email',
     'people.directoryHint': 'Everyone in the workspace shows here – including users without an employee profile yet.',
     'people.org': 'Organization',
+    'people.newOpening': 'New opening',
+    'people.openingTitle': 'Title',
+    'people.openingStatus': 'Status',
+    'people.openingPositions': 'Positions',
+    'people.openingStatusDraft': 'Draft',
+    'people.openingStatusOpen': 'Open',
+    'people.openingStatusOnHold': 'On hold',
+    'people.openingStatusClosed': 'Closed',
+    'people.openingCreated': 'Opening created',
+    'people.openingCreateFailed': 'Could not create the opening',
+    'people.addApplicant': 'Add applicant',
+    'people.applicantName': 'Name',
+    'people.applicantEmail': 'Email',
+    'people.applicantPhone': 'Phone',
+    'people.applicantAdded': 'Applicant added',
+    'people.applicantAddFailed': 'Could not add the applicant',
   },
   uk: {
     'people.statusActive': 'Активний',
@@ -93,6 +109,22 @@ extendDict({
     'people.noEmail': 'Немає ел. пошти',
     'people.directoryHint': 'Тут показані всі люди робочого простору – зокрема користувачі, які ще не мають профілю співробітника.',
     'people.org': 'Організація',
+    'people.newOpening': 'Нова вакансія',
+    'people.openingTitle': 'Назва',
+    'people.openingStatus': 'Статус',
+    'people.openingPositions': 'Кількість позицій',
+    'people.openingStatusDraft': 'Чернетка',
+    'people.openingStatusOpen': 'Відкрита',
+    'people.openingStatusOnHold': 'На паузі',
+    'people.openingStatusClosed': 'Закрита',
+    'people.openingCreated': 'Вакансію створено',
+    'people.openingCreateFailed': 'Не вдалося створити вакансію',
+    'people.addApplicant': 'Додати кандидата',
+    'people.applicantName': 'Імʼя',
+    'people.applicantEmail': 'Ел. пошта',
+    'people.applicantPhone': 'Телефон',
+    'people.applicantAdded': 'Кандидата додано',
+    'people.applicantAddFailed': 'Не вдалося додати кандидата',
   },
 });
 
@@ -515,6 +547,8 @@ function RecruitingView() {
   const openings = useQuery({ queryKey: ['jobOpenings'], queryFn: () => api.get<{ data: JobOpening[] }>('/job-openings') });
   const stages = useQuery({ queryKey: ['applicantStages'], queryFn: () => api.get<{ data: ApplicantStage[] }>('/applicant-stages') });
   const [openingId, setOpeningId] = usePersistedState('ordi:view:people.recruiting.opening', '', stringPref());
+  const [openingDialog, setOpeningDialog] = useState(false);
+  const [applicantDialog, setApplicantDialog] = useState(false);
   const list = openings.data?.data ?? [];
   const activeOpening = openingId || list[0]?.id || '';
   const applicants = useQuery({
@@ -551,15 +585,39 @@ function RecruitingView() {
       </div>
     );
   }
-  if (list.length === 0) return <EmptyState icon={<Briefcase size={20} />} title={t('people.noOpenings')} hint={t('people.noOpeningsHint')} />;
+  if (list.length === 0) {
+    return (
+      <>
+        <EmptyState
+          icon={<Briefcase size={20} />}
+          title={t('people.noOpenings')}
+          hint={t('people.noOpeningsHint')}
+          action={<Button size="sm" onClick={() => setOpeningDialog(true)}><Plus size={14} /> {t('people.newOpening')}</Button>}
+        />
+        <NewOpeningDialog
+          open={openingDialog}
+          onClose={() => setOpeningDialog(false)}
+          onCreated={(id) => setOpeningId(id)}
+        />
+      </>
+    );
+  }
 
   return (
     <div className="p-6">
-      <div className="mb-4 flex items-center gap-3">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <span className="text-[13px] text-muted-foreground">{t('people.opening')}</span>
         <Select value={activeOpening} onChange={(e) => setOpeningId(e.target.value)}>
           {list.map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}
         </Select>
+        <div className="ml-auto flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => setApplicantDialog(true)} disabled={!activeOpening}>
+            <UserPlus size={14} /> {t('people.addApplicant')}
+          </Button>
+          <Button size="sm" onClick={() => setOpeningDialog(true)}>
+            <Plus size={14} /> {t('people.newOpening')}
+          </Button>
+        </div>
       </div>
       {applicants.isLoading ? (
         <div className="flex gap-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-64 w-64" />)}</div>
@@ -613,7 +671,181 @@ function RecruitingView() {
           })}
         </div>
       )}
+
+      <NewOpeningDialog
+        open={openingDialog}
+        onClose={() => setOpeningDialog(false)}
+        onCreated={(id) => setOpeningId(id)}
+      />
+      <AddApplicantDialog
+        open={applicantDialog}
+        jobOpeningId={activeOpening}
+        onClose={() => setApplicantDialog(false)}
+      />
     </div>
+  );
+}
+
+/** Create a job opening – the API always could, the tab finally offers it. */
+function NewOpeningDialog({ open, onClose, onCreated }: {
+  open: boolean; onClose: () => void; onCreated: (id: string) => void;
+}) {
+  const t = useT();
+  const qc = useQueryClient();
+  const [title, setTitle] = useState('');
+  const [departmentId, setDepartmentId] = useState('');
+  const [employmentType, setEmploymentType] = useState('full_time');
+  const [positionsCount, setPositionsCount] = useState('1');
+  const [status, setStatus] = useState('open');
+
+  useEffect(() => {
+    if (open) { setTitle(''); setDepartmentId(''); setEmploymentType('full_time'); setPositionsCount('1'); setStatus('open'); }
+  }, [open]);
+
+  // Departments demand people.read; a recruit-only role simply gets no select.
+  const departments = useQuery({
+    queryKey: ['departments'],
+    queryFn: async () => {
+      try {
+        return await api.get<{ data: { id: string; name: string }[] }>('/departments');
+      } catch {
+        return { data: [] as { id: string; name: string }[] };
+      }
+    },
+    enabled: open,
+  });
+
+  const create = useMutation({
+    mutationFn: () => api.post<{ id: string }>('/job-openings', {
+      title: title.trim(),
+      departmentId: departmentId || null,
+      employmentType,
+      positionsCount: Math.max(1, Number(positionsCount) || 1),
+      status,
+    }),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['jobOpenings'] });
+      toast(t('people.openingCreated'));
+      onCreated(r.id);
+      onClose();
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('people.openingCreateFailed')),
+  });
+
+  const label = (text: string) => <label className="text-xs font-medium text-muted-foreground">{text}</label>;
+  const STATUS_KEYS: Record<string, string> = {
+    draft: 'people.openingStatusDraft', open: 'people.openingStatusOpen',
+    on_hold: 'people.openingStatusOnHold', closed: 'people.openingStatusClosed',
+  };
+  const EMP_TYPE_KEYS: Record<string, string> = {
+    full_time: 'people.typeFullTime', part_time: 'people.typePartTime', contractor: 'people.typeContractor',
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} width={440} title={t('people.newOpening')}>
+      <form
+        className="space-y-3 px-4 pb-4 pt-1"
+        onSubmit={(e) => { e.preventDefault(); if (title.trim() && !create.isPending) create.mutate(); }}
+      >
+        <div className="space-y-1">
+          {label(t('people.openingTitle'))}
+          <Input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          {(departments.data?.data ?? []).length > 0 && (
+            <div className="space-y-1">
+              {label(t('people.department'))}
+              <Select className="w-full" value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}>
+                <option value="">{t('people.noDepartment')}</option>
+                {(departments.data?.data ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </Select>
+            </div>
+          )}
+          <div className="space-y-1">
+            {label(t('people.employmentType'))}
+            <Select className="w-full" value={employmentType} onChange={(e) => setEmploymentType(e.target.value)}>
+              {Object.entries(EMP_TYPE_KEYS).map(([k, key]) => <option key={k} value={k}>{t(key)}</option>)}
+            </Select>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            {label(t('people.openingStatus'))}
+            <Select className="w-full" value={status} onChange={(e) => setStatus(e.target.value)}>
+              {Object.entries(STATUS_KEYS).map(([k, key]) => <option key={k} value={k}>{t(key)}</option>)}
+            </Select>
+          </div>
+          <div className="space-y-1">
+            {label(t('people.openingPositions'))}
+            <Input type="number" min={1} value={positionsCount} onChange={(e) => setPositionsCount(e.target.value)} />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="ghost" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button type="submit" size="sm" disabled={!title.trim() || create.isPending}>
+            {create.isPending ? <Spinner /> : t('common.create')}
+          </Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+/** Add an applicant by hand – for candidates that arrive outside the public form. */
+function AddApplicantDialog({ open, jobOpeningId, onClose }: {
+  open: boolean; jobOpeningId: string; onClose: () => void;
+}) {
+  const t = useT();
+  const qc = useQueryClient();
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+
+  useEffect(() => {
+    if (open) { setName(''); setEmail(''); setPhone(''); }
+  }, [open]);
+
+  const create = useMutation({
+    mutationFn: () => api.post('/applicants', {
+      jobOpeningId, name: name.trim(), email: email.trim(), phone: phone.trim() || null,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['applicants'] });
+      toast(t('people.applicantAdded'));
+      onClose();
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('people.applicantAddFailed')),
+  });
+
+  const label = (text: string) => <label className="text-xs font-medium text-muted-foreground">{text}</label>;
+  const valid = name.trim() && email.trim();
+
+  return (
+    <Dialog open={open} onClose={onClose} width={400} title={t('people.addApplicant')}>
+      <form
+        className="space-y-3 px-4 pb-4 pt-1"
+        onSubmit={(e) => { e.preventDefault(); if (valid && !create.isPending) create.mutate(); }}
+      >
+        <div className="space-y-1">
+          {label(t('people.applicantName'))}
+          <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div className="space-y-1">
+          {label(t('people.applicantEmail'))}
+          <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        </div>
+        <div className="space-y-1">
+          {label(t('people.applicantPhone'))}
+          <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="ghost" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button type="submit" size="sm" disabled={!valid || create.isPending}>
+            {create.isPending ? <Spinner /> : t('common.add')}
+          </Button>
+        </div>
+      </form>
+    </Dialog>
   );
 }
 
