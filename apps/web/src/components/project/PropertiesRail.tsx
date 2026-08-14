@@ -75,7 +75,8 @@ export function PropertiesRail({ project, users, canWrite, canManageMembers, onP
 
   const companiesQ = useQuery<CompanyLite[]>({
     queryKey: ['companies', 'lookup'],
-    queryFn: () => api.get<{ data: CompanyLite[] }>('/companies').then((r) => r.data),
+    // The default page is the 50 newest companies – a picker needs all of them.
+    queryFn: () => api.get<{ data: CompanyLite[] }>('/companies?limit=200').then((r) => r.data),
     enabled: canWrite,
     staleTime: 5 * 60_000,
   });

@@ -12,8 +12,9 @@ import {
   Avatar, AvatarGroup, PriorityIcon, ProgressRing, Tooltip, fmtDate, cn,
 } from '../components/ui';
 import { Calendar } from '../components/DatePicker';
-import { useLabels, useUsersLookup } from '../lib/queries';
+import { byName, useLabels, useUsersLookup } from '../lib/queries';
 import { Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator, useMenuClose } from '../components/overlays';
+import { SearchSelect } from '../components/SearchSelect';
 import { toast } from '../components/overlays';
 import { ProjectIcon } from '../components/project/ProjectIcon';
 import { ProjectContextMenu } from '../components/project/contextMenus';
@@ -376,7 +377,8 @@ export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: 
   const types = typesQ.data ?? [];
   const companiesQ = useQuery<CompanyLite[]>({
     queryKey: ['companies', 'lite'],
-    queryFn: () => api.get<{ data: CompanyLite[] }>('/companies').then((r) => r.data),
+    // The default page is the 50 newest companies – a picker needs all of them.
+    queryFn: () => api.get<{ data: CompanyLite[] }>('/companies?limit=200').then((r) => r.data),
     enabled: open && canCrm,
   });
   const companies = companiesQ.data ?? [];
@@ -536,9 +538,12 @@ export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: 
           </DropdownMenu>
 
           {canCrm && (companies.length > 0 || needsClient) && (
-            <DropdownMenu
+            <SearchSelect
               align="start"
               width={240}
+              value={companyId}
+              onChange={setCompanyId}
+              menuLabel={t('crm.client')}
               trigger={(
                 <FormChip active={!!client} label={t('crm.client')}>
                   <Building2 size={13} />
@@ -546,13 +551,11 @@ export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: 
                   {needsClient && !client && <span className="text-destructive">*</span>}
                 </FormChip>
               )}
-            >
-              <MenuLabel>{t('crm.client')}</MenuLabel>
-              {!needsClient && <MenuItem checked={!companyId} onSelect={() => setCompanyId('')}>{t('projects.noClient')}</MenuItem>}
-              {companies.map((c) => (
-                <MenuItem key={c.id} checked={c.id === companyId} onSelect={() => setCompanyId(c.id)}>{c.name}</MenuItem>
-              ))}
-            </DropdownMenu>
+              options={[
+                ...(needsClient ? [] : [{ value: '', label: t('projects.noClient') }]),
+                ...byName(companies).map((c) => ({ value: c.id, label: c.name, icon: <Building2 size={14} /> })),
+              ]}
+            />
           )}
 
           <DropdownMenu
