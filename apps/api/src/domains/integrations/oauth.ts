@@ -172,12 +172,15 @@ export async function listSlackChannels(botToken: string): Promise<SlackChannel[
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Post a message to a channel via chat.postMessage. Throws on API error. */
-export async function postSlackMessage(botToken: string, channel: string, text: string): Promise<void> {
+/**
+ * Post a message to a channel via chat.postMessage. Throws on API error.
+ * `text` doubles as the notification fallback when `blocks` are given.
+ */
+export async function postSlackMessage(botToken: string, channel: string, text: string, blocks?: unknown[]): Promise<void> {
   const res = await fetch('https://slack.com/api/chat.postMessage', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json; charset=utf-8', Authorization: `Bearer ${botToken}` },
-    body: JSON.stringify({ channel, text }),
+    body: JSON.stringify({ channel, text, ...(blocks?.length ? { blocks, unfurl_links: false } : {}) }),
     signal: AbortSignal.timeout(5_000),
   });
   if (!res.ok) throw new Error(`slack chat.postMessage failed: ${res.status}`);

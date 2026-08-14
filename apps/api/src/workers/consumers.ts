@@ -336,8 +336,45 @@ async function resolveSlackTarget(projectId: string | null): Promise<SlackTarget
   return url ? { kind: 'webhook', url } : null;
 }
 
+/** Escape Slack mrkdwn control characters in user-authored text. */
+function slackEsc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** A `<url|label>` mrkdwn link; the label must not carry the separator char. */
+function slackLink(url: string, label: string): string {
+  return `<${url}|${slackEsc(label).replace(/\|/g, '/')}>`;
+}
+
+interface SlackMessage { text: string; blocks: unknown[]; projectId: string | null }
+
+/** One section line + an optional muted context line, with a plain-text fallback. */
+function slackMsg(section: string, opts: { fallback: string; context?: string; projectId: string | null }): SlackMessage {
+  const blocks: unknown[] = [{ type: 'section', text: { type: 'mrkdwn', text: section } }];
+  if (opts.context) blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: opts.context }] });
+  return { text: opts.fallback, blocks, projectId: opts.projectId };
+}
+
+/** "Roman K., Olha D." for the task's assignees, or null when nobody is on it. */
+async function taskAssigneeNames(taskId: string): Promise<string | null> {
+  const { db } = getDb();
+  const rows = await db.select({ name: schema.users.name })
+    .from(schema.taskAssignees)
+    .innerJoin(schema.users, eq(schema.taskAssignees.userId, schema.users.id))
+    .where(eq(schema.taskAssignees.taskId, taskId));
+  return rows.length ? rows.map((r) => r.name).join(', ') : null;
+}
+
+async function projectName(projectId: string | null): Promise<string | null> {
+  if (!projectId) return null;
+  const { db } = getDb();
+  const [project] = await db.select({ name: schema.projects.name })
+    .from(schema.projects).where(eq(schema.projects.id, projectId));
+  return project?.name ?? null;
+}
+
 /** Build the Slack message + the project it belongs to (for webhook resolution). */
-async function buildSlackMessage(ev: DomainEvent): Promise<{ text: string; projectId: string | null } | null> {
+export async function buildSlackMessage(ev: DomainEvent): Promise<SlackMessage | null> {
   const { db } = getDb();
   const p = ev.payload as any;
   const app = env.appUrl.replace(/\/$/, '');
@@ -349,17 +386,28 @@ async function buildSlackMessage(ev: DomainEvent): Promise<{ text: string; proje
       const [task] = await db.select({ title: schema.tasks.title, statusId: schema.tasks.statusId })
         .from(schema.tasks).where(eq(schema.tasks.id, taskId));
       const title = task?.title ?? '';
+      const ref = String(p.ref ?? taskId);
       const link = projectId ? `${app}/projects/${projectId}/tasks/${taskId}` : `${app}/my-tasks`;
-      if (ev.type === 'task.created') {
-        return { text: `:sparkles: New task *${p.ref ?? taskId}* – ${title}\n${link}`, projectId };
-      }
       let statusName = '';
       if (task?.statusId) {
         const [st] = await db.select({ name: schema.taskStatuses.name })
           .from(schema.taskStatuses).where(eq(schema.taskStatuses.id, task.statusId));
         statusName = st?.name ?? '';
       }
-      return { text: `:arrows_counterclockwise: Task *${p.ref ?? taskId}* → *${statusName}* – ${title}\n${link}`, projectId };
+      const assignees = await taskAssigneeNames(taskId);
+      const context = [
+        await projectName(projectId),
+        assignees ? `Assignee: ${slackEsc(assignees)}` : 'Unassigned',
+        statusName ? `Status: ${slackEsc(statusName)}` : null,
+      ].filter(Boolean).join('  ·  ');
+      if (ev.type === 'task.created') {
+        return slackMsg(`:sparkles: New task *${slackLink(link, ref)}*  ${slackEsc(title)}`, {
+          fallback: `New task ${ref}: ${title}`, context, projectId,
+        });
+      }
+      return slackMsg(`:arrows_counterclockwise: *${slackLink(link, ref)}*  ${slackEsc(title)} → *${slackEsc(statusName)}*`, {
+        fallback: `${ref} moved to ${statusName}`, context, projectId,
+      });
     }
     case 'comment.mentioned': {
       // aggregateId is the comment id; derive the task/project for the deep link.
@@ -373,26 +421,43 @@ async function buildSlackMessage(ev: DomainEvent): Promise<{ text: string; proje
         projectId = task?.projectId ?? null;
         link = projectId ? `${app}/projects/${projectId}/tasks/${comment.taskId}` : app;
       }
-      return { text: `:speech_balloon: You were mentioned in *${p.ref ?? 'a comment'}*\n${link}`, projectId };
+      const ref = String(p.ref ?? 'a comment');
+      return slackMsg(`:speech_balloon: You were mentioned in *${slackLink(link, ref)}*`, {
+        fallback: `You were mentioned in ${ref}`,
+        context: (await projectName(projectId)) ?? undefined,
+        projectId,
+      });
     }
     case 'deal.won': {
+      const title = String(p.title ?? ev.aggregateId);
       const amount = p.amount ? ` (${p.currency ?? ''} ${p.amount})` : '';
-      return { text: `:tada: Deal won: *${p.title ?? ev.aggregateId}*${amount}\n${app}/deals`, projectId: null };
+      return slackMsg(`:tada: Deal won: *${slackLink(`${app}/deals`, title)}*${amount}`, {
+        fallback: `Deal won: ${title}${amount}`, projectId: null,
+      });
     }
     case 'deal.lost': {
       const [deal] = await db.select({ title: schema.deals.title })
         .from(schema.deals).where(eq(schema.deals.id, ev.aggregateId));
-      const reason = p.lostReason ? ` – ${p.lostReason}` : '';
-      return { text: `:disappointed: Deal lost: *${deal?.title ?? ev.aggregateId}*${reason}\n${app}/deals`, projectId: null };
+      const title = deal?.title ?? ev.aggregateId;
+      const reason = p.lostReason ? ` – ${slackEsc(String(p.lostReason))}` : '';
+      return slackMsg(`:disappointed: Deal lost: *${slackLink(`${app}/deals`, title)}*${reason}`, {
+        fallback: `Deal lost: ${title}`, projectId: null,
+      });
     }
     case 'invoice.paid': {
-      return { text: `:moneybag: Invoice *${p.number ?? ev.aggregateId}* was paid\n${app}/finance/invoices/${ev.aggregateId}`, projectId: null };
+      const number = String(p.number ?? ev.aggregateId);
+      return slackMsg(`:moneybag: Invoice *${slackLink(`${app}/finance/invoices/${ev.aggregateId}`, number)}* was paid`, {
+        fallback: `Invoice ${number} was paid`, projectId: null,
+      });
     }
     case 'project.completed': {
       const projectId = ev.aggregateId;
       const [project] = await db.select({ name: schema.projects.name })
         .from(schema.projects).where(eq(schema.projects.id, projectId));
-      return { text: `:checkered_flag: Project *${p.key ?? project?.name ?? projectId}* completed\n${app}/projects/${projectId}`, projectId };
+      const name = String(p.key ?? project?.name ?? projectId);
+      return slackMsg(`:checkered_flag: Project *${slackLink(`${app}/projects/${projectId}`, name)}* completed`, {
+        fallback: `Project ${name} completed`, projectId,
+      });
     }
     default:
       return null;
@@ -408,13 +473,13 @@ const slack: Consumer = {
     const target = await resolveSlackTarget(msg.projectId);
     if (!target) return; // not configured – skip
     if (target.kind === 'bot') {
-      await postSlackMessage(target.token, target.channel, msg.text); // throws → relay retries / DLQs
+      await postSlackMessage(target.token, target.channel, msg.text, msg.blocks); // throws → relay retries / DLQs
       return;
     }
     const res = await fetch(target.url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: msg.text }),
+      body: JSON.stringify({ text: msg.text, blocks: msg.blocks }),
       signal: AbortSignal.timeout(5_000),
     });
     if (!res.ok) {
