@@ -28,12 +28,16 @@ export function usersRoutes() {
   });
 
   // Lightweight directory for assignee pickers and @mentions: any authenticated
-  // user; only public fields (id, name, avatar) – no emails or role data.
+  // user; only public fields (id, name, avatar, isActive) – no emails or role
+  // data. Deactivated users ARE included: historical records (comments, audit
+  // rows, memberships) still name them, and hiding them here rendered every
+  // ex-colleague as "Someone" with an initials circle. Pickers filter by
+  // isActive; renderers must not.
   app.get('/lookup', async (c) => {
     const { db } = getDb();
     const rows = await db.select({
-      id: schema.users.id, name: schema.users.name, avatar: schema.users.avatar,
-    }).from(schema.users).where(eq(schema.users.isActive, true));
+      id: schema.users.id, name: schema.users.name, avatar: schema.users.avatar, isActive: schema.users.isActive,
+    }).from(schema.users);
     return c.json({ data: rows });
   });
 

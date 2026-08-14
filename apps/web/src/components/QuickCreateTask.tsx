@@ -14,7 +14,7 @@ import { Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator, toast, useMen
 import { ProjectIcon } from './project/ProjectIcon';
 import { RichEditor, EMPTY_DOC } from './richtext/RichEditor';
 import { docIsEmpty } from './richtext/RichText';
-import { useUsersLookup, useLabels } from '../lib/queries';
+import { useUsersLookup, useLabels, activeUsers } from '../lib/queries';
 import { useT, extendDict } from '../lib/i18n';
 import { Calendar } from './DatePicker';
 import { LabelsMenu } from './LabelsMenu';
@@ -60,7 +60,7 @@ extendDict({
 
 interface ProjectLite { id: string; name: string; key: string }
 interface StatusLite { id: string; name: string; category: string; color: string; position: number; isDefault?: boolean }
-interface UserLite { id: string; name?: string | null; email?: string | null; avatar?: string | null }
+interface UserLite { id: string; name?: string | null; email?: string | null; avatar?: string | null; isActive?: boolean }
 interface CreatedTask { id: string; ref?: string; title: string }
 
 const PRIORITIES = ['urgent', 'high', 'medium', 'low', 'none'] as const;
@@ -368,7 +368,7 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
               }
             >
               <MenuLabel>{t('tasks.assignees')}</MenuLabel>
-              {users.map((u) => (
+              {activeUsers(users).map((u) => (
                 <ToggleItem
                   key={u.id}
                   icon={<Avatar name={userName(u)} src={u.avatar} size={18} />}

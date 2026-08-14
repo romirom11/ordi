@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Pin, Trash2, UserCircle2 } from 'lucide-react';
 import { api, qs, ApiError } from '../../lib/api';
+import { activeUsers } from '../../lib/queries';
 import { useT } from '../../lib/i18n';
 import { Avatar, Button, Card, EmptySection, IconButton, RailChip, Skeleton, Spinner, Tooltip, cn, fmtDate } from '../ui';
 import { ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, toast } from '../overlays';
@@ -183,7 +184,7 @@ export function InlineEdit({
  */
 export function OwnerRailValue({ ownerId, users, editable, onPick }: {
   ownerId?: string | null;
-  users: { id: string; name: string; avatar?: string | null }[];
+  users: { id: string; name: string; avatar?: string | null; isActive?: boolean }[];
   editable: boolean;
   onPick: (id: string) => void;
 }) {
@@ -202,7 +203,7 @@ export function OwnerRailValue({ ownerId, users, editable, onPick }: {
       trigger={<RailChip empty={!owner} caret>{label}</RailChip>}
     >
       <MenuLabel>{t('crm.changeOwner')}</MenuLabel>
-      {users.map((user) => (
+      {activeUsers(users).map((user) => (
         <MenuItem key={user.id} checked={user.id === ownerId} onSelect={() => user.id !== ownerId && onPick(user.id)}>
           <span className="flex items-center gap-2">
             <Avatar name={user.name} src={user.avatar} size={18} />

@@ -12,16 +12,20 @@
 import type { SuggestionKeyDownProps, SuggestionOptions, SuggestionProps } from '@tiptap/suggestion';
 import type { MentionNodeAttrs } from '@tiptap/extension-mention';
 import { api } from '../../lib/api';
+import { resolveFileSrc } from '../../lib/uploads';
 
 export interface MentionUser {
   id: string;
   label: string;
+  avatar?: string | null;
+  isActive?: boolean;
 }
 
 interface ApiUser {
   id: string;
   name?: string | null;
   email?: string | null;
+  avatar?: string | null;
   isActive?: boolean;
 }
 
@@ -53,7 +57,7 @@ function fetchUsers(): Promise<MentionUser[]> {
       .then((res) =>
         (res.data ?? [])
           .filter((u) => u.isActive !== false)
-          .map((u) => ({ id: u.id, label: u.name || u.email || u.id })),
+          .map((u) => ({ id: u.id, label: u.name || u.email || u.id, avatar: u.avatar, isActive: u.isActive })),
       )
       .catch(() => {
         // network error: mentions silently disabled.
@@ -112,10 +116,23 @@ class MentionDropdown {
       btn.type = 'button';
       btn.className = 'ordi-mention-item' + (index === this.selected ? ' is-selected' : '');
 
-      const avatar = document.createElement('span');
-      avatar.className = 'ordi-mention-avatar';
-      avatar.style.backgroundColor = `hsl(${hueFor(item.label)} 45% 38%)`;
-      avatar.textContent = initialsFor(item.label);
+      let avatar: HTMLElement;
+      if (item.avatar) {
+        const img = document.createElement('img');
+        img.className = 'ordi-mention-avatar';
+        img.src = resolveFileSrc(item.avatar);
+        img.alt = item.label;
+        img.style.width = '1.5rem';
+        img.style.height = '1.5rem';
+        img.style.borderRadius = '9999px';
+        img.style.objectFit = 'cover';
+        avatar = img;
+      } else {
+        avatar = document.createElement('span');
+        avatar.className = 'ordi-mention-avatar';
+        avatar.style.backgroundColor = `hsl(${hueFor(item.label)} 45% 38%)`;
+        avatar.textContent = initialsFor(item.label);
+      }
 
       const label = document.createElement('span');
       label.className = 'ordi-mention-label';

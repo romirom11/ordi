@@ -15,7 +15,7 @@ import { useT, extendDict } from '../lib/i18n';
 import { useTheme, type ThemePref } from '../lib/theme';
 import { initDesktop, restartDesktop, isTauri, isMacDesktop } from '../lib/desktop';
 import { TabsProvider, useTabs } from '../lib/tabs';
-import { cn, Kbd, Tooltip, IconButton } from './ui';
+import { Avatar, cn, Kbd, Tooltip, IconButton } from './ui';
 import { ContextMenu, DropdownMenu, MenuItem, MenuSeparator, MenuLabel, Toaster, toast, type ContextMenuEntry } from './overlays';
 import { CommandPalette } from './CommandPalette';
 import { TimerIndicator } from './TimerIndicator';
@@ -443,7 +443,12 @@ function ShellInner({ children }: { children: ReactNode }) {
                 </button>
               }
             >
-              <MenuLabel>{me.user.email}</MenuLabel>
+              <MenuLabel>
+                <span className="flex items-center gap-2">
+                  <Avatar name={me.user.name} src={me.user.avatar} size={18} />
+                  <span className="min-w-0 truncate">{me.user.email}</span>
+                </span>
+              </MenuLabel>
               <MenuItem icon={<UserIcon size={14} />} onSelect={() => navigate('/profile')}>{t('nav.profile')}</MenuItem>
               {can('users.manage') && (
                 <MenuItem icon={<UserPlus size={14} />} onSelect={() => navigate('/settings/users')}>

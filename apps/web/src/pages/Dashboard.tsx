@@ -385,6 +385,7 @@ interface TeamEvent {
   endDate?: string;
   label?: string | null;
   status?: string;
+  avatar?: string | null;
 }
 
 interface DashboardData {
@@ -463,6 +464,9 @@ function TeamUpcomingCard({ events }: { events: TeamEvent[] }) {
                           ? { borderColor: absenceColor(e.label ?? '') }
                           : { backgroundColor: absenceColor(e.label ?? '') }}
                       />
+                    )}
+                    {(e.kind === 'birthday' || e.kind === 'absence') && e.avatar && (
+                      <Avatar name={e.name} src={e.avatar} size={18} />
                     )}
                     <span className="min-w-0 truncate">{e.name}</span>
                     <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">

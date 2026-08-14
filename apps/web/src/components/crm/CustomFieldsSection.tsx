@@ -12,6 +12,7 @@ import type { CustomFieldEntity } from '@ordi/shared';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, SlidersHorizontal } from 'lucide-react';
 import { api } from '../../lib/api';
+import { activeUsers } from '../../lib/queries';
 import { usePersistedState } from '../../lib/prefs';
 import { useT } from '../../lib/i18n';
 import { Avatar, Card, cn, fmtDate } from '../ui';
@@ -131,7 +132,7 @@ export function CustomFieldsSection({ entityType, projectId, values: valuesProp,
 /** One custom field value: read view + per-type editor. */
 function CustomFieldValue({ field: f, value: v, editable, users, onSave }: {
   field: FieldDef; value: unknown; editable: boolean;
-  users: { id: string; name: string; avatar?: string | null }[];
+  users: { id: string; name: string; avatar?: string | null; isActive?: boolean }[];
   onSave: (v: unknown) => void;
 }) {
   const t = useT();
@@ -203,7 +204,7 @@ function CustomFieldValue({ field: f, value: v, editable, users, onSave }: {
         trigger={<button className="block w-full rounded-md px-1.5 py-1 text-left transition-colors hover:bg-muted">{u ? <span className="inline-flex items-center gap-1.5"><Avatar name={u.name} src={u.avatar} size={16} /> {u.name}</span> : empty} <ChevronDown size={11} className="inline text-faint" /></button>}
       >
         <MenuItem checked={!u} onSelect={() => onSave(null)}>{t('crm.noOwner')}</MenuItem>
-        {users.map((x) => (
+        {activeUsers(users).map((x) => (
           <MenuItem key={x.id} checked={x.id === v} onSelect={() => x.id !== v && onSave(x.id)}>
             <span className="flex items-center gap-2"><Avatar name={x.name} src={x.avatar} size={18} /> {x.name}</span>
           </MenuItem>

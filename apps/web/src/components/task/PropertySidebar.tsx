@@ -17,6 +17,7 @@ import { GitBlock } from './GitBlock';
 import { useT, extendDict } from '../../lib/i18n';
 import { TaskTimer } from './TaskTimer';
 import type { MilestoneLite, TaskDetail, TaskPatch, TaskStatus, UserLite } from './types';
+import { activeUsers } from '../../lib/queries';
 import { Calendar } from '../DatePicker';
 
 extendDict({
@@ -286,7 +287,14 @@ export function PropertySidebar({ task, statuses, users, onPatch, hasRepos }: {
                 </>
               ) : (
                 <>
-                  <AvatarGroup users={task.assignees.map((a) => ({ id: a.userId, name: a.name }))} size={18} max={4} />
+                  <AvatarGroup
+                    users={task.assignees.map((a) => ({
+                      id: a.userId, name: a.name,
+                      avatar: a.avatar ?? users.find((u) => u.id === a.userId)?.avatar,
+                    }))}
+                    size={18}
+                    max={4}
+                  />
                   <span className="truncate">
                     {task.assignees.length === 1 ? task.assignees[0]!.name : task.assignees.length}
                   </span>
@@ -296,7 +304,7 @@ export function PropertySidebar({ task, statuses, users, onPatch, hasRepos }: {
           }
         >
           <MenuLabel>{t('tasks.assignees')}</MenuLabel>
-          {users.map((u) => (
+          {activeUsers(users).map((u) => (
             <ToggleItem
               key={u.id}
               icon={<Avatar name={u.name} src={u.avatar} size={18} />}

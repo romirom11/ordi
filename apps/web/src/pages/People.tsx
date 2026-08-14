@@ -116,7 +116,7 @@ function deptColor(name: string): string {
 
 interface Employee { id: string; firstName?: string | null; lastName?: string | null; name?: string | null; position?: string | null; positionTitle?: string | null; department?: string | null; departmentName?: string | null; status?: string | null }
 interface Compensation { id?: string; compType?: string; amount?: number | string; currency?: string; effectiveFrom?: string | null; effectiveTo?: string | null }
-interface LeaveRequest { id: string; employeeName?: string | null; leaveTypeName?: string | null; fromDate?: string | null; toDate?: string | null; status?: string | null; reason?: string | null }
+interface LeaveRequest { id: string; employeeName?: string | null; employeeAvatar?: string | null; leaveTypeName?: string | null; fromDate?: string | null; toDate?: string | null; status?: string | null; reason?: string | null }
 interface LeaveType { id: string; name: string }
 interface JobOpening { id: string; title: string; status?: string | null; department?: string | null; positionsCount?: number | string }
 interface Applicant { id: string; name?: string | null; email?: string | null; stage?: string | null; stageId?: string | null }
@@ -434,7 +434,7 @@ function LeaveView() {
                 style={{ ['--i' as string]: Math.min(i, 10) }}
                 className={cn('row-enter group flex items-center gap-3 px-4 py-2.5 text-[13px]', i > 0 && 'border-t border-border')}
               >
-                <Avatar name={r.employeeName} size={26} />
+                <Avatar name={r.employeeName} src={r.employeeAvatar} size={26} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-medium text-foreground">{r.employeeName ?? '–'}</div>
                   <div className="truncate text-xs text-faint">{r.leaveTypeName ?? '–'}</div>

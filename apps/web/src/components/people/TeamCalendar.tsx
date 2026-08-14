@@ -9,8 +9,9 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Cake, ChevronLeft, ChevronRight, Sun } from 'lucide-react';
 import { api } from '../../lib/api';
+import { useUserMap } from '../../lib/queries';
 import { useT, extendDict } from '../../lib/i18n';
-import { Button, Skeleton, appLocale, cn } from '../ui';
+import { Avatar, Button, Skeleton, appLocale, cn } from '../ui';
 
 extendDict({
   en: {
@@ -34,9 +35,10 @@ extendDict({
 interface LeaveRow {
   id: string; employeeId?: string | null; employeeName?: string | null; leaveTypeName?: string | null;
   fromDate?: string | null; toDate?: string | null; status?: string | null; halfDay?: boolean;
+  employeeAvatar?: string | null;
 }
 interface Holiday { id: string; date: string; name: string; calendarId?: string }
-interface EmpRow { id: string; firstName?: string | null; lastName?: string | null; birthday?: string | null; status?: string | null }
+interface EmpRow { id: string; userId?: string | null; firstName?: string | null; lastName?: string | null; birthday?: string | null; status?: string | null }
 
 const TYPE_COLORS = ['#6366f1', '#f59e0b', '#06b6d4', '#ec4899', '#a855f7', '#84cc16', '#f43f5e', '#22c55e'];
 function typeColor(name: string): string {
@@ -60,6 +62,7 @@ export function TeamCalendar() {
   const now = new Date();
   const [cursor, setCursor] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1));
 
+  const userMap = useUserMap();
   const leavesQ = useQuery({ queryKey: ['leaveRequests'], queryFn: () => api.get<{ data: LeaveRow[] }>('/leave-requests') });
   const holidaysQ = useQuery({ queryKey: ['holidays'], queryFn: () => api.get<{ data: Holiday[] }>('/holidays') });
   const employeesQ = useQuery({ queryKey: ['employees'], queryFn: () => api.get<{ data: EmpRow[] }>('/employees') });
@@ -192,13 +195,17 @@ export function TeamCalendar() {
                         <span className="truncate">{h.name}</span>
                       </div>
                     ))}
-                    {birthdays.map((e) => (
-                      <div key={`bd-${e.id}`} title={`${t('people.calBirthday')} – ${empShort(e)}`}
-                        className="flex items-center gap-1 rounded bg-pink-500/10 px-1 py-0.5 text-xs text-pink-500">
-                        <Cake size={10} className="shrink-0" />
-                        <span className="truncate">{empShort(e)}</span>
-                      </div>
-                    ))}
+                    {birthdays.map((e) => {
+                      const avatar = e.userId ? userMap.get(e.userId)?.avatar : undefined;
+                      return (
+                        <div key={`bd-${e.id}`} title={`${t('people.calBirthday')} – ${empShort(e)}`}
+                          className="flex items-center gap-1 rounded bg-pink-500/10 px-1 py-0.5 text-xs text-pink-500">
+                          <Cake size={10} className="shrink-0" />
+                          {avatar && <Avatar name={empShort(e)} src={avatar} size={14} />}
+                          <span className="truncate">{empShort(e)}</span>
+                        </div>
+                      );
+                    })}
                     {leaves.map((lr) => {
                       const pending = lr.status === 'pending';
                       const color = typeColor(lr.leaveTypeName ?? '');
@@ -210,6 +217,7 @@ export function TeamCalendar() {
                             className={cn('h-2 w-2 shrink-0 rounded-full', pending && 'border bg-transparent')}
                             style={pending ? { borderColor: color } : { backgroundColor: color }}
                           />
+                          {lr.employeeAvatar && <Avatar name={lr.employeeName ?? ''} src={lr.employeeAvatar} size={14} />}
                           <span className="truncate text-foreground/90">{lr.employeeName ?? '–'}</span>
                         </div>
                       );

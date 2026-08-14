@@ -11,7 +11,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, Check, ChevronRight, Plus, X } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { extendDict, useT } from '../../lib/i18n';
-import { Badge, Button, Checkbox, Input, Select, Skeleton, Card, Spinner, cn, fmtDate } from '../ui';
+import { Avatar, Badge, Button, Checkbox, Input, Select, Skeleton, Card, Spinner, cn, fmtDate } from '../ui';
 import { ConfirmDialog, Dialog, toast } from '../overlays';
 import { DateField } from '../DatePicker';
 
@@ -117,6 +117,7 @@ interface LeaveRequest {
   decisionComment?: string | null;
   createdAt?: string;
   employeeName?: string | null;
+  employeeAvatar?: string | null;
   leaveTypeName?: string | null;
 }
 /** Numeric columns arrive as strings. Available = allocated + carried - used. */
@@ -344,6 +345,7 @@ export function MyLeaveCard() {
           <div className="overflow-hidden rounded-lg border border-border">
             {approvalRows.map((r, i) => (
               <div key={r.id} className={cn('flex items-center gap-3 px-3 py-2 text-[13px]', i > 0 && 'border-t border-border')}>
+                <Avatar name={r.employeeName ?? '–'} src={r.employeeAvatar} size={24} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-medium">{r.employeeName ?? '–'}</div>
                   <div className="truncate text-xs text-faint">
