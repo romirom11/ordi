@@ -168,7 +168,8 @@ export async function listSlackChannels(botToken: string): Promise<SlackChannel[
     cursor = data.response_metadata?.next_cursor || undefined;
     if (!cursor) break;
   }
-  return out;
+  // Slack returns pages in no useful order – alphabetical is what a picker needs.
+  return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** Post a message to a channel via chat.postMessage. Throws on API error. */
