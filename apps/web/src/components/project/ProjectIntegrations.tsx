@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ChevronDown, GitBranch, Github, Gitlab, Hash, Link2, Plus, Search, Slack, X,
+  ChevronDown, GitBranch, Github, Gitlab, Hash, Link2, Lock, Plus, Search, Slack, X,
 } from 'lucide-react';
 import { api, qs, ApiError } from '../../lib/api';
 import { Link } from '../../lib/router';
@@ -42,6 +42,8 @@ extendDict({
     'projects.slackChannelCleared': 'Slack channel cleared',
     'projects.slackClear': 'No channel',
     'projects.slackSearchChannels': 'Search channels…',
+    'projects.slackNoMatches': 'No channels match',
+    'projects.slackPrivateHint': 'A private channel shows up here only after the bot joins it: run /invite @ordi in that channel.',
     'projects.slackLoadFailed': 'Could not load channels.',
     'projects.slackNotConnected': 'Connect Slack in',
     'projects.settingsIntegrations': 'Settings → Integrations',
@@ -78,6 +80,8 @@ extendDict({
     'projects.slackChannelCleared': 'Канал Slack очищено',
     'projects.slackClear': 'Без каналу',
     'projects.slackSearchChannels': 'Пошук каналів…',
+    'projects.slackNoMatches': 'Немає каналів за запитом',
+    'projects.slackPrivateHint': 'Приватний канал зʼявиться тут лише після того, як бот у ньому: виконайте /invite @ordi у тому каналі.',
     'projects.slackLoadFailed': 'Не вдалося завантажити канали.',
     'projects.slackNotConnected': 'Підключіть Slack у',
     'projects.settingsIntegrations': 'Settings → Integrations',
@@ -363,7 +367,9 @@ function ChannelPicker({ channels, currentId, onSelect, onClear }: {
         <span className="flex h-8 w-full cursor-pointer items-center gap-1.5 rounded-md border border-input px-2.5 text-[13px] transition-colors hover:border-border-strong">
           {current ? (
             <>
-              <Hash size={14} className="shrink-0 text-muted-foreground" />
+              {current.isPrivate
+                ? <Lock size={14} className="shrink-0 text-muted-foreground" />
+                : <Hash size={14} className="shrink-0 text-muted-foreground" />}
               <span className="flex-1 truncate">{current.name}</span>
             </>
           ) : (
@@ -383,10 +389,13 @@ function ChannelPicker({ channels, currentId, onSelect, onClear }: {
       )}
       <div className="max-h-64 overflow-y-auto">
         {filtered.map((c) => (
-          <MenuItem key={c.id} icon={<Hash size={14} />} checked={c.id === currentId} onSelect={() => onSelect(c.id)}>
+          <MenuItem key={c.id} icon={c.isPrivate ? <Lock size={14} /> : <Hash size={14} />} checked={c.id === currentId} onSelect={() => onSelect(c.id)}>
             {c.name}
           </MenuItem>
         ))}
+        {filtered.length === 0 && (
+          <p className="px-2.5 py-2 text-xs text-faint">{t('projects.slackNoMatches')}</p>
+        )}
       </div>
       {current && (
         <>
@@ -394,6 +403,8 @@ function ChannelPicker({ channels, currentId, onSelect, onClear }: {
           <MenuItem icon={<X size={14} />} danger onSelect={onClear}>{t('projects.slackClear')}</MenuItem>
         </>
       )}
+      <div className="mx-1 my-1 h-px bg-border" />
+      <p className="px-2.5 pb-1.5 pt-0.5 text-[11px] leading-snug text-faint">{t('projects.slackPrivateHint')}</p>
     </DropdownMenu>
   );
 }
