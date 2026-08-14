@@ -5,7 +5,8 @@ import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { guard } from '../../core/rbac';
 import { emailConfigured, trySendEmail, verifyEmailTransport } from '../../lib/email';
-import { encryptIntegrationSecrets, invalidateRuntimeConfig, runtimeConfig } from '../../lib/runtime-config';
+import { encryptIntegrationSecrets, invalidateRuntimeConfig, runtimeConfig, storeSlackAppConfig } from '../../lib/runtime-config';
+import { createSlackApp, SlackManifestError } from '../integrations/slack-app';
 import { invalidateModuleCache } from '../../core/modules';
 import { integrationsConfigSchema } from '@ordi/shared';
 import { err } from '../../lib/errors';
@@ -164,6 +165,38 @@ export function settingsRoutes() {
       diff: { keys: Object.keys(patch) },
     });
     return c.json({ ok: true });
+  });
+
+  // One-click Slack setup: exchange an app configuration token for a freshly
+  // created Slack app (Manifest API) and store its credentials – the Slack
+  // counterpart of the GitHub App manifest flow.
+  app.post('/integrations-config/slack-app', guard('settings.manage'), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { configToken?: unknown };
+    const configToken = typeof body.configToken === 'string' ? body.configToken.trim() : '';
+    if (!configToken) throw err.validation('configToken is required');
+
+    const { db } = getDb();
+    const [ws] = await db.select().from(schema.workspaceSettings)
+      .where(eq(schema.workspaceSettings.id, 'workspace'));
+
+    let created;
+    try {
+      created = await createSlackApp(configToken, ws?.name || 'ordi');
+    } catch (e) {
+      if (e instanceof SlackManifestError) throw err.validation(`Slack refused to create the app – ${e.message}`);
+      throw err.validation('Could not reach Slack to create the app');
+    }
+    await storeSlackAppConfig({
+      clientId: created.clientId,
+      clientSecret: created.clientSecret,
+      signingSecret: created.signingSecret,
+    });
+    await writeActivity(db, {
+      entityType: 'workspace', entityId: 'workspace', action: 'integrations_config_updated',
+      actorId: currentActor(c).userId, actorType: currentActor(c).actorType,
+      diff: { keys: ['slack'], slackAppId: created.appId },
+    });
+    return c.json({ ok: true, appId: created.appId });
   });
 
   // Trash (PRD §14.7): list soft-deleted across the main business entities.
