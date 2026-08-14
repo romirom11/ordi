@@ -21,6 +21,10 @@ interface GithubAsset { name: string; browser_download_url: string; size: number
 interface GithubRelease { tag_name: string; published_at: string; html_url: string; assets: GithubAsset[] }
 
 const CACHE_TTL_MS = 60 * 60_000;
+// A release with no installers (fetch failure, or the short window while a
+// release's binaries are still uploading) must not stick for a whole hour –
+// retry soon so the download page recovers as soon as the assets exist.
+const EMPTY_CACHE_TTL_MS = 60_000;
 let cache: { at: number; value: DesktopRelease } | null = null;
 
 function platformOf(assetName: string): DesktopPlatform | null {
@@ -71,7 +75,8 @@ export function desktopRoutes() {
   const app = new Hono<AppEnv>();
 
   app.get('/latest', async (c) => {
-    if (!cache || Date.now() - cache.at > CACHE_TTL_MS) {
+    const ttl = cache && Object.keys(cache.value.downloads).length === 0 ? EMPTY_CACHE_TTL_MS : CACHE_TTL_MS;
+    if (!cache || Date.now() - cache.at > ttl) {
       cache = { at: Date.now(), value: await fetchLatest() };
     }
     return c.json(cache.value);

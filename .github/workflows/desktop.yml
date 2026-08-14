@@ -2,6 +2,9 @@ name: Desktop builds
 
 # Tauri release builds (PRD §18): macOS universal, Windows msi, Linux AppImage/deb.
 # Runs on version tags; artifacts feed the signed updater endpoint.
+# The release stays a draft while bundles build (see release.yml) and is
+# published by the final job here, so `releases/latest` never points at a
+# version without binaries.
 on:
   push:
     tags: ['v*']
@@ -54,3 +57,15 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'ordi ${{ github.ref_name }}'
           releaseDraft: true
+
+  # Publish only after every platform uploaded its bundle. If any build
+  # fails the release stays a draft – users keep updating to the previous
+  # version instead of being offered binaries that do not exist.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ github.ref_name }}" --repo "${{ github.repository }}" --draft=false --latest

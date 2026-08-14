@@ -45,8 +45,13 @@ export interface RuntimeConfig {
   github: OAuthAppConfig | null;
   githubSource: 'db' | 'env' | 'none';
   githubApp: GithubAppConfig | null;
-  slack: OAuthAppConfig | null;
+  slack: SlackAppConfig | null;
   slackSource: 'db' | 'env' | 'none';
+}
+
+/** Slack adds the request-signing secret for inbound events/commands. */
+export interface SlackAppConfig extends OAuthAppConfig {
+  signingSecret: string;
 }
 
 /** Stored shape – secrets here are ciphertext. */
@@ -54,7 +59,7 @@ interface StoredIntegrations {
   smtp?: { host?: string; port?: number; secure?: boolean; user?: string; pass?: string; from?: string };
   github?: { clientId?: string; clientSecret?: string };
   githubApp?: { appId?: string; slug?: string; privateKey?: string; webhookSecret?: string; htmlUrl?: string };
-  slack?: { clientId?: string; clientSecret?: string };
+  slack?: { clientId?: string; clientSecret?: string; signingSecret?: string };
 }
 
 /** SMTP_URL as the same shape, so both sources resolve identically. */
@@ -124,10 +129,10 @@ async function resolve(): Promise<RuntimeConfig> {
     : null;
 
   const dbSlack = stored.slack?.clientId
-    ? { clientId: stored.slack.clientId, clientSecret: readSecret(stored.slack.clientSecret) }
+    ? { clientId: stored.slack.clientId, clientSecret: readSecret(stored.slack.clientSecret), signingSecret: readSecret(stored.slack.signingSecret) }
     : null;
   const envSlack = env.slackClientId && env.slackClientSecret
-    ? { clientId: env.slackClientId, clientSecret: env.slackClientSecret }
+    ? { clientId: env.slackClientId, clientSecret: env.slackClientSecret, signingSecret: env.slackSigningSecret }
     : null;
 
   return {
@@ -158,7 +163,7 @@ export function encryptIntegrationSecrets(patch: {
   smtp?: { pass?: string } & Record<string, unknown>;
   github?: { clientSecret?: string } & Record<string, unknown>;
   githubApp?: { privateKey?: string; webhookSecret?: string } & Record<string, unknown>;
-  slack?: { clientSecret?: string } & Record<string, unknown>;
+  slack?: { clientSecret?: string; signingSecret?: string } & Record<string, unknown>;
 }): typeof patch {
   const out = { ...patch };
   if (out.smtp?.pass) out.smtp = { ...out.smtp, pass: encrypt(out.smtp.pass) };
@@ -168,7 +173,11 @@ export function encryptIntegrationSecrets(patch: {
     if (out.githubApp.privateKey) out.githubApp.privateKey = encrypt(out.githubApp.privateKey);
     if (out.githubApp.webhookSecret) out.githubApp.webhookSecret = encrypt(out.githubApp.webhookSecret);
   }
-  if (out.slack?.clientSecret) out.slack = { ...out.slack, clientSecret: encrypt(out.slack.clientSecret) };
+  if (out.slack) {
+    out.slack = { ...out.slack };
+    if (out.slack.clientSecret) out.slack.clientSecret = encrypt(out.slack.clientSecret);
+    if (out.slack.signingSecret) out.slack.signingSecret = encrypt(out.slack.signingSecret);
+  }
   return out;
 }
 

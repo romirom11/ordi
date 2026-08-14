@@ -245,10 +245,11 @@ const ROWS: Row[] = [
 
   // people
   ...crud('employees', 'people', 'people', 'EmployeeInput'),
-  ['/leave-requests', 'get', 'List leave requests', 'people.read', undefined, 'people'],
+  // Leave routes authorize per-request in the service (own/manager/approver), not via a static permission.
+  ['/leave-requests', 'get', 'List leave requests (own, or all with people.read)', null, undefined, 'people'],
   ['/leave-requests', 'post', 'Create leave request', null, 'LeaveRequestInput', 'people'],
-  ['/leave-requests/{id}/approve', 'post', 'Approve leave request', 'people.approve_leave', 'free', 'people'],
-  ['/leave-requests/{id}/reject', 'post', 'Reject leave request', 'people.approve_leave', 'free', 'people'],
+  ['/leave-requests/{id}/approve', 'post', 'Approve leave request (manager or people.approve_leave)', null, 'free', 'people'],
+  ['/leave-requests/{id}/reject', 'post', 'Reject leave request (manager or people.approve_leave)', null, 'free', 'people'],
   ['/job-openings', 'get', 'List job openings', 'people.recruit', undefined, 'people'],
   ['/job-openings', 'post', 'Create job opening', 'people.recruit', 'JobOpeningInput', 'people'],
   ['/applicants', 'get', 'List applicants', 'people.recruit', undefined, 'people'],

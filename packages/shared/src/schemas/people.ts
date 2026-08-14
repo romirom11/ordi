@@ -15,6 +15,7 @@ export const employeeInputSchema = z.object({
   lastName: z.string().default(''),
   email: z.string().email().nullable().optional(),
   phone: z.string().nullable().optional(),
+  location: z.string().max(200).nullable().optional(),
   positionId: idSchema.nullable().optional(),
   departmentId: idSchema.nullable().optional(),
   employmentType: z.enum(EMPLOYMENT_TYPES).default('full_time'),
@@ -23,8 +24,8 @@ export const employeeInputSchema = z.object({
   joinDate: z.string().nullable().optional(),
   probationEnd: z.string().nullable().optional(),
   status: z.enum(EMPLOYEE_STATUSES).default('active'),
-  emergencyContact: z.record(z.string(), z.unknown()).nullable().optional(),
-  sensitive: z.record(z.string(), z.unknown()).nullable().optional(),
+  // `sensitive`/`emergencyContact` are gone from the contract: superseded by
+  // custom-field groups (v1.24+). The columns stay for old rows, read-stripped.
   customFields: customFieldsSchema.optional(),
 });
 export const employeeUpdateSchema = employeeInputSchema.partial().extend({ version: z.number().int().optional() });

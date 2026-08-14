@@ -15,6 +15,7 @@ import { Button, EmptyState, IconButton, Kbd, Skeleton, Tooltip } from '../compo
 import { toast } from '../components/overlays';
 import { RichEditor, EMPTY_DOC } from '../components/richtext/RichEditor';
 import { PropertySidebar } from '../components/task/PropertySidebar';
+import { RailResizeHandle, useRailWidth } from '../components/RailResize';
 import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
 import { SubtaskList } from '../components/task/SubtaskList';
 import { ActivityFeed } from '../components/task/CommentThread';
@@ -73,6 +74,7 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
   const t = useT();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const rail = useRailWidth('task', 256);
 
   const taskQ = useQuery({
     queryKey: ['task', taskId],
@@ -267,8 +269,10 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
             <div className="mt-6">
               <CustomFieldsSection
                 entityType="tasks"
+                projectId={projectId}
                 values={task.customFields}
                 editable
+                collapsible
                 onSave={(customFields) => patch({ customFields })}
               />
             </div>
@@ -283,8 +287,9 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
           </div>
         </div>
 
-        {/* Properties sidebar */}
-        <aside className="anim-fade-in shrink-0 border-t border-border bg-surface min-[1100px]:w-64 min-[1100px]:overflow-y-auto min-[1100px]:border-l min-[1100px]:border-t-0">
+        {/* Properties sidebar – width is user-draggable, see RailResize */}
+        <aside style={rail.railStyle} className="anim-fade-in relative shrink-0 border-t border-border bg-surface min-[1100px]:w-[var(--rail-w)] min-[1100px]:overflow-y-auto min-[1100px]:border-l min-[1100px]:border-t-0">
+          <RailResizeHandle width={rail.width} base={rail.base} onWidth={rail.onWidth} className="min-[1100px]:block" />
           <PropertySidebar
             task={task}
             statuses={statuses}

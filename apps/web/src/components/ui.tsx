@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { usePageTitle } from '../lib/tabs';
 import { Link } from '../lib/router';
+import { resolveFileSrc } from '../lib/uploads';
 import { appLocale, formatDay } from '../lib/dates';
 
 export function cn(...args: Parameters<typeof clsx>): string {
@@ -227,11 +228,12 @@ export function Breadcrumbs({ items, className }: { items: BreadcrumbItem[]; cla
 }
 
 /** The one standard page content container – pages wrap their body in this. */
-export function PageBody({ children, width = 'default', className }: {
-  children: ReactNode; width?: 'default' | 'wide' | 'full'; className?: string;
+export function PageBody({ children, width = 'default', className, style }: {
+  children: ReactNode; width?: 'default' | 'wide' | 'full'; className?: string; style?: CSSProperties;
 }) {
   return (
     <div
+      style={style}
       className={cn(
         'w-full px-6 py-6',
         width === 'default' && 'mx-auto max-w-3xl',
@@ -390,7 +392,9 @@ export function Avatar({ name, src, size = 20, className }: { name?: string | nu
   const hue = hueFor(name ?? '?');
   const style: CSSProperties = { width: size, height: size, fontSize: Math.max(8, Math.round(size * 0.42)) };
   if (src) {
-    return <img src={src} alt={name ?? ''} style={style} className={cn('shrink-0 rounded-full object-cover', className)} />;
+    // Stored avatars are root-relative signed paths; in the desktop shell they
+    // would resolve against tauri://localhost and silently render nothing.
+    return <img src={resolveFileSrc(src)} alt={name ?? ''} style={style} className={cn('shrink-0 rounded-full object-cover', className)} />;
   }
   return (
     <span

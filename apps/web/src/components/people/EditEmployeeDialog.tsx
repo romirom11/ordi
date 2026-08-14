@@ -18,6 +18,8 @@ extendDict({
     'people.email': 'Email',
     'people.noDepartment': 'No department',
     'people.noPosition': 'No position',
+    'people.location': 'Location',
+    'people.locationPlaceholder': 'Country, city',
   },
   uk: {
     'people.editEmployee': 'Редагувати співробітника',
@@ -30,6 +32,8 @@ extendDict({
     'people.email': 'Ел. пошта',
     'people.noDepartment': 'Без відділу',
     'people.noPosition': 'Без посади',
+    'people.location': 'Локація',
+    'people.locationPlaceholder': 'Країна, місто',
   },
 });
 
@@ -41,7 +45,7 @@ export interface EditableEmployee {
   id: string; firstName?: string | null; lastName?: string | null;
   positionId?: string | null; departmentId?: string | null;
   managerId?: string | null; employmentType?: string | null; joinDate?: string | null;
-  birthday?: string | null;
+  birthday?: string | null; location?: string | null;
   version?: number;
 }
 
@@ -59,6 +63,7 @@ function formFrom(e: EditableEmployee) {
     employmentType: e.employmentType ?? 'full_time',
     joinDate: e.joinDate ?? '',
     birthday: e.birthday ?? '',
+    location: e.location ?? '',
   };
 }
 
@@ -90,6 +95,7 @@ export function EditEmployeeDialog({ employee, open, onClose }: {
       employmentType: form.employmentType,
       joinDate: form.joinDate || null,
       birthday: form.birthday || null,
+      location: form.location.trim() || null,
       ...(typeof employee.version === 'number' ? { version: employee.version } : {}),
     }),
     onSuccess: () => {
@@ -166,6 +172,14 @@ export function EditEmployeeDialog({ employee, open, onClose }: {
           <div className="space-y-1">
             {label(t('people.birthday'))}
             <DateField value={form.birthday} onChange={(v) => setForm((f) => ({ ...f, birthday: v ?? '' }))} />
+          </div>
+          <div className="space-y-1">
+            {label(t('people.location'))}
+            <Input
+              value={form.location}
+              placeholder={t('people.locationPlaceholder')}
+              onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
+            />
           </div>
         </div>
         <div className="flex justify-end gap-2 pt-1">

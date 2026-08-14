@@ -72,7 +72,10 @@ const NAV_DEFS: NavDef[] = [
   { key: 'kb', to: '/kb', labelKey: 'nav.knowledge', icon: <BookText size={16} />, perm: 'kb.read', section: 'work', module: 'kb' },
   { key: 'time', to: '/time', labelKey: 'nav.time', icon: <Clock size={16} />, perm: 'time.track', section: 'operations', module: 'time' },
   { key: 'finance', to: '/finance', labelKey: 'nav.finance', icon: <Receipt size={16} />, perm: 'finance.read', section: 'operations', module: 'finance' },
-  { key: 'people', to: '/people', labelKey: 'nav.people', icon: <Users size={16} />, perm: 'people.read', section: 'operations', module: 'people' },
+  // anyAuth: the directory is the workspace's own phone book – the API serves
+  // a public slice to viewers without people.read (items with neither perm nor
+  // anyAuth are hidden for everyone by the nav filter).
+  { key: 'people', to: '/people', labelKey: 'nav.people', icon: <Users size={16} />, anyAuth: true, section: 'operations', module: 'people' },
   { key: 'resourcing', to: '/resourcing', labelKey: 'nav.resourcing', icon: <CalendarRange size={16} />, perm: 'projects.read', section: 'operations', module: 'resourcing' },
   { key: 'dashboards', to: '/dashboards', labelKey: 'nav.dashboards', icon: <LayoutGrid size={16} />, anyAuth: true, section: 'insights', module: 'dashboards' },
 ];

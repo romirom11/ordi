@@ -35,11 +35,10 @@ export function useFieldGroups(entityType: string) {
   });
 }
 
-export function EmployeeFieldGroups({ values, fieldAccess, canWrite, questionnaireUpdatedAt, onSave }: {
+export function EmployeeFieldGroups({ values, fieldAccess, questionnaireUpdatedAt, onSave }: {
   values?: Record<string, unknown>;
   /** groupId → 'read' | 'write', as computed by the server for this viewer. */
   fieldAccess?: Record<string, 'read' | 'write'>;
-  canWrite: boolean;
   questionnaireUpdatedAt?: string | null;
   onSave: (customFields: Record<string, unknown>) => void;
 }) {
@@ -63,7 +62,9 @@ export function EmployeeFieldGroups({ values, fieldAccess, canWrite, questionnai
   return (
     <section className="mb-6 space-y-5">
       {visibleGroups.map((g) => {
-        const editable = canWrite && g.level === 'write';
+        // The server already folded people.write into the level – a write
+        // grant is exactly the permission to edit this group's fields.
+        const editable = g.level === 'write';
         const shown = g.fields.filter((f: FieldDef) => editable || !fieldValueIsEmpty((values ?? {})[f.key]));
         if (shown.length === 0) return null;
         return (

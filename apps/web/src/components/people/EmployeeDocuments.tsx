@@ -63,7 +63,9 @@ export function EmployeeDocuments({ employeeId, canWrite }: { employeeId: string
   const upload = async (file: File) => {
     setUploading(true);
     try {
-      const up = await uploadAttachment(file);
+      // Bound to the employee from the first byte – an entity-less attachment
+      // would hand its signed URL to any authenticated user.
+      const up = await uploadAttachment(file, { entityType: 'employee', entityId: employeeId });
       await api.post(`/employees/${employeeId}/documents`, { attachmentId: up.id });
       invalidate();
     } catch (e) {

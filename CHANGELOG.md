@@ -3,6 +3,31 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.26.0
+
+- **Intake grows up**: the IMAP mailbox is configurable in project settings,
+  email attachments are stored, shown on the triage card and travel to the
+  task on accept, and a signed **`/ordi` Slack slash command** files a
+  request from the channel-bound project's Slack channel.
+- **People opens up**: anyone signed in reads the directory and the public
+  slice of an employee card (grouped custom fields by grant); leave is
+  self-service on the profile with a manager approvals block; holidays get a
+  settings panel and stop charging leave days; employee documents move under
+  their own `people.read_documents` permission with the file URLs to match;
+  field-group WRITE grants actually allow editing those fields.
+- **People hardening**: custom-field merge on PATCH, transactional leave
+  decisions (no double deduction), lifecycle validation, idempotent hire,
+  soft-delete filters, read-only-token and compensation guard fixes, the
+  module toggle covering the real HR routes.
+- **Project-scoped custom fields**: task fields defined per project in its
+  settings, managed by the project admin; the task card's custom-fields
+  block is collapsible.
+- **Resizable rails** on task/project/CRM cards (persisted, +50% max);
+  employee card gains a location field and a slimmer hero; avatars render in
+  the desktop shell and in record history.
+- **Releases publish only after desktop builds finish** – no more update
+  prompts for binaries that do not exist yet.
+
 ## v1.25.0
 
 - **One dashboard for everyone**: personal work tiles plus a two-week team

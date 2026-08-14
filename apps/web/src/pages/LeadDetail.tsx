@@ -6,6 +6,7 @@ import { Link, useNavigate } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import { useT } from '../lib/i18n';
+import { RailResizeHandle, useRailWidth } from '../components/RailResize';
 import {
   Button, Card, RailChip, RailField, Skeleton, Tooltip, fmtDate, fmtRelative,
 } from '../components/ui';
@@ -26,6 +27,7 @@ import { ContactDialog } from '../components/crm/dialogs';
 
 export function LeadDetailPage({ id }: { id: string }) {
   const t = useT();
+  const rail = useRailWidth('crm', 320);
   const can = useCan();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -270,9 +272,8 @@ export function LeadDetailPage({ id }: { id: string }) {
           </div>
         </main>
 
-        {/* The rail absorbs surplus width (280→400px with the viewport), so long
-          * names get room on exactly the screens that have room to give. */}
-        <aside className="order-1 shrink-0 space-y-6 overflow-auto border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-[clamp(280px,23vw,400px)] min-[1100px]:border-b-0 min-[1100px]:border-l">
+        {/* The rail width is user-draggable and persisted – see RailResize. */}
+        <aside style={rail.railStyle} className="relative order-1 shrink-0 space-y-6 overflow-auto border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-[var(--rail-w)] min-[1100px]:border-b-0 min-[1100px]:border-l">
           <div>
             <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('crm.properties')}</h2>
             <div className="space-y-0.5">
@@ -380,6 +381,7 @@ export function LeadDetailPage({ id }: { id: string }) {
           {lead.status !== 'converted' && (
             <FilesSection entityType="lead" entityId={id} canWrite={canWrite} variant="rail" />
           )}
+          <RailResizeHandle width={rail.width} base={rail.base} onWidth={rail.onWidth} className="!mt-0 min-[1100px]:block" />
         </aside>
       </div>
 

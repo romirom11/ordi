@@ -15,7 +15,7 @@ import { CompensationDialog } from '../components/people/CompensationDialog';
 import { EditEmployeeDialog } from '../components/people/EditEmployeeDialog';
 import {
   Users, MoreHorizontal, UserCheck, UserX, Plus, Lock, Mail, Briefcase,
-  CalendarClock, UserCog, AtSign, Pencil, Cake,
+  CalendarClock, UserCog, AtSign, Pencil, Cake, MapPin,
 } from 'lucide-react';
 import { usePageTitle } from '../lib/tabs';
 import { useT, extendDict } from '../lib/i18n';
@@ -34,6 +34,7 @@ extendDict({
     'people.probationEnd': 'Probation ends',
     'people.exitDate': 'Exit date',
     'people.userAccount': 'User account',
+    'people.location': 'Location',
     'people.compExplain': 'Compensation records are visible only to roles with the people.read_compensation permission. HR or an admin can add a record.',
     'people.currentComp': 'Current',
   },
@@ -50,6 +51,7 @@ extendDict({
     'people.probationEnd': 'Кінець випробувального',
     'people.exitDate': 'Дата звільнення',
     'people.userAccount': 'Обліковий запис',
+    'people.location': 'Локація',
     'people.compExplain': 'Записи про компенсацію бачать лише ролі з правом people.read_compensation. Додати запис може HR/адмін.',
     'people.currentComp': 'Поточна',
   },
@@ -67,7 +69,7 @@ const EMP_TYPE_KEY: Record<string, string> = {
 interface EmployeeUser { id: string; name: string; email: string; avatar?: string | null; isActive?: boolean }
 interface EmployeeDetail {
   id: string; userId?: string | null; firstName?: string | null; lastName?: string | null; email?: string | null;
-  phone?: string | null; positionId?: string | null; departmentId?: string | null; employmentType?: string | null;
+  phone?: string | null; location?: string | null; positionId?: string | null; departmentId?: string | null; employmentType?: string | null;
   managerId?: string | null; birthday?: string | null; joinDate?: string | null; probationEnd?: string | null; exitDate?: string | null;
   status?: string | null; version?: number; user?: EmployeeUser | null;
   customFields?: Record<string, unknown>;
@@ -202,25 +204,19 @@ export function EmployeePage({ id }: { id: string }) {
     <div className="page-enter">
       {header}
       <PageBody>
-        {/* Hero */}
+        {/* Hero: identity only – name and role. Contact details and the
+          * account marker live in Basic info, so nothing is stated twice. */}
         <div className="mb-6 flex items-center gap-4">
           <Avatar name={name} src={e.user?.avatar} size={48} />
           <div className="min-w-0">
             <h1 className="truncate text-lg font-semibold leading-tight">{name}</h1>
-            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[13px] text-muted-foreground">
-              {positionTitle && <span className="inline-flex items-center gap-1.5"><Briefcase size={13} className="text-faint" />{positionTitle}</span>}
-              {departmentName && <Badge className="ml-0.5">{departmentName}</Badge>}
-            </div>
-            {e.user ? (
-              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
-                <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-muted-foreground">
-                  <AtSign size={11} className="text-faint" />{t('people.userAccount')}
-                </span>
-                <span className="inline-flex items-center gap-1 text-muted-foreground"><Mail size={11} className="text-faint" />{e.user.email}</span>
+            {(positionTitle || departmentName) && (
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] text-muted-foreground">
+                {positionTitle && <span className="inline-flex items-center gap-1.5"><Briefcase size={13} className="text-faint" />{positionTitle}</span>}
+                {positionTitle && departmentName && <span className="text-faint">·</span>}
+                {departmentName && <span>{departmentName}</span>}
               </div>
-            ) : e.email ? (
-              <div className="mt-1.5 inline-flex items-center gap-1 text-xs text-muted-foreground"><Mail size={11} className="text-faint" />{e.email}</div>
-            ) : null}
+            )}
           </div>
         </div>
 
@@ -231,9 +227,21 @@ export function EmployeePage({ id }: { id: string }) {
             {/* Position and department are already stated in the hero. */}
             <InfoRow icon={<UserCog size={13} />} label={t('people.manager')} value={managerName ?? '–'} />
             <InfoRow icon={<Briefcase size={13} />} label={t('people.employmentType')} value={e.employmentType ? t(EMP_TYPE_KEY[e.employmentType] ?? '') || e.employmentType : '–'} />
+            <InfoRow icon={<MapPin size={13} />} label={t('people.location')} value={e.location || '–'} />
             <InfoRow icon={<CalendarClock size={13} />} label={t('people.joinDate')} value={e.joinDate ? fmtDate(e.joinDate) : '–'} />
             <InfoRow icon={<Cake size={13} />} label={t('people.birthday')} value={e.birthday ? fmtDate(e.birthday) : '–'} />
-            <InfoRow icon={<AtSign size={13} />} label={t('people.corpEmail')} value={e.user?.email ?? '–'} />
+            <InfoRow
+              icon={<Mail size={13} />}
+              label={t('people.corpEmail')}
+              value={e.user ? (
+                <span className="flex flex-wrap items-center gap-2">
+                  {e.user.email}
+                  <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-xs text-muted-foreground">
+                    <AtSign size={11} className="text-faint" />{t('people.userAccount')}
+                  </span>
+                </span>
+              ) : (e.email ?? '–')}
+            />
             {e.probationEnd && <InfoRow icon={<CalendarClock size={13} />} label={t('people.probationEnd')} value={fmtDate(e.probationEnd)} />}
             {e.exitDate && <InfoRow icon={<CalendarClock size={13} />} label={t('people.exitDate')} value={fmtDate(e.exitDate)} />}
           </div>
@@ -252,12 +260,11 @@ export function EmployeePage({ id }: { id: string }) {
         <EmployeeFieldGroups
           values={e.customFields}
           fieldAccess={e.fieldAccess}
-          canWrite={canWrite}
           questionnaireUpdatedAt={e.questionnaireUpdatedAt}
           onSave={(cf) => saveCustomFields.mutate(cf)}
         />
 
-        <EmployeeDocuments employeeId={id} canWrite={canWrite} />
+        {can('people.read_documents') && <EmployeeDocuments employeeId={id} canWrite={canWrite} />}
 
         {/* Compensation – only rendered when the viewer can read compensation */}
         {canComp && (

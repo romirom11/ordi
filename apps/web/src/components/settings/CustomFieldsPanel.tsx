@@ -49,6 +49,8 @@ extendDict({
     'cfields.deleteGroupConfirm': 'Delete “{name}”? Its fields stay, but fall back to the ungrouped default visibility.',
     'cfields.group': 'Group',
     'cfields.noGroup': 'No group',
+    'cfields.projectFields': 'Project custom fields',
+    'cfields.projectFieldsDesc': 'Task fields that exist only in this project, on top of the workspace-wide ones.',
   },
   uk: {
     'settings.customFieldsDesc': 'Додавайте власні поля до будь-якого типу сутностей.',
@@ -80,6 +82,8 @@ extendDict({
     'cfields.deleteGroupConfirm': 'Видалити «{name}»? Поля залишаться, але повернуться до стандартної видимості без групи.',
     'cfields.group': 'Група',
     'cfields.noGroup': 'Без групи',
+    'cfields.projectFields': 'Кастомні поля проекту',
+    'cfields.projectFieldsDesc': 'Поля задач, що діють лише в цьому проекті – додатково до полів усього воркспейсу.',
   },
 });
 
@@ -88,6 +92,7 @@ interface CustomField {
   options?: { value: string; label: string }[] | null;
   required?: boolean; position?: number; showInList?: boolean; isSortable?: boolean;
   indexed?: boolean; deprecated?: boolean; groupId?: string | null; icon?: string | null;
+  projectId?: string | null;
 }
 
 interface FieldGroup { id: string; name: string; icon?: string | null; position?: number }
@@ -97,15 +102,22 @@ const GROUPED_ENTITY = 'employees';
 
 const OPTION_TYPES = ['select', 'multiselect'];
 
-export function CustomFieldsPanel() {
+/**
+ * With `projectId` the panel manages that project's own task fields (rendered
+ * inside the project's settings tab): entity is fixed to tasks, the list shows
+ * only the project-scoped definitions, and creates carry the projectId.
+ */
+export function CustomFieldsPanel({ projectId }: { projectId?: string } = {}) {
   const t = useT();
   const qc = useQueryClient();
-  const [entityType, setEntityType] = useState<string>('companies');
+  const [entityType, setEntityType] = useState<string>(projectId ? 'tasks' : 'companies');
   const fieldsQ = useQuery({
-    queryKey: ['customFields', entityType],
-    queryFn: () => api.get<{ data: CustomField[] }>('/custom-fields' + qs({ entityType })),
+    queryKey: ['customFields', entityType, projectId ?? null],
+    queryFn: () => api.get<{ data: CustomField[] }>('/custom-fields' + qs({ entityType, ...(projectId ? { projectId } : {}) })),
   });
-  const rows = (fieldsQ.data?.data ?? []).slice().sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.key.localeCompare(b.key));
+  const rows = (fieldsQ.data?.data ?? [])
+    .filter((f) => (projectId ? f.projectId === projectId : !f.projectId))
+    .slice().sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.key.localeCompare(b.key));
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<CustomField | null>(null);
   const [deleting, setDeleting] = useState<CustomField | null>(null);
@@ -133,13 +145,15 @@ export function CustomFieldsPanel() {
   return (
     <div>
       <SectionHead
-        title={t('settings.customFields')}
-        desc={t('settings.customFieldsDesc')}
+        title={t(projectId ? 'cfields.projectFields' : 'settings.customFields')}
+        desc={t(projectId ? 'cfields.projectFieldsDesc' : 'settings.customFieldsDesc')}
         actions={
           <div className="flex items-center gap-2">
-            <Select value={entityType} onChange={(e) => setEntityType(e.target.value)} className="w-36">
-              {CUSTOM_FIELD_ENTITIES.map((et) => <option key={et} value={et}>{et}</option>)}
-            </Select>
+            {!projectId && (
+              <Select value={entityType} onChange={(e) => setEntityType(e.target.value)} className="w-36">
+                {CUSTOM_FIELD_ENTITIES.map((et) => <option key={et} value={et}>{et}</option>)}
+              </Select>
+            )}
             <Button size="sm" onClick={() => setCreateOpen(true)}><Plus size={14} /> {t('settings.addField')}</Button>
           </div>
         }
@@ -174,11 +188,12 @@ export function CustomFieldsPanel() {
         </RowList>
       )}
 
-      {entityType === GROUPED_ENTITY && <FieldGroupsBlock groups={groups} entityType={entityType} />}
+      {entityType === GROUPED_ENTITY && !projectId && <FieldGroupsBlock groups={groups} entityType={entityType} />}
 
       <FieldDialog
         open={createOpen || !!editing}
         entityType={entityType}
+        projectId={projectId}
         field={editing}
         groups={entityType === GROUPED_ENTITY ? groups : []}
         onClose={() => { setCreateOpen(false); setEditing(null); }}
@@ -284,8 +299,8 @@ function FieldGroupsBlock({ groups, entityType }: { groups: FieldGroup[]; entity
 const KEY_RE = /^[a-z][a-z0-9_]*$/;
 const slug = (s: string) => s.toLowerCase().trim().replace(/['’]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 
-function FieldDialog({ open, entityType, field, groups, onClose, onSaved }: {
-  open: boolean; entityType: string; field: CustomField | null; groups: FieldGroup[]; onClose: () => void; onSaved: () => void;
+function FieldDialog({ open, entityType, projectId, field, groups, onClose, onSaved }: {
+  open: boolean; entityType: string; projectId?: string; field: CustomField | null; groups: FieldGroup[]; onClose: () => void; onSaved: () => void;
 }) {
   const t = useT();
   const [key, setKey] = useState('');
@@ -327,7 +342,7 @@ function FieldDialog({ open, entityType, field, groups, onClose, onSaved }: {
       const group = groups.length ? { groupId: groupId || null } : {};
       return field
         ? api.patch(`/custom-fields/${field.id}`, { label: label.trim(), icon, ...opts, ...flags, ...group, deprecated })
-        : api.post('/custom-fields', { entityType, key, label: label.trim(), type, icon, ...opts, ...flags, ...group });
+        : api.post('/custom-fields', { entityType, ...(projectId ? { projectId } : {}), key, label: label.trim(), type, icon, ...opts, ...flags, ...group });
     },
     onSuccess: () => { onSaved(); toast(t('common.saved')); onClose(); },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('settings.saveFailed')),

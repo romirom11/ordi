@@ -24,6 +24,7 @@ import { SearchSelect } from '../components/SearchSelect';
 import { ConfirmDialog, Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator, toast } from '../components/overlays';
 import { EntityActivity } from '../components/EntityActivity';
 import { useT } from '../lib/i18n';
+import { RailResizeHandle, useRailWidth } from '../components/RailResize';
 import {
   COMPANY_STATUSES, CURRENCIES, StatusPill, useDealStages, useLeads, useUsersLookup,
   type Company, type Contact, type Deal, type Stage,
@@ -63,6 +64,7 @@ const auditKey = (companyId: string) => ['audit', 'company', companyId];
 
 export function CompanyDetailPage({ id }: { id: string }) {
   const t = useT();
+  const rail = useRailWidth('crm', 320);
   const qc = useQueryClient();
   const can = useCan();
   const canWrite = can('crm.write');
@@ -143,7 +145,7 @@ export function CompanyDetailPage({ id }: { id: string }) {
             <CompanyActivity companyId={id} users={usersQ.data ?? []} />
           </div>
         </div>
-        <aside className="order-1 shrink-0 space-y-6 overflow-auto border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-[clamp(280px,23vw,400px)] min-[1100px]:border-b-0 min-[1100px]:border-l">
+        <aside style={rail.railStyle} className="relative order-1 shrink-0 space-y-6 overflow-auto border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-[var(--rail-w)] min-[1100px]:border-b-0 min-[1100px]:border-l">
           <CompanyRail
             company={c}
             loading={companyQ.isLoading}
@@ -153,6 +155,7 @@ export function CompanyDetailPage({ id }: { id: string }) {
           />
           <ProjectsRail companyId={id} />
           <FilesSection entityType="company" entityId={id} canWrite={canWrite} variant="rail" />
+          <RailResizeHandle width={rail.width} base={rail.base} onWidth={rail.onWidth} className="!mt-0 min-[1100px]:block" />
         </aside>
       </div>
 

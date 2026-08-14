@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { pgTable, text, timestamp, integer, boolean, jsonb, index, uniqueIndex, primaryKey } from 'drizzle-orm/pg-core';
 import { pk, timestamps, createdBy, version, deletedAt } from './_shared';
 
@@ -181,6 +182,8 @@ export const customFieldGroupGrants = pgTable('custom_field_group_grants', {
 export const customFieldDefinitions = pgTable('custom_field_definitions', {
   id: pk(),
   entityType: text('entity_type').notNull(),
+  /** null = workspace-wide; set = the field exists only on this project's records (tasks). No FK – core cannot import the projects schema. */
+  projectId: text('project_id'),
   key: text('key').notNull(),
   label: text('label').notNull(),
   type: text('type').notNull(),
@@ -195,7 +198,10 @@ export const customFieldDefinitions = pgTable('custom_field_definitions', {
   deprecated: boolean('deprecated').notNull().default(false),
   ...timestamps,
 }, (t) => ({
-  entityKeyIdx: uniqueIndex('cfd_entity_key_idx').on(t.entityType, t.key),
+  // Global keys are unique per entity; project keys per (entity, project).
+  entityKeyIdx: uniqueIndex('cfd_entity_key_idx').on(t.entityType, t.key).where(sql`project_id is null`),
+  projectKeyIdx: uniqueIndex('cfd_project_key_idx').on(t.entityType, t.key, t.projectId).where(sql`project_id is not null`),
+  projectIdx: index('cfd_project_idx').on(t.projectId),
 }));
 
 export const activityLog = pgTable('activity_log', {

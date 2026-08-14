@@ -11,8 +11,8 @@ import { fileSrc } from '../../lib/file-tokens';
 import { err } from '../../lib/errors';
 
 /** Which permission covers files hanging off each entity type. */
-const READ_PERM: Record<string, Permission> = { company: 'crm.read', lead: 'crm.read', deal: 'deals.read', task: 'projects.read', project: 'projects.read' };
-const WRITE_PERM: Record<string, Permission> = { company: 'crm.write', lead: 'crm.write', deal: 'deals.write', task: 'projects.read', project: 'projects.read' };
+const READ_PERM: Record<string, Permission> = { company: 'crm.read', lead: 'crm.read', deal: 'deals.read', task: 'projects.read', project: 'projects.read', employee: 'people.read_documents', intake_item: 'projects.read' };
+const WRITE_PERM: Record<string, Permission> = { company: 'crm.write', lead: 'crm.write', deal: 'deals.write', task: 'projects.read', project: 'projects.read', employee: 'people.write', intake_item: 'projects.read' };
 
 function requireEntityPerm(perms: ReadonlySet<string>, map: Record<string, Permission>, entityType: string): void {
   const needed = map[entityType];
@@ -39,6 +39,13 @@ async function assertEntityAccess(
     const [task] = await db.select({ projectId: schema.tasks.projectId }).from(schema.tasks).where(eq(schema.tasks.id, entityId));
     if (!task) throw err.notFound('Task not found');
     await assertProject(actor, task.projectId, minRole);
+  }
+  if (entityType === 'intake_item') {
+    const { db } = getDb();
+    const [item] = await db.select({ projectId: schema.intakeItems.projectId }).from(schema.intakeItems).where(eq(schema.intakeItems.id, entityId));
+    if (!item) throw err.notFound('Intake item not found');
+    // The triage queue itself demands project membership; its files do too.
+    await assertProject(actor, item.projectId, 'member');
   }
 }
 
