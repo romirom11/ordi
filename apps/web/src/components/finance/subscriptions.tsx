@@ -20,6 +20,7 @@ import {
 import { api, ApiError } from '../../lib/api';
 import { useCan } from '../../lib/auth';
 import { useT, extendDict } from '../../lib/i18n';
+import { byName } from '../../lib/queries';
 import {
   Badge, Button, EmptyState, Input, Select, Skeleton, Switch, Spinner,
   cn, fmtMoney, fmtDate,
@@ -167,7 +168,8 @@ export function RecurringExpensesSection() {
   });
   const companiesQ = useQuery({
     queryKey: ['companies', 'finance'],
-    queryFn: () => api.get<{ data: CompanyLite[] }>('/companies'),
+    // The default page is the 50 newest companies – a picker needs all of them.
+    queryFn: () => api.get<{ data: CompanyLite[] }>('/companies?limit=200'),
     staleTime: 5 * 60_000,
   });
 
@@ -501,7 +503,7 @@ function SubscriptionDialog({ mode, sub, companies, onClose, onSaved }: {
           <LabeledField label={t('subs.company')}>
             <Select value={companyId} onChange={(e) => setCompanyId(e.target.value)} className="w-full">
               <option value="">{t('subs.noneSelected')}</option>
-              {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {byName(companies).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select>
           </LabeledField>
         </div>

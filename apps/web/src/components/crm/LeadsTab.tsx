@@ -15,6 +15,7 @@ import {
   sortRows, useCompanies, useLeads, useStatusRank, useTableSort, useUserMap, useUsersLookup, type Lead,
 } from './shared';
 import { LeadLabelChips } from './LeadLabels';
+import { byName } from '../../lib/queries';
 
 type LeadSortKey = 'title' | 'company' | 'status' | 'score' | 'next' | 'owner';
 
@@ -190,7 +191,7 @@ export function LeadsTab() {
           onChange={setCompanyId}
           options={[
             { value: '', label: t('crm.allCompanies') },
-            ...(companiesQ.data ?? []).map((company) => ({
+            ...byName(companiesQ.data).map((company) => ({
               value: company.id, label: company.name, icon: <Building2 size={14} className="text-muted-foreground" />,
             })),
           ]}

@@ -9,6 +9,7 @@ import { Dialog, ContextMenu, toast, type ContextMenuEntry } from '../components
 import { Plus, Trash2, Wallet, AlertTriangle, CheckCircle2, Receipt, FileStack, Copy, ExternalLink, Link2 } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
 import { usePersistedState, oneOfPref, stringPref } from '../lib/prefs';
+import { byName } from '../lib/queries';
 import { RecurringExpensesSection } from '../components/finance/subscriptions';
 import { SortHeader, sortRows, useStatusRank, useTableSort } from '../components/tableSort';
 import { TransactionsTab, AddIncomeDialog } from '../components/finance/ledger';
@@ -159,7 +160,8 @@ export function FinancePage() {
 }
 
 function useCompanies() {
-  return useQuery({ queryKey: ['companies', 'finance'], queryFn: () => api.get<{ data: Company[] }>('/companies') });
+  // The default page is the 50 newest companies – a picker needs all of them.
+  return useQuery({ queryKey: ['companies', 'finance'], queryFn: () => api.get<{ data: Company[] }>('/companies?limit=200') });
 }
 
 interface AgingRow { currency: string; bucket_0_30: number; bucket_31_60: number; bucket_61_90: number; bucket_90_plus: number; total: number }
@@ -363,7 +365,7 @@ function DocForm({ kind, companies, onSubmit, pending }: { kind: 'invoice' | 'qu
           <label className="text-xs font-medium text-muted-foreground">{t('common.company')}</label>
           <Select value={companyId} onChange={(e) => setCompanyId(e.target.value)} className="block w-full">
             <option value="">{t('common.select')}</option>
-            {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {byName(companies).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
         </div>
         <div className="space-y-1">

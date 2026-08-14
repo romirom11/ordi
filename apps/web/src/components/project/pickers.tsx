@@ -4,9 +4,10 @@ import {
 } from 'lucide-react';
 import { Avatar, RailChip, RailField, fmtDate } from '../ui';
 import { DropdownMenu, MenuItem, MenuLabel, MenuSeparator, useMenuClose } from '../overlays';
+import { SearchSelect } from '../SearchSelect';
 import { Calendar } from '../DatePicker';
 import { useT, extendDict } from '../../lib/i18n';
-import { activeUsers } from '../../lib/queries';
+import { activeUsers, byName } from '../../lib/queries';
 
 export interface UserLite { id: string; name: string; avatar?: string | null; isActive?: boolean }
 export interface CompanyLite { id: string; name: string }
@@ -171,15 +172,18 @@ export function CompanyPicker({ value, companyName, companies, onSelect, disable
   );
   if (disabled) return trigger;
   return (
-    <DropdownMenu trigger={trigger} align="start" width={230} className="w-full">
-      <MenuLabel>{t('projects.company')}</MenuLabel>
-      <MenuItem icon={<Circle size={14} />} onSelect={() => onSelect(null)} checked={!value}>{t('projects.noCompany')}</MenuItem>
-      <MenuSeparator />
-      {companies.map((c) => (
-        <MenuItem key={c.id} icon={<Building2 size={15} />} onSelect={() => onSelect(c.id)} checked={value === c.id}>
-          {c.name}
-        </MenuItem>
-      ))}
-    </DropdownMenu>
+    <SearchSelect
+      align="start"
+      width={230}
+      className="w-full"
+      value={value ?? ''}
+      onChange={(id) => onSelect(id || null)}
+      menuLabel={t('projects.company')}
+      trigger={trigger}
+      options={[
+        { value: '', label: t('projects.noCompany'), icon: <Circle size={14} /> },
+        ...byName(companies).map((c) => ({ value: c.id, label: c.name, icon: <Building2 size={15} /> })),
+      ]}
+    />
   );
 }

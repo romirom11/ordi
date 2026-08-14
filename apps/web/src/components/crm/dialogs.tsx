@@ -15,6 +15,7 @@ import {
   useProjectsLookup, type Company, type Stage,
 } from './shared';
 import { CustomFieldsSection } from './CustomFieldsSection';
+import { byName } from '../../lib/queries';
 
 function errMsg(e: unknown, fallback: string): string {
   return e instanceof ApiError ? e.message : fallback;
@@ -185,7 +186,7 @@ export function NewLeadDialog({ open, onClose, lockedCompanyId, onCreated }: {
               placeholder={companiesQ.isLoading ? t('common.loading') : t('common.select')}
               options={[
                 { value: NEW_COMPANY, label: t('crm.newCompanyOption'), icon: <Plus size={14} /> },
-                ...(companiesQ.data ?? []).map((company) => ({
+                ...byName(companiesQ.data).map((company) => ({
                   value: company.id, label: company.name, icon: <Building2 size={14} />,
                 })),
               ]}
@@ -294,7 +295,7 @@ export function NewDealDialog({ open, onClose, lockedCompanyId, defaultStageId, 
               value={companyId}
               onChange={setCompanyId}
               placeholder={companiesQ.isLoading ? t('common.loading') : t('common.select')}
-              options={companies.map((c) => ({ value: c.id, label: c.name, icon: <Building2 size={14} /> }))}
+              options={byName(companies).map((c) => ({ value: c.id, label: c.name, icon: <Building2 size={14} /> }))}
             />
           </Field>
         )}

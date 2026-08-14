@@ -38,6 +38,14 @@ export function activeUsers<T extends { isActive?: boolean }>(users: T[] | undef
   return (users ?? []).filter((u) => u.isActive !== false);
 }
 
+/**
+ * Alphabetical copy for pickers. The API lists newest-first (ULID desc), which
+ * reads as random in a dropdown of fifty client names.
+ */
+export function byName<T extends { name: string }>(rows: T[] | undefined): T[] {
+  return [...(rows ?? [])].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+}
+
 export type ProjectMemberRole = 'admin' | 'member' | 'viewer';
 
 export interface ProjectMember {
