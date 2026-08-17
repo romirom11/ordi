@@ -5,6 +5,13 @@
 export interface OrdiClientConfig {
   baseUrl: string;
   token: string;
+  /**
+   * Origin embedded file links are resolved against when it differs from
+   * baseUrl – the HTTP-served MCP calls the API on localhost, but the links it
+   * hands an agent must be on the public app origin or the agent cannot fetch
+   * them. Defaults to baseUrl.
+   */
+  publicUrl?: string;
 }
 
 /**
@@ -28,6 +35,11 @@ export class OrdiApiError extends Error {
 
 export class OrdiClient {
   constructor(private cfg: OrdiClientConfig) {}
+
+  /** The origin an agent's embedded file links resolve against. */
+  get publicUrl(): string {
+    return (this.cfg.publicUrl ?? this.cfg.baseUrl).replace(/\/+$/, '');
+  }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const res = await fetch(`${this.cfg.baseUrl}/api/v1${path}`, {

@@ -11,7 +11,7 @@ import {
   dateOnlySchema, docToText, textToDoc,
 } from '@ordi/shared';
 import { OrdiClient } from './client';
-import { decodeEntities, scrub, text, wrap } from './format';
+import { absolutizeImageSrcs, decodeEntities, relativizeImageSrcs, scrub, text, wrap } from './format';
 import { registerTaskTools } from './tasks';
 
 export { decodeEntities, scrub };
@@ -32,6 +32,11 @@ export function buildServer(client: OrdiClient): McpServer {
   const rawPatch = client.patch.bind(client);
   client.post = (path, body) => rawPost(path, decodeEntities(body));
   client.patch = (path, body) => rawPatch(path, decodeEntities(body));
+
+  // Bodies leave with image markers resolved to fetchable urls and come back
+  // relative, so stored documents stay domain-independent (see format.ts).
+  const toAgent = (text: string): string => absolutizeImageSrcs(text, client.publicUrl);
+  const fromAgent = (text: string): string => relativizeImageSrcs(text, client.publicUrl);
 
 // ── Read tools ──
   server.tool('search', 'Search companies, projects, tasks, CRM notes, invoices and KB pages by name/title/number. Matches titles, note bodies and indexed text, not arbitrary fields; use list_projects / list_companies / list_notes to enumerate instead of guessing names.', { query: z.string() },
@@ -185,7 +190,7 @@ export function buildServer(client: OrdiClient): McpServer {
   const res = await client.get<{ data: Record<string, unknown>[] }>(`/notes?${qs}`);
   return { data: res.data.slice(0, limit ?? 20).map((n) => ({
     id: n.id, companyId: n.companyId, contactId: n.contactId, leadId: n.leadId, dealId: n.dealId,
-    pinned: n.pinned, createdAt: n.createdAt, createdBy: n.createdBy, text: docToText(n.body),
+    pinned: n.pinned, createdAt: n.createdAt, createdBy: n.createdBy, text: toAgent(docToText(n.body)),
   })) };
 }));
 
@@ -248,14 +253,14 @@ export function buildServer(client: OrdiClient): McpServer {
   server.tool('get_kb_page', 'One knowledge base page with its body as plain text', { pageId: z.string() },
   ({ pageId }) => wrap(async () => {
   const page = await client.get<Record<string, unknown>>(`/pages/${pageId}`);
-  return { ...page, body: undefined, text: docToText(page.body) };
+  return { ...page, body: undefined, text: toAgent(docToText(page.body)) };
 }));
 
   server.tool('update_kb_page', 'Rewrite a knowledge base page. The text replaces the body, so send the whole page – read it with get_kb_page first.', {
   pageId: z.string(), title: z.string().optional(), text: z.string().optional(),
 }, ({ pageId, title, text: body }) => wrap(() => client.patch(`/pages/${pageId}`, {
   ...(title === undefined ? {} : { title }),
-  ...(body === undefined ? {} : { body: textToDoc(body) }),
+  ...(body === undefined ? {} : { body: textToDoc(fromAgent(body)) }),
 })));
 
   server.tool('get_project_profitability', 'Project profitability (requires finance.read_costs scope)', { projectId: z.string() },
@@ -282,7 +287,7 @@ export function buildServer(client: OrdiClient): McpServer {
   ({ taskId, assigneeIds }) => wrap(() => client.patch(`/tasks/${taskId}`, { assigneeIds })));
 
   server.tool('comment_on_task', 'Comment on a task (line breaks are preserved)', { taskId: z.string(), text: z.string() },
-  ({ taskId, text: body }) => wrap(() => client.post(`/tasks/${taskId}/comments`, { body: textToDoc(body), mentions: [] })));
+  ({ taskId, text: body }) => wrap(() => client.post(`/tasks/${taskId}/comments`, { body: textToDoc(fromAgent(body)), mentions: [] })));
 
   server.tool('log_time', 'Log time on a task', { taskId: z.string(), durationSeconds: z.number(), note: z.string().optional(), startedAt: z.string().optional() },
   ({ taskId, durationSeconds, note, startedAt }) => wrap(() => client.post('/time/entries', { taskId, durationSeconds, note: note ?? '', startedAt: startedAt ?? new Date().toISOString() })));
@@ -318,14 +323,14 @@ export function buildServer(client: OrdiClient): McpServer {
   companyId: z.string().optional(), contactId: z.string().optional(), leadId: z.string().optional(), dealId: z.string().optional(), text: z.string(),
 }, ({ companyId, contactId, leadId, dealId, text: body }) => wrap(async () => {
   if (!companyId && !contactId && !leadId && !dealId) throw new Error('One of companyId, contactId, leadId or dealId is required');
-  return client.post('/notes', { companyId, contactId, leadId, dealId, body: textToDoc(body) });
+  return client.post('/notes', { companyId, contactId, leadId, dealId, body: textToDoc(fromAgent(body)) });
 }));
 
   server.tool('update_note', 'Rewrite a note (see list_notes for noteId). The text replaces the body, so send the whole note, not a fragment – this is how a card whose facts moved into fields gets trimmed, or a stale one superseded.', {
   noteId: z.string(), text: z.string(),
   pinned: z.boolean().optional().describe('Keep it at the top of the record'),
 }, ({ noteId, text: body, pinned }) => wrap(() => client.patch(`/notes/${noteId}`, {
-  body: textToDoc(body), ...(pinned === undefined ? {} : { pinned }),
+  body: textToDoc(fromAgent(body)), ...(pinned === undefined ? {} : { pinned }),
 })));
 
   server.tool('create_company', 'Create a CRM company. Refuses a name or domain that already exists – update the existing record instead of doubling it.', {
@@ -559,7 +564,7 @@ export function buildServer(client: OrdiClient): McpServer {
 }));
 
   server.tool('create_kb_page', 'Create a knowledge base page (line breaks are preserved; blank line = new paragraph)', { spaceId: z.string(), title: z.string(), text: z.string().optional() },
-  ({ spaceId, title, text: body }) => wrap(() => client.post('/pages', { spaceId, title, body: textToDoc(body ?? '') })));
+  ({ spaceId, title, text: body }) => wrap(() => client.post('/pages', { spaceId, title, body: textToDoc(fromAgent(body ?? '')) })));
 
   server.tool('request_leave', 'Request leave – for the token owner by default, or for another employee with the HR scopes', {
   leaveTypeId: z.string(), fromDate: z.string(), toDate: z.string(),

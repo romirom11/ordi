@@ -5,17 +5,38 @@
  * re-walking the tree in each caller.
  */
 
+/**
+ * A line that is exactly one embedded image, in the markdown form docToText
+ * emits. Only a whole line counts: an image is a block node in the editor
+ * schema, so a marker inside a sentence stays ordinary text.
+ */
+const IMAGE_LINE = /^!\[([^\]]*)\]\((\S+)\)$/;
+
 /** Plain text → tiptap doc. Blank lines separate paragraphs, single newlines are hard breaks. */
 export function textToDoc(text: string): Record<string, unknown> {
-  const paragraphs = text.replace(/\r\n/g, '\n').split(/\n{2,}/).map((para) => {
-    const content: Record<string, unknown>[] = [];
-    para.split('\n').forEach((line, i) => {
-      if (i > 0) content.push({ type: 'hardBreak' });
-      if (line) content.push({ type: 'text', text: line });
-    });
-    return { type: 'paragraph', content };
-  });
-  return { type: 'doc', content: paragraphs };
+  const blocks: Record<string, unknown>[] = [];
+  for (const chunk of text.replace(/\r\n/g, '\n').split(/\n{2,}/)) {
+    let inline: Record<string, unknown>[] = [];
+    let open = false;
+    const endParagraph = (): void => {
+      blocks.push({ type: 'paragraph', content: inline });
+      inline = [];
+      open = false;
+    };
+    for (const line of chunk.split('\n')) {
+      const image = IMAGE_LINE.exec(line.trim());
+      if (image) {
+        if (open) endParagraph();
+        blocks.push({ type: 'image', attrs: { src: image[2], alt: image[1] || null } });
+        continue;
+      }
+      if (open) inline.push({ type: 'hardBreak' });
+      if (line) inline.push({ type: 'text', text: line });
+      open = true;
+    }
+    if (open) endParagraph();
+  }
+  return { type: 'doc', content: blocks };
 }
 
 /**
@@ -24,6 +45,11 @@ export function textToDoc(text: string): Record<string, unknown> {
  * `docToText(textToDoc(t))` gives `t` back: an agent that reads a body, edits a
  * sentence and writes it back must not lose the paragraph structure on the way
  * through. Nested blocks (list items, table cells) stay one line each.
+ *
+ * An embedded image becomes an `![name](url)` line, which textToDoc turns back
+ * into an image node – without it, a screenshot pasted into a bug report would
+ * be invisible to an agent reading the card, and silently destroyed the first
+ * time the agent rewrote the body.
  */
 export function docToText(doc: unknown): string {
   const lines: string[] = [];
@@ -41,6 +67,12 @@ export function docToText(doc: unknown): string {
     if (node.type === 'text' && typeof node.text === 'string') current += node.text;
     else if (node.type === 'hardBreak') { flush(); }
     else if (node.type === 'mention') current += `@${node.attrs?.label ?? node.attrs?.id ?? ''}`;
+    else if (node.type === 'image') {
+      if (current) flush();
+      current = `![${node.attrs?.alt ?? ''}](${node.attrs?.src ?? ''})`;
+      flush();
+      if (depth === 1) lines.push('');
+    }
     if (Array.isArray(node.content)) {
       const block = node.type && node.type !== 'doc' && node.type !== 'text';
       for (const child of node.content) walk(child, depth + 1);
