@@ -12,6 +12,7 @@ import { api } from '../../lib/api';
 import { useUserMap } from '../../lib/queries';
 import { useT, extendDict } from '../../lib/i18n';
 import { Avatar, Button, Skeleton, appLocale, cn } from '../ui';
+import { DropdownMenu } from '../overlays';
 
 extendDict({
   en: {
@@ -55,6 +56,66 @@ function empShort(e: EmpRow): string {
   const first = (e.firstName ?? '').trim();
   const last = (e.lastName ?? '').trim();
   return [first, last ? `${last[0]}.` : ''].filter(Boolean).join(' ');
+}
+
+function empFull(e: EmpRow): string {
+  return [(e.firstName ?? '').trim(), (e.lastName ?? '').trim()].filter(Boolean).join(' ');
+}
+
+/**
+ * Everything one day holds, in full – the grid cell truncates on narrow
+ * screens and a native title tooltip never fires on touch, so the cell opens
+ * this popover instead of leaving the reader to guess the cut-off names.
+ */
+function DayDetails({ day, holidays, birthdays, leaves, userMap }: {
+  day: Date;
+  holidays: Holiday[];
+  birthdays: EmpRow[];
+  leaves: LeaveRow[];
+  userMap: Map<string, { avatar?: string | null }>;
+}) {
+  const t = useT();
+  return (
+    <div className="max-h-72 overflow-y-auto">
+      <div className="px-2 pb-1 pt-1.5 text-xs font-semibold capitalize text-muted-foreground">
+        {day.toLocaleDateString(appLocale(), { weekday: 'long', day: 'numeric', month: 'long' })}
+      </div>
+      {holidays.map((h) => (
+        <div key={h.id} className="flex items-start gap-2 rounded-md px-2 py-1 text-[13px]">
+          <Sun size={13} className="mt-0.5 shrink-0 text-warning" />
+          <span className="min-w-0 break-words text-warning">{h.name}</span>
+        </div>
+      ))}
+      {birthdays.map((e) => {
+        const avatar = e.userId ? userMap.get(e.userId)?.avatar : undefined;
+        return (
+          <div key={`bd-${e.id}`} className="flex items-center gap-2 rounded-md px-2 py-1 text-[13px]">
+            <Cake size={13} className="shrink-0 text-pink-500" />
+            {avatar && <Avatar name={empFull(e)} src={avatar} size={16} />}
+            <span className="min-w-0 flex-1 break-words">{empFull(e)}</span>
+            <span className="shrink-0 text-xs text-faint">{t('people.calBirthday')}</span>
+          </div>
+        );
+      })}
+      {leaves.map((lr) => {
+        const pending = lr.status === 'pending';
+        const color = typeColor(lr.leaveTypeName ?? '');
+        return (
+          <div key={lr.id} className={cn('flex items-center gap-2 rounded-md px-2 py-1 text-[13px]', pending && 'opacity-60')}>
+            <span
+              className={cn('h-2 w-2 shrink-0 rounded-full', pending && 'border bg-transparent')}
+              style={pending ? { borderColor: color } : { backgroundColor: color }}
+            />
+            {lr.employeeAvatar && <Avatar name={lr.employeeName ?? ''} src={lr.employeeAvatar} size={16} />}
+            <span className="min-w-0 flex-1 break-words">{lr.employeeName ?? '–'}</span>
+            <span className="shrink-0 text-xs text-faint">
+              {lr.leaveTypeName ?? ''}{pending ? ` (${t('people.calPending')})` : ''}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export function TeamCalendar() {
@@ -170,15 +231,12 @@ export function TeamCalendar() {
               const holidays = holidaysByDay.get(key) ?? [];
               const birthdays = birthdaysByDay.get(key) ?? [];
               const leaves = leavesByDay.get(key) ?? [];
-              return (
-                <div key={key}
-                  className={cn(
-                    'min-h-24 border-border p-1',
-                    i % 7 !== 0 && 'border-l',
-                    i >= 7 && 'border-t',
-                    !inMonth && 'bg-muted/30',
-                    inMonth && (weekend || holidays.length > 0) && 'bg-muted/15',
-                  )}>
+              const hasEvents = holidays.length + birthdays.length + leaves.length > 0;
+              const cellBody = (
+                <div className={cn(
+                  'min-h-24 w-full p-1 text-left',
+                  hasEvents && 'cursor-pointer transition-colors duration-150 hover:bg-muted/40',
+                )}>
                   <div className={cn(
                     'mb-1 px-1 text-right text-xs tabular-nums',
                     key === todayKey
@@ -190,9 +248,9 @@ export function TeamCalendar() {
                   <div className="space-y-0.5">
                     {holidays.map((h) => (
                       <div key={h.id} title={h.name}
-                        className="flex items-center gap-1 rounded bg-warning/10 px-1 py-0.5 text-xs text-warning">
-                        <Sun size={10} className="shrink-0" />
-                        <span className="truncate">{h.name}</span>
+                        className="flex items-start gap-1 rounded bg-warning/10 px-1 py-0.5 text-xs text-warning">
+                        <Sun size={10} className="mt-0.5 shrink-0" />
+                        <span className="line-clamp-2 min-w-0 break-words">{h.name}</span>
                       </div>
                     ))}
                     {birthdays.map((e) => {
@@ -223,6 +281,22 @@ export function TeamCalendar() {
                       );
                     })}
                   </div>
+                </div>
+              );
+              return (
+                <div key={key}
+                  className={cn(
+                    'border-border',
+                    i % 7 !== 0 && 'border-l',
+                    i >= 7 && 'border-t',
+                    !inMonth && 'bg-muted/30',
+                    inMonth && (weekend || holidays.length > 0) && 'bg-muted/15',
+                  )}>
+                  {/* A cell with events opens the day in full – truncated chips
+                      and hover-only tooltips leave touch screens guessing. */}
+                  <DropdownMenu disabled={!hasEvents} width={280} className="h-full w-full" trigger={cellBody}>
+                    <DayDetails day={day} holidays={holidays} birthdays={birthdays} leaves={leaves} userMap={userMap} />
+                  </DropdownMenu>
                 </div>
               );
             })}
