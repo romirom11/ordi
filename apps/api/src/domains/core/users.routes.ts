@@ -33,12 +33,34 @@ export function usersRoutes() {
   // rows, memberships) still name them, and hiding them here rendered every
   // ex-colleague as "Someone" with an initials circle. Pickers filter by
   // isActive; renderers must not.
+  //
+  // The name prefers the linked HR employee card: users.name is whatever the
+  // person typed at signup (often just a first name), while the employee card
+  // is where HR keeps the real full name – without this, member lists and
+  // pickers showed "Vasyl" next to fully-named colleagues.
   app.get('/lookup', async (c) => {
     const { db } = getDb();
-    const rows = await db.select({
-      id: schema.users.id, name: schema.users.name, avatar: schema.users.avatar, isActive: schema.users.isActive,
-    }).from(schema.users);
-    return c.json({ data: rows });
+    const [rows, emps] = await Promise.all([
+      db.select({
+        id: schema.users.id, name: schema.users.name, avatar: schema.users.avatar, isActive: schema.users.isActive,
+      }).from(schema.users),
+      db.select({
+        userId: schema.employees.userId, firstName: schema.employees.firstName,
+        lastName: schema.employees.lastName, status: schema.employees.status,
+      }).from(schema.employees),
+    ]);
+    const cardName = new Map<string, { name: string; active: boolean }>();
+    for (const e of emps) {
+      if (!e.userId) continue;
+      const full = [e.firstName, e.lastName].map((s) => (s ?? '').trim()).filter(Boolean).join(' ');
+      if (!full) continue;
+      const active = e.status !== 'terminated';
+      const seen = cardName.get(e.userId);
+      // Two cards can point at one user (a rehire keeps the old card): the
+      // active one names them.
+      if (!seen || (active && !seen.active)) cardName.set(e.userId, { name: full, active });
+    }
+    return c.json({ data: rows.map((u) => ({ ...u, name: cardName.get(u.id)?.name ?? u.name })) });
   });
 
   /**
