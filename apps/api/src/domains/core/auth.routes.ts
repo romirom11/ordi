@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { setCookie, deleteCookie } from 'hono/cookie';
-import { getDb, schema, eq, and, sql } from '@ordi/db';
+import { getDb, schema, eq, and, isNull, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import { z } from 'zod';
 import * as OTPAuth from 'otpauth';
@@ -93,6 +93,27 @@ export function authRoutes() {
       passwordHash: hashPassword(body.password), roleId: invite.roleId,
     });
     await db.update(schema.invites).set({ acceptedAt: new Date() }).where(eq(schema.invites.id, invite.id));
+
+    // One person, not two loose records (ORD-19): the account links up with
+    // the HR card that was waiting under this email – its full name becomes
+    // the account name, the card is canonical. No card yet → one is created
+    // from the invite, so a new colleague never exists half-way.
+    const [card] = await db.select().from(schema.employees).where(and(
+      sql`lower(${schema.employees.email}) = ${invite.email.toLowerCase()}`,
+      isNull(schema.employees.userId),
+      isNull(schema.employees.deletedAt),
+    ));
+    if (card) {
+      await db.update(schema.employees).set({ userId }).where(eq(schema.employees.id, card.id));
+      const full = [card.firstName, card.lastName].map((s) => (s ?? '').trim()).filter(Boolean).join(' ');
+      if (full) await db.update(schema.users).set({ name: full }).where(eq(schema.users.id, userId));
+    } else {
+      const [first, ...rest] = body.name.trim().split(/\s+/);
+      await db.insert(schema.employees).values({
+        id: ulid(), userId, firstName: first || body.name.trim(), lastName: rest.join(' '),
+        email: invite.email.toLowerCase(), createdBy: userId,
+      });
+    }
     return c.json({ ok: true, userId });
   });
 

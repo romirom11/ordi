@@ -79,4 +79,6 @@ export interface MeResponse {
   projectMemberships: { projectId: string; role: string; canWriteTasks: boolean }[];
   spaceMemberships: { spaceId: string; role: string }[];
   actorType: 'user' | 'agent';
+  /** The linked HR card, when one exists – where the person's identity lives (ORD-19). */
+  employee?: { id: string } | null;
 }

@@ -4,12 +4,11 @@ import { api, ApiError } from '../lib/api';
 import { useMe } from '../lib/auth';
 import { Button, Input, Select, Card, Badge, Switch, Checkbox, Avatar, PageHeader, PageBody, Breadcrumbs, Skeleton, Spinner, fmtDate } from '../components/ui';
 import { toast } from '../components/overlays';
-import { Camera, Check, Copy, KeyRound, Plus, ShieldCheck, Trash2 } from 'lucide-react';
+import { Camera, Check, Copy, IdCard, KeyRound, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import { extendDict, useT } from '../lib/i18n';
+import { useNavigate } from '../lib/router';
 import { DATE_FORMATS, TIME_ZONES, formatSample, offsetLabel, rememberDateFormat, type DateFormat } from '../lib/dates';
 import { downscaleImage } from '../components/settings/image';
-import { HrQuestionnaireCard } from '../components/people/HrQuestionnaire';
-import { MyLeaveCard } from '../components/people/MyLeaveCard';
 
 extendDict({
   en: {
@@ -32,6 +31,8 @@ extendDict({
     'profile.currentPassword': 'Current password',
     'profile.passwordChanged': 'Password changed.',
     'profile.passwordChangeFailed': 'Could not change the password.',
+    'profile.myCard': 'My HR card',
+    'profile.myCardHint': 'Contacts, the questionnaire and leave live on your card.',
   },
   uk: {
     'profile.profileInfo': 'Профіль',
@@ -53,6 +54,8 @@ extendDict({
     'profile.currentPassword': 'Поточний пароль',
     'profile.passwordChanged': 'Пароль змінено.',
     'profile.passwordChangeFailed': 'Не вдалося змінити пароль.',
+    'profile.myCard': 'Моя HR-картка',
+    'profile.myCardHint': 'Контакти, анкета і відпустки живуть на вашій картці.',
   },
 });
 
@@ -91,9 +94,10 @@ export function ProfilePage() {
         breadcrumbs={<Breadcrumbs items={[{ label: t('profile.title') }]} />}
       />
       <PageBody className="space-y-4">
+        {/* Identity lives on the HR card (ORD-19): the questionnaire and
+          * leave moved to the person's own employee page; the profile keeps
+          * account things and links over. */}
         <ProfileInfoCard />
-        <HrQuestionnaireCard />
-        <MyLeaveCard />
         <PreferencesCard />
         <NotificationsSection />
         <div>
@@ -126,6 +130,7 @@ function SaveRow({ dirty, pending, t }: { dirty: boolean; pending: boolean; t: (
 function ProfileInfoCard() {
   const t = useT();
   const me = useMe();
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const [name, setName] = useState(me.user.name);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -212,6 +217,17 @@ function ProfileInfoCard() {
         <Input value={name} onChange={(e) => setName(e.target.value)} />
         <SaveRow dirty={dirty} pending={save.isPending} t={t} />
       </form>
+      {me.employee && (
+        <button
+          type="button"
+          onClick={() => navigate(`/people/${me.employee!.id}`)}
+          className="mt-4 flex w-full items-center gap-2 rounded-lg border border-border px-3 py-2 text-left text-[13px] transition-colors duration-150 hover:border-border-strong hover:bg-muted/40"
+        >
+          <IdCard size={15} className="shrink-0 text-faint" />
+          <span className="font-medium">{t('profile.myCard')}</span>
+          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{t('profile.myCardHint')}</span>
+        </button>
+      )}
     </Card>
   );
 }

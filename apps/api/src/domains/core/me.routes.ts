@@ -22,6 +22,8 @@ export function meRoutes() {
     }));
     const sms = [...actor.access.spaceMemberships.entries()].map(([spaceId, role]) => ({ spaceId, role }));
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, actor.userId));
+    const [card] = await db.select({ id: schema.employees.id }).from(schema.employees)
+      .where(and(eq(schema.employees.userId, actor.userId), isNull(schema.employees.deletedAt)));
     return c.json({
       user: {
         id: actor.userId, email: actor.email, name: actor.name,
@@ -35,6 +37,8 @@ export function meRoutes() {
       projectMemberships: pms,
       spaceMemberships: sms,
       actorType: actor.actorType,
+      // Where the person's identity lives (ORD-19) – the profile links there.
+      employee: card ? { id: card.id } : null,
     });
   });
 
