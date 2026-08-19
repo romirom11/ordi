@@ -204,6 +204,21 @@ export async function peopleDirectory() {
   return rows;
 }
 
+/**
+ * The account mirrors the card (ORD-19): whenever a card with a linked user
+ * writes its name – or gains its link – users.name is overwritten with the
+ * card's full name, so the profile, the member lists and every other reader
+ * spell the person the same way. users.name remains authoritative only for
+ * people without a card.
+ */
+async function syncUserNameFromCard(employee: { userId?: string | null; firstName?: string | null; lastName?: string | null }) {
+  if (!employee.userId) return;
+  const full = [employee.firstName, employee.lastName].map((s) => (s ?? '').trim()).filter(Boolean).join(' ');
+  if (!full) return;
+  const { db } = getDb();
+  await db.update(schema.users).set({ name: full }).where(eq(schema.users.id, employee.userId));
+}
+
 export async function createEmployee(actor: Actor, input: any): Promise<string> {
   const { db } = getDb();
   const id = ulid();
@@ -230,6 +245,7 @@ export async function createEmployee(actor: Actor, input: any): Promise<string> 
   // people.read-gated audit feed.
   const loggedInput = { ...input, ...(input.customFields !== undefined ? { customFields: '[custom fields]' } : {}) };
   await writeActivity(db, { entityType: 'employee', entityId: id, action: 'created', after: loggedInput, actorId: actor.userId, actorType: actor.actorType });
+  await syncUserNameFromCard(input);
   return id;
 }
 
@@ -280,6 +296,9 @@ export async function updateEmployee(actor: Actor, id: string, input: any) {
     loggedAfter.customFields = '[custom fields updated]';
   }
   await writeActivity(db, { entityType: 'employee', entityId: id, action: 'updated', before: beforeTouched, after: loggedAfter, actorId: actor.userId, actorType: actor.actorType });
+  if (patch.userId !== undefined || patch.firstName !== undefined || patch.lastName !== undefined) {
+    await syncUserNameFromCard({ ...before, ...patch } as { userId?: string | null; firstName?: string | null; lastName?: string | null });
+  }
   // The same filtered view a GET would serve this viewer.
   return getEmployee(actor, id);
 }
