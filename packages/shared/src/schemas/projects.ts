@@ -191,6 +191,9 @@ export const labelInputSchema = z.object({
   scope: z.enum(LABEL_SCOPES).default('task'),
 });
 
+/** Rename/recolor only – the scope of an existing label never moves. */
+export const labelPatchSchema = labelInputSchema.pick({ name: true, color: true }).partial();
+
 export const cycleInputSchema = z.object({
   projectId: idSchema,
   name: z.string().min(1),

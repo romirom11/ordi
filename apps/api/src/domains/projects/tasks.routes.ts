@@ -3,7 +3,7 @@ import { getDb, schema, eq, and, isNull, desc } from '@ordi/db';
 import { ulid } from 'ulid';
 import {
   taskInputSchema, taskUpdateSchema, taskMoveSchema, taskRelationSchema, taskLinkSchema,
-  bulkTaskUpdateSchema, commentInputSchema, labelInputSchema, cycleInputSchema, cycleCompleteSchema,
+  bulkTaskUpdateSchema, commentInputSchema, labelInputSchema, labelPatchSchema, cycleInputSchema, cycleCompleteSchema,
   taskTemplateInputSchema, recurringTaskInputSchema, intakeAcceptSchema, intakeDeclineSchema, intakeSettingsSchema,
   LABEL_SCOPES,
   type CustomFieldFilter, type LabelScope,
@@ -148,6 +148,19 @@ export function tasksRoutes() {
     const id = ulid();
     await db.insert(schema.labels).values({ id, name: body.name, color: body.color, scope: body.scope });
     return c.json({ id, scope: body.scope }, 201);
+  });
+
+  app.patch('/labels/:id', guard('settings.manage'), async (c) => {
+    const body = labelPatchSchema.parse(await c.req.json());
+    if (body.name === undefined && body.color === undefined) throw err.validation('Nothing to update – pass name and/or color');
+    const { db } = getDb();
+    const [label] = await db.select().from(schema.labels).where(eq(schema.labels.id, c.req.param('id')));
+    if (!label) throw err.notFound('Label not found');
+    await db.update(schema.labels).set({
+      ...(body.name === undefined ? {} : { name: body.name }),
+      ...(body.color === undefined ? {} : { color: body.color }),
+    }).where(eq(schema.labels.id, label.id));
+    return c.json({ ok: true });
   });
 
   app.delete('/labels/:id', guard('settings.manage'), async (c) => {
