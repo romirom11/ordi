@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '../lib/router';
 import { api } from '../lib/api';
-import { useCan } from '../lib/auth';
+import { useCan, useMe } from '../lib/auth';
 import {
   Button, Badge, Breadcrumbs, PageBody, EmptyState, Skeleton, Avatar,
   fmtMoney, fmtDate, cn,
@@ -11,6 +11,7 @@ import { DropdownMenu, MenuItem, toast } from '../components/overlays';
 import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
 import { EmployeeFieldGroups } from '../components/people/EmployeeFieldGroups';
 import { EmployeeDocuments } from '../components/people/EmployeeDocuments';
+import { MyLeaveCard } from '../components/people/MyLeaveCard';
 import { CompensationDialog } from '../components/people/CompensationDialog';
 import { EditEmployeeDialog } from '../components/people/EditEmployeeDialog';
 import {
@@ -109,6 +110,7 @@ export function EmployeePage({ id }: { id: string }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const can = useCan();
+  const me = useMe();
   const canWrite = can('people.write');
   const canComp = can('people.read_compensation');
   const [compOpen, setCompOpen] = useState(false);
@@ -275,6 +277,10 @@ export function EmployeePage({ id }: { id: string }) {
           questionnaireUpdatedAt={e.questionnaireUpdatedAt}
           onSave={(cf) => saveCustomFields.mutate(cf)}
         />
+
+        {/* Leave self-service lives on the person's own card (ORD-19) – it
+          * moved here from the profile, which now keeps account things only. */}
+        {e.userId === me.user.id && <div className="mb-6"><MyLeaveCard /></div>}
 
         {can('people.read_documents') && <EmployeeDocuments employeeId={id} canWrite={canWrite} />}
 

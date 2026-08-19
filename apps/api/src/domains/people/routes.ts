@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { MiddlewareHandler } from 'hono';
+import { z } from 'zod';
 import {
   employeeInputSchema, employeeUpdateSchema, employeeLifecycleSchema,
   departmentInputSchema, positionInputSchema, leaveTypeInputSchema,
@@ -77,6 +78,17 @@ export function peopleRoutes() {
 
   app.get('/employees/:id', async (c) =>
     c.json(await svc.getEmployee(currentActor(c), c.req.param('id'))));
+
+  // ── Account ↔ card pairing (ORD-19) ──
+  app.get('/people/link-suggestions', guard('people.write'), async (c) => {
+    currentActor(c);
+    return c.json(await svc.linkSuggestions());
+  });
+
+  app.post('/employees/:id/link-user', guard('people.write'), async (c) => {
+    const body = z.object({ userId: z.string().min(1) }).parse(await c.req.json());
+    return c.json(await svc.linkEmployeeUser(currentActor(c), c.req.param('id'), body.userId));
+  });
 
   // No static guard: people.write edits everything, while a role holding a
   // WRITE grant on a field group may change exactly those fields – the service

@@ -19,6 +19,8 @@ export interface TaskComment {
   authorName?: string | null;
   body: unknown;
   createdAt: string;
+  /** Emoji → ids of the users who reacted with it. */
+  reactions?: Record<string, string[]>;
 }
 
 export interface TaskDetail {

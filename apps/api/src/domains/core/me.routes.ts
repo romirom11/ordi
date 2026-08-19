@@ -22,6 +22,8 @@ export function meRoutes() {
     }));
     const sms = [...actor.access.spaceMemberships.entries()].map(([spaceId, role]) => ({ spaceId, role }));
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, actor.userId));
+    const [card] = await db.select({ id: schema.employees.id }).from(schema.employees)
+      .where(and(eq(schema.employees.userId, actor.userId), isNull(schema.employees.deletedAt)));
     return c.json({
       user: {
         id: actor.userId, email: actor.email, name: actor.name,
@@ -35,6 +37,8 @@ export function meRoutes() {
       projectMemberships: pms,
       spaceMemberships: sms,
       actorType: actor.actorType,
+      // Where the person's identity lives (ORD-19) – the profile links there.
+      employee: card ? { id: card.id } : null,
     });
   });
 
@@ -50,6 +54,20 @@ export function meRoutes() {
       ...(body.avatar !== undefined ? { avatar: body.avatar } : {}),
       ...(body.emailNotificationPrefs !== undefined ? { emailNotificationPrefs: body.emailNotificationPrefs } : {}),
     }).where(eq(schema.users.id, actor.userId));
+    // One name per person (ORD-19): the linked HR card is the canonical
+    // spelling, so renaming yourself in the profile renames the card too –
+    // otherwise HR screens would show the old name until someone noticed.
+    // First word → first name, the rest → last name; the same door the card
+    // edit walks through in the other direction (people service sync).
+    if (body.name !== undefined) {
+      const trimmed = body.name.trim();
+      if (trimmed) {
+        const [first, ...rest] = trimmed.split(/\s+/);
+        await db.update(schema.employees)
+          .set({ firstName: first!, lastName: rest.join(' ') })
+          .where(and(eq(schema.employees.userId, actor.userId), isNull(schema.employees.deletedAt)));
+      }
+    }
     return c.json({ ok: true });
   });
 

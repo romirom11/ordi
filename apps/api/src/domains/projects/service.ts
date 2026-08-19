@@ -823,6 +823,26 @@ export async function editComment(actor: Actor, commentId: string, body: unknown
   return { ok: true };
 }
 
+/**
+ * Slack-style toggle: one call adds the actor's reaction, the same call takes
+ * it back. Stored as `{ emoji: [userId, ...] }` on the comment – the column
+ * has been there since the schema was born, this makes it live.
+ */
+export async function toggleCommentReaction(actor: Actor, commentId: string, emoji: string) {
+  const { db } = getDb();
+  const [comment] = await db.select().from(schema.comments).where(and(eq(schema.comments.id, commentId), isNull(schema.comments.deletedAt)));
+  if (!comment) throw err.notFound('Comment not found');
+  const task = await loadTask(comment.taskId);
+  await assertProject(actor, task.projectId, 'member');
+  const reactions = { ...((comment.reactions ?? {}) as Record<string, string[]>) };
+  const reacted = new Set(reactions[emoji] ?? []);
+  const mine = reacted.has(actor.userId);
+  if (mine) reacted.delete(actor.userId); else reacted.add(actor.userId);
+  if (reacted.size) reactions[emoji] = [...reacted]; else delete reactions[emoji];
+  await db.update(schema.comments).set({ reactions }).where(eq(schema.comments.id, commentId));
+  return { reactions, reacted: !mine };
+}
+
 export async function deleteComment(actor: Actor, commentId: string) {
   const { db } = getDb();
   const [comment] = await db.select().from(schema.comments).where(and(eq(schema.comments.id, commentId), isNull(schema.comments.deletedAt)));

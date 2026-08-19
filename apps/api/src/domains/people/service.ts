@@ -204,8 +204,39 @@ export async function peopleDirectory() {
   return rows;
 }
 
+/**
+ * The account mirrors the card (ORD-19): whenever a card with a linked user
+ * writes its name – or gains its link – users.name is overwritten with the
+ * card's full name, so the profile, the member lists and every other reader
+ * spell the person the same way. users.name remains authoritative only for
+ * people without a card.
+ */
+async function syncUserNameFromCard(employee: { userId?: string | null; firstName?: string | null; lastName?: string | null }) {
+  if (!employee.userId) return;
+  const full = [employee.firstName, employee.lastName].map((s) => (s ?? '').trim()).filter(Boolean).join(' ');
+  if (!full) return;
+  const { db } = getDb();
+  await db.update(schema.users).set({ name: full }).where(eq(schema.users.id, employee.userId));
+}
+
+/** An account this email belongs to, when it is free to link (no other card holds it). */
+async function linkableUserByEmail(email: string): Promise<string | null> {
+  const { db } = getDb();
+  const [user] = await db.select().from(schema.users)
+    .where(and(sql`lower(${schema.users.email}) = ${email.toLowerCase()}`, eq(schema.users.isActive, true)));
+  if (!user || user.actorType !== 'user') return null;
+  const [taken] = await db.select({ id: schema.employees.id }).from(schema.employees)
+    .where(and(eq(schema.employees.userId, user.id), isNull(schema.employees.deletedAt)));
+  return taken ? null : user.id;
+}
+
 export async function createEmployee(actor: Actor, input: any): Promise<string> {
   const { db } = getDb();
+  // Auto-link by email (ORD-19): a card created for someone who already has
+  // an account must not sit unlinked until somebody notices the pair.
+  if (!input.userId && input.email) {
+    input = { ...input, userId: await linkableUserByEmail(input.email) };
+  }
   const id = ulid();
   await db.insert(schema.employees).values({
     id,
@@ -230,6 +261,7 @@ export async function createEmployee(actor: Actor, input: any): Promise<string> 
   // people.read-gated audit feed.
   const loggedInput = { ...input, ...(input.customFields !== undefined ? { customFields: '[custom fields]' } : {}) };
   await writeActivity(db, { entityType: 'employee', entityId: id, action: 'created', after: loggedInput, actorId: actor.userId, actorType: actor.actorType });
+  await syncUserNameFromCard(input);
   return id;
 }
 
@@ -280,7 +312,62 @@ export async function updateEmployee(actor: Actor, id: string, input: any) {
     loggedAfter.customFields = '[custom fields updated]';
   }
   await writeActivity(db, { entityType: 'employee', entityId: id, action: 'updated', before: beforeTouched, after: loggedAfter, actorId: actor.userId, actorType: actor.actorType });
+  if (patch.userId !== undefined || patch.firstName !== undefined || patch.lastName !== undefined) {
+    await syncUserNameFromCard({ ...before, ...patch } as { userId?: string | null; firstName?: string | null; lastName?: string | null });
+  }
   // The same filtered view a GET would serve this viewer.
+  return getEmployee(actor, id);
+}
+
+/**
+ * The pairs that should not exist for long (ORD-19): unlinked cards whose
+ * email belongs to an account, and active accounts with no card at all. The
+ * Employees screen turns these into a banner with one-click fixes instead of
+ * a state nobody notices for weeks.
+ */
+export async function linkSuggestions() {
+  const { db } = getDb();
+  const [cards, userRows] = await Promise.all([
+    db.select().from(schema.employees).where(isNull(schema.employees.deletedAt)),
+    db.select().from(schema.users).where(eq(schema.users.isActive, true)),
+  ]);
+  const people = userRows.filter((u) => u.actorType === 'user');
+  const linked = new Set(cards.map((c) => c.userId).filter(Boolean));
+  const byEmail = new Map(people.map((u) => [u.email.toLowerCase(), u]));
+  const linkable = cards
+    .filter((c) => !c.userId && c.email)
+    .flatMap((c) => {
+      const user = byEmail.get(String(c.email).toLowerCase());
+      if (!user || linked.has(user.id)) return [];
+      return [{
+        employeeId: c.id,
+        employeeName: [c.firstName, c.lastName].filter(Boolean).join(' '),
+        userId: user.id, userName: user.name, email: user.email,
+      }];
+    });
+  const claimed = new Set(linkable.map((l) => l.userId));
+  const usersWithoutCard = people
+    .filter((u) => !linked.has(u.id) && !claimed.has(u.id))
+    .map((u) => ({ userId: u.id, name: u.name, email: u.email }));
+  return { linkable, usersWithoutCard };
+}
+
+export async function linkEmployeeUser(actor: Actor, id: string, userId: string) {
+  const { db } = getDb();
+  const card = await loadEmployee(id);
+  if (card.userId) throw err.domain('This card is already linked to an account');
+  const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId));
+  if (!user) throw err.notFound('User not found');
+  const [taken] = await db.select({ id: schema.employees.id }).from(schema.employees)
+    .where(and(eq(schema.employees.userId, userId), isNull(schema.employees.deletedAt)));
+  if (taken) throw err.domain('This account is already linked to another card');
+  await db.update(schema.employees).set({ userId }).where(eq(schema.employees.id, id));
+  await syncUserNameFromCard({ ...card, userId });
+  await writeActivity(db, {
+    entityType: 'employee', entityId: id, action: 'updated',
+    before: { userId: null }, after: { userId },
+    actorId: actor.userId, actorType: actor.actorType,
+  });
   return getEmployee(actor, id);
 }
 

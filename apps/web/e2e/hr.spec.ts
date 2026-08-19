@@ -75,20 +75,23 @@ test('the employee card carries documents and the questionnaire with icons', asy
     grants: [{ principal: 'self', level: 'write' }],
   });
 
-  // Fill it in on the profile page: the select field renders as an empty
-  // "–" trigger inside the questionnaire card.
+  // The questionnaire lives on the person's own card now (ORD-19): the
+  // profile keeps account things and links over via "My HR card".
   await page.goto('/profile');
-  await expect(page.getByText('HR questionnaire')).toBeVisible();
-  const qcard = page.getByText('These answers are visible to HR', { exact: false }).locator('..');
-  await expect(qcard.getByText('T-shirt size')).toBeVisible();
-  await qcard.getByRole('button', { name: '–' }).first().click();
-  await page.getByRole('menuitem', { name: 'M', exact: true }).click();
-  await expect(page.getByText(/Filled in|Partially filled/)).toBeVisible();
+  await page.getByText('My HR card').click();
+  await expect(page).toHaveURL(new RegExp(`/people/${empId}`));
 
-  // The card mirrors the answer inside the group's section.
-  await page.goto(`/people/${empId}`);
+  // Fill it in inside the group's section: the empty select renders as a
+  // "–" trigger, same control every custom-field grid uses.
   await expect(page.getByText(`Анкета ${stamp}`)).toBeVisible();
   await expect(page.getByText('T-shirt size', { exact: true })).toBeVisible();
+  const qsection = page.locator('section').filter({ hasText: `Анкета ${stamp}` });
+  await qsection.getByRole('button', { name: '–' }).first().click();
+  await page.getByRole('menuitem', { name: 'M', exact: true }).click();
+  await expect(qsection.getByText('M', { exact: true }).first()).toBeVisible();
+
+  // The answer survives a reload – it went through the same PATCH the card uses.
+  await page.reload();
   await expect(page.getByText('M', { exact: true }).first()).toBeVisible();
 
   // The card names the login email; personal contacts live in custom fields now.

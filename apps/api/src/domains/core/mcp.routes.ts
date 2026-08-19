@@ -116,7 +116,9 @@ export function mcpRoutes() {
       return c.json({ error: 'unsupported', error_description: 'MCP requires the node server' }, 501);
     }
 
-    const client = new OrdiClient({ baseUrl: `http://localhost:${env.port}`, token: raw });
+    // publicUrl: image links handed to the agent must resolve on the app
+    // origin – the localhost baseUrl only exists inside this process.
+    const client = new OrdiClient({ baseUrl: `http://localhost:${env.port}`, token: raw, publicUrl: env.appUrl });
     const server = buildServer(client);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined, // stateless

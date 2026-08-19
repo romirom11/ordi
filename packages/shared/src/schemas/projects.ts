@@ -185,11 +185,23 @@ export const commentInputSchema = z.object({
   mentions: z.array(idSchema).default([]),
 });
 
+/**
+ * One reaction toggle. The emoji is stored as the map key on the comment, so
+ * it is capped tight – 16 chars fits any emoji sequence (flags, skin tones)
+ * but no sentence.
+ */
+export const reactionToggleSchema = z.object({
+  emoji: z.string().trim().min(1).max(16),
+});
+
 export const labelInputSchema = z.object({
   name: z.string().min(1),
   color: z.string().default('#6b7280'),
   scope: z.enum(LABEL_SCOPES).default('task'),
 });
+
+/** Rename/recolor only – the scope of an existing label never moves. */
+export const labelPatchSchema = labelInputSchema.pick({ name: true, color: true }).partial();
 
 export const cycleInputSchema = z.object({
   projectId: idSchema,

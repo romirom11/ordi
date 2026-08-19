@@ -11,7 +11,7 @@ import {
 import { Dialog, DropdownMenu, MenuItem, ContextMenu, toast, type ContextMenuEntry } from '../components/overlays';
 import {
   Plus, Check, X, UserPlus, Users, CalendarClock, CalendarDays, Briefcase,
-  ChevronRight, LayoutGrid, Sparkles, ExternalLink, Copy, FilePlus, IdCard, Network,
+  ChevronRight, LayoutGrid, Sparkles, ExternalLink, Copy, FilePlus, IdCard, Link2, Network,
 } from 'lucide-react';
 import { TeamCalendar } from '../components/people/TeamCalendar';
 import { CreateProfileDialog, type CreateProfileTarget } from '../components/people/CreateProfileDialog';
@@ -56,6 +56,11 @@ extendDict({
     'people.emailCopied': 'Email copied',
     'people.noEmail': 'No email',
     'people.directoryHint': 'Everyone in the workspace shows here – including users without an employee profile yet.',
+    'people.unlinkedTitle': 'Cards not linked to an account',
+    'people.unlinkedHint': 'These employee cards carry an email that belongs to a user account. Link them so the person exists once, not twice.',
+    'people.linkAction': 'Link',
+    'people.linked': 'Card linked to the account',
+    'people.linkFailed': 'Could not link the card',
     'people.org': 'Organization',
     'people.newOpening': 'New opening',
     'people.openingTitle': 'Title',
@@ -108,6 +113,11 @@ extendDict({
     'people.emailCopied': 'Ел. пошту скопійовано',
     'people.noEmail': 'Немає ел. пошти',
     'people.directoryHint': 'Тут показані всі люди робочого простору – зокрема користувачі, які ще не мають профілю співробітника.',
+    'people.unlinkedTitle': 'Картки без привʼязки до акаунта',
+    'people.unlinkedHint': 'Ці картки співробітників мають email, що належить акаунту користувача. Привʼяжіть їх, щоб людина існувала один раз, а не двічі.',
+    'people.linkAction': 'Привʼязати',
+    'people.linked': 'Картку привʼязано до акаунта',
+    'people.linkFailed': 'Не вдалося привʼязати картку',
     'people.org': 'Організація',
     'people.newOpening': 'Нова вакансія',
     'people.openingTitle': 'Назва',
@@ -245,9 +255,29 @@ function DirectoryView() {
     oneOfPref(['all', 'active', 'deactivated', 'no_profile'], 'all'),
   );
   const [createTarget, setCreateTarget] = useState<CreateProfileTarget | null>(null);
+  const qc = useQueryClient();
 
   const directory = useQuery({ queryKey: ['peopleDirectory'], queryFn: () => api.get<{ data: DirectoryRow[] }>('/people/directory') });
   const rows = directory.data?.data ?? [];
+
+  // Unlinked card ↔ account pairs (ORD-19): surfaced with a one-click fix
+  // instead of living unnoticed until someone spots two spellings of a name.
+  interface LinkSuggestion { employeeId: string; employeeName: string; userId: string; userName: string; email: string }
+  const suggestions = useQuery({
+    queryKey: ['linkSuggestions'],
+    queryFn: () => api.get<{ linkable: LinkSuggestion[] }>('/people/link-suggestions'),
+    enabled: canWrite,
+  });
+  const linkUser = useMutation({
+    mutationFn: (s: LinkSuggestion) => api.post(`/employees/${s.employeeId}/link-user`, { userId: s.userId }),
+    onSuccess: () => {
+      for (const key of ['peopleDirectory', 'linkSuggestions', 'users-lookup', 'employees']) {
+        qc.invalidateQueries({ queryKey: [key] });
+      }
+      toast(t('people.linked'));
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('people.linkFailed')),
+  });
 
   const counts = useMemo(() => {
     const c: Record<DirFilter, number> = { all: rows.length, active: 0, deactivated: 0, no_profile: 0 };
@@ -301,8 +331,31 @@ function DirectoryView() {
     { key: 'no_profile', label: t('people.noProfile') },
   ];
 
+  const linkable = suggestions.data?.linkable ?? [];
+
   return (
     <div className="p-6">
+      {canWrite && linkable.length > 0 && (
+        <Card className="mb-4 border-warning/40 bg-warning/5 p-3">
+          <div className="mb-1 flex items-center gap-2 text-[13px] font-medium">
+            <Link2 size={14} className="text-warning" /> {t('people.unlinkedTitle')}
+          </div>
+          <p className="mb-2 text-xs text-muted-foreground">{t('people.unlinkedHint')}</p>
+          <div className="space-y-1">
+            {linkable.map((s) => (
+              <div key={s.employeeId} className="flex items-center gap-2 text-[13px]">
+                <span className="min-w-0 truncate font-medium">{s.employeeName}</span>
+                <span className="shrink-0 text-faint">↔</span>
+                <span className="min-w-0 truncate text-muted-foreground">{s.userName} · {s.email}</span>
+                <Button size="xs" variant="outline" className="ml-auto shrink-0" disabled={linkUser.isPending}
+                  onClick={() => linkUser.mutate(s)}>
+                  {t('people.linkAction')}
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-1.5">
           {filters.map((f) => {

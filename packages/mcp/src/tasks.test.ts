@@ -269,8 +269,60 @@ describe('opening a card', () => {
       customFields: { platform: 'linkedin', external_key: 'post-1' }, version: 4,
     });
     expect(card.links).toEqual([{ id: 'l1', url: 'https://news.example/ai', title: 'Trend source' }]);
-    expect(card.comments).toEqual([{ id: 'c1', authorId: 'u1', author: 'Roman', createdAt: 'z', editedAt: null, text: 'Shorten the hook' }]);
+    expect(card.comments).toEqual([{ id: 'c1', authorId: 'u1', author: 'Roman', createdAt: 'z', editedAt: null, text: 'Shorten the hook', reactions: {} }]);
     expect(card.assignees).toEqual([{ userId: 'u1', name: 'Roman' }]);
+  });
+});
+
+describe('images embedded in the body', () => {
+  const SRC = '/api/v1/files/att1/token123';
+  const withImage = () => fakeOrdi({ tasks: [{
+    id: 't1', number: 1, projectId: PROJECT.id, title: 'Broken calendar', statusId: 'st-idea',
+    priority: 'none', dueDate: null, labelIds: [], customFields: {}, version: 1,
+    description: { type: 'doc', content: [
+      { type: 'paragraph', content: [{ type: 'text', text: 'The holiday name is cut off:' }] },
+      { type: 'image', attrs: { src: SRC, alt: 'screenshot.png' } },
+      { type: 'paragraph', content: [{ type: 'text', text: 'Show the full name.' }] },
+    ] },
+  }] });
+
+  it('get_task shows the image as a fetchable markdown line, in place', async () => {
+    const client = await connect(withImage().client);
+    const card = body(await client.callTool({ name: 'get_task', arguments: { taskId: 't1' } }));
+    expect(card.text).toBe(`The holiday name is cut off:\n\n![screenshot.png](http://test${SRC})\n\nShow the full name.`);
+  });
+
+  it('a rewrite keeps the image and stores its path root-relative again', async () => {
+    const api = withImage();
+    const client = await connect(api.client);
+    const card = body(await client.callTool({ name: 'get_task', arguments: { taskId: 't1' } }));
+    await client.callTool({ name: 'update_task', arguments: {
+      taskId: 't1', text: card.text.replace('Show the full name.', 'Fixed.'), expectedVersion: 1,
+    } });
+    const stored = JSON.stringify(api.patches[0]!.body.description);
+    expect(stored).toContain(`"src":"${SRC}"`);
+    expect(stored).not.toContain('http://test');
+    const after = body(await client.callTool({ name: 'get_task', arguments: { taskId: 't1' } }));
+    expect(after.text).toBe(`The holiday name is cut off:\n\n![screenshot.png](http://test${SRC})\n\nFixed.`);
+  });
+
+  it('an upsert re-run over an image body is not mistaken for a hand edit', async () => {
+    const api = fakeOrdi();
+    const client = await connect(api.client);
+    const args = {
+      project: 'CONTENT', key: 'bug-1', title: 'Broken calendar', status: 'Idea',
+      text: `Cut off:\n\n![screenshot.png](http://test${SRC})`,
+    };
+    await client.callTool({ name: 'upsert_task', arguments: args });
+    expect(JSON.stringify(api.tasks[0]!.description)).toContain(`"src":"${SRC}"`);
+    const rerun = await client.callTool({ name: 'upsert_task', arguments: args });
+    expect(rerun.isError).toBeFalsy();
+    expect(api.tasks).toHaveLength(1);
+  });
+
+  it('an image line round-trips through the stored document', () => {
+    const text = 'Intro\n\n![shot](/api/v1/files/a/b)\n\nOutro';
+    expect(docToText(textToDoc(text))).toBe(text);
   });
 });
 

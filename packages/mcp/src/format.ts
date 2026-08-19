@@ -54,6 +54,29 @@ export function decodeEntities<T>(value: T): T {
   return value;
 }
 
+/**
+ * Embedded images travel through body text as the `![name](url)` lines
+ * docToText emits. A stored document holds a root-relative signed path
+ * (PRD §14.5) that only a browser on the instance origin can resolve, so a
+ * read rewrites the marker to an absolute url the agent can actually fetch,
+ * and a write strips that origin off again – the stored document must stay
+ * domain-independent. Only whole image markers are touched; ordinary text and
+ * links pass through unchanged.
+ */
+const IMAGE_MARKER = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
+
+export function absolutizeImageSrcs(text: string, origin: string): string {
+  return text.replace(IMAGE_MARKER, (marker, alt: string, src: string) => (
+    src.startsWith('/') && !src.startsWith('//') ? `![${alt}](${origin}${src})` : marker
+  ));
+}
+
+export function relativizeImageSrcs(text: string, origin: string): string {
+  return text.replace(IMAGE_MARKER, (marker, alt: string, src: string) => (
+    src.startsWith(`${origin}/`) ? `![${alt}](${src.slice(origin.length)})` : marker
+  ));
+}
+
 export interface TextOptions {
   /** Response keys to keep despite being scrubbed by default, e.g. `version`. */
   keep?: readonly string[];

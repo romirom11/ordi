@@ -24,7 +24,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { TASK_PRIORITIES, docToText, textToDoc } from '@ordi/shared';
 import { OrdiApiError, type OrdiClient } from './client';
-import { wrap } from './format';
+import { absolutizeImageSrcs, relativizeImageSrcs, wrap } from './format';
 
 type Row = Record<string, any>;
 
@@ -289,7 +289,7 @@ async function writeBody(args: WriteArgs, vocab: () => Promise<Vocab>): Promise<
 }
 
 const writeSchema = {
-  text: z.string().optional().describe('Full body as plain text; blank line = new paragraph. Replaces the whole body.'),
+  text: z.string().optional().describe('Full body as plain text; blank line = new paragraph. Replaces the whole body. An `![name](url)` line read from get_task stays an embedded image – keep such lines when rewriting.'),
   status: z.string().optional().describe('Status id, name ("Scheduled") or category (backlog|todo|in_progress|done|canceled)'),
   type: z.string().optional().describe('Task type id or name (see get_project_schema)'),
   priority: z.enum(TASK_PRIORITIES).optional(),
@@ -301,6 +301,12 @@ const writeSchema = {
 };
 
 export function registerTaskTools(server: McpServer, client: OrdiClient): void {
+  // Bodies cross the tool boundary with image markers resolved to fetchable
+  // urls, and come back relative before anything is stored or fingerprinted –
+  // fingerprints always compare the stored (relative) form.
+  const toAgent = (text: string): string => absolutizeImageSrcs(text, client.publicUrl);
+  const fromAgent = (text: string): string => relativizeImageSrcs(text, client.publicUrl);
+
   server.tool('get_project_schema', 'The writable structure of one project: its statuses, task types, task labels and task custom fields – everything create_task / update_task / list_tasks accept as a name. Takes a project key ("CONTENT") or id, so this is also how a project is looked up by key.', {
     project: z.string().describe('Project key (e.g. CONTENT) or id'),
   }, ({ project }) => wrap(async () => {
@@ -359,7 +365,7 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
     };
   }, VERSIONED));
 
-  server.tool('get_task', 'One task card in full: body text, calendar date, status, labels, custom fields, assignees, external links (sources, published permalink), comments and the version to send back with update_task.', {
+  server.tool('get_task', 'One task card in full: body text, calendar date, status, labels, custom fields, assignees, external links (sources, published permalink), comments and the version to send back with update_task. Images embedded in the body or comments appear as `![name](url)` lines in place – the url is signed and can be fetched without signing in.', {
     taskId: z.string(),
   }, ({ taskId }) => wrap(async () => {
     const task = await client.get<Row>(`/tasks/${taskId}?include=labels,assignees,links,comments`);
@@ -369,13 +375,14 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
     const labels = (task.labels as Row[] | undefined) ?? [];
     return {
       ...compact(task, vocab, labels.map((l) => l.id)),
-      text: task.description ? docToText(task.description) : '',
+      text: task.description ? toAgent(docToText(task.description)) : '',
       statusCategory: vocab.statuses.find((s) => s.id === task.statusId)?.category ?? null,
       assignees: ((task.assignees as Row[] | undefined) ?? []).map((a) => ({ userId: a.userId, name: a.name })),
       links: ((task.links as Row[] | undefined) ?? []).map((l) => ({ id: l.id, url: l.url, title: l.title })),
       comments: ((task.comments as Row[] | undefined) ?? []).map((c) => ({
         id: c.id, authorId: c.authorId, author: userName(c.authorId),
-        createdAt: c.createdAt, editedAt: c.editedAt, text: docToText(c.body),
+        createdAt: c.createdAt, editedAt: c.editedAt, text: toAgent(docToText(c.body)),
+        reactions: c.reactions ?? {},
       })),
       createdAt: task.createdAt,
     };
@@ -389,6 +396,7 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
     externalKey: z.string().optional().describe('Your own unique id for this item, stored in a custom field'),
     keyField: z.string().optional().describe(`Custom field key holding externalKey; defaults to ${DEFAULT_KEY_FIELD}`),
   }, ({ projectId, title, links, externalKey, keyField, ...args }) => wrap(async () => {
+    if (args.text !== undefined) args.text = fromAgent(args.text);
     const project = await resolveProjectId(client, projectId);
     const vocab = vocabLoader(client, project);
     const field = keyField ?? DEFAULT_KEY_FIELD;
@@ -432,6 +440,7 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
     addLinks: z.array(linkSchema).optional().describe('Links to append – sources, or the permalink of the published post. Already-present urls are skipped.'),
     expectedVersion: z.number().int().optional().describe('The version get_task returned; omit only for a blind write'),
   }, ({ taskId, addLinks, expectedVersion, ...args }) => wrap(async () => {
+    if (args.text !== undefined) args.text = fromAgent(args.text);
     const before = await client.get<Row>(`/tasks/${taskId}?include=links`);
     const vocab = vocabLoader(client, before.projectId);
     const body = await writeBody(args, vocab);
@@ -470,6 +479,7 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
     ifExists: z.enum(['update', 'skip']).optional().describe('What to do when the key is already there; defaults to update'),
     force: z.boolean().optional().describe('Overwrite even when the task was edited in ordi after the last upsert'),
   }, ({ project, key, title, links, keyField, ifExists, force, ...args }) => wrap(async () => {
+    if (args.text !== undefined) args.text = fromAgent(args.text);
     const projectId = await resolveProjectId(client, project);
     const vocab = vocabLoader(client, projectId);
     const field = keyField ?? DEFAULT_KEY_FIELD;

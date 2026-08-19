@@ -611,6 +611,7 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, canWrite, 
             collapsed: prefs.collapsed.includes(key) ? prefs.collapsed.filter((k) => k !== key) : [...prefs.collapsed, key],
           })}
           onAdd={(title, seed) => addTask.mutate({ title, seed })}
+          onMove={(taskId, statusId, version) => move.mutate({ taskId, statusId, version })}
         />
       ) : view === 'board' ? (
         <div className="min-w-0 flex-1 px-4 py-3">
@@ -693,12 +694,54 @@ function ProgressPill({ stats }: { stats: ChildStats }) {
 
 /* ---- List view (grouped, Linear-density rows) ---- */
 
-function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, resolveUsers, labelById, childStats, taskById, onOpen, onToggleCollapse, onAdd }: {
+/**
+ * The status icon in a row, made clickable (ORD-14): pick a status without
+ * opening the task. The right-click menu offered this already, but nothing
+ * suggested it exists – an icon that opens a picker on the same click that
+ * would otherwise open the card is the discoverable form.
+ */
+function RowStatusPicker({ task, statuses, current, canWrite, onMove }: {
+  task: Task; statuses: TaskStatus[]; current?: TaskStatus; canWrite: boolean;
+  onMove: (taskId: string, statusId: string, version?: number) => void;
+}) {
+  const t = useT();
+  const icon = <StatusIcon category={current?.category} color={current?.color} size={14} />;
+  if (!canWrite) return icon;
+  return (
+    <DropdownMenu
+      className="shrink-0"
+      trigger={
+        <span
+          role="button"
+          tabIndex={0}
+          aria-label={t('common.status')}
+          title={current?.name}
+          className="-m-1 grid h-6 w-6 cursor-pointer place-items-center rounded-md transition-colors duration-150 hover:bg-muted [&>svg]:block"
+        >
+          {icon}
+        </span>
+      }
+    >
+      <MenuLabel>{t('common.status')}</MenuLabel>
+      {statuses.map((s) => (
+        <MenuItem key={s.id} onSelect={() => { if (s.id !== task.statusId) onMove(task.id, s.id, task.version); }}>
+          <span className="flex items-center gap-2">
+            <StatusIcon category={s.category} color={s.color} size={14} /> {s.name}
+            {s.id === task.statusId && <span className="ml-auto pl-2 text-primary">✓</span>}
+          </span>
+        </MenuItem>
+      ))}
+    </DropdownMenu>
+  );
+}
+
+function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, resolveUsers, labelById, childStats, taskById, onOpen, onToggleCollapse, onAdd, onMove }: {
   projectId: string; projectKey?: string; statuses: TaskStatus[]; groups: TaskGroup[]; prefs: TaskViewPrefs;
   canWrite: boolean; resolveUsers: (ids?: string[]) => UserLite[];
   labelById: Map<string, LabelLite>; childStats: Map<string, ChildStats>; taskById: Map<string, Task>;
   onOpen: (tid: string, e?: OpenIntent) => void; onToggleCollapse: (key: string) => void;
   onAdd: (title: string, seed?: Record<string, unknown>) => void;
+  onMove: (taskId: string, statusId: string, version?: number) => void;
 }) {
   const t = useT();
   const qc = useQueryClient();
@@ -823,7 +866,15 @@ function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, re
                         {props.id && ref && (
                           <span className="hidden w-16 shrink-0 truncate font-mono text-[11px] text-faint sm:block">{ref}</span>
                         )}
-                        {props.status && <StatusIcon category={st?.category} color={st?.color} size={14} />}
+                        {props.status && (
+                          <RowStatusPicker
+                            task={task}
+                            statuses={statuses}
+                            current={st}
+                            canWrite={canWrite}
+                            onMove={onMove}
+                          />
+                        )}
                         <span className="flex min-w-0 items-center gap-1.5">
                           {task.blocked && (
                             <span title={t('projects.blocked')} className="shrink-0 text-warning"><Ban size={13} /></span>
