@@ -3,7 +3,7 @@ import { getDb, schema, eq, and, isNull, desc } from '@ordi/db';
 import { ulid } from 'ulid';
 import {
   taskInputSchema, taskUpdateSchema, taskMoveSchema, taskRelationSchema, taskLinkSchema,
-  bulkTaskUpdateSchema, commentInputSchema, labelInputSchema, labelPatchSchema, cycleInputSchema, cycleCompleteSchema,
+  bulkTaskUpdateSchema, commentInputSchema, reactionToggleSchema, labelInputSchema, labelPatchSchema, cycleInputSchema, cycleCompleteSchema,
   taskTemplateInputSchema, recurringTaskInputSchema, intakeAcceptSchema, intakeDeclineSchema, intakeSettingsSchema,
   LABEL_SCOPES,
   type CustomFieldFilter, type LabelScope,
@@ -127,6 +127,11 @@ export function tasksRoutes() {
   });
 
   app.delete('/comments/:id', async (c) => c.json(await svc.deleteComment(currentActor(c), c.req.param('id'))));
+
+  app.post('/comments/:id/reactions', async (c) => {
+    const body = reactionToggleSchema.parse(await c.req.json());
+    return c.json(await svc.toggleCommentReaction(currentActor(c), c.req.param('id'), body.emoji));
+  });
 
   // ── Labels (workspace-level, PRD §8.3) ──
   // Scoped vocabularies in one table: `?scope=task|project|lead` picks one, no

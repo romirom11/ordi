@@ -382,6 +382,7 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
       comments: ((task.comments as Row[] | undefined) ?? []).map((c) => ({
         id: c.id, authorId: c.authorId, author: userName(c.authorId),
         createdAt: c.createdAt, editedAt: c.editedAt, text: toAgent(docToText(c.body)),
+        reactions: c.reactions ?? {},
       })),
       createdAt: task.createdAt,
     };

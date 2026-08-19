@@ -269,7 +269,7 @@ describe('opening a card', () => {
       customFields: { platform: 'linkedin', external_key: 'post-1' }, version: 4,
     });
     expect(card.links).toEqual([{ id: 'l1', url: 'https://news.example/ai', title: 'Trend source' }]);
-    expect(card.comments).toEqual([{ id: 'c1', authorId: 'u1', author: 'Roman', createdAt: 'z', editedAt: null, text: 'Shorten the hook' }]);
+    expect(card.comments).toEqual([{ id: 'c1', authorId: 'u1', author: 'Roman', createdAt: 'z', editedAt: null, text: 'Shorten the hook', reactions: {} }]);
     expect(card.assignees).toEqual([{ userId: 'u1', name: 'Roman' }]);
   });
 });
