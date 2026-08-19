@@ -3,6 +3,28 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.28.0
+
+- **One name per person**: `/users/lookup` prefers the linked HR card's full
+  name; card writes sync `users.name` and profile renames write back into
+  the card; migration 0034 backfills existing links. Accepting an invite
+  links the waiting card or creates one, a card created for an existing
+  account's email links itself, and unlinked card ↔ account pairs surface
+  as a one-click banner in Employees. The questionnaire and leave
+  self-service moved from the profile to the person's own employee page.
+- **Agents see embedded images**: task/note/KB bodies cross MCP with
+  `![name](url)` image lines that survive the read-edit-write round trip;
+  the urls are signed, fetchable without sign-in, and resolved against the
+  instance origin (`publicUrl` for the HTTP-served MCP).
+- **Labels are editable**: rename, recolor and delete in the picker, behind
+  `settings.manage`; `PATCH /labels/:id` in the API.
+- **Status changes from the list**: the status icon on a task row is a
+  picker – no trip through the task page.
+- **Comment reactions**: Slack-style emoji toggles on task comments, with
+  chips, a quick palette and the map in MCP `get_task`.
+- **HR calendar legibility**: holiday chips wrap to two lines and a
+  day-click popover lists the full day – holidays, birthdays, absences.
+
 ## v1.27.0
 
 - **Profile photos everywhere a person is shown**: `/users/lookup` keeps
