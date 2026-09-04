@@ -618,6 +618,69 @@ export async function updateTask(actor: Actor, id: string, input: any) {
   return { ...task, ref };
 }
 
+// ── Hand-off when someone leaves (ORD-20) ──
+
+/** Statuses that still mean work to do; done/canceled tasks stay with whoever closed them. */
+const OPEN_CATEGORIES = ['backlog', 'todo', 'in_progress'];
+
+/**
+ * Open tasks a user is assigned to, across every project. Not membership
+ * gated: the caller is an admin deactivating that user (users.manage), who
+ * has to see the whole picture even for projects they are not a member of.
+ */
+export async function openTasksAssignedTo(userId: string) {
+  const { db } = getDb();
+  const rows = await db.select({
+    id: tasks.id, projectId: tasks.projectId, number: tasks.number, title: tasks.title, key: projects.key,
+  })
+    .from(tasks)
+    .innerJoin(taskAssignees, eq(taskAssignees.taskId, tasks.id))
+    .innerJoin(taskStatuses, eq(taskStatuses.id, tasks.statusId))
+    .innerJoin(projects, eq(projects.id, tasks.projectId))
+    .where(and(
+      eq(taskAssignees.userId, userId),
+      isNull(tasks.deletedAt),
+      inArray(taskStatuses.category, OPEN_CATEGORIES),
+    ))
+    .orderBy(desc(tasks.id));
+  return rows.map((r) => ({ id: r.id, projectId: r.projectId, title: r.title, ref: refOf(r.key, r.number) }));
+}
+
+/**
+ * Take a leaving person off their open work. Every open task assigned to
+ * them loses that assignee and, when a successor is named, gains the
+ * successor (a task the successor already had stays as it is). Closed tasks
+ * keep their history. Each task gets a `reassigned` activity row, so the
+ * hand-off reads on the task itself, not only in the user's audit trail.
+ */
+export async function handOffOpenTasks(actor: Actor, fromUserId: string, toUserId: string | null) {
+  const { db } = getDb();
+  const open = await openTasksAssignedTo(fromUserId);
+  if (!open.length) return { count: 0, taskIds: [] as string[] };
+  const ids = open.map((t) => t.id);
+  await db.transaction(async (tx) => {
+    await tx.delete(taskAssignees).where(and(inArray(taskAssignees.taskId, ids), eq(taskAssignees.userId, fromUserId)));
+    if (toUserId) {
+      await tx.insert(taskAssignees).values(ids.map((taskId) => ({ taskId, userId: toUserId }))).onConflictDoNothing();
+    }
+    await tx.update(tasks).set({ updatedAt: new Date() }).where(inArray(tasks.id, ids));
+    for (const t of open) {
+      await writeActivity(tx, {
+        entityType: 'task', entityId: t.id, action: 'reassigned',
+        before: { assigneeId: fromUserId }, after: { assigneeId: toUserId },
+        actorId: actor.userId, actorType: actor.actorType,
+      });
+    }
+  });
+  if (toUserId) {
+    // The successor learns about their new work the same way any assignee does.
+    for (const t of open) {
+      await emit({ type: 'task.assigned', aggregateType: 'task', aggregateId: t.id, payload: { assigneeIds: [toUserId], ref: t.ref, taskId: t.id, projectId: t.projectId }, actorId: actor.userId, actorType: actor.actorType });
+    }
+  }
+  return { count: ids.length, taskIds: ids };
+}
+
 export async function softDeleteTask(actor: Actor, id: string) {
   const { db } = getDb();
   const task = await loadTask(id);

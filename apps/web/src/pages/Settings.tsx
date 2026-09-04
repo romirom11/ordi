@@ -65,6 +65,13 @@ extendDict({
     'settings.deactivated': 'Deactivated',
     'settings.userDeactivated': 'User deactivated',
     'settings.userReactivated': 'User reactivated',
+    'settings.deactivateTitle': 'Deactivate user',
+    'settings.deactivateBody': 'They will be signed out everywhere and their API tokens revoked. Open tasks assigned to them need a new owner.',
+    'settings.openTasksNone': 'No open tasks assigned – nothing to hand over.',
+    'settings.openTasksCount': 'Open tasks assigned',
+    'settings.handOffTo': 'Hand open tasks to',
+    'settings.leaveUnassigned': 'Leave unassigned',
+    'settings.handedOff': 'Tasks handed over',
     'settings.roleUpdated': 'Role updated',
     'settings.inviteSent': 'Invitation created',
     'settings.inviteCopyHint': 'Share this link so they can set up their account.',
@@ -129,6 +136,13 @@ extendDict({
     'settings.deactivated': 'Деактивовано',
     'settings.userDeactivated': 'Користувача деактивовано',
     'settings.userReactivated': 'Користувача активовано',
+    'settings.deactivateTitle': 'Деактивувати користувача',
+    'settings.deactivateBody': 'Його сесії завершаться, API-токени буде відкликано. Відкриті задачі, призначені на нього, потрібно комусь передати.',
+    'settings.openTasksNone': 'Відкритих задач немає, передавати нічого.',
+    'settings.openTasksCount': 'Відкритих задач',
+    'settings.handOffTo': 'Передати відкриті задачі',
+    'settings.leaveUnassigned': 'Залишити без виконавця',
+    'settings.handedOff': 'Задачі передано',
     'settings.roleUpdated': 'Роль оновлено',
     'settings.inviteSent': 'Запрошення створено',
     'settings.inviteCopyHint': 'Надішліть це посилання, щоб вони налаштували обліковий запис.',
@@ -537,6 +551,74 @@ interface UserRow { id: string; name?: string | null; email?: string | null; rol
 interface PendingInvite { id: string; email: string; name?: string | null; roleId?: string | null; expiresAt?: string; inviteUrl: string }
 interface Role { id: string; key?: string; name: string; isSystem?: boolean; permissions?: string[]; userCount?: number }
 
+/**
+ * "Who takes over?" before a user is switched off (ORD-20). Lists the open
+ * tasks they still hold and offers a successor; the admin can also leave
+ * them unassigned, but never keep them on someone who cannot sign in.
+ */
+function DeactivateUserDialog({ user, candidates, pending, onClose, onConfirm }: {
+  user: UserRow | null; candidates: UserRow[]; pending: boolean;
+  onClose: () => void; onConfirm: (reassignTo: string | null) => void;
+}) {
+  const t = useT();
+  const [reassignTo, setReassignTo] = useState('');
+  useEffect(() => { setReassignTo(''); }, [user?.id]);
+  const open = useQuery({
+    queryKey: ['user-open-tasks', user?.id],
+    queryFn: () => api.get<{ count: number; data: { id: string; ref: string; title: string }[] }>(`/users/${user!.id}/open-tasks`),
+    enabled: !!user,
+  });
+  const count = open.data?.count ?? 0;
+  const sample = open.data?.data ?? [];
+
+  return (
+    <Dialog open={!!user} onClose={onClose} title={t('settings.deactivateTitle')} width={440}>
+      <div className="space-y-3 px-4 pb-4 pt-1">
+        <div className="flex items-center gap-2">
+          <Avatar name={user?.name} src={user?.avatar} size={24} />
+          <div className="min-w-0">
+            <div className="truncate text-[13px] font-medium">{user?.name ?? '–'}</div>
+            <div className="truncate text-xs text-faint">{user?.email}</div>
+          </div>
+        </div>
+        <p className="text-[13px] text-muted-foreground">{t('settings.deactivateBody')}</p>
+
+        {open.isLoading ? (
+          <Skeleton className="h-16 w-full" />
+        ) : count === 0 ? (
+          <p className="text-[13px] text-muted-foreground">{t('settings.openTasksNone')}</p>
+        ) : (
+          <>
+            <div className="rounded-md border border-border bg-muted/40 px-3 py-2">
+              <div className="text-xs font-medium text-muted-foreground">{t('settings.openTasksCount')}: <span className="tabular-nums text-foreground">{count}</span></div>
+              <ul className="mt-1 max-h-32 space-y-0.5 overflow-y-auto text-[13px]">
+                {sample.map((task) => (
+                  <li key={task.id} className="truncate"><span className="font-mono text-xs text-faint">{task.ref}</span> {task.title}</li>
+                ))}
+                {count > sample.length && <li className="text-xs text-faint">…</li>}
+              </ul>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">{t('settings.handOffTo')}</label>
+              <Select value={reassignTo} onChange={(e) => setReassignTo(e.target.value)} className="w-full">
+                <option value="">{t('settings.leaveUnassigned')}</option>
+                {candidates.map((u) => <option key={u.id} value={u.id}>{u.name ?? u.email ?? u.id}</option>)}
+              </Select>
+            </div>
+          </>
+        )}
+
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="ghost" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button type="button" variant="destructive" size="sm" disabled={pending || open.isLoading} onClick={() => onConfirm(reassignTo || null)}>
+            {pending && <Spinner className="h-3 w-3" />} {t('settings.deactivate')}
+          </Button>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
 function UsersPanel() {
   const t = useT();
   const qc = useQueryClient();
@@ -552,9 +634,20 @@ function UsersPanel() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); qc.invalidateQueries({ queryKey: ['roles'] }); toast(t('settings.roleUpdated')); },
     onError: () => toast.error(t('settings.saveFailed')),
   });
+  // Deactivation goes through a dialog (ORD-20): open tasks the person holds
+  // are handed to a successor, or left unassigned, never orphaned on them.
+  const [deactivating, setDeactivating] = useState<UserRow | null>(null);
   const setActive = useMutation({
-    mutationFn: ({ id, active }: { id: string; active: boolean }) => api.post(`/users/${id}/${active ? 'reactivate' : 'deactivate'}`),
-    onSuccess: (_r, v) => { qc.invalidateQueries({ queryKey: ['users'] }); toast(v.active ? t('settings.userReactivated') : t('settings.userDeactivated')); },
+    mutationFn: ({ id, active, reassignTo }: { id: string; active: boolean; reassignTo?: string | null }) =>
+      api.post<{ handedOffTasks?: number }>(`/users/${id}/${active ? 'reactivate' : 'deactivate'}`, active ? undefined : { reassignTo: reassignTo ?? null }),
+    onSuccess: (r, v) => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+      qc.invalidateQueries({ queryKey: ['tasks'] });
+      qc.invalidateQueries({ queryKey: ['me-tasks'] });
+      setDeactivating(null);
+      if (v.active) toast(t('settings.userReactivated'));
+      else toast(r?.handedOffTasks ? `${t('settings.userDeactivated')} · ${t('settings.handedOff')}: ${r.handedOffTasks}` : t('settings.userDeactivated'));
+    },
     onError: () => toast.error(t('settings.saveFailed')),
   });
 
@@ -653,7 +746,7 @@ function UsersPanel() {
                     {u.actorType !== 'agent' && (
                       <MenuItem icon={<KeyRound size={14} />} onSelect={() => resetPassword.mutate(u)}>{t('settings.resetPassword')}</MenuItem>
                     )}
-                    <MenuItem icon={<Trash2 size={14} />} danger onSelect={() => setActive.mutate({ id: u.id, active: false })}>{t('settings.deactivate')}</MenuItem>
+                    <MenuItem icon={<Trash2 size={14} />} danger onSelect={() => setDeactivating(u)}>{t('settings.deactivate')}</MenuItem>
                   </>
                 )}
               </DropdownMenu>
@@ -663,6 +756,13 @@ function UsersPanel() {
       )}
 
       <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} roles={roleList} />
+      <DeactivateUserDialog
+        user={deactivating}
+        candidates={rows.filter((u) => u.isActive !== false && u.id !== deactivating?.id)}
+        pending={setActive.isPending}
+        onClose={() => setDeactivating(null)}
+        onConfirm={(reassignTo) => deactivating && setActive.mutate({ id: deactivating.id, active: false, reassignTo })}
+      />
 
       <Dialog open={!!resetLink} onClose={() => setResetLink(null)} title={t('settings.resetPassword')} width={420}>
         <div className="space-y-3 p-4">
