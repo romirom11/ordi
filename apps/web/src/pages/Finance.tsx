@@ -10,6 +10,7 @@ import { Plus, Trash2, Wallet, AlertTriangle, CheckCircle2, Receipt, FileStack, 
 import { useT, extendDict } from '../lib/i18n';
 import { usePersistedState, oneOfPref, stringPref } from '../lib/prefs';
 import { byName } from '../lib/queries';
+import { CURRENCIES } from '../components/crm/shared';
 import { RecurringExpensesSection } from '../components/finance/subscriptions';
 import { SortHeader, sortRows, useStatusRank, useTableSort } from '../components/tableSort';
 import { TransactionsTab, AddIncomeDialog } from '../components/finance/ledger';
@@ -603,12 +604,18 @@ function ExpensesView() {
   const qc = useQueryClient();
   const can = useCan();
   const expenses = useQuery({ queryKey: ['expenses'], queryFn: () => api.get<{ data: Expense[] }>('/expenses') });
+  // The form's currency starts at the workspace default (ORD-24): it used to
+  // be a free-text box stuck on USD, so every UAH expense landed in dollars.
+  const ws = useQuery({ queryKey: ['workspace-settings'], queryFn: () => api.get<{ defaultCurrency?: string | null }>('/settings/workspace') });
+  const defaultCurrency = ws.data?.defaultCurrency || 'USD';
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ description: '', amount: '', currency: 'USD', date: '', category: '' });
+  const blankForm = (currency: string) => ({ description: '', amount: '', currency, date: '', category: '' });
+  const [form, setForm] = useState(() => blankForm(defaultCurrency));
+  const openForm = () => { setForm(blankForm(defaultCurrency)); setShowForm(true); };
   const create = useMutation({
     mutationFn: () => api.post('/expenses', { description: form.description, amount: Number(form.amount), currency: form.currency, date: form.date || undefined, category: form.category || undefined }),
     onSuccess: () => {
-      setForm({ description: '', amount: '', currency: 'USD', date: '', category: '' });
+      setForm(blankForm(defaultCurrency));
       setShowForm(false);
       qc.invalidateQueries({ queryKey: ['expenses'] });
       toast(t('common.saved'));
@@ -632,7 +639,7 @@ function ExpensesView() {
             <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">{rows.length}</span>
           )}
         </h2>
-        {can('finance.write') && <Button size="sm" variant="outline" onClick={() => setShowForm(true)}><Plus size={14} /> {t('finance.newExpense')}</Button>}
+        {can('finance.write') && <Button size="sm" variant="outline" onClick={openForm}><Plus size={14} /> {t('finance.newExpense')}</Button>}
       </div>
       {expenses.isLoading ? (
         <div className="overflow-hidden rounded-xl border border-border">
@@ -643,7 +650,7 @@ function ExpensesView() {
           ))}
         </div>
       ) : rows.length === 0 ? (
-        <EmptyState icon={<Receipt size={20} />} title={t('finance.noExpenses')} hint={t('finance.noExpensesHint')} action={can('finance.write') ? <Button size="sm" variant="outline" onClick={() => setShowForm(true)}><Plus size={13} /> {t('finance.newExpense')}</Button> : undefined} />
+        <EmptyState icon={<Receipt size={20} />} title={t('finance.noExpenses')} hint={t('finance.noExpensesHint')} action={can('finance.write') ? <Button size="sm" variant="outline" onClick={openForm}><Plus size={13} /> {t('finance.newExpense')}</Button> : undefined} />
       ) : (
         <div className="overflow-hidden rounded-xl border border-border bg-card">
           {rows.map((e, i) => (
@@ -676,7 +683,9 @@ function ExpensesView() {
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">{t('common.currency')}</label>
-                <Input value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))} />
+                <Select value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))} className="w-full">
+                  {(CURRENCIES.includes(form.currency) ? CURRENCIES : [form.currency, ...CURRENCIES]).map((c) => <option key={c} value={c}>{c}</option>)}
+                </Select>
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">{t('common.date')}</label>
