@@ -93,11 +93,23 @@ export interface GitRunner {
   (args: string[], opts: { cwd: string; repo?: RepoBinding | null }): Promise<{ stdout: string; stderr: string }>;
 }
 
+/**
+ * HOME for git is a scratch directory outside every checkout and the global
+ * and system config are switched off: a `.gitconfig` in the repository
+ * (shipped, or written by the agent) must never steer the platform's own
+ * push, which carries the installation token.
+ */
+const gitHome = join(env.agentWorkDir, '.git-home');
+
 const defaultGit: GitRunner = async (args, opts) => {
+  await mkdir(gitHome, { recursive: true });
   const full = opts.repo ? ['-c', `http.extraheader=${authHeader(opts.repo)}`, ...args] : args;
   const { stdout, stderr } = await execFileAsync('git', full, {
     cwd: opts.cwd, maxBuffer: 16 * 1024 * 1024,
-    env: { PATH: process.env.PATH ?? '', HOME: opts.cwd, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'echo', LANG: 'C' },
+    env: {
+      PATH: process.env.PATH ?? '', HOME: gitHome, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1',
+      GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'echo', LANG: 'C',
+    },
   });
   return { stdout, stderr };
 };

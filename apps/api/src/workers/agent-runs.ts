@@ -53,6 +53,8 @@ export async function agentActor(agentUserId: string): Promise<Actor> {
 
 async function heartbeat(runtimeAvailable: boolean): Promise<void> {
   const { db } = getDb();
+  // Rows are keyed by host:pid; a restarted process leaves its old row behind.
+  await db.delete(agentWorkers).where(sql`${agentWorkers.lastSeenAt} < now() - interval '10 minutes'`);
   await db.insert(agentWorkers).values({
     id: workerId, concurrency: env.agentWorkerConcurrency, running: inFlight.size, runtimeAvailable, version: SERVER_VERSION,
   }).onConflictDoUpdate({
@@ -127,7 +129,12 @@ export async function executeRun(claimed: RunRow): Promise<void> {
   inFlight.add(runId);
   let ws: Workspace | null = null;
   let token: string | null = null;
-  const configDir = join(runDir(runId), '.harness');
+  // Outside the checkout: the harness keeps session transcripts under its
+  // HOME, and nothing of that may end up in the agent's commits.
+  const configDir = join(env.agentWorkDir, `${runId}.harness`);
+  // Liveness from claim to finish: a slow clone or push must not look like a
+  // dead worker to requeueStaleRuns.
+  const liveness = setInterval(() => { void touchRun(runId).catch(() => {}); }, 30_000);
   try {
     const setup = await loadSetup(claimed);
     const { profile, agent, task, project } = setup;
@@ -173,7 +180,6 @@ export async function executeRun(claimed: RunRow): Promise<void> {
     const timer = setTimeout(() => controller.abort(new Error('timeout')), profile.maxRunMinutes * 60_000);
     const cancelPoll = setInterval(async () => {
       if (await cancelRequested(runId).catch(() => false)) controller.abort(new Error('cancelled'));
-      await touchRun(runId).catch(() => {});
     }, 5_000);
 
     let outcome: RuntimeOutcome | null = null;
@@ -198,7 +204,7 @@ export async function executeRun(claimed: RunRow): Promise<void> {
               case 'assistant': if (event.text || event.toolUses.length) await recordRunEvent(runId, 'assistant', { text: event.text.slice(0, 8000), toolUses: event.toolUses.map((t) => ({ id: t.id, name: t.name })) }); break;
               case 'tool_use': await recordRunEvent(runId, 'tool_use', { toolUseId: event.toolUseId, name: event.name, input: truncate(event.input) }); break;
               case 'tool_result': await recordRunEvent(runId, 'tool_result', { toolUseId: event.toolUseId, text: event.text.slice(0, 2000), isError: event.isError }); break;
-              case 'rate_limit': await recordRunEvent(runId, 'rate_limit', { status: event.status, resetsAt: event.resetsAt, limitType: event.limitType }); break;
+              case 'rate_limit': await recordRunEvent(runId, 'rate_limit', { status: event.status, resetsAt: epochToIso(event.resetsAt), limitType: event.limitType }); break;
               case 'log': await recordRunEvent(runId, 'log', { message: event.message }); break;
             }
           },
@@ -248,6 +254,8 @@ export async function executeRun(claimed: RunRow): Promise<void> {
       const question = outcome.report?.question ?? outcome.report?.summary ?? outcome.message ?? 'I need more information to continue.';
       await postComment(actor, task.id, `I need input before I can continue:\n\n${question}`).catch(() => {});
       await finishRun(runId, { status: 'needs_input', summary: outcome.report?.summary ?? null, sessionId: outcome.sessionId, branch: ws.branch, usage });
+      // A reply that arrived while we were still working is the answer.
+      await queueFollowUp(agent.id, task.id, project.id, runId, started.run.startedAt, outcome.sessionId);
       return;
     }
 
@@ -278,18 +286,13 @@ export async function executeRun(claimed: RunRow): Promise<void> {
     await finishRun(runId, { status: 'succeeded', summary, sessionId: outcome.sessionId, branch: ws.branch, prUrl, usage });
 
     // R13/R30: a human wrote while we worked – continue in a follow-up.
-    const followUp = await newestHumanCommentSince(task.id, started.run.startedAt, agent.id);
-    if (followUp) {
-      await queueRun({
-        agentUserId: agent.id, taskId: task.id, projectId: project.id, trigger: 'comment', requestedBy: followUp.authorId,
-        commentId: followUp.id, parentRunId: runId, sessionId: outcome.sessionId,
-      });
-    }
+    await queueFollowUp(agent.id, task.id, project.id, runId, started.run.startedAt, outcome.sessionId);
   } catch (e) {
     logger.error({ err: e, runId }, 'agent run crashed');
     await recordRunEvent(runId, 'error', { message: (e as Error).message }).catch(() => {});
     await finishRun(runId, { status: 'failed', error: (e as Error).message }).catch(() => {});
   } finally {
+    clearInterval(liveness);
     inFlight.delete(runId);
     forgetRunSecrets(runId);
     forgetRunScope(runId);
@@ -297,6 +300,22 @@ export async function executeRun(claimed: RunRow): Promise<void> {
     await rm(configDir, { recursive: true, force: true }).catch(() => {});
     await cleanupWorkspace(runId).catch(() => {});
   }
+}
+
+/** R13/R30: a human comment written during the run becomes the next run's prompt. */
+async function queueFollowUp(agentUserId: string, taskId: string, projectId: string, parentRunId: string, since: Date | null, sessionId: string | null): Promise<void> {
+  const followUp = await newestHumanCommentSince(taskId, since, agentUserId);
+  if (!followUp) return;
+  await queueRun({
+    agentUserId, taskId, projectId, trigger: sessionId ? 'comment' : 'assigned', requestedBy: followUp.authorId,
+    commentId: followUp.id, parentRunId, sessionId,
+  });
+}
+
+/** The SDK reports reset times in epoch seconds; the log wants an instant it can format. */
+function epochToIso(value: number | null): string | null {
+  if (!value) return null;
+  return new Date(value < 1e12 ? value * 1000 : value).toISOString();
 }
 
 function truncate(value: unknown): unknown {

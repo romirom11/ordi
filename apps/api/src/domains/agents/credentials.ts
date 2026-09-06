@@ -125,6 +125,8 @@ export async function updateCredential(actor: Actor, id: string, input: {
     patch.connectedAt = new Date();
   }
   if (input.slot !== undefined) {
+    const willBeActive = input.secret !== undefined || row.status === 'active';
+    if (input.slot && !willBeActive) throw err.domain('Only an active credential can be the primary or fallback; rotate it first');
     if (input.slot) await vacateSlot(input.slot, id);
     patch.slot = input.slot;
   }
@@ -166,20 +168,41 @@ export async function loadRuntimeCredential(id: string): Promise<(RuntimeCredent
  * workspace primary, then the profile fallback, the workspace fallback and the
  * env key. Only active, unexpired ones are returned.
  */
-export async function resolveCredentialChain(profile: { credentialId: string | null; fallbackCredentialId: string | null }): Promise<string[]> {
+export interface CredentialSlots {
+  primary: string | null;
+  fallback: string | null;
+  /** Ids of every active, unexpired credential (plus the env key when set). */
+  usable: Set<string>;
+}
+
+/** The workspace's slot assignment and the set of usable credentials, in one query. */
+export async function loadCredentialSlots(now = new Date()): Promise<CredentialSlots> {
   const { db } = getDb();
-  const slots = await db.select({ id: agentCredentials.id, slot: agentCredentials.slot })
+  const rows = await db.select({ id: agentCredentials.id, slot: agentCredentials.slot, expiresAt: agentCredentials.expiresAt })
     .from(agentCredentials)
     .where(and(eq(agentCredentials.status, 'active'), isNull(agentCredentials.revokedAt)));
-  const primary = slots.find((s) => s.slot === 'primary')?.id ?? null;
-  const fallback = slots.find((s) => s.slot === 'fallback')?.id ?? null;
-  const order = [profile.credentialId, primary, profile.fallbackCredentialId, fallback, env.anthropicApiKey ? ENV_CREDENTIAL_ID : null];
+  const live = rows.filter((r) => !r.expiresAt || r.expiresAt > now);
+  const usable = new Set(live.map((r) => r.id));
+  if (env.anthropicApiKey) usable.add(ENV_CREDENTIAL_ID);
+  return {
+    primary: live.find((r) => r.slot === 'primary')?.id ?? null,
+    fallback: live.find((r) => r.slot === 'fallback')?.id ?? null,
+    usable,
+  };
+}
+
+export async function resolveCredentialChain(
+  profile: { credentialId: string | null; fallbackCredentialId: string | null },
+  slots?: CredentialSlots,
+): Promise<string[]> {
+  const s = slots ?? await loadCredentialSlots();
+  const order = [profile.credentialId, s.primary, profile.fallbackCredentialId, s.fallback, env.anthropicApiKey ? ENV_CREDENTIAL_ID : null];
   const seen = new Set<string>();
   const out: string[] = [];
   for (const id of order) {
-    if (!id || seen.has(id)) continue;
+    if (!id || seen.has(id) || !s.usable.has(id)) continue;
     seen.add(id);
-    if (await loadRuntimeCredential(id)) out.push(id);
+    out.push(id);
   }
   return out;
 }

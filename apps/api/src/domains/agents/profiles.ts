@@ -12,7 +12,7 @@ import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { assertVersion } from '../../core/locking';
-import { resolveCredentialChain } from './credentials';
+import { loadCredentialSlots, resolveCredentialChain } from './credentials';
 
 const { users, roles, agentProfiles, agentConnectors, mcpConnectors, projectMembers } = schema;
 
@@ -45,42 +45,54 @@ export interface AgentView {
   updatedAt: string;
 }
 
-async function loadView(userId: string): Promise<AgentView> {
+type AgentRow = { user: typeof users.$inferSelect; profile: typeof agentProfiles.$inferSelect; roleName: string | null };
+
+/** Batched: one query each for rows, grants and memberships, whatever the count. */
+async function loadViews(userIds: string[] | null): Promise<AgentView[]> {
   const { db } = getDb();
-  const [row] = await db.select({
-    user: users, profile: agentProfiles, roleName: roles.name,
-  }).from(users)
+  const rows: AgentRow[] = await db.select({ user: users, profile: agentProfiles, roleName: roles.name }).from(users)
     .innerJoin(agentProfiles, eq(agentProfiles.userId, users.id))
     .leftJoin(roles, eq(roles.id, users.roleId))
-    .where(eq(users.id, userId));
-  if (!row) throw err.notFound('Agent not found');
-  const [grants, memberships, chain] = await Promise.all([
-    db.select({ connectorId: agentConnectors.connectorId }).from(agentConnectors).where(eq(agentConnectors.agentUserId, userId)),
-    db.select({ projectId: projectMembers.projectId }).from(projectMembers).where(eq(projectMembers.userId, userId)),
-    resolveCredentialChain(row.profile),
+    .where(userIds ? inArray(users.id, userIds) : undefined)
+    .orderBy(agentProfiles.createdAt);
+  if (!rows.length) return [];
+  const ids = rows.map((r) => r.user.id);
+  const [grants, memberships, slots] = await Promise.all([
+    db.select({ agentUserId: agentConnectors.agentUserId, connectorId: agentConnectors.connectorId }).from(agentConnectors).where(inArray(agentConnectors.agentUserId, ids)),
+    db.select({ userId: projectMembers.userId, projectId: projectMembers.projectId }).from(projectMembers).where(inArray(projectMembers.userId, ids)),
+    loadCredentialSlots(),
   ]);
-  const p = row.profile;
-  return {
-    id: row.user.id, name: row.user.name, email: row.user.email, avatar: row.user.avatar,
-    roleId: row.user.roleId, roleName: row.roleName ?? '', isActive: row.user.isActive,
-    runtime: p.runtime, model: p.model, instructions: p.instructions,
-    completionCategory: p.completionCategory, assignPolicy: p.assignPolicy,
-    maxRunMinutes: p.maxRunMinutes, maxTurns: p.maxTurns,
-    maxBudgetUsd: p.maxBudgetUsd != null ? Number(p.maxBudgetUsd) : null,
-    concurrency: p.concurrency, credentialId: p.credentialId, fallbackCredentialId: p.fallbackCredentialId,
-    enabled: p.enabled,
-    connectorIds: grants.map((g) => g.connectorId),
-    projectIds: memberships.map((m) => m.projectId),
-    dispatchable: p.enabled && row.user.isActive && chain.length > 0,
-    version: p.version,
-    createdAt: p.createdAt.toISOString(), updatedAt: p.updatedAt.toISOString(),
-  };
+  const views: AgentView[] = [];
+  for (const row of rows) {
+    const p = row.profile;
+    const chain = await resolveCredentialChain(p, slots);
+    views.push({
+      id: row.user.id, name: row.user.name, email: row.user.email, avatar: row.user.avatar,
+      roleId: row.user.roleId, roleName: row.roleName ?? '', isActive: row.user.isActive,
+      runtime: p.runtime, model: p.model, instructions: p.instructions,
+      completionCategory: p.completionCategory, assignPolicy: p.assignPolicy,
+      maxRunMinutes: p.maxRunMinutes, maxTurns: p.maxTurns,
+      maxBudgetUsd: p.maxBudgetUsd != null ? Number(p.maxBudgetUsd) : null,
+      concurrency: p.concurrency, credentialId: p.credentialId, fallbackCredentialId: p.fallbackCredentialId,
+      enabled: p.enabled,
+      connectorIds: grants.filter((g) => g.agentUserId === row.user.id).map((g) => g.connectorId),
+      projectIds: memberships.filter((m) => m.userId === row.user.id).map((m) => m.projectId),
+      dispatchable: p.enabled && row.user.isActive && chain.length > 0,
+      version: p.version,
+      createdAt: p.createdAt.toISOString(), updatedAt: p.updatedAt.toISOString(),
+    });
+  }
+  return views;
+}
+
+async function loadView(userId: string): Promise<AgentView> {
+  const [view] = await loadViews([userId]);
+  if (!view) throw err.notFound('Agent not found');
+  return view;
 }
 
 export async function listAgents(): Promise<AgentView[]> {
-  const { db } = getDb();
-  const ids = await db.select({ userId: agentProfiles.userId }).from(agentProfiles).orderBy(agentProfiles.createdAt);
-  return Promise.all(ids.map((r) => loadView(r.userId)));
+  return loadViews(null);
 }
 
 export async function getAgent(userId: string): Promise<AgentView> {

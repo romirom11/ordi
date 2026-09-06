@@ -496,8 +496,10 @@ const agents: Consumer = {
           .from(schema.agentRuns)
           .where(and(eq(schema.agentRuns.taskId, p.taskId), eq(schema.agentRuns.agentUserId, agentUserId)))
           .orderBy(desc(schema.agentRuns.createdAt)).limit(1);
+        // Without a session to resume there is nothing to follow up on: the
+        // run gets the full brief, with the comment among the others.
         await queueRun({
-          agentUserId, taskId: p.taskId, projectId: p.projectId, trigger: 'comment',
+          agentUserId, taskId: p.taskId, projectId: p.projectId, trigger: last?.sessionId ? 'comment' : 'assigned',
           requestedBy: ev.actorId ?? null, commentId: p.commentId ?? ev.aggregateId, sessionId: last?.sessionId ?? null,
           actorType: ev.actorType ?? 'user',
         });

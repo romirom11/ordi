@@ -51,6 +51,23 @@ export function forgetRunScope(runId: string): void {
 }
 
 /**
+ * The project the event belongs to decides who may see it on the stream.
+ * Events recorded outside the worker (queueing, a cancel request, a gateway
+ * call from another replica) look the run up once instead of going out
+ * unscoped.
+ */
+async function scopeFor(runId: string): Promise<RunScope | null> {
+  const known = scopeByRun.get(runId);
+  if (known) return known;
+  const { db } = getDb();
+  const [run] = await db.select({ projectId: schema.agentRuns.projectId, taskId: schema.agentRuns.taskId })
+    .from(schema.agentRuns).where(sql`${schema.agentRuns.id} = ${runId}`);
+  if (!run) return null;
+  scopeByRun.set(runId, run);
+  return run;
+}
+
+/**
  * Append one event. The sequence is assigned in SQL; the worker and the
  * gateway write concurrently, so a collision on (run_id, seq) is retried
  * rather than surfacing as a failed tool call.
@@ -71,11 +88,12 @@ export async function recordRunEvent(runId: string, type: RunEventType, payload:
       if ((e as { code?: string }).code !== '23505' || attempt === 4) throw e;
     }
   }
-  const scope = scopeByRun.get(runId);
+  const scope = await scopeFor(runId);
   broadcaster.broadcast({
     event: 'agent.run_event',
     data: { runId, taskId: scope?.taskId, projectId: scope?.projectId, seq: Number(row?.seq ?? 0), eventType: type, payload: clean, createdAt: row?.created_at ?? new Date().toISOString() },
-    projectScope: scope ? [scope.projectId] : undefined,
+    // Never unscoped: an unknown run is not broadcast to the workspace.
+    projectScope: [scope?.projectId ?? '__none__'],
   });
 }
 
