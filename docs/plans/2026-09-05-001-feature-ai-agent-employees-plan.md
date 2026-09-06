@@ -127,7 +127,7 @@ flowchart TB
   C -->|otherwise| Z[skip, notify author]
   D --> E[worker claims run]
   E --> F[clone repo, mint token, write mcp config]
-  F --> G[claude -p with ordi + allowed connectors]
+  F --> G[Agent SDK query with ordi + allowed connectors]
   G --> H{outcome}
   H -->|pull request| I[add_task_link, status in_review]
   H -->|question| J[needs_input comment]
@@ -198,7 +198,7 @@ flowchart LR
 - The MCP authorization flow is OAuth 2.1 with protected-resource discovery, dynamic client registration and PKCE; `@modelcontextprotocol/sdk` 1.29 (already an API dependency) provides the client-side helpers.
 - The GitHub App integration can mint installation tokens (`installationToken` in `integrations/github-app.ts`) and receives PR webhooks that populate `git_links`.
 - The outbox relay, `email_deliveries` claim pattern, and SSE broadcaster are the reference implementations for dispatch, claiming, and live logs.
-- The Node 22 slim base image can install the Claude Code CLI and `git` without extra runtimes.
+- The Node 22 slim base image can run the SDK's bundled Linux binary and install `git` without extra runtimes.
 
 ### Sources / Research
 
