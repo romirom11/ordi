@@ -50,22 +50,33 @@ export function forgetRunScope(runId: string): void {
   scopeByRun.delete(runId);
 }
 
-/** Append one event; the sequence is assigned in SQL so concurrent writers stay ordered. */
+/**
+ * Append one event. The sequence is assigned in SQL; the worker and the
+ * gateway write concurrently, so a collision on (run_id, seq) is retried
+ * rather than surfacing as a failed tool call.
+ */
 export async function recordRunEvent(runId: string, type: RunEventType, payload: Record<string, unknown>): Promise<void> {
   const { db } = getDb();
   const clean = scrub(payload, secretsByRun.get(runId) ?? []) as Record<string, unknown>;
-  const id = ulid();
-  const [row] = await db.execute(sql`
-    insert into agent_run_events (id, run_id, seq, type, payload)
-    values (${id}, ${runId}, (select coalesce(max(seq), 0) + 1 from agent_run_events where run_id = ${runId}), ${type}, ${JSON.stringify(clean)}::jsonb)
-    returning seq, created_at
-  `) as unknown as { seq: number; created_at: string }[];
+  let row: { seq: number; created_at: string } | undefined;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      [row] = await db.execute(sql`
+        insert into agent_run_events (id, run_id, seq, type, payload)
+        values (${ulid()}, ${runId}, (select coalesce(max(seq), 0) + 1 from agent_run_events where run_id = ${runId}), ${type}, ${JSON.stringify(clean)}::jsonb)
+        returning seq, created_at
+      `) as unknown as { seq: number; created_at: string }[];
+      break;
+    } catch (e) {
+      if ((e as { code?: string }).code !== '23505' || attempt === 4) throw e;
+    }
+  }
   const scope = scopeByRun.get(runId);
   broadcaster.broadcast({
-    type: 'agent.run_event',
+    event: 'agent.run_event',
     data: { runId, taskId: scope?.taskId, projectId: scope?.projectId, seq: Number(row?.seq ?? 0), eventType: type, payload: clean, createdAt: row?.created_at ?? new Date().toISOString() },
     projectScope: scope ? [scope.projectId] : undefined,
-  } as never);
+  });
 }
 
 export async function listRunEvents(runId: string, afterSeq = 0, limit = 500) {
