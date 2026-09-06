@@ -49,6 +49,8 @@ extendDict({
     'settings.ghAppInstalled': 'GitHub App installed, repositories synced',
     'settings.ghAppError': 'GitHub App setup failed – please try again.',
     'settings.ghAppBadgeApp': 'app',
+    'settings.ghAppAgentPerms': 'AI agents push branches and open pull requests through this app, so it asks for “Contents: write” and “Pull requests: write”. GitHub asks the owner of each installation to accept the new permissions – until they do, agent pushes fail.',
+    'settings.ghAppOpenSettings': 'Open the app on GitHub',
     // Slack
     'settings.slackTitle': 'Slack',
     'settings.slackDesc': 'Get notified about events (tasks, deals, invoices) in Slack.',
@@ -110,6 +112,8 @@ extendDict({
     'settings.ghAppInstalled': 'GitHub App встановлено, репозиторії синхронізовано',
     'settings.ghAppError': 'Не вдалося налаштувати GitHub App – спробуйте ще раз.',
     'settings.ghAppBadgeApp': 'app',
+    'settings.ghAppAgentPerms': 'AI-агенти пушать гілки та відкривають пулреквести через цей застосунок, тому він просить права «Contents: write» і «Pull requests: write». GitHub попросить власника кожної інсталяції підтвердити нові права – доки цього не зроблять, пуші агентів не проходитимуть.',
+    'settings.ghAppOpenSettings': 'Відкрити застосунок на GitHub',
     // Slack
     'settings.slackTitle': 'Slack',
     'settings.slackDesc': 'Отримуйте сповіщення про події (задачі, угоди, інвойси) у Slack.',
@@ -283,6 +287,21 @@ function GitHubCard() {
       )}
       {appConfigured && conns.length === 0 && (
         <p className="mt-3 border-t border-border pt-3 text-xs text-muted-foreground">{t('settings.ghAppInstallHint')}</p>
+      )}
+      {/* The agent slice raised the app's permissions; an existing installation
+          keeps the old ones until its owner accepts (plan 2026-09-05-001 R37). */}
+      {appConfigured && (
+        <p className="mt-3 border-t border-border pt-3 text-xs text-muted-foreground">
+          {t('settings.ghAppAgentPerms')}
+          {ghApp.data?.htmlUrl && (
+            <>
+              {' '}
+              <a href={ghApp.data.htmlUrl} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-1 text-primary hover:underline">
+                {t('settings.ghAppOpenSettings')} <ExternalLink size={11} />
+              </a>
+            </>
+          )}
+        </p>
       )}
 
       {/* Legacy: the per-user OAuth app. Still works, no longer promoted. */}

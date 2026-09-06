@@ -73,6 +73,8 @@ export interface UserLite {
   avatar?: string | null;
   /** false = deactivated account; renderers keep it, pickers filter it. */
   isActive?: boolean;
+  /** `agent` marks an AI agent employee – avatars carry a badge. */
+  actorType?: string;
 }
 
 export interface SubtaskRow {
