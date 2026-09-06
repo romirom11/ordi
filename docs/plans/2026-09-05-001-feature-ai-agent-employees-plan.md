@@ -37,7 +37,7 @@ ordi already says "agent-first": every human action is reachable over MCP within
 - **Agents run inside the ordi deployment, not on user machines** (session-settled: user-approved — chosen over a self-hosted runner each person installs: the platform owns execution so an admin configures it once and every member can assign work). Governs R12-R16, R30-R33.
 - **Claude Code first, Codex registered as coming soon** (session-settled: user-approved — chosen over shipping both adapters: one runtime end to end beats two half-finished ones; the runtime enum, UI selector and credential model keep room for Codex). Governs R2, R6.
 - **Subscriptions are first-class credentials alongside API keys** (session-settled: user-approved — chosen over API keys only: many teams already pay for Claude Max; Claude Code documents `claude setup-token` for headless use). Governs R6-R11.
-- **A credential belongs to a person, not to the workspace** (session-settled: user-approved — chosen over a workspace-wide subscription: a Max plan is personal under Anthropic's terms, so the agent runs on a named member's plan or on a company API key, and the UI says whose limit it consumes). Governs R7, R9, R11.
+- **A credential belongs to a person, not to the workspace** (session-settled: user-approved — chosen over a workspace-wide subscription: a Max plan is personal, so the agent runs on a named member's plan or on a company API key, and the UI says whose limit it consumes). Governs R7, R9, R11.
 - **A workspace connector library with a per-agent allowlist** (session-settled: user-approved — chosen over ad-hoc MCP config per run: admins add connectors once, from a curated library or by URL, and grant them to specific agents). Governs R17-R24.
 - **Claude runs through the Agent SDK, not the CLI** (session-settled: user-approved — chosen over spawning `claude -p`: the SDK bundles the runtime, yields typed messages with session id and usage, and exposes `canUseTool` and hooks for a programmatic policy; authentication and Anthropic's policy are identical for both). Governs R15, R25, R33-R35.
 - **ordi performs MCP OAuth itself and fronts connectors with a gateway** (session-settled: user-approved — chosen over rejecting OAuth connectors because the SDK cannot run the browser flow headless: MCP authorization is standard OAuth 2.1 with discovery, dynamic registration and PKCE, the MCP SDK already in the API ships the client side, and a gateway keeps upstream secrets inside the API process while refreshing tokens mid-run). Governs R19, R22, R23, R38-R42.
@@ -65,8 +65,8 @@ ordi already says "agent-first": every human action is reachable over MCP within
 **Credentials**
 
 - R6. `agent_credentials` stores provider (`anthropic` now; `openai` reserved), kind (`api_key` or `subscription`), label, `owner_user_id`, an AES-GCM encrypted secret, `expires_at`, `last_verified_at`, and status.
-- R7. A subscription credential for Claude is the one-year OAuth token produced by `claude setup-token`; the user runs the command on their own machine and pastes the token into ordi. ordi never asks for claude.ai login itself.
-- R8. An API-key credential for Claude is an Anthropic API key. `ANTHROPIC_API_KEY` in the container env is offered as a fallback source only for API keys, never for subscriptions.
+- R7. A subscription credential for Claude is the one-year OAuth token produced by `claude setup-token`; the user runs the command on their own machine and pastes the token into ordi. The credential form offers subscription and API key as equal choices.
+- R8. An API-key credential for Claude is an Anthropic API key. `ANTHROPIC_API_KEY` in the container env is offered as a fallback source only for API keys, never for subscriptions, because a subscription token always names its owner.
 - R9. Each agent profile references one primary credential and optionally one fallback credential. Deactivating the owner revokes their credentials; affected agents show "credential required" and stop being dispatched.
 - R10. "Verify" runs a minimal headless Claude Code call with the credential and records `last_verified_at` or the error.
 - R11. ordi notifies the owner fourteen days before a subscription token expires and marks the credential expired afterwards.
@@ -190,12 +190,12 @@ flowchart LR
 **Explicitly out of scope**
 
 - Merging pull requests, deleting branches, or any irreversible git action by the agent.
-- Sharing one subscription credential across the workspace, or ordi initiating a claude.ai login flow.
+- Sharing one subscription credential across the workspace.
 
 ### Dependencies / Assumptions
 
 - The Claude Agent SDK (TypeScript) bundles the runtime, accepts `mcpServers` with `type: 'http' | 'sse'` plus `headers` and stdio entries, supports `permissionMode`, `allowedTools`, `disallowedTools`, `maxTurns`, `maxBudgetUsd`, `resume`, `cwd`, `env`, `hooks`, `strictMcpConfig`. It does not run MCP OAuth flows headless: a server that needs authorization is reported as `needs-auth` and skipped. Verified against the SDK docs on 2026-09-05.
-- Subscription credentials reach the SDK: the authentication docs state that credential environment variables "apply to the CLI and the surfaces that wrap it, including the VS Code extension, the Agent SDK, and GitHub Actions", list the Agent SDK among login paths, rank `CLAUDE_CODE_OAUTH_TOKEN` fifth in precedence, and say the `setup-token` token "authenticates with your Claude subscription and requires a Pro, Max, Team, or Enterprise plan" while "MCP servers you configure locally still work". `ANTHROPIC_API_KEY` outranks it, so the rebuilt env carries exactly one credential; bare mode ignores it, so bare mode is never used. Anthropic's note that third parties may not offer claude.ai login or rate limits in their products applies to the SDK as well, which is why the UI recommends API keys and treats subscription tokens as the member's own credential.
+- Subscription credentials reach the SDK: the authentication docs state that credential environment variables "apply to the CLI and the surfaces that wrap it, including the VS Code extension, the Agent SDK, and GitHub Actions", list the Agent SDK among login paths, rank `CLAUDE_CODE_OAUTH_TOKEN` fifth in precedence, and say the `setup-token` token "authenticates with your Claude subscription and requires a Pro, Max, Team, or Enterprise plan" while "MCP servers you configure locally still work". `ANTHROPIC_API_KEY` outranks it, so the rebuilt env carries exactly one credential; bare mode ignores it, so bare mode is never used. ordi is self-hosted and offers no login or plan of its own: a member generates the token for their own subscription with the documented command and stores it on their own server, the same headless use the docs describe. API key and subscription are therefore equal options in the UI.
 - The MCP authorization flow is OAuth 2.1 with protected-resource discovery, dynamic client registration and PKCE; `@modelcontextprotocol/sdk` 1.29 (already an API dependency) provides the client-side helpers.
 - The GitHub App integration can mint installation tokens (`installationToken` in `integrations/github-app.ts`) and receives PR webhooks that populate `git_links`.
 - The outbox relay, `email_deliveries` claim pattern, and SSE broadcaster are the reference implementations for dispatch, claiming, and live logs.
@@ -293,7 +293,7 @@ for await (const message of query({
 - **Blast radius of an unattended agent:** `dontAsk` with explicit allow and deny lists, rebuilt child env, per-run token, no `done` transitions, no merge; documented container split for production.
 - **OAuth providers without dynamic registration:** the connector form accepts a pre-registered client id and secret; the gateway treats both paths the same after tokens exist.
 - **Gateway as a bottleneck:** it is stateless per request and forwards bodies without buffering results into the database; only `tools/call` metadata is recorded.
-- **Provider terms:** credentials are per person, never shared workspace-wide; the UI states whose plan is consumed; ordi never initiates claude.ai login.
+- **Shared plans:** credentials are per person, never shared workspace-wide; the UI states whose plan is consumed.
 - **Rate limits on subscriptions:** `waiting_quota` state with backoff and optional fallback credential.
 - **Disk growth:** fresh clone per run plus deletion on finish; volume size documented in operations.
 - **Secrets in logs:** scrub known secret values from every stored event before insert.
