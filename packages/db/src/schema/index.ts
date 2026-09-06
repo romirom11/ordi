@@ -7,3 +7,4 @@ export * from './finance';
 export * from './ledger';
 export * from './people';
 export * from './integrations';
+export * from './agents';

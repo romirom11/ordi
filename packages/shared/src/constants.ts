@@ -97,6 +97,44 @@ export type GitLinkType = (typeof GIT_LINK_TYPES)[number];
 export const ACTOR_TYPES = ['user', 'agent', 'system', 'integration'] as const;
 export type ActorType = (typeof ACTOR_TYPES)[number];
 
+/** AI agent employees (plan 2026-09-05-001). */
+export const AGENT_RUNTIMES = ['claude_code', 'codex'] as const;
+export type AgentRuntime = (typeof AGENT_RUNTIMES)[number];
+/** Runtimes with a working adapter; the rest are shown as coming soon. */
+export const EXECUTABLE_AGENT_RUNTIMES = ['claude_code'] as const satisfies readonly AgentRuntime[];
+
+export const AGENT_CREDENTIAL_PROVIDERS = ['anthropic', 'openai'] as const;
+export type AgentCredentialProvider = (typeof AGENT_CREDENTIAL_PROVIDERS)[number];
+export const AGENT_CREDENTIAL_KINDS = ['api_key', 'subscription'] as const;
+export type AgentCredentialKind = (typeof AGENT_CREDENTIAL_KINDS)[number];
+export const AGENT_CREDENTIAL_STATUSES = ['active', 'expired', 'revoked'] as const;
+export type AgentCredentialStatus = (typeof AGENT_CREDENTIAL_STATUSES)[number];
+/** Workspace slots: at most one primary and one fallback credential. */
+export const AGENT_CREDENTIAL_SLOTS = ['primary', 'fallback'] as const;
+export type AgentCredentialSlot = (typeof AGENT_CREDENTIAL_SLOTS)[number];
+
+/** Who may assign a task to an agent (and so spend its plan). */
+export const AGENT_ASSIGN_POLICIES = ['project_members', 'project_admins', 'agents_managers'] as const;
+export type AgentAssignPolicy = (typeof AGENT_ASSIGN_POLICIES)[number];
+
+export const AGENT_RUN_STATUSES = [
+  'queued', 'claimed', 'running', 'waiting_quota', 'needs_input', 'succeeded', 'failed', 'cancelled',
+] as const;
+export type AgentRunStatus = (typeof AGENT_RUN_STATUSES)[number];
+/** Statuses that hold the per-task "one active run" slot. */
+export const AGENT_RUN_ACTIVE_STATUSES = ['queued', 'claimed', 'running', 'waiting_quota'] as const satisfies readonly AgentRunStatus[];
+export const AGENT_RUN_TRIGGERS = ['assigned', 'comment', 'retry', 'manual'] as const;
+export type AgentRunTrigger = (typeof AGENT_RUN_TRIGGERS)[number];
+
+export const MCP_CONNECTOR_SOURCES = ['library', 'custom'] as const;
+export type McpConnectorSource = (typeof MCP_CONNECTOR_SOURCES)[number];
+export const MCP_CONNECTOR_TRANSPORTS = ['http', 'sse', 'stdio'] as const;
+export type McpConnectorTransport = (typeof MCP_CONNECTOR_TRANSPORTS)[number];
+export const MCP_CONNECTOR_AUTH_MODES = ['none', 'bearer', 'headers', 'oauth'] as const;
+export type McpConnectorAuthMode = (typeof MCP_CONNECTOR_AUTH_MODES)[number];
+export const MCP_CONNECTOR_STATUSES = ['active', 'needs_auth', 'disabled'] as const;
+export type McpConnectorStatus = (typeof MCP_CONNECTOR_STATUSES)[number];
+
 export const DASHBOARD_WIDGET_TYPES = ['bar', 'line', 'pie', 'number', 'table'] as const;
 export type DashboardWidgetType = (typeof DASHBOARD_WIDGET_TYPES)[number];
 
