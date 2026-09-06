@@ -12,7 +12,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { getDb, schema, eq } from '@ordi/db';
 import { app, resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
 import { setupWorkspace, createAgent, addProjectMember, startTestMcpServer, eventsForRun, type TestMcpServer, type Workspace } from './agents-helpers';
-import { queueRun, startRun } from '../domains/agents/runs';
+import { queueRun, startRun, claimRuns } from '../domains/agents/runs';
 import { closeRunConnections, pooledConnectionCount } from '../domains/agents/gateway';
 import { setUpstreamOpener, ConnectorNeedsAuthError } from '../domains/agents/connectors';
 import { registerRunSecrets } from '../domains/agents/run-events';
@@ -49,8 +49,9 @@ beforeAll(async () => {
   agentId = agent.id;
   await addProjectMember(users, ws.projectId, agent.id);
   runId = (await queueRun({ agentUserId: agent.id, taskId: ws.taskId, projectId: ws.projectId, trigger: 'manual', requestedBy: users.owner!.userId }))!;
+  await claimRuns('gateway-test', 1);
   const started = await startRun(runId);
-  token = started.token;
+  token = started!.token;
   registerRunSecrets(runId, ['upstream-secret-abc', token]);
 });
 

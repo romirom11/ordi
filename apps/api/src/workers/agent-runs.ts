@@ -147,6 +147,7 @@ export async function executeRun(claimed: RunRow): Promise<void> {
     await recordRunEvent(runId, 'log', { message: ws.repo ? `Checked out ${ws.repo.fullName} on ${ws.branch}` : 'No repository linked; working in a scratch directory' });
 
     const started = await startRun(runId);
+    if (!started) return; // cancelled during preparation
     token = started.token;
     const ref = `${project.key}-${task.number}`;
     const status = await completionStatus(project.id, profile.completionCategory);

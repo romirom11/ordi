@@ -162,10 +162,12 @@ async function claimOne(workerId: string): Promise<RunRow[]> {
 }
 
 /** Mint the per-run identity (R27, KTD4): scope = the agent's role at run start. */
-export async function startRun(runId: string): Promise<{ run: RunRow; token: string }> {
+export async function startRun(runId: string): Promise<{ run: RunRow; token: string } | null> {
   const { db } = getDb();
   const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, runId));
   if (!run) throw err.notFound('Run not found');
+  // Cancelled while the worker was still preparing the checkout: stay cancelled.
+  if (run.status !== 'claimed') return null;
   const [agent] = await db.select().from(users).where(eq(users.id, run.agentUserId));
   if (!agent) throw err.notFound('Agent not found');
   const scopes = [...(await loadRolePermissions(agent.roleId))];
