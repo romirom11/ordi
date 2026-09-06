@@ -224,3 +224,83 @@ extension per operation so MCP/external integrations can see the required
 capability. `/api/docs/openapi.json` serves the raw spec; `/api/docs` serves a
 dependency-free HTML browser over it. Responses are intentionally loose
 (generic envelope) – handlers remain the source of truth for response shapes.
+
+## 12. AI agent employees
+
+Plan: `docs/plans/2026-09-05-001-feature-ai-agent-employees-plan.md`. An agent
+is a `users` row with `actor_type = 'agent'`, a role, a runtime and an allowlist
+of MCP connectors. Assigning it a task queues a run; the run ends with a pull
+request and the task in review.
+
+- **Execution is platform-hosted, not on user machines.** The run worker
+  (`workers/agent-runs.ts`) lives in the API process next to the email worker
+  and claims runs with `FOR UPDATE SKIP LOCKED`, so replicas are safe and the
+  admin configures execution once for everyone. The alternative – a runner each
+  person installs – was rejected: it makes "assign a task to the agent" depend
+  on whose laptop is awake. `AGENT_WORKER_ENABLED` turns claiming off, which is
+  also how the documented production split works: the same image runs a second
+  container with the worker on and the API's own worker off
+  (`docker-compose.prod.yml`, deployment.md §3b). The split is documentation,
+  not the default, because `docker compose up` must produce a working system.
+- **The Agent SDK, not the `claude` CLI.** `@anthropic-ai/claude-agent-sdk`
+  bundles the same runtime as a per-platform optional dependency and yields
+  typed messages (session id, tool use, usage, cost) instead of parsed stdout,
+  which is what makes the live run log and `resume` for follow-ups cheap.
+  Consequence for packaging: the image must keep optional dependencies, so
+  `Dockerfile.api` resolves the bundled binary at build time and fails the
+  build if it is missing – the failure mode otherwise is a green deploy whose
+  first agent run dies.
+- **Credentials belong to the workspace, and a subscription is not a
+  second-class one.** One Claude credential (plus an optional fallback) is
+  connected in Settings → Agents by a holder of `agents.manage`; every agent
+  draws on it. A `claude setup-token` subscription token and an Anthropic API
+  key are equal options in the same form – teams that already pay for Max
+  should not have to buy API credit to use this. Secrets are AES-GCM blobs
+  (`lib/crypto`), never returned after creation, and the card records who
+  connected it: the plan being spent is a person's, and that has to be visible.
+  `ANTHROPIC_API_KEY` in the container env is accepted as a fallback for API
+  keys only, so a PaaS install can be configured without the UI.
+- **Every connector goes through a gateway.** Agents never receive an upstream
+  URL, header, token or stdio env. The SDK gets `ordi` plus one entry per
+  allowed connector, all pointing at
+  `POST /api/v1/mcp-connectors/:slug/mcp` with the run's token;
+  the gateway authenticates the run, checks the allowlist, and forwards
+  JSON-RPC to the upstream with the decrypted credential. SSE upstreams are
+  bridged and library `stdio` servers are spawned by the gateway for the life
+  of the run, so the model only ever speaks Streamable HTTP. ordi also runs the
+  MCP OAuth 2.1 client flow itself (discovery, dynamic registration, PKCE,
+  refresh) – the SDK cannot do a browser consent headless, and doing it in the
+  API is what keeps the tokens out of the run. `tools/call` metadata is logged
+  as a run event; arguments and results are not.
+- **RBAC is the existing model plus one permission.** A new `agents` domain
+  with `agents.manage` (backfilled into `owner` and `admin` by migration
+  `0035_ai_agents.sql`, grantable to any custom role), a preset `Agent` role
+  (`projects.read`, `projects.write`, `kb.read`), project membership as the
+  resource boundary, and a per-agent `assign_policy` (`project_members`,
+  `project_admins`, `agents_managers`) enforced in the task service next to the
+  existing membership check – spending the workspace's plan should be a
+  deliberate grant, not a side effect of the assignee dropdown.
+- **Identity per run is minted and revoked.** The worker creates an `api_tokens`
+  row for the agent user at run start, scoped to the agent role's permissions,
+  and revokes it when the run ends (including when a stale run is reaped). Every
+  write the agent makes is an ordinary authorized API call attributed to it in
+  `activity_log`, so "what did the agent do" is answered by the same audit trail
+  as for a person. A role change applies to the next run, not the running one.
+- **The agent stops at `in_review`.** It moves the task to the project's status
+  in the profile's completion category and never to a `done` one; the pull
+  request is attached with `add_task_link`, and the existing `pr_merged` git
+  automation closes the task after a human merges. This keeps the one
+  irreversible step – merging – with a person, and reuses the automation that
+  already existed rather than teaching the agent to finish work.
+- **Security posture.** The SDK child process gets a rebuilt `env`: `PATH`,
+  `HOME` on a per-run `CLAUDE_CONFIG_DIR`, exactly one provider credential and
+  MCP timeouts. `DATABASE_URL`, `ENCRYPTION_KEY`, `AUTH_SECRET`, S3 and SMTP
+  never reach it. The run uses `permissionMode: 'dontAsk'` with an explicit
+  `allowedTools` list and a `disallowedTools` list for destructive git and
+  network commands, `maxTurns`/`maxBudgetUsd` from the profile, and a
+  `PreToolUse` hook that records every tool call. Stored run events are scrubbed
+  of known secret values before insert. The residual blast radius is stated
+  plainly: the container, the agent's ordi role, and repository write through
+  the GitHub App installation token (whose manifest now asks for
+  `contents: write` and `pull_requests: write`). That is the reason the
+  separate-container split is documented for production.

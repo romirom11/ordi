@@ -105,14 +105,78 @@ Logs are pino JSON on stdout with `request_id` – ship via Dokploy log driver.
 Alert specifically on repeated `email delivery tick failed`, `email delivery
 dead-lettered`, `sales digest failed` and `initial sales digest failed` messages.
 
-## 6. Secrets
+## 6. Agent runs
+
+The agent worker runs inside the API container (`AGENT_WORKER_ENABLED`, default
+on) unless it has been split into its own service – see docs/deployment.md §3b.
+
+**Disk.** Every run gets a fresh clone under `/data/agent-work/<runId>` and the
+directory is deleted when the run finishes, fails or is cancelled. Nothing
+accumulates in normal operation, so size the volume for the *peak*:
+`AGENT_WORKER_CONCURRENCY` × repository size (× replicas, if more than one
+container claims runs), plus headroom for build output the agent produces
+inside the checkout. A crash can leave a directory behind – the next run of the
+same id would recreate it, but a container that died mid-run leaves an orphan;
+alert on volume usage the same way as on the DB volume, and it is safe to
+delete any `/data/agent-work/*` directory whose run is no longer `running`.
+
+**Worker liveness.** Workers write a heartbeat to `agent_workers` every 15s
+(id, concurrency, in-flight runs, whether the Claude runtime resolved, version).
+Settings → Agents lists them and greys out anything not seen for ~35s.
+
+```sql
+SELECT id, last_seen_at, running, concurrency, runtime_available
+FROM agent_workers ORDER BY last_seen_at DESC;
+```
+
+`runtime_available = false` means the process imported the Agent SDK and did
+not find its bundled binary – the image is wrong, not the credential.
+
+**Stale runs.** A run whose worker vanishes is re-queued: rows in `claimed` or
+`running` untouched for 3 minutes go back to `queued`, and after 3 attempts the
+run is failed with "the worker running this run stopped responding". The
+per-run API token is revoked on every one of those transitions, so a lost
+worker cannot keep writing as the agent.
+
+**Event log growth.** `agent_run_events` is one row per SDK message, tool call
+and connector call, so a long run is a few hundred rows. It is the live log on
+the task page and the audit trail of what the agent did, so it is not pruned
+automatically; if it becomes the largest table, delete events for finished runs
+older than the retention you want (the run row itself keeps the summary). Known
+secret values are scrubbed out of every payload before it is stored – provider
+credentials, connector headers, OAuth tokens – so the log is safe to read and
+to ship to a log collector.
+
+**Runs stuck in `queued`.** In order of likelihood:
+
+- no worker: `agent_workers` empty or stale (`AGENT_WORKER_ENABLED=0`
+  everywhere, or the container is down);
+- no usable credential: the workspace Claude credential is missing, revoked or
+  expired – the agent shows "credential required" and dispatch is skipped;
+- the agent is not a member of the task's project, or is disabled;
+- per-agent `concurrency` or `AGENT_WORKER_CONCURRENCY` is already saturated by
+  other runs (check `running` in the heartbeat).
+
+A run that nobody claims within ten minutes notifies the task author, so a
+silent queue is normally reported before anyone reads this file.
+
+**Connectors in `needs_auth`.** An OAuth connector whose refresh failed (token
+revoked upstream, or the provider rotated the client) is excluded from new runs
+and shows "Re-authorize" on its card; runs continue with the remaining
+connectors rather than failing. The fix is a human clicking through consent
+again, which needs the public callback URL to be reachable (deployment.md §3b).
+
+## 7. Secrets
 
 All secrets come exclusively from env (PRD §19.1): `AUTH_SECRET`,
 `ENCRYPTION_KEY` (32-byte hex, AES-256-GCM for git credentials), `DATABASE_URL`,
 `SMTP_URL`, `S3_*`. Rotate `ENCRYPTION_KEY` by re-encrypting `git_connections`
-(reconnect integrations) – the key is never stored in the DB.
+(reconnect integrations) – the key is never stored in the DB. The same key
+encrypts the workspace Claude credential and the MCP connector secrets, so a
+rotation means reconnecting those too (deployment.md §3b): agents show
+"credential required" and connectors `needs_auth` until you do.
 
-## 7. Sensitive-audit retention (PRD §14.4)
+## 8. Sensitive-audit retention (PRD §14.4)
 
 `workspace_settings.sensitive_audit_retention_months` (default 24). Purge job
 (manual or cron):

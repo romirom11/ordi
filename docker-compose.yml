@@ -46,6 +46,18 @@ services:
       S3_SECRET_KEY: ordi-secret
       # Local development: SMTP_URL: smtp://mailpit:1025
       SMTP_URL: ${SMTP_URL:-}
+      # AI agent employees: the run worker lives in this same container.
+      # Set AGENT_WORKER_ENABLED=0 to keep the API without ever starting a run.
+      AGENT_WORKER_ENABLED: ${AGENT_WORKER_ENABLED:-1}
+      AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:-2}
+      # Claude is normally connected in Settings → Agents (a `claude
+      # setup-token` subscription token or an API key). This env var is only a
+      # fallback for API keys, handy when developing without touching the UI:
+      # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      # One fresh clone per run under /data/agent-work/<runId>, deleted when
+      # the run ends. A volume keeps the checkouts off the container layer.
+      - agent_work:/data/agent-work
     depends_on:
       db:
         condition: service_healthy
@@ -64,3 +76,4 @@ services:
 volumes:
   db_data:
   minio_data:
+  agent_work:

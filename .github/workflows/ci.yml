@@ -92,6 +92,14 @@ jobs:
         run: docker build -f docker/Dockerfile.api -t ordi-api:ci .
       - name: Build web image
         run: docker build -f docker/Dockerfile.web -t ordi-web:ci .
+      # The Claude runtime is an optional platform dependency of the Agent
+      # SDK: it installs silently or not at all, and a missing one only shows
+      # up when an agent run tries to start. Prove it resolves in the image.
+      - name: Agent runtime resolves inside the API image
+        run: |
+          docker run --rm -w /app/apps/api ordi-api:ci \
+            node -e "import('@anthropic-ai/claude-agent-sdk').then(m => process.exit(typeof m.query === 'function' ? 0 : 1))"
+          docker run --rm ordi-api:ci git --version
       - name: Boot the API image and wait for healthz
         run: |
           docker network create ordi-ci

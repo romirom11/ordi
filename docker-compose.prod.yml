@@ -112,10 +112,68 @@ services:
       SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-}
       SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
+      # AI agent employees: the run worker lives in this container unless you
+      # split it out (see agent-worker below). Set AGENT_WORKER_ENABLED=0 to
+      # run the platform with agents configurable but no runs executing here.
+      AGENT_WORKER_ENABLED: ${AGENT_WORKER_ENABLED:-1}
+      AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:-2}
+      # Claude is connected in Settings → Agents (a `claude setup-token`
+      # subscription token or an API key). This env var is only a fallback
+      # source for API keys, for a PaaS that configures everything by env.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      # One fresh clone per run under /data/agent-work/<runId>, deleted when
+      # the run ends – size it for AGENT_WORKER_CONCURRENCY × repository size
+      # (docs/operations.md). Not a cache: nothing here survives a run.
+      - agent_work:/data/agent-work
     depends_on:
       db:
         condition: service_healthy
 
+  # ── Optional: run agents in their own container ──
+  #
+  # An agent run is the only thing in ordi that executes model-authored code.
+  # It is already sandboxed (rebuilt child env, per-run token, allow/deny tool
+  # lists – see docs/architecture-decisions.md §12), but its blast radius is
+  # still the container it runs in. Moving it out of the container that serves
+  # requests means a runaway run cannot take the site down with it, and the
+  # runs get their own CPU/memory limits.
+  #
+  # To enable: uncomment the block below and set `AGENT_WORKER_ENABLED=0` in
+  # the environment, so the `api` service stops claiming runs itself. Both
+  # services need the same DATABASE_URL, ENCRYPTION_KEY (credentials and
+  # connector secrets are encrypted with it) and APP_URL, and both mount
+  # agent_work. Runs are claimed with SKIP LOCKED, so nothing is executed
+  # twice even if you get the flags wrong for a moment.
+  #
+  # It runs the same server process, only with no published port: the worker
+  # talks to ordi over its own loopback (the per-run MCP token points at
+  # http://localhost:3000/api/v1), and the connector gateway lives there too.
+  # Migrations stay with `api` – one container writes the schema, not two.
+  #
+  # agent-worker:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/Dockerfile.api
+  #   restart: unless-stopped
+  #   command: ["sh", "-c", "pnpm --filter @ordi/api exec tsx src/server.ts"]
+  #   environment:
+  #     NODE_ENV: production
+  #     DATABASE_URL: postgres://${POSTGRES_USER:-ordi}:${POSTGRES_PASSWORD}@ordi-db:5432/${POSTGRES_DB:-ordi}
+  #     APP_URL: ${APP_URL}
+  #     API_URL: ${API_URL:-${APP_URL}}
+  #     AUTH_SECRET: ${AUTH_SECRET}
+  #     ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+  #     ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  #     AGENT_WORKER_ENABLED: "1"
+  #     AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:-2}
+  #   volumes:
+  #     - agent_work:/data/agent-work
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+
 volumes:
   db_data:
   minio_data:
+  agent_work:
