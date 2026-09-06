@@ -15,6 +15,7 @@ export const EVENT_TYPES = [
   'task.status_changed',
   'task.assigned',
   'comment.mentioned',
+  'comment.created',
   'cycle.completed',
   'page.published',
   'page.mentioned',

@@ -10,6 +10,7 @@ import { postExpense } from '../domains/finance/ledger.service';
 import { appLink, asLocale, loadBranding, renderEmail, tr } from '../lib/email-templates';
 import { logger } from '../lib/logger';
 import { enqueueEmail, type QueuedEmailInput } from './email-delivery';
+import { sweepCredentialExpiry } from '../domains/agents/credentials';
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -240,6 +241,37 @@ export async function runAllDailyJobs(): Promise<void> {
   await runReminders();
   await runCycleSnapshots();
   await runQuoteExpiry();
+  await runAgentCredentialExpiry();
+}
+
+/** R11: expire subscription tokens and warn agents.manage holders two weeks ahead (once a day per credential). */
+export async function runAgentCredentialExpiry(): Promise<void> {
+  const { db } = getDb();
+  const { expired, expiringSoon } = await sweepCredentialExpiry();
+  if (!expired.length && !expiringSoon.length) return;
+  const holders = await db.select({ userId: schema.users.id, locale: schema.users.locale, email: schema.users.email })
+    .from(schema.users)
+    .innerJoin(schema.rolePermissions, eq(schema.rolePermissions.roleId, schema.users.roleId))
+    .where(and(eq(schema.rolePermissions.permission, 'agents.manage'), eq(schema.users.isActive, true), eq(schema.users.actorType, 'user')));
+  const day = today();
+  for (const cred of expiringSoon) {
+    for (const h of holders) {
+      const dedupeKey = `agent_credential:${cred.id}:expiring:${day}:${h.userId}`;
+      await db.insert(schema.notifications).values({
+        id: ulid(), userId: h.userId, type: 'agent.credential_expiring', dedupeKey, entityRef: cred.label,
+        payload: { credentialId: cred.id, label: cred.label, expiresAt: cred.expiresAt, link: appLink('/settings/agents') },
+      }).onConflictDoNothing();
+    }
+  }
+  for (const id of expired) {
+    for (const h of holders) {
+      await db.insert(schema.notifications).values({
+        id: ulid(), userId: h.userId, type: 'agent.credential_expired', dedupeKey: `agent_credential:${id}:expired:${h.userId}`, entityRef: id,
+        payload: { credentialId: id, link: appLink('/settings/agents') },
+      }).onConflictDoNothing();
+    }
+  }
+  logger.info({ expired: expired.length, expiringSoon: expiringSoon.length }, 'agent credential expiry sweep');
 }
 
 // helpers

@@ -58,4 +58,11 @@ export const env = {
   desktopReleasesRepo: process.env.DESKTOP_RELEASES_REPO ?? 'romirom11/ordi',
   /** disable workers (e.g. in tests) */
   workersEnabled: process.env.WORKERS_ENABLED !== 'false',
+  /** AI agent employees (plan 2026-09-05-001): the in-process run worker. */
+  agentWorkerEnabled: process.env.AGENT_WORKER_ENABLED !== '0' && process.env.AGENT_WORKER_ENABLED !== 'false',
+  agentWorkerConcurrency: Math.max(1, Number(process.env.AGENT_WORKER_CONCURRENCY ?? 2)),
+  /** Fresh checkouts per run live here; documented as a volume in deployment.md. */
+  agentWorkDir: process.env.AGENT_WORK_DIR ?? '/data/agent-work',
+  /** Env fallback for an API-key credential (PaaS installs without the UI step). */
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',
 };

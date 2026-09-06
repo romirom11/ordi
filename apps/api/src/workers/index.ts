@@ -12,14 +12,17 @@ import { runAllDailyJobs } from './scheduled';
 import { pollIntakeMailboxes } from './imap';
 import { startEmailDeliveryWorker } from './email-delivery';
 import { runSalesWorkDigests } from './sales-digest';
+import { startAgentRunsWorker } from './agent-runs';
 
 let boss: PgBoss | null = null;
 let stopEmailDelivery: (() => void) | null = null;
+let stopAgentRuns: (() => void) | null = null;
 
 export async function startWorkers(): Promise<void> {
   logConsumers();
   startRelay();
   stopEmailDelivery = startEmailDeliveryWorker();
+  if (env.agentWorkerEnabled) stopAgentRuns = startAgentRunsWorker();
 
   try {
     boss = new PgBoss({ connectionString: env.databaseUrl, schema: 'pgboss' });
@@ -57,5 +60,7 @@ export async function startWorkers(): Promise<void> {
 export async function stopWorkers(): Promise<void> {
   stopEmailDelivery?.();
   stopEmailDelivery = null;
+  stopAgentRuns?.();
+  stopAgentRuns = null;
   if (boss) await boss.stop();
 }
