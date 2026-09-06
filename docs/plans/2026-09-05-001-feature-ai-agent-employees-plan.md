@@ -37,7 +37,8 @@ ordi already says "agent-first": every human action is reachable over MCP within
 - **Agents run inside the ordi deployment, not on user machines** (session-settled: user-approved — chosen over a self-hosted runner each person installs: the platform owns execution so an admin configures it once and every member can assign work). Governs R12-R16, R30-R33.
 - **Claude Code first, Codex registered as coming soon** (session-settled: user-approved — chosen over shipping both adapters: one runtime end to end beats two half-finished ones; the runtime enum, UI selector and credential model keep room for Codex). Governs R2, R6.
 - **Subscriptions are first-class credentials alongside API keys** (session-settled: user-approved — chosen over API keys only: many teams already pay for Claude Max; Claude Code documents `claude setup-token` for headless use). Governs R6-R11.
-- **A credential belongs to a person, not to the workspace** (session-settled: user-approved — chosen over a workspace-wide subscription: a Max plan is personal, so the agent runs on a named member's plan or on a company API key, and the UI says whose limit it consumes). Governs R7, R9, R11.
+- **Claude is configured once at workspace level by whoever holds `agents.manage`** (session-settled: user-approved — chosen over each member connecting their own plan: the owner connects a subscription token or an API key in Settings, every agent draws on it, and the card records who connected it and when so the team knows whose plan it is). Governs R6-R11.
+- **RBAC is the existing model plus one permission domain** (session-settled: reused from PRD §4 — a new `agents` domain with `agents.manage`, a preset `Agent` role for agent users, role ∩ token scope on every agent call, project membership as the resource boundary, and an assign policy per agent so spending a plan is a deliberate grant). Governs R3, R14, R34, R43-R52.
 - **A workspace connector library with a per-agent allowlist** (session-settled: user-approved — chosen over ad-hoc MCP config per run: admins add connectors once, from a curated library or by URL, and grant them to specific agents). Governs R17-R24.
 - **Claude runs through the Agent SDK, not the CLI** (session-settled: user-approved — chosen over spawning `claude -p`: the SDK bundles the runtime, yields typed messages with session id and usage, and exposes `canUseTool` and hooks for a programmatic policy; authentication and Anthropic's policy are identical for both). Governs R15, R25, R33-R35.
 - **ordi performs MCP OAuth itself and fronts connectors with a gateway** (session-settled: user-approved — chosen over rejecting OAuth connectors because the SDK cannot run the browser flow headless: MCP authorization is standard OAuth 2.1 with discovery, dynamic registration and PKCE, the MCP SDK already in the API ships the client side, and a gateway keeps upstream secrets inside the API process while refreshing tokens mid-run). Governs R19, R22, R23, R38-R42.
@@ -46,7 +47,7 @@ ordi already says "agent-first": every human action is reachable over MCP within
 
 ### Actors
 
-- **Workspace admin:** connects provider credentials, curates MCP connectors, creates agents and grants them connectors and projects.
+- **Workspace owner or admin (`agents.manage`, `integrations.manage`):** connects Claude for the workspace, curates MCP connectors, creates agents, grants them connectors and projects, and sets who may assign work to them.
 - **Task author / reviewer:** assigns tasks to an agent, answers its questions in comments, reviews and merges the pull request.
 - **Agent:** an `actor_type = 'agent'` user; reads and writes ordi through MCP with its own short-lived token, and edits code in a per-run checkout.
 - **Agent worker:** the platform process that claims queued runs, prepares the workspace, launches Claude Code, streams events, and finalizes the run.
@@ -64,12 +65,12 @@ ordi already says "agent-first": every human action is reachable over MCP within
 
 **Credentials**
 
-- R6. `agent_credentials` stores provider (`anthropic` now; `openai` reserved), kind (`api_key` or `subscription`), label, `owner_user_id`, an AES-GCM encrypted secret, `expires_at`, `last_verified_at`, and status.
-- R7. A subscription credential for Claude is the one-year OAuth token produced by `claude setup-token`; the user runs the command on their own machine and pastes the token into ordi. The credential form offers subscription and API key as equal choices.
-- R8. An API-key credential for Claude is an Anthropic API key. `ANTHROPIC_API_KEY` in the container env is offered as a fallback source only for API keys, never for subscriptions, because a subscription token always names its owner.
-- R9. Each agent profile references one primary credential and optionally one fallback credential. Deactivating the owner revokes their credentials; affected agents show "credential required" and stop being dispatched.
-- R10. "Verify" runs a minimal headless Claude Code call with the credential and records `last_verified_at` or the error.
-- R11. ordi notifies the owner fourteen days before a subscription token expires and marks the credential expired afterwards.
+- R6. `agent_credentials` are workspace resources: provider (`anthropic` now; `openai` reserved), kind (`api_key` or `subscription`), label, `connected_by` and `connected_at`, an AES-GCM encrypted secret, `expires_at`, `last_verified_at`, and status. Creating, rotating, and revoking them requires `agents.manage`; the secret is never returned after creation.
+- R7. A subscription credential for Claude is the one-year OAuth token produced by `claude setup-token`; the owner runs the command on their own machine and pastes the token into Settings → Agents. Subscription and API key are equal choices in the form.
+- R8. An API-key credential for Claude is an Anthropic API key. `ANTHROPIC_API_KEY` in the container env is accepted as a fallback source for API keys only, so a PaaS deployment can configure Claude without touching the UI.
+- R9. The workspace has one primary Claude credential and optionally one fallback; an agent profile may override both. Revoking a credential stops dispatch for every agent that would use it, and those agents show "credential required". Deactivating the person who connected a credential leaves it in place and flags the card, because it is a workspace asset.
+- R10. "Verify" runs a minimal SDK query with the credential and records `last_verified_at` or the error.
+- R11. ordi notifies holders of `agents.manage` fourteen days before a subscription token expires and marks the credential expired afterwards.
 
 **Dispatch and runs**
 
@@ -97,6 +98,19 @@ ordi already says "agent-first": every human action is reachable over MCP within
 - R40. `POST /api/v1/mcp-connectors/:slug/mcp` is a Streamable HTTP MCP endpoint that authenticates the per-run token, checks the agent's allowlist and the connector state, and forwards JSON-RPC to the upstream with the current credential. SSE upstreams are bridged, and library `stdio` connectors are spawned by the gateway for the lifetime of the run and bridged the same way, so the SDK only ever sees Streamable HTTP.
 - R41. The gateway records every `tools/call` as an `agent_run_events` row (connector, tool, duration, ok or error) without arguments or results, so the run log shows which external tools the agent used.
 - R42. The connector card shows who authorized it and when, because the agent acts on the upstream as that person.
+
+**RBAC**
+
+- R43. A new permission domain `agents` with one permission, `agents.manage`, joins the catalogue. Owner and Admin receive it automatically because they carry the whole catalogue; the migration backfills it into existing `owner` and `admin` role rows and nowhere else. Any custom role can be granted it in the role matrix.
+- R44. `agents.manage` governs: connecting, rotating, and revoking Claude credentials; creating, editing, disabling, and deleting agents; setting an agent's role, limits, instructions, assign policy, projects, and connector allowlist; cancelling or retrying any run; and seeing the Agents settings tab at all.
+- R45. `integrations.manage` governs the connector library: adding, testing, authorizing, re-authorizing, disabling, and deleting connectors. Granting a connector to an agent is `agents.manage`. Owner and Admin hold both by default.
+- R46. A preset role `agent` ships in `roles.ts`: `projects.read`, `projects.write`, `kb.read`. It is the default role in the create-agent dialog, editable like every preset, and the owner may pick any other role for an agent.
+- R47. Every agent call to ordi is authorized as role ∩ per-run token scope through the existing `effectivePermissions`, and the per-run token's scope is the agent's role permissions at run start. A role change applies to the next run.
+- R48. Project membership is the resource boundary. An agent sees only projects where it is a member, `assertProject` applies to it as to any user, and the assignee picker offers an agent only inside its projects. Agents are added to projects through the same members UI as people.
+- R49. Each agent profile carries an `assign_policy`: `project_members` (default), `project_admins`, or `agents_managers`. `createTask`, `updateTask`, and `bulkUpdateTasks` reject an assignment that violates it with a domain error the UI shows inline, so a run and the plan it spends are always a deliberate grant.
+- R50. Run visibility follows the task: anyone who can view the task sees its runs and live log. Cancel and retry require task write on the project or `agents.manage`.
+- R51. Every mutation in this feature writes `activity_log`: credential connected, rotated, revoked; agent created, updated, disabled; connector added, authorized, disabled; allowlist changed; run queued, started, finished, cancelled. Secrets never appear in diffs.
+- R52. Settings tabs and actions without access are absent, not disabled, in line with PRD §17.1: Agents needs `agents.manage`, Connectors needs `integrations.manage`, and the agent toggle in the member dialog needs `users.manage` plus `agents.manage`.
 
 **Task loop**
 
@@ -142,18 +156,21 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-  Admin -->|paste setup-token or API key| Cred[agent_credentials]
-  Admin -->|library or URL| Conn[mcp_connectors]
-  Admin -->|create agent| Agent[users + agent_profiles]
+  Owner[Owner: agents.manage + integrations.manage] -->|paste setup-token or API key| Cred[Workspace Claude credential]
+  Owner -->|library or URL, authorize| Conn[mcp_connectors]
+  Owner -->|create agent, role, assign policy| Agent[users + agent_profiles]
   Cred --> Agent
   Conn -->|allowlist| Agent
   Agent -->|project member| Picker[Assignee picker]
+  Member[Project member] -->|assign within policy| Picker
 ```
 
 ### Acceptance Examples
 
 - **AE1 — Create an agent:** Given an admin in Settings → Users, when they add a member with "This is an AI agent", runtime Claude Code, and a credential, then a badged agent appears in the user list, has no password, is absent from People, and can be added to a project.
-- **AE2 — Subscription credential:** Given a member who ran `claude setup-token`, when they paste the token and click Verify, then the credential shows verified with an expiry a year out, and an agent bound to it can be dispatched.
+- **AE2 — Subscription credential:** Given an owner who ran `claude setup-token`, when they paste the token into Settings → Agents and click Verify, then the workspace credential shows verified, connected by them, with an expiry a year out, and every agent can be dispatched.
+- **AE13 — Permission boundary:** Given a Manager without `agents.manage`, when they open Settings, then there is no Agents tab, and a direct call to create an agent or read a credential returns 403; given a Member in a project, when they assign a task to an agent whose policy is `project_admins`, then the assignment is rejected inline and no run is queued.
+- **AE14 — Agent scope:** Given an agent with the preset `agent` role, when its run calls a finance MCP tool, then the call fails with `forbidden` naming the missing permission, and the task comment from the agent still succeeds.
 - **AE3 — Dispatch:** Given a task in a project with a linked repository, when it is assigned to the agent, then within seconds the task shows an acknowledgement comment and a queued run, and the worker starts it.
 - **AE4 — Pull request:** Given a running agent that finishes a fix, when the run completes, then the task has a git link to an open PR, sits in an `in_review` status, and the run card shows a summary and usage.
 - **AE5 — Merge closes:** Given AE4, when a human merges the PR, then the existing automation moves the task to Done with `actor_type = 'integration'`, and the run stays untouched.
@@ -190,7 +207,7 @@ flowchart LR
 **Explicitly out of scope**
 
 - Merging pull requests, deleting branches, or any irreversible git action by the agent.
-- Sharing one subscription credential across the workspace.
+- Per-agent token scopes narrower than the agent's role; the role is the single knob in this slice.
 
 ### Dependencies / Assumptions
 
@@ -228,6 +245,7 @@ flowchart LR
 - KTD6. Connector library entries live in `packages/shared/src/mcp-library.ts` as typed data; the API validates custom connectors to `http`/`sse` only. Governs R18, R19.
 - KTD7. Run events are rows, not files: `agent_run_events` with a sequence number, broadcast through the existing SSE broadcaster scoped to the task's project. Governs R33.
 - KTD8. The completion status is resolved per project by category (`in_review`), falling back to the first non-done status when the project has none, and the agent never targets `done`. Governs R29.
+- KTD10. RBAC reuses `guard()`, `effectivePermissions`, and `assertProject` unchanged: `agents.manage` is a catalogue entry plus a backfill migration modelled on `0033_people_read_documents.sql`, the `agent` preset is a `RoleSeed`, the per-run token scope is the role's permission list, and the assign policy is enforced in the task service next to the existing membership check. Governs R43-R52.
 
 ### High-Level Technical Design
 
@@ -285,7 +303,7 @@ for await (const message of query({
 - **Workers:** new `agents` consumer and `agent-runs` worker with heartbeat; `startWorkers` and `stopWorkers` wire them.
 - **Docker:** `Dockerfile.api` installs `git` and keeps the SDK's optional platform binaries; a `/data/agent-work` volume is documented; prod compose documents the optional split.
 - **Web:** Add member dialog toggle, Settings → Agents panel with Agents, Credentials, and Connectors tabs, avatar badge, task page run block, i18n in English and Ukrainian.
-- **Shared:** Zod schemas for agents, credentials, connectors, and runs; `MCP_LIBRARY`; new permission `agents.manage`; new event types `agent.run_queued`, `agent.run_started`, `agent.run_finished`, `agent.needs_input`.
+- **Shared:** Zod schemas for agents, credentials, connectors, and runs; `MCP_LIBRARY`; new permission domain `agents` with `agents.manage`; the `agent` preset role; new event types `agent.run_queued`, `agent.run_started`, `agent.run_finished`, `agent.needs_input`.
 - **Docs:** PRD §16 addendum, architecture decision on platform-hosted agents, deployment notes for the image and volume.
 
 ### Risks and Mitigations
@@ -293,7 +311,8 @@ for await (const message of query({
 - **Blast radius of an unattended agent:** `dontAsk` with explicit allow and deny lists, rebuilt child env, per-run token, no `done` transitions, no merge; documented container split for production.
 - **OAuth providers without dynamic registration:** the connector form accepts a pre-registered client id and secret; the gateway treats both paths the same after tokens exist.
 - **Gateway as a bottleneck:** it is stateless per request and forwards bodies without buffering results into the database; only `tools/call` metadata is recorded.
-- **Shared plans:** credentials are per person, never shared workspace-wide; the UI states whose plan is consumed.
+- **Unattended spend:** the credential is a workspace asset, so the assign policy, per-agent limits, and the "connected by" label are what keep spending deliberate and attributable.
+- **Permission drift:** a lint test asserts every new route declares a `guard`, and the RBAC tests cover `agents.manage`, `integrations.manage`, the agent role, and the assign policy.
 - **Rate limits on subscriptions:** `waiting_quota` state with backoff and optional fallback credential.
 - **Disk growth:** fresh clone per run plus deletion on finish; volume size documented in operations.
 - **Secrets in logs:** scrub known secret values from every stored event before insert.
@@ -312,11 +331,11 @@ Persist and share contracts first, then credentials and connectors (they are ind
 ### U1. Add the agent data model and shared contracts
 
 - **Goal:** Establish additive persistence and validated input shapes for agents, credentials, connectors, and runs.
-- **Requirements:** R1, R2, R6, R17, R21, R33.
+- **Requirements:** R1, R2, R6, R17, R21, R33, R43, R46.
 - **Dependencies:** None.
-- **Files:** `packages/db/src/schema/agents.ts`, `packages/db/src/schema/index.ts`, `packages/db/drizzle/*`, `packages/shared/src/schemas/agents.ts`, `packages/shared/src/mcp-library.ts`, `packages/shared/src/permissions.ts`, `packages/shared/src/events.ts`, `packages/shared/src/index.ts`.
-- **Approach:** Add `agent_profiles`, `agent_credentials`, `mcp_connectors`, `mcp_connector_oauth`, `agent_connectors`, `agent_runs`, `agent_run_events` with the partial unique index on active runs; add the `agents.manage` permission and the four event types; define the library catalogue and Zod schemas with `runtime: z.enum(['claude_code'])` and a documented `codex` reservation.
-- **Test scenarios:** Migration is additive; schemas reject `codex`, custom `stdio`, an `oauth` connector without a URL, and missing credential owners; library entries validate against their own schema.
+- **Files:** `packages/db/src/schema/agents.ts`, `packages/db/src/schema/index.ts`, `packages/db/drizzle/*`, `packages/shared/src/schemas/agents.ts`, `packages/shared/src/mcp-library.ts`, `packages/shared/src/permissions.ts`, `packages/shared/src/roles.ts`, `packages/shared/src/events.ts`, `packages/shared/src/index.ts`.
+- **Approach:** Add `agent_profiles`, `agent_credentials`, `mcp_connectors`, `mcp_connector_oauth`, `agent_connectors`, `agent_runs`, `agent_run_events` with the partial unique index on active runs; add the `agents` permission domain with `agents.manage` and a backfill migration into `owner` and `admin`; add the `agent` preset role; add the four event types; define the library catalogue and Zod schemas with `runtime: z.enum(['claude_code'])`, a documented `codex` reservation, and `assign_policy`.
+- **Test scenarios:** Migration is additive and backfills only owner and admin; schemas reject `codex`, custom `stdio`, an `oauth` connector without a URL, and an unknown assign policy; library entries validate against their own schema; the role seed resolves the `agent` preset.
 - **Verification:** `pnpm --filter @ordi/db typecheck && pnpm --filter @ordi/shared typecheck`.
 
 ### U2. Implement credentials and connectors APIs
@@ -325,18 +344,18 @@ Persist and share contracts first, then credentials and connectors (they are ind
 - **Requirements:** R6-R11, R17-R21, R23, R24, R38, R39, R42.
 - **Dependencies:** U1.
 - **Files:** `apps/api/src/domains/agents/credentials.ts`, `apps/api/src/domains/agents/connectors.ts`, `apps/api/src/domains/agents/connector-oauth.ts`, `apps/api/src/domains/agents/routes.ts`, `apps/api/src/app.ts`, `apps/api/src/lib/crypto.ts`, `apps/api/src/test/agents-credentials.test.ts`, `apps/api/src/test/agents-connectors.test.ts`.
-- **Approach:** CRUD with encrypted secrets and masked responses; `POST /agent-credentials/:id/verify` runs a minimal SDK query through the Claude adapter; `POST /mcp-connectors/:id/test` performs initialize plus `tools/list` with the MCP SDK client and caches tool names; on an authorization challenge, `POST /mcp-connectors/:id/oauth/start` discovers metadata, registers or uses the supplied client, stores PKCE state, and returns the consent URL, while `GET /mcp-connectors/oauth/callback` exchanges the code and stores tokens; a refresh helper is shared with the gateway; owner deactivation revokes credentials; expiry reminders in `workers/scheduled.ts`.
-- **Test scenarios:** Secrets never appear in GET bodies; verify and test record outcomes; revoked credentials are not listed as usable; custom stdio is rejected; the OAuth flow is exercised against an in-test MCP server that requires a bearer and serves discovery documents; a failed refresh flips the connector to `needs_auth`.
+- **Approach:** Credential routes under `guard('agents.manage')`, connector routes under `guard('integrations.manage')`; CRUD with encrypted secrets and masked responses; `POST /agent-credentials/:id/verify` runs a minimal SDK query through the Claude adapter; `POST /mcp-connectors/:id/test` performs initialize plus `tools/list` with the MCP SDK client and caches tool names; on an authorization challenge, `POST /mcp-connectors/:id/oauth/start` discovers metadata, registers or uses the supplied client, stores PKCE state, and returns the consent URL, while `GET /mcp-connectors/oauth/callback` exchanges the code and stores tokens; a refresh helper is shared with the gateway; expiry reminders in `workers/scheduled.ts`; every mutation writes activity.
+- **Test scenarios:** Secrets never appear in GET bodies; a Manager without `agents.manage` gets 403 on every credential route and a Member gets 403 on connector routes; verify and test record outcomes; revoked credentials are not listed as usable; custom stdio is rejected; the OAuth flow is exercised against an in-test MCP server that requires a bearer and serves discovery documents; a failed refresh flips the connector to `needs_auth`.
 - **Verification:** `pnpm --filter @ordi/api test -- agents-credentials.test.ts agents-connectors.test.ts`.
 
 ### U3. Implement agent profiles and the assignment surface
 
 - **Goal:** Create agents from the member dialog and make them assignable within their projects.
-- **Requirements:** R1-R5, R9.
+- **Requirements:** R1-R5, R9, R44, R46-R49.
 - **Dependencies:** U1, U2.
-- **Files:** `apps/api/src/domains/agents/profiles.ts`, `apps/api/src/domains/core/users.routes.ts`, `apps/api/src/domains/projects/service.ts`, `apps/api/src/test/agents-profiles.test.ts`.
-- **Approach:** `POST /agents` creates the user with `actor_type = 'agent'` and its profile in one transaction; `GET /users/lookup` returns `actorType`; assignee validation in `updateTask`/`createTask` rejects agents that are not project members; `bulkUpdateTasks` emits `task.assigned` for newly added assignees.
-- **Test scenarios:** Agent creation without email invite; password reset refused; bulk assignment emits events; a non-member agent is rejected as assignee.
+- **Files:** `apps/api/src/domains/agents/profiles.ts`, `apps/api/src/domains/core/users.routes.ts`, `apps/api/src/domains/projects/service.ts`, `apps/api/src/test/agents-profiles.test.ts`, `apps/api/src/test/rbac.test.ts`.
+- **Approach:** `POST /agents` under `guard('agents.manage')` creates the user with `actor_type = 'agent'`, the chosen role (default `agent`), and its profile in one transaction; `GET /users/lookup` returns `actorType`; assignee validation in `createTask`, `updateTask`, and `bulkUpdateTasks` rejects agents that are not project members and assignments outside the agent's `assign_policy`, using `effectiveProjectRole` of the assigner; `bulkUpdateTasks` emits `task.assigned` for newly added assignees.
+- **Test scenarios:** Agent creation without email invite and 403 without `agents.manage`; password reset refused; bulk assignment emits events; a non-member agent is rejected as assignee; each assign policy accepts and rejects the right project roles; an agent-role token cannot reach finance routes.
 - **Verification:** `pnpm --filter @ordi/api test -- agents-profiles.test.ts projects.test.ts`.
 
 ### U4. Implement the connector gateway
@@ -352,20 +371,20 @@ Persist and share contracts first, then credentials and connectors (they are ind
 ### U5. Implement dispatch, the worker, and the Claude adapter
 
 - **Goal:** Turn an assignment into a finished run with a pull request.
-- **Requirements:** R12-R16, R25-R35.
+- **Requirements:** R12-R16, R25-R35, R47, R50, R51.
 - **Dependencies:** U1-U4.
 - **Files:** `apps/api/package.json`, `apps/api/src/workers/consumers.ts`, `apps/api/src/workers/agent-runs.ts`, `apps/api/src/workers/index.ts`, `apps/api/src/domains/agents/runtime/types.ts`, `apps/api/src/domains/agents/runtime/claude-code.ts`, `apps/api/src/domains/agents/runtime/codex.ts`, `apps/api/src/domains/agents/runs.ts`, `apps/api/src/domains/agents/prompt.ts`, `apps/api/src/domains/agents/workspace.ts`, `apps/api/src/domains/integrations/github-app.ts`, `apps/api/src/test/agents-dispatch.test.ts`, `apps/api/src/test/agents-runtime.test.ts`.
 - **Approach:** The `agents` consumer queues runs and posts the acknowledgement comment; the worker claims, mints the token, clones with the installation token, builds the `mcpServers` map (`ordi` plus gateway entries), calls the SDK `query()` with the rebuilt env and the options in the design, records each message as an event (capturing the session id, usage, result), classifies failures (rate limit → `waiting_quota`, question → `needs_input`), pushes the branch, opens the PR, revokes the token, deletes the workdir. Comment and mention events queue follow-ups with `resume`. The adapter is tested behind an injected `query` function so tests never spawn the runtime.
-- **Test scenarios:** Dispatch on assignment and bulk assignment; no duplicate active runs; env scrubbing; `mcpServers` contains exactly the allowed connectors via the gateway; a rate-limit result yields `waiting_quota` and fallback; timeout aborts and fails; follow-up passes `resume`; secrets scrubbed from stored events.
+- **Test scenarios:** Dispatch on assignment and bulk assignment; no duplicate active runs; env scrubbing; `mcpServers` contains exactly the allowed connectors via the gateway; the per-run token carries the agent role's permissions and is revoked after the run; cancel needs task write or `agents.manage`; a rate-limit result yields `waiting_quota` and fallback; timeout aborts and fails; follow-up passes `resume`; secrets scrubbed from stored events; run lifecycle writes activity.
 - **Verification:** `pnpm --filter @ordi/api test -- agents-dispatch.test.ts agents-runtime.test.ts`.
 
 ### U6. Build the web surfaces
 
 - **Goal:** Give admins and task authors the screens the flow needs.
-- **Requirements:** R1, R2, R4, R7, R10, R19-R21, R31, R33, R37, R38, R39, R42.
+- **Requirements:** R1, R2, R4, R7, R10, R19-R21, R31, R33, R37, R38, R39, R42, R49, R50, R52.
 - **Dependencies:** U2-U5.
 - **Files:** `apps/web/src/pages/Settings.tsx`, `apps/web/src/components/settings/AgentsPanel.tsx`, `apps/web/src/components/settings/AgentCredentialsPanel.tsx`, `apps/web/src/components/settings/McpConnectorsPanel.tsx`, `apps/web/src/components/settings/IntegrationsPanel.tsx`, `apps/web/src/components/task/AgentRunsBlock.tsx`, `apps/web/src/pages/TaskPage.tsx`, `apps/web/src/components/ui.tsx`, `apps/web/src/components/task/PropertySidebar.tsx`, `apps/web/src/lib/queries.ts`, `apps/web/src/lib/sse.ts`, i18n dictionaries.
-- **Approach:** Add member dialog gains the agent toggle, runtime selector (Codex disabled with a coming-soon badge), credential picker, and connector checklist; Settings → Agents lists agents, worker status, credentials, and connectors with library picker, URL form, an "Authorize" button that opens the consent URL and returns to the card, "Re-authorize" for `needs_auth`, and "authorized by" on the card; `Avatar` renders the badge from `actorType`; the task page shows runs with a live log including external tool calls, retry and cancel; the integrations panel shows the GitHub App permission re-accept state.
+- **Approach:** Add member dialog gains the agent toggle (shown with `users.manage` plus `agents.manage`), runtime selector (Codex disabled with a coming-soon badge), role picker defaulting to Agent, assign policy, and connector checklist; Settings → Agents (`agents.manage`) shows the workspace Claude connection with "connected by", agents, worker status, and the Connectors tab (`integrations.manage`) with library picker, URL form, an "Authorize" button that opens the consent URL and returns to the card, "Re-authorize" for `needs_auth`, and "authorized by" on the card; `Avatar` renders the badge from `actorType`; the assignee picker hides agents the current user may not assign; the task page shows runs with a live log including external tool calls, retry and cancel gated by task write; the integrations panel shows the GitHub App permission re-accept state.
 - **Test scenarios:** Typecheck and build; query shapes registered; both locales; an e2e smoke that creates an agent and sees it in the assignee picker.
 - **Verification:** `pnpm --filter @ordi/web typecheck && pnpm --filter @ordi/web build && pnpm check:query-shapes`.
 
@@ -385,8 +404,8 @@ Persist and share contracts first, then credentials and connectors (they are ind
 - **Requirements:** All.
 - **Dependencies:** U1-U7.
 - **Files:** `apps/api/src/seed.ts`, `apps/web/e2e/*`, this plan.
-- **Approach:** Seed the demo agent with a profile bound to a placeholder credential; walk AE1-AE12 manually against a throwaway repository and one real OAuth MCP server; run the simplification and code-review skills; record residual risks in the architecture decisions log.
-- **Test scenarios:** AE1-AE12 observed.
+- **Approach:** Seed the demo agent with the `agent` role and a profile; walk AE1-AE14 manually against a throwaway repository and one real OAuth MCP server; run the simplification and code-review skills; record residual risks in the architecture decisions log.
+- **Test scenarios:** AE1-AE14 observed.
 - **Verification:** Repository gates below plus the behavioural smoke test.
 
 ---
@@ -394,7 +413,7 @@ Persist and share contracts first, then credentials and connectors (they are ind
 ## Verification Contract
 
 - **Focused database/contracts:** `pnpm --filter @ordi/db typecheck && pnpm --filter @ordi/shared typecheck`.
-- **Focused API:** `pnpm --filter @ordi/api test -- agents-credentials.test.ts agents-connectors.test.ts agents-gateway.test.ts agents-profiles.test.ts agents-dispatch.test.ts agents-runtime.test.ts projects.test.ts`.
+- **Focused API:** `pnpm --filter @ordi/api test -- agents-credentials.test.ts agents-connectors.test.ts agents-gateway.test.ts agents-profiles.test.ts agents-dispatch.test.ts agents-runtime.test.ts projects.test.ts rbac.test.ts`.
 - **Focused MCP:** `pnpm --filter @ordi/mcp test` (the hosted endpoint is reused unchanged).
 - **Web:** `pnpm --filter @ordi/web typecheck && pnpm --filter @ordi/web build`.
 - **Repository gates:** `pnpm typecheck`, `pnpm test`, `pnpm build`, `pnpm check:query-shapes`, and `pnpm check:desktop-safe`.
@@ -410,7 +429,7 @@ Persist and share contracts first, then credentials and connectors (they are ind
 - Every R-ID is implemented or explicitly deferred by its owning scope boundary.
 - Every U-ID has an observed verification result.
 - Existing users, tasks, git links, MCP tokens, and OAuth clients remain readable and functional.
-- Dispatch, run lifecycle, credential handling, connector allowlists, connector OAuth, the gateway, and env scrubbing have API integration coverage.
+- Dispatch, run lifecycle, credential handling, connector allowlists, connector OAuth, the gateway, env scrubbing, `agents.manage`, the `agent` role, and the assign policy have API integration coverage.
 - Settings, the member dialog, the assignee picker, and the task page form one coherent English/Ukrainian workflow.
 - No secret appears in any API response, stored run event, or task comment.
 - The Docker image runs the worker out of the box and the production split is documented.
