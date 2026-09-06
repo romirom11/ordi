@@ -16,7 +16,7 @@ execution: code
 - **Objective:** Let a workspace add an AI agent as a team member, assign it tasks like any other assignee, and have the platform run Claude Code against the task until a pull request is ready for human review.
 - **Product authority:** This plan owns agent identity, provider credentials, the workspace MCP connector library, run dispatch and the task feedback loop. It does not change how humans work with tasks, git links, or permissions.
 - **Execution profile:** Implement additively on a feature branch with database, API, worker, Docker image, web, and documentation parity. Claude Code is the only runtime that executes; Codex is registered but shown as coming soon.
-- **Stop conditions:** Stop before merging pull requests on the agent's behalf, before shipping any shared "workspace subscription" credential, before executing arbitrary stdio commands supplied by users, and before any change that lets an agent act outside its role and project membership.
+- **Stop conditions:** Stop before merging pull requests on the agent's behalf, before exposing any credential or connector secret to the agent process, before executing arbitrary stdio commands supplied by users, and before any change that lets an agent act outside its role and project membership.
 - **Open blockers:** None.
 - **Tail ownership:** The implementation workflow owns tests, simplification, code review, and local commits; it must not push or open a PR without a later user request.
 
@@ -26,7 +26,7 @@ execution: code
 
 ### Summary
 
-An agent is a user with `actor_type = 'agent'`, a runtime, a provider credential, and a set of allowed MCP connectors. Assigning a task to it queues a run. A worker inside the ordi deployment clones the project's repository, launches Claude Code headless with the ordi MCP server and the agent's connectors, streams the log to the task page, and ends with a pull request and the task in review. Humans review and merge; the existing `pr_merged` git rule closes the task. Comments on the task continue the same Claude session.
+An agent is a user with `actor_type = 'agent'`, a runtime, a role, and a set of allowed MCP connectors; the workspace owner connects Claude once and every agent draws on that credential. Assigning a task to it queues a run. A worker inside the ordi deployment clones the project's repository, launches Claude Code headless with the ordi MCP server and the agent's connectors, streams the log to the task page, and ends with a pull request and the task in review. Humans review and merge; the existing `pr_merged` git rule closes the task. Comments on the task continue the same Claude session.
 
 ### Problem Frame
 
@@ -43,7 +43,6 @@ ordi already says "agent-first": every human action is reachable over MCP within
 - **Claude runs through the Agent SDK, not the CLI** (session-settled: user-approved — chosen over spawning `claude -p`: the SDK bundles the runtime, yields typed messages with session id and usage, and exposes `canUseTool` and hooks for a programmatic policy; authentication and Anthropic's policy are identical for both). Governs R15, R25, R33-R35.
 - **ordi performs MCP OAuth itself and fronts connectors with a gateway** (session-settled: user-approved — chosen over rejecting OAuth connectors because the SDK cannot run the browser flow headless: MCP authorization is standard OAuth 2.1 with discovery, dynamic registration and PKCE, the MCP SDK already in the API ships the client side, and a gateway keeps upstream secrets inside the API process while refreshing tokens mid-run). Governs R19, R22, R23, R38-R42.
 - **The agent never closes a coding task itself** (session-settled: user-approved — chosen over letting the agent set Done: it leaves the task in an `in_review` status with a PR link; the existing `pr_merged` automation closes it after a human merges). Governs R28, R29.
-- **Permissions stay role ∩ token scope plus project membership** (session-settled: reused from PRD §4 and §16 — no new permission model for agents). Governs R3, R14, R34.
 
 ### Actors
 
@@ -57,7 +56,7 @@ ordi already says "agent-first": every human action is reachable over MCP within
 
 **Agent identity**
 
-- R1. A workspace member with `users.manage` can create an agent from the same "Add member" dialog as a person by switching on "This is an AI agent". The agent is a `users` row with `actor_type = 'agent'`, no password, no invite email, and an `agent_profiles` row.
+- R1. A workspace member with `users.manage` and `agents.manage` can create an agent from the same "Add member" dialog as a person by switching on "This is an AI agent". The agent is a `users` row with `actor_type = 'agent'`, no password, no invite email, and an `agent_profiles` row.
 - R2. An agent profile has a runtime (`claude_code` executable now; `codex` visible in the selector, disabled, labelled coming soon), free-text instructions, a completion status category (`in_review` by default), `max_run_minutes`, `max_turns`, `max_budget_usd` (nullable), and `concurrency` (default 1).
 - R3. An agent holds a role like any user and must be a project member to be assignable there; the assignee picker only offers agents that are members of the task's project.
 - R4. Agents carry a visible badge wherever an avatar is rendered, and `GET /users/lookup` exposes `actorType` so the web app can render it.
@@ -91,6 +90,25 @@ ordi already says "agent-first": every human action is reachable over MCP within
 - R23. Upstream secrets, OAuth tokens, and stdio env never leave the API process: they are not written to the run directory, not passed to the SDK subprocess, and run events are scrubbed for any known secret value before storage.
 - R24. Disabling or deleting a connector removes it from future runs immediately and makes the gateway refuse it for active runs.
 
+**Task loop**
+
+- R25. The run prompt contains the task ref, title, description as text, labels, comments so far, links and git links, the project key, the agent's instructions, and the rules of engagement: report progress with `comment_on_task`, attach the pull request with `add_task_link`, finish by moving the task to the configured completion category, and ask via comment when blocked. The rules go in `systemPrompt.append`; the task goes in the prompt.
+- R26. The worker resolves the repository through `project_repositories`, clones it fresh into `/data/agent-work/<runId>` using the GitHub App installation token, checks out the branch from `GET /tasks/:id/branch-name`, and gives Claude Code the checkout as its working directory. Projects without a repository run in an empty scratch directory.
+- R27. The worker mints a short-lived `api_tokens` row for the agent user at run start and revokes it at run end; the ordi MCP entry points at the local API with that token, so every write is attributed to the agent with `actor_type = 'agent'`.
+- R28. On success the agent pushes its branch and opens a pull request with the installation token; the existing git webhook links the PR to the task, and the run records the PR url and a summary.
+- R29. The agent moves the task to the project's status with the profile's completion category (`in_review` by default) and never to a `done` status in this slice.
+- R30. A human comment on a task whose assignee is an agent, or an `@`-mention of the agent, queues a follow-up run (trigger `comment`) that resumes the previous Claude session with the SDK `resume` option and the new comment as the prompt.
+- R31. A run that ends because Claude asked a question is marked `needs_input`; the question is a task comment, and the author is notified.
+- R32. A run that fails on a provider rate limit is marked `waiting_quota`, retried when the window is expected to reset, and switched to the fallback credential when one is configured.
+- R33. SDK messages are stored as run events as they stream (session id from the init message, assistant text and tool use, the result with usage and cost) and broadcast over SSE so the task page shows a live log, duration, turn count, and cost or token usage.
+
+**Security**
+
+- R34. The SDK subprocess receives a rebuilt `env`: `PATH`, `HOME` pointing at a per-run `CLAUDE_CONFIG_DIR`, the provider credential, MCP timeouts, and nothing else. `DATABASE_URL`, `ENCRYPTION_KEY`, `AUTH_SECRET`, S3 and SMTP settings never reach it.
+- R35. The run uses `permissionMode: 'dontAsk'` with an explicit `allowedTools` list (file tools, Bash, and `mcp__*` for the configured servers), `disallowedTools` for destructive git and network commands, `maxTurns` from the profile and `maxBudgetUsd` for API-key credentials, plus a `PreToolUse` hook that logs every tool call as a run event. The plan documents the blast radius as the container plus the agent's ordi role plus repository write via the installation token.
+- R36. `docker-compose.prod.yml` documents an optional split where the worker runs as its own service from the same image with `AGENT_WORKER_ENABLED=1` and the API with `0`; the split is documentation in this slice, not default.
+- R37. The GitHub App manifest requests `contents: write` and `pull_requests: write`; the integrations panel explains that the org owner must accept the new permissions before agents can push.
+
 **Connector OAuth and gateway**
 
 - R38. When a URL connector answers 401 with protected-resource metadata, ordi runs the MCP OAuth 2.1 client flow itself: discover the authorization server, register a client dynamically with the callback `APP_URL/api/v1/mcp-connectors/oauth/callback` (or use admin-supplied client id and secret when the provider has no dynamic registration), send the admin to consent with PKCE, exchange the code, and store access and refresh tokens encrypted with their expiry and the authorizing user.
@@ -112,25 +130,6 @@ ordi already says "agent-first": every human action is reachable over MCP within
 - R51. Every mutation in this feature writes `activity_log`: credential connected, rotated, revoked; agent created, updated, disabled; connector added, authorized, disabled; allowlist changed; run queued, started, finished, cancelled. Secrets never appear in diffs.
 - R52. Settings tabs and actions without access are absent, not disabled, in line with PRD §17.1: Agents needs `agents.manage`, Connectors needs `integrations.manage`, and the agent toggle in the member dialog needs `users.manage` plus `agents.manage`.
 
-**Task loop**
-
-- R25. The run prompt contains the task ref, title, description as text, labels, comments so far, links and git links, the project key, the agent's instructions, and the rules of engagement: report progress with `comment_on_task`, attach the pull request with `add_task_link`, finish by moving the task to the configured completion category, and ask via comment when blocked. The rules go in `systemPrompt.append`; the task goes in the prompt.
-- R26. The worker resolves the repository through `project_repositories`, clones it fresh into `/data/agent-work/<runId>` using the GitHub App installation token, checks out the branch from `GET /tasks/:id/branch-name`, and gives Claude Code the checkout as its working directory. Projects without a repository run in an empty scratch directory.
-- R27. The worker mints a short-lived `api_tokens` row for the agent user at run start and revokes it at run end; the ordi MCP entry points at the local API with that token, so every write is attributed to the agent with `actor_type = 'agent'`.
-- R28. On success the agent pushes its branch and opens a pull request with the installation token; the existing git webhook links the PR to the task, and the run records the PR url and a summary.
-- R29. The agent moves the task to the project's status with the profile's completion category (`in_review` by default) and never to a `done` status in this slice.
-- R30. A human comment on a task whose assignee is an agent, or an `@`-mention of the agent, queues a follow-up run (trigger `comment`) that resumes the previous Claude session with the SDK `resume` option and the new comment as the prompt.
-- R31. A run that ends because Claude asked a question is marked `needs_input`; the question is a task comment, and the author is notified.
-- R32. A run that fails on a provider rate limit is marked `waiting_quota`, retried when the window is expected to reset, and switched to the fallback credential when one is configured.
-- R33. SDK messages are stored as run events as they stream (session id from the init message, assistant text and tool use, the result with usage and cost) and broadcast over SSE so the task page shows a live log, duration, turn count, and cost or token usage.
-
-**Security**
-
-- R34. The SDK subprocess receives a rebuilt `env`: `PATH`, `HOME` pointing at a per-run `CLAUDE_CONFIG_DIR`, the provider credential, MCP timeouts, and nothing else. `DATABASE_URL`, `ENCRYPTION_KEY`, `AUTH_SECRET`, S3 and SMTP settings never reach it.
-- R35. The run uses `permissionMode: 'dontAsk'` with an explicit `allowedTools` list (file tools, Bash, and `mcp__*` for the configured servers), `disallowedTools` for destructive git and network commands, `maxTurns` from the profile and `maxBudgetUsd` for API-key credentials, plus a `PreToolUse` hook that logs every tool call as a run event. The plan documents the blast radius as the container plus the agent's ordi role plus repository write via the installation token.
-- R36. `docker-compose.prod.yml` documents an optional split where the worker runs as its own service from the same image with `AGENT_WORKER_ENABLED=1` and the API with `0`; the split is documentation in this slice, not default.
-- R37. The GitHub App manifest requests `contents: write` and `pull_requests: write`; the integrations panel explains that the org owner must accept the new permissions before agents can push.
-
 ### Key Flows
 
 ```mermaid
@@ -140,7 +139,7 @@ flowchart TB
   C -->|agent enabled and credential usable| D[agent_runs queued + ack comment]
   C -->|otherwise| Z[skip, notify author]
   D --> E[worker claims run]
-  E --> F[clone repo, mint token, write mcp config]
+  E --> F[clone repo, mint token, build mcpServers map]
   F --> G[Agent SDK query with ordi + allowed connectors]
   G --> H{outcome}
   H -->|pull request| I[add_task_link, status in_review]
@@ -167,20 +166,20 @@ flowchart LR
 
 ### Acceptance Examples
 
-- **AE1 — Create an agent:** Given an admin in Settings → Users, when they add a member with "This is an AI agent", runtime Claude Code, and a credential, then a badged agent appears in the user list, has no password, is absent from People, and can be added to a project.
+- **AE1 — Create an agent:** Given an admin in Settings → Users, when they add a member with "This is an AI agent", runtime Claude Code, and the Agent role, then a badged agent appears in the user list, has no password, is absent from People, and can be added to a project.
 - **AE2 — Subscription credential:** Given an owner who ran `claude setup-token`, when they paste the token into Settings → Agents and click Verify, then the workspace credential shows verified, connected by them, with an expiry a year out, and every agent can be dispatched.
-- **AE13 — Permission boundary:** Given a Manager without `agents.manage`, when they open Settings, then there is no Agents tab, and a direct call to create an agent or read a credential returns 403; given a Member in a project, when they assign a task to an agent whose policy is `project_admins`, then the assignment is rejected inline and no run is queued.
-- **AE14 — Agent scope:** Given an agent with the preset `agent` role, when its run calls a finance MCP tool, then the call fails with `forbidden` naming the missing permission, and the task comment from the agent still succeeds.
 - **AE3 — Dispatch:** Given a task in a project with a linked repository, when it is assigned to the agent, then within seconds the task shows an acknowledgement comment and a queued run, and the worker starts it.
 - **AE4 — Pull request:** Given a running agent that finishes a fix, when the run completes, then the task has a git link to an open PR, sits in an `in_review` status, and the run card shows a summary and usage.
 - **AE5 — Merge closes:** Given AE4, when a human merges the PR, then the existing automation moves the task to Done with `actor_type = 'integration'`, and the run stays untouched.
 - **AE6 — Follow-up:** Given a task in review with an agent assignee, when the reviewer comments "also update the tests", then a follow-up run resumes the same session and pushes to the same branch.
 - **AE7 — Connector allowlist:** Given a workspace with GitHub and Sentry connectors and an agent allowed only Sentry, when the agent runs, then the SDK receives `ordi` and `sentry` only, both through the gateway, and the gateway refuses a call to `github` with the run's token.
-- **AE11 — OAuth connector:** Given an admin who adds a Notion MCP URL, when ordi detects the authorization challenge and the admin completes consent, then the connector shows "authorized by" the admin with the tool list, an agent granted it can call Notion tools during a run, and a token refresh during a long run is invisible to the agent.
-- **AE12 — Lost authorization:** Given an OAuth connector whose refresh token was revoked upstream, when the next run starts, then the connector is excluded, its card shows "Re-authorize", and the run proceeds with the remaining connectors.
-- **AE8 — Quota:** Given an agent on a subscription credential that hits its five-hour window, when the CLI reports the limit, then the run shows `waiting_quota`, switches to the fallback API key if configured, and otherwise retries later without spamming the author.
+- **AE8 — Quota:** Given an agent on a subscription credential that hits its five-hour window, when the SDK reports the limit, then the run shows `waiting_quota`, switches to the fallback API key if configured, and otherwise retries later without spamming the author.
 - **AE9 — Bulk assign:** Given three tasks selected in the list view, when they are bulk-assigned to the agent, then three runs are queued (serialised by the agent's concurrency).
 - **AE10 — Codex placeholder:** Given the runtime selector, when the admin opens it, then Codex is visible, disabled, and labelled coming soon, and the API rejects `codex` with a validation error.
+- **AE11 — OAuth connector:** Given an admin who adds a Notion MCP URL, when ordi detects the authorization challenge and the admin completes consent, then the connector shows "authorized by" the admin with the tool list, an agent granted it can call Notion tools during a run, and a token refresh during a long run is invisible to the agent.
+- **AE12 — Lost authorization:** Given an OAuth connector whose refresh token was revoked upstream, when the next run starts, then the connector is excluded, its card shows "Re-authorize", and the run proceeds with the remaining connectors.
+- **AE13 — Permission boundary:** Given a Manager without `agents.manage`, when they open Settings, then there is no Agents tab, and a direct call to create an agent or read a credential returns 403; given a Member in a project, when they assign a task to an agent whose policy is `project_admins`, then the assignment is rejected inline and no run is queued.
+- **AE14 — Agent scope:** Given an agent with the preset `agent` role, when its run calls a finance MCP tool, then the call fails with `forbidden` naming the missing permission, and the task comment from the agent still succeeds.
 
 ### Success Criteria
 
@@ -236,15 +235,15 @@ flowchart LR
 
 ### Key Technical Decisions
 
-- KTD1. Keep `users.actor_type = 'agent'` as the identity flag and add `agent_profiles` (1:1), `agent_credentials`, `mcp_connectors`, `agent_connectors`, `agent_runs`, and `agent_run_events` as additive tables. Governs R1-R2, R6, R17, R21, R33.
+- KTD1. Keep `users.actor_type = 'agent'` as the identity flag and add `agent_profiles` (1:1), `agent_credentials`, `mcp_connectors`, `mcp_connector_oauth`, `agent_connectors`, `agent_runs`, and `agent_run_events` as additive tables. Governs R1-R2, R6, R17, R21, R33.
 - KTD2. Dispatch through a sixth outbox consumer named `agents` so queuing inherits retry, dedupe, and dead-letter behaviour; the worker claims with `FOR UPDATE SKIP LOCKED` exactly like `email_deliveries`. Governs R12-R14.
 - KTD3. Model runtimes as adapters behind one interface (`prepare`, `run`, `resume`, `classifyFailure`); `claude-code.ts` wraps the Agent SDK `query()` and a `codex.ts` stub throws `runtime_unavailable`. Governs R2, R30, R32.
 - KTD4. Per-run identity is a minted-and-revoked `api_tokens` row, never a stored long-lived token; the ordi MCP entry and every gateway entry target `http://localhost:<port>/api/v1/...` with that bearer. Governs R27, R40.
 - KTD5. Secrets (credential secrets, connector headers, env, OAuth tokens) are AES-GCM blobs via `lib/crypto`, masked in every GET, and decrypted only inside the gateway. The provider credential is the one secret the worker hands to the SDK subprocess. Governs R6, R17, R23, R34.
-- KTD9. The connector gateway is a Hono route that speaks Streamable HTTP towards the agent and uses `@modelcontextprotocol/sdk` client transports towards the upstream (Streamable HTTP, SSE, or a stdio process it spawns per run): it authenticates the run token, resolves the connector and its credential, forwards the JSON-RPC body, and returns the response. OAuth state lives in `mcp_connector_oauth` (client registration, tokens, expiry, authorizing user). Governs R22, R38-R42.
 - KTD6. Connector library entries live in `packages/shared/src/mcp-library.ts` as typed data; the API validates custom connectors to `http`/`sse` only. Governs R18, R19.
 - KTD7. Run events are rows, not files: `agent_run_events` with a sequence number, broadcast through the existing SSE broadcaster scoped to the task's project. Governs R33.
 - KTD8. The completion status is resolved per project by category (`in_review`), falling back to the first non-done status when the project has none, and the agent never targets `done`. Governs R29.
+- KTD9. The connector gateway is a Hono route that speaks Streamable HTTP towards the agent and uses `@modelcontextprotocol/sdk` client transports towards the upstream (Streamable HTTP, SSE, or a stdio process it spawns per run): it authenticates the run token, resolves the connector and its credential, forwards the JSON-RPC body, and returns the response. OAuth state lives in `mcp_connector_oauth` (client registration, tokens, expiry, authorizing user). Governs R22, R38-R42.
 - KTD10. RBAC reuses `guard()`, `effectivePermissions`, and `assertProject` unchanged: `agents.manage` is a catalogue entry plus a backfill migration modelled on `0033_people_read_documents.sql`, the `agent` preset is a `RoleSeed`, the per-run token scope is the role's permission list, and the assign policy is enforced in the task service next to the existing membership check. Governs R43-R52.
 
 ### High-Level Technical Design
@@ -384,7 +383,7 @@ Persist and share contracts first, then credentials and connectors (they are ind
 - **Requirements:** R1, R2, R4, R7, R10, R19-R21, R31, R33, R37, R38, R39, R42, R49, R50, R52.
 - **Dependencies:** U2-U5.
 - **Files:** `apps/web/src/pages/Settings.tsx`, `apps/web/src/components/settings/AgentsPanel.tsx`, `apps/web/src/components/settings/AgentCredentialsPanel.tsx`, `apps/web/src/components/settings/McpConnectorsPanel.tsx`, `apps/web/src/components/settings/IntegrationsPanel.tsx`, `apps/web/src/components/task/AgentRunsBlock.tsx`, `apps/web/src/pages/TaskPage.tsx`, `apps/web/src/components/ui.tsx`, `apps/web/src/components/task/PropertySidebar.tsx`, `apps/web/src/lib/queries.ts`, `apps/web/src/lib/sse.ts`, i18n dictionaries.
-- **Approach:** Add member dialog gains the agent toggle (shown with `users.manage` plus `agents.manage`), runtime selector (Codex disabled with a coming-soon badge), role picker defaulting to Agent, assign policy, and connector checklist; Settings → Agents (`agents.manage`) shows the workspace Claude connection with "connected by", agents, worker status, and the Connectors tab (`integrations.manage`) with library picker, URL form, an "Authorize" button that opens the consent URL and returns to the card, "Re-authorize" for `needs_auth`, and "authorized by" on the card; `Avatar` renders the badge from `actorType`; the assignee picker hides agents the current user may not assign; the task page shows runs with a live log including external tool calls, retry and cancel gated by task write; the integrations panel shows the GitHub App permission re-accept state.
+- **Approach:** Add member dialog gains the agent toggle (shown with `users.manage` plus `agents.manage`), runtime selector (Codex disabled with a coming-soon badge), role picker defaulting to Agent, assign policy, an optional credential override, and connector checklist; Settings → Agents (`agents.manage`) shows the workspace Claude connection with "connected by", agents, worker status, and the Connectors tab (`integrations.manage`) with library picker, URL form, an "Authorize" button that opens the consent URL and returns to the card, "Re-authorize" for `needs_auth`, and "authorized by" on the card; `Avatar` renders the badge from `actorType`; the assignee picker hides agents the current user may not assign; the task page shows runs with a live log including external tool calls, retry and cancel gated by task write; the integrations panel shows the GitHub App permission re-accept state.
 - **Test scenarios:** Typecheck and build; query shapes registered; both locales; an e2e smoke that creates an agent and sees it in the assignee picker.
 - **Verification:** `pnpm --filter @ordi/web typecheck && pnpm --filter @ordi/web build && pnpm check:query-shapes`.
 
