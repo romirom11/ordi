@@ -121,7 +121,18 @@ export async function activeRunForTask(taskId: string): Promise<RunRow | null> {
  * retry time has come, while the agent stays under its concurrency.
  */
 export async function claimRuns(workerId: string, limit: number): Promise<RunRow[]> {
-  if (limit <= 0) return [];
+  const out: RunRow[] = [];
+  // One claim per statement: the per-agent concurrency count must see the
+  // previous claim, which a single multi-row UPDATE would not.
+  for (let i = 0; i < limit; i++) {
+    const [row] = await claimOne(workerId);
+    if (!row) break;
+    out.push(row);
+  }
+  return out;
+}
+
+async function claimOne(workerId: string): Promise<RunRow[]> {
   const { db } = getDb();
   const rows = await db.execute(sql`
     with due as (
@@ -137,7 +148,7 @@ export async function claimRuns(workerId: string, limit: number): Promise<RunRow
         and (select count(*) from agent_runs a where a.agent_user_id = r.agent_user_id and a.status in ('claimed', 'running')) < p.concurrency
       order by r.created_at asc
       for update of r skip locked
-      limit ${limit}
+      limit 1
     )
     update agent_runs as run
     set status = 'claimed', worker_id = ${workerId}, claimed_at = now(), attempts = run.attempts + 1, next_attempt_at = null

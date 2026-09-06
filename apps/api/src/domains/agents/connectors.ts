@@ -286,9 +286,11 @@ async function defaultOpener(connector: ConnectorRow): Promise<UpstreamClient> {
     const headers = secrets.headers ?? {};
     const authProvider = connector.authMode === 'oauth' ? new ConnectorOAuthProvider(connector.id, connector.url) : undefined;
     // Static headers ride on every request, including the SSE stream itself.
-    const withHeaders = (input: string | URL, init?: RequestInit) => fetch(input, {
-      ...init, headers: { ...(init?.headers as Record<string, string> ?? {}), ...headers },
-    });
+    const withHeaders = (input: string | URL, init?: RequestInit) => {
+      const merged = new Headers(init?.headers);
+      for (const [k, v] of Object.entries(headers)) merged.set(k, v);
+      return fetch(input, { ...init, headers: merged });
+    };
     transport = connector.transport === 'sse'
       ? new SSEClientTransport(url, { authProvider, requestInit: { headers }, fetch: withHeaders })
       : new StreamableHTTPClientTransport(url, { authProvider, requestInit: { headers }, fetch: withHeaders });

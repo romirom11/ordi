@@ -77,14 +77,23 @@ async function postComment(actor: Actor, taskId: string, text: string): Promise<
   await tasksSvc.addComment(actor, taskId, { body: textToDoc(text), mentions: [] });
 }
 
-/** KTD8: the project's status in the agent's completion category, if any. */
-async function completionStatus(projectId: string, category: string): Promise<{ id: string; name: string } | null> {
+/**
+ * KTD8: where a finished task lands. ordi has no "in_review" status category
+ * (statuses are backlog/todo/in_progress/done/canceled), so "in_review" means
+ * the project's review status by name, else the last in-progress status, else
+ * nothing – the task then keeps its status and the comment says so.
+ */
+export async function completionStatus(projectId: string, category: string): Promise<{ id: string; name: string } | null> {
   const { db } = getDb();
   const rows = await db.select({ id: taskStatuses.id, name: taskStatuses.name, category: taskStatuses.category, position: taskStatuses.position })
     .from(taskStatuses).where(eq(taskStatuses.projectId, projectId)).orderBy(taskStatuses.position);
-  const exact = rows.find((s) => s.category === category);
-  if (exact) return exact;
-  return null;
+  if (category === 'in_review') {
+    const byName = rows.find((s) => s.category !== 'done' && s.category !== 'canceled' && /review|рев'?ю|перевір/i.test(s.name));
+    if (byName) return byName;
+    const inProgress = rows.filter((s) => s.category === 'in_progress');
+    return inProgress.length ? inProgress[inProgress.length - 1]! : null;
+  }
+  return rows.find((s) => s.category === category) ?? null;
 }
 
 interface RunSetup {
