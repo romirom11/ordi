@@ -100,7 +100,7 @@ describe('manifest flow', () => {
     expect(manifest.hook_attributes.url).toContain('/api/v1/integrations/git/github/webhook');
     expect(manifest.redirect_url).toContain('/api/v1/integrations/github-app/setup');
     expect(manifest.default_events).toEqual(['push', 'pull_request']);
-    expect(manifest.default_permissions).toEqual({ contents: 'read', metadata: 'read', pull_requests: 'read' });
+    expect(manifest.default_permissions).toEqual({ contents: 'write', metadata: 'read', pull_requests: 'write' });
   });
 
   it('targets the organization form when one is given', async () => {
