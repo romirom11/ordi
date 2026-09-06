@@ -15,6 +15,7 @@ export const EVENT_TYPES = [
   'task.status_changed',
   'task.assigned',
   'comment.mentioned',
+  'comment.created',
   'cycle.completed',
   'page.published',
   'page.mentioned',
@@ -38,6 +39,10 @@ export const EVENT_TYPES = [
   'applicant.hired',
   'role.updated',
   'sales.work_digest_due',
+  'agent.run_queued',
+  'agent.run_started',
+  'agent.run_finished',
+  'agent.needs_input',
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];
@@ -58,6 +63,7 @@ export const AGGREGATE_TYPES = [
   'role',
   'comment',
   'user',
+  'agent_run',
 ] as const;
 
 export type AggregateType = (typeof AGGREGATE_TYPES)[number];

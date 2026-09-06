@@ -16,6 +16,8 @@ export * from './schemas/finance';
 export * from './schemas/people';
 export * from './schemas/integrations';
 export * from './schemas/settings';
+export * from './schemas/agents';
+export * from './mcp-library';
 
 // Pure business calc (single source of truth, unit-tested)
 export * from './calc/money';

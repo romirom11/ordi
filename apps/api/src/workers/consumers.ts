@@ -15,6 +15,8 @@ import { writeActivity } from '../core/activity';
 import { logger } from '../lib/logger';
 import { env } from '../env';
 import { salesWork, summarizeSalesWork } from '../domains/crm/work';
+import { queueRun, activeRunForTask } from '../domains/agents/runs';
+import { agentProfilesAmong } from '../domains/agents/profiles';
 
 export interface Consumer {
   name: string;
@@ -56,6 +58,10 @@ async function notify(
         waitingReply: Number(payload.waitingReply ?? 0),
         nurtureDue: Number(payload.nurtureDue ?? 0),
         noNextAction: Number(payload.noNextAction ?? 0),
+        outcome: (payload.outcome as string) ?? '',
+        summary: (payload.summary as string) ?? '',
+        label: (payload.label as string) ?? '',
+        expiresAt: (payload.expiresAt as string) ?? '',
         workspace: branding.workspaceName,
       };
       const known = NOTIFY_KEYS.has(type) ? type : 'generic';
@@ -88,7 +94,7 @@ async function notify(
 const NOTIFY_KEYS = new Set([
   'task.assigned', 'comment.mentioned', 'task.status_changed',
   'invoice.paid', 'quote.accepted', 'leave.requested', 'leave.decided',
-  'sales.work_digest',
+  'sales.work_digest', 'agent.run_finished', 'agent.needs_input',
 ]);
 
 /** Deep link for a notification, mirroring the Slack consumer's targets. */
@@ -114,6 +120,10 @@ function notificationLink(type: string, payload: Record<string, unknown>): strin
       return appLink('/people');
     case 'sales.work_digest':
       return appLink('/crm/work');
+    case 'agent.run_finished':
+    case 'agent.needs_input':
+      if (projectId && taskId) return appLink(`/projects/${projectId}/tasks/${taskId}`);
+      return appLink('/my-tasks');
     default:
       return null;
   }
@@ -150,6 +160,19 @@ async function enrichNotifyPayload(ev: DomainEvent): Promise<Record<string, unkn
   const p = { ...(ev.payload as Record<string, unknown>) };
   const taskId = (p.taskId as string | undefined)
     ?? (ev.aggregateType === 'task' ? ev.aggregateId : undefined);
+  if (taskId && ev.aggregateType === 'agent_run') {
+    const [task] = await db.select({ number: schema.tasks.number, createdBy: schema.tasks.createdBy, projectId: schema.tasks.projectId })
+      .from(schema.tasks).where(eq(schema.tasks.id, taskId));
+    if (task) {
+      const [project] = await db.select({ key: schema.projects.key }).from(schema.projects).where(eq(schema.projects.id, task.projectId));
+      if (!p.ref && project) p.ref = `${project.key}-${task.number}`;
+      if (!p.createdBy) p.createdBy = task.createdBy;
+    }
+    if (ev.actorId) {
+      const [agent] = await db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, ev.actorId));
+      if (agent?.name) p.actorName = agent.name;
+    }
+  }
   if (taskId && (!p.title || !p.statusName)) {
     const [task] = await db.select({ title: schema.tasks.title, statusId: schema.tasks.statusId })
       .from(schema.tasks).where(eq(schema.tasks.id, taskId));
@@ -208,6 +231,18 @@ const notifications: Consumer = {
         break;
       case 'git.pr_merged':
         await notify(ev.id, p.assigneeIds ?? [], 'task.status_changed', p.ref ?? null, p);
+        break;
+      case 'agent.run_finished': {
+        // The person who assigned or commented hears how the run ended;
+        // a task author who is not the requester gets it too.
+        if (p.status === 'succeeded' || p.status === 'failed') {
+          const targets = [p.requestedBy, p.createdBy].filter(Boolean) as string[];
+          await notify(ev.id, targets, 'agent.run_finished', p.ref ?? null, { ...p, outcome: p.status });
+        }
+        break;
+      }
+      case 'agent.needs_input':
+        await notify(ev.id, [p.requestedBy, p.createdBy].filter(Boolean) as string[], 'agent.needs_input', p.ref ?? null, p);
         break;
       case 'sales.work_digest_due': {
         const digest = await liveSalesDigest(p.userId, p.localDate);
@@ -425,7 +460,55 @@ const slack: Consumer = {
   },
 };
 
-export const consumers: Consumer[] = [sse, notifications, automations, webhooks, slack];
+/**
+ * Agent dispatch (plan 2026-09-05-001, R12, R30): an assignment to an agent
+ * queues a run; a human comment or @-mention on a task an agent is assigned
+ * to queues a follow-up. Queueing is idempotent per task (one active run).
+ */
+const agents: Consumer = {
+  name: 'agents',
+  async handle(ev) {
+    const p = ev.payload as any;
+    if (ev.type === 'task.assigned') {
+      if (ev.actorType === 'agent') return;
+      const profiles = await agentProfilesAmong((p.assigneeIds as string[]) ?? []);
+      for (const [agentUserId, profile] of profiles) {
+        if (!profile.enabled) continue;
+        await queueRun({
+          agentUserId, taskId: p.taskId, projectId: p.projectId, trigger: 'assigned',
+          requestedBy: ev.actorId ?? null, actorType: ev.actorType ?? 'system',
+        });
+      }
+      return;
+    }
+    if (ev.type === 'comment.created') {
+      if (ev.actorType === 'agent' || !p.taskId) return;
+      const { db } = getDb();
+      const assignees = await db.select({ userId: schema.taskAssignees.userId }).from(schema.taskAssignees).where(eq(schema.taskAssignees.taskId, p.taskId));
+      const mentioned = new Set<string>((p.mentions as string[]) ?? []);
+      const candidates = [...new Set([...assignees.map((a) => a.userId), ...mentioned])];
+      const profiles = await agentProfilesAmong(candidates);
+      for (const [agentUserId, profile] of profiles) {
+        if (!profile.enabled) continue;
+        // A run in flight picks the comment up as a follow-up when it ends.
+        if (await activeRunForTask(p.taskId)) continue;
+        const [last] = await db.select({ sessionId: schema.agentRuns.sessionId, branch: schema.agentRuns.branch })
+          .from(schema.agentRuns)
+          .where(and(eq(schema.agentRuns.taskId, p.taskId), eq(schema.agentRuns.agentUserId, agentUserId)))
+          .orderBy(desc(schema.agentRuns.createdAt)).limit(1);
+        // Without a session to resume there is nothing to follow up on: the
+        // run gets the full brief, with the comment among the others.
+        await queueRun({
+          agentUserId, taskId: p.taskId, projectId: p.projectId, trigger: last?.sessionId ? 'comment' : 'assigned',
+          requestedBy: ev.actorId ?? null, commentId: p.commentId ?? ev.aggregateId, sessionId: last?.sessionId ?? null,
+          actorType: ev.actorType ?? 'user',
+        });
+      }
+    }
+  },
+};
+
+export const consumers: Consumer[] = [sse, notifications, automations, webhooks, slack, agents];
 
 export function logConsumers(): void {
   logger.info({ consumers: consumers.map((c) => c.name) }, 'event consumers registered');

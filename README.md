@@ -125,6 +125,10 @@ so the books actually balance.
 - **Modules you can switch off** – run ordi as just a task tracker, or just a CRM.
 - **Built-in MCP server** – point Claude or Cursor at your workspace; the agent gets
   exactly the permissions of its API token, nothing more.
+- **AI agent employees** – add an agent as a team member, assign it a task like you
+  would a person, and it works through the project's repository and opens a pull
+  request for a human to review. Runs on your own Claude subscription or API key,
+  with MCP connectors granted per agent.
 - **Desktop app** – macOS, Windows and Linux, with native notifications, a global
   quick-add shortcut, signed auto-updates, and sign-in through your browser
   instead of retyping credentials. Downloadable from inside the web app.

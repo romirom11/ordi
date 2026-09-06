@@ -11,6 +11,7 @@ import { api, ApiError } from '../lib/api';
 import { Link, useNavigate } from '../lib/router';
 import { usePageTitle } from '../lib/tabs';
 import { useUsersLookup } from '../lib/queries';
+import { useProjectRole } from '../lib/auth';
 import { Button, EmptyState, IconButton, Kbd, Skeleton, Tooltip } from '../components/ui';
 import { toast } from '../components/overlays';
 import { RichEditor, EMPTY_DOC } from '../components/richtext/RichEditor';
@@ -19,6 +20,7 @@ import { RailResizeHandle, useRailWidth } from '../components/RailResize';
 import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
 import { SubtaskList } from '../components/task/SubtaskList';
 import { ActivityFeed } from '../components/task/CommentThread';
+import { AgentRunsBlock } from '../components/task/AgentRunsBlock';
 import type { TaskDetail, TaskPatch, TaskStatus, UserLite } from '../components/task/types';
 import { useT, extendDict } from '../lib/i18n';
 import '../components/task/task.css';
@@ -40,7 +42,7 @@ extendDict({
   },
 });
 
-interface ProjectLite { id: string; name: string; key: string }
+interface ProjectLite { id: string; name: string; key: string; visibility?: 'workspace' | 'private' }
 
 function TaskSkeleton() {
   return (
@@ -100,6 +102,13 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
   const statuses = statusesQ.data ?? [];
   const refLabel = task?.ref ?? (project && task ? `${project.key}-${task.number}` : '');
   const hasRepos = (reposQ.data ?? []).length > 0;
+  // Same rule the project board uses: members and admins write tasks. Agent
+  // runs borrow it for cancel/retry (agents.manage also unlocks them).
+  const projectRole = useProjectRole(projectId, project?.visibility);
+  const canWriteTasks = projectRole === 'admin' || projectRole === 'member';
+  const hasAgentAssignee = (task?.assignees ?? []).some(
+    (a) => (usersQ.data ?? []).find((u) => u.id === a.userId)?.actorType === 'agent',
+  );
 
   usePageTitle(task ? `${refLabel} ${task.title}` : null);
 
@@ -282,6 +291,8 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
             <SubtaskList taskId={taskId} projectId={projectId} projectKey={project?.key} statuses={statuses} />
 
             <div className="my-6 h-px bg-border" />
+
+            <AgentRunsBlock taskId={taskId} canWrite={canWriteTasks} showWhenEmpty={hasAgentAssignee} />
 
             <ActivityFeed taskId={taskId} comments={task.comments ?? []} users={usersQ.data ?? []} />
           </div>

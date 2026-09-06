@@ -130,7 +130,7 @@ describe('admin-issued reset', () => {
     const [role] = await db.select().from(schema.roles).where(eq(schema.roles.key, 'member'));
     const agentId = ulid();
     await db.insert(schema.users).values({
-      id: agentId, email: 'agent@test.local', name: 'Agent', roleId: role!.id, actorType: 'agent',
+      id: agentId, email: 'bot@test.local', name: 'Bot', roleId: role!.id, actorType: 'agent',
     });
     expect((await reqAs(users.owner!.cookie).post(`/users/${agentId}/reset-password`, {})).status).toBe(422);
   });

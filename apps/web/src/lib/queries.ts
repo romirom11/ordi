@@ -22,6 +22,8 @@ export interface UserLookup {
    * `activeUsers()`; renderers must not.
    */
   isActive?: boolean;
+  /** `agent` marks an AI agent employee – rendered with a badge everywhere. */
+  actorType?: string;
 }
 
 /** Everyone in the workspace, past and present – for resolving people on records. */
@@ -114,4 +116,88 @@ export function useUserMap() {
     [usersQ.data],
   );
   return byId;
+}
+
+/* ────────────────────────── AI agent employees ────────────────────────── */
+
+/** An agent employee as `/agents` describes it (plan 2026-09-05-001). */
+export interface AgentLookup {
+  id: string;
+  name: string;
+  email: string;
+  avatar: string | null;
+  roleId: string;
+  roleName: string;
+  isActive: boolean;
+  runtime: string;
+  model: string | null;
+  instructions: string;
+  completionCategory: string;
+  assignPolicy: string;
+  maxRunMinutes: number;
+  maxTurns: number;
+  maxBudgetUsd: number | null;
+  concurrency: number;
+  credentialId: string | null;
+  fallbackCredentialId: string | null;
+  enabled: boolean;
+  connectorIds: string[];
+  projectIds: string[];
+  /** False while no active credential resolves for the agent. */
+  dispatchable: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * The workspace's agents – read by the Agents panel and by the member dialog,
+ * which only needs to know that the list changed after it creates one.
+ * Requires `agents.manage`, so callers without it pass `enabled: false`.
+ */
+export function useAgents(enabled = true): UseQueryResult<AgentLookup[]> {
+  return useQuery({
+    queryKey: ['agents'],
+    queryFn: () => api.get<{ data: AgentLookup[] }>('/agents').then((r) => r.data),
+    enabled,
+  });
+}
+
+/** A workspace MCP connector as `/mcp-connectors` describes it. */
+export interface McpConnectorLookup {
+  id: string;
+  slug: string;
+  name: string;
+  source: string;
+  libraryKey: string | null;
+  transport: string;
+  url: string | null;
+  command: string | null;
+  args: string[];
+  authMode: string;
+  status: string;
+  tools: { name: string; description?: string }[];
+  toolCount: number;
+  lastTestedAt: string | null;
+  lastError: string | null;
+  /** Which secret keys are stored – never their values. */
+  secretKeys: string[];
+  oauth: { authorized: boolean; authorizedBy: string | null; authorizedAt: string | null; pending: boolean } | null;
+  agentCount: number;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+}
+
+/**
+ * The connector library of this workspace – read by the Connectors panel, the
+ * agent editor and the member dialog. Requires `integrations.manage`.
+ */
+export function useMcpConnectors(enabled = true): UseQueryResult<McpConnectorLookup[]> {
+  return useQuery({
+    queryKey: ['mcp-connectors'],
+    queryFn: () => api.get<{ data: McpConnectorLookup[] }>('/mcp-connectors').then((r) => r.data),
+    enabled,
+  });
 }

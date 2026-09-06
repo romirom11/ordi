@@ -14,7 +14,8 @@ import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { emit } from '../../core/events';
 import { assertVersion } from '../../core/locking';
-import { assertProject, accessibleProjectIds } from '../../core/access';
+import { assertProject, accessibleProjectIds, effectiveProjectRole } from '../../core/access';
+import { assertCanAssignAgents } from '../agents/profiles';
 import { buildCustomFieldFilter, mergeCustomFields } from '../../core/customfields';
 import { extractMentions } from '../kb/service';
 import { encrypt, generateToken } from '../../lib/crypto';
@@ -489,9 +490,10 @@ export async function listTasks(actor: Actor, params: {
 }
 
 export async function createTask(actor: Actor, input: any) {
-  await assertProject(actor, input.projectId, 'member');
+  const project = await assertProject(actor, input.projectId, 'member');
   await assertSubtaskDepth(input.parentId);
   const assigneeIds: string[] = input.assigneeIds ?? [];
+  if (assigneeIds.length) await assertCanAssignAgents(actor, project.id, assigneeIds, effectiveProjectRole(actor, project));
   const labelIds: string[] = input.labelIds ?? [];
   // Before the row exists: a rejected label must not leave a half-created task.
   await assertLabelScope(labelIds, 'task');
@@ -574,7 +576,7 @@ async function refsFor(taskIds: string[]): Promise<Map<string, string>> {
 export async function updateTask(actor: Actor, id: string, input: any) {
   const { db } = getDb();
   const before = await loadTask(id);
-  await assertProject(actor, before.projectId, 'member');
+  const project = await assertProject(actor, before.projectId, 'member');
   assertVersion(before, input.version, before);
 
   const patch: Record<string, unknown> = {};
@@ -594,6 +596,9 @@ export async function updateTask(actor: Actor, id: string, input: any) {
   let newAssignees: string[] = [];
   if (input.assigneeIds !== undefined) {
     const next: string[] = input.assigneeIds;
+    const added = next.filter((a) => !oldAssignees.includes(a));
+    // Agents among the new assignees: membership and assign policy (R48, R49).
+    if (added.length) await assertCanAssignAgents(actor, project.id, added, effectiveProjectRole(actor, project));
     await db.delete(taskAssignees).where(eq(taskAssignees.taskId, id));
     if (next.length) await db.insert(taskAssignees).values(next.map((userId) => ({ taskId: id, userId })));
     newAssignees = next.filter((a) => !oldAssignees.includes(a));
@@ -806,6 +811,12 @@ export async function addComment(actor: Actor, taskId: string, input: any) {
       actorType: actor.actorType,
     });
   }
+  // Every comment is an event: agents assigned to the task follow up on it (R30).
+  await emit({
+    type: 'comment.created', aggregateType: 'comment', aggregateId: id,
+    payload: { ref: await taskRef(task), taskId, projectId: task.projectId, commentId: id, mentions },
+    actorId: actor.userId, actorType: actor.actorType,
+  });
   await writeActivity(db, { entityType: 'comment', entityId: id, action: 'created', actorId: actor.userId, actorType: actor.actorType });
   return { id };
 }
@@ -868,8 +879,19 @@ export async function bulkUpdateTasks(actor: Actor, input: any) {
     if (input.priority !== undefined) patch.priority = input.priority;
     if (Object.keys(patch).length) await db.update(tasks).set(patch).where(eq(tasks.id, t.id));
     if (input.assigneeIds !== undefined) {
+      const oldAssignees = await assigneeIdsOf(t.id);
+      const next = input.assigneeIds as string[];
+      const added = next.filter((a) => !oldAssignees.includes(a));
+      if (added.length) await assertCanAssignAgents(actor, t.projectId, added, role);
       await db.delete(taskAssignees).where(eq(taskAssignees.taskId, t.id));
-      if (input.assigneeIds.length) await db.insert(taskAssignees).values((input.assigneeIds as string[]).map((userId) => ({ taskId: t.id, userId })));
+      if (next.length) await db.insert(taskAssignees).values(next.map((userId) => ({ taskId: t.id, userId })));
+      // Bulk assignment dispatches and notifies like a single one (R12).
+      if (added.length) {
+        await emit({ type: 'task.assigned', aggregateType: 'task', aggregateId: t.id, payload: { assigneeIds: added, ref: await taskRef(t), taskId: t.id, projectId: t.projectId }, actorId: actor.userId, actorType: actor.actorType });
+      }
+    }
+    if (input.statusId !== undefined && input.statusId !== t.statusId) {
+      await emit({ type: 'task.status_changed', aggregateType: 'task', aggregateId: t.id, payload: { ref: await taskRef(t), taskId: t.id, assigneeIds: await assigneeIdsOf(t.id), createdBy: t.createdBy, projectId: t.projectId }, actorId: actor.userId, actorType: actor.actorType });
     }
     if (input.labelIds !== undefined) {
       await db.delete(taskLabels).where(eq(taskLabels.taskId, t.id));

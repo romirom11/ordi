@@ -56,7 +56,11 @@ export function buildAppManifest(workspaceName: string): Record<string, unknown>
     setup_url: githubAppSetupUrl(),
     setup_on_update: false,
     public: false,
-    default_permissions: { contents: 'read', metadata: 'read', pull_requests: 'read' },
+    // Write, not read (plan R37): agent employees clone with the installation
+    // token, push their branch and open the pull request a human then reviews.
+    // GitHub does not widen an existing installation on its own – an owner has
+    // to accept the new permissions before those pushes stop failing.
+    default_permissions: { contents: 'write', metadata: 'read', pull_requests: 'write' },
     default_events: ['push', 'pull_request'],
   };
 }
