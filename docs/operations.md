@@ -110,15 +110,28 @@ dead-lettered`, `sales digest failed` and `initial sales digest failed` messages
 The agent worker runs inside the API container (`AGENT_WORKER_ENABLED`, default
 on) unless it has been split into its own service – see docs/deployment.md §3b.
 
-**Disk.** Every run gets a fresh clone under `/data/agent-work/<runId>` and the
-directory is deleted when the run finishes, fails or is cancelled. Nothing
-accumulates in normal operation, so size the volume for the *peak*:
-`AGENT_WORKER_CONCURRENCY` × repository size (× replicas, if more than one
-container claims runs), plus headroom for build output the agent produces
-inside the checkout. A crash can leave a directory behind – the next run of the
-same id would recreate it, but a container that died mid-run leaves an orphan;
-alert on volume usage the same way as on the DB volume, and it is safe to
-delete any `/data/agent-work/*` directory whose run is no longer `running`.
+**Disk.** Every run gets a fresh clone under
+`/data/agent-work/tasks/<taskId>/checkout`, deleted when the run finishes,
+fails or is cancelled. Next to it, `tasks/<taskId>/harness` is the runtime's
+own home (`HOME` / `CLAUDE_CONFIG_DIR` of the Claude Code process) with the
+session transcripts; it stays, because a follow-up comment or a Retry resumes
+that session, and the worker deletes task directories untouched for 30 days.
+Size the volume for the *peak*: `AGENT_WORKER_CONCURRENCY` × repository size
+(× replicas, if more than one container claims runs), plus headroom for build
+output the agent produces inside the checkout; transcripts are megabytes per
+task. A container that died mid-run leaves a checkout behind; the next run of
+the task recreates it, and it is safe to delete any `checkout` directory whose
+task has no `running` run. Deleting a `harness` directory is safe too: the next
+run logs "Session … is not on this worker" and starts a fresh session on the
+task's branch instead of failing. Workers on different hosts must share the
+volume for the same reason.
+
+**Sessions.** `agent_runs.session_id` is the Claude Code session of the last
+run; a run queued from a comment or a Retry carries it and the runtime resumes
+the conversation. The transcript lives only on the worker's volume, so a
+rebuilt volume, a different host or the 30-day prune all lead to the fresh
+start described above – the branch and the task comments carry the state, the
+transcript only saves the agent re-reading them.
 
 **Worker liveness.** Workers write a heartbeat to `agent_workers` every 15s
 (id, concurrency, in-flight runs, whether the Claude runtime resolved, version).

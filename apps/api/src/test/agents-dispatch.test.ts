@@ -7,14 +7,14 @@
  * follow-ups from comments, secret scrubbing and stale-run recovery.
  */
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, utimes, writeFile } from 'node:fs/promises';
 import { getDb, schema, eq, and, desc } from '@ordi/db';
 import { resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
 import {
   setupWorkspace, createAgent, addProjectMember, addCredential, drainOutbox, runsForTask, eventsForRun, type Workspace,
 } from './agents-helpers';
 import { setRuntimeAdapter, type RuntimeAdapter, type RuntimeOutcome, type RuntimeRunInput, type RuntimeUsage } from '../domains/agents/runtime';
-import { setGitRunner, type GitRunner } from '../domains/agents/workspace';
+import { setGitRunner, harnessDir, taskDir, pruneTaskDirs, type GitRunner } from '../domains/agents/workspace';
 import { executeRun, completionStatus } from '../workers/agent-runs';
 import { claimRuns, requeueStaleRuns, listRuns, cancelRun } from '../domains/agents/runs';
 import { env } from '../env';
@@ -188,7 +188,7 @@ describe('the worker end to end', () => {
     expect(input.mcpServers.ordi!.url).toContain('/api/v1/mcp');
     expect(input.allowedTools).toContain('mcp__ordi');
     expect(input.maxTurns).toBe(200);
-    expect(input.cwd).toContain(run.id);
+    expect(input.cwd).toContain(task.id);
 
     // Git: clone, branch, push with the repo token; the token never reaches the log.
     expect(gitLog.some((a) => a[0] === 'clone')).toBe(true);
@@ -318,6 +318,68 @@ describe('the worker end to end', () => {
     expect(resumed!.resume).toBe('s3');
     expect(resumed!.prompt).toContain('Continue');
     expect(resumed!.prompt).toContain('git status');
+  });
+
+  it('the harness home survives between runs of a task, so a follow-up can resume the session', async () => {
+    const task = await newTask('Remember me');
+    await assign(task.id, [agentId]);
+    restoreAdapter = setRuntimeAdapter(adapter(async (input) => {
+      expect(input.configDir).toBe(harnessDir(task.id));
+      await writeFile(`${input.configDir}/transcript.jsonl`, 'hello');
+      return done();
+    }));
+    const first = await runToEnd(task.id);
+    expect(first.status).toBe('succeeded');
+    // The checkout is gone, the harness home is not.
+    await expect(stat(`${taskDir(task.id)}/checkout`)).rejects.toBeTruthy();
+    expect(await readFile(`${harnessDir(task.id)}/transcript.jsonl`, 'utf8')).toBe('hello');
+
+    // Retention: a task dir last touched before the cutoff is pruned, a fresh one stays.
+    const old = new Date(Date.now() - 40 * 86_400_000);
+    await utimes(taskDir(task.id), old, old);
+    const other = await newTask('Keep me');
+    await mkdir(harnessDir(other.id), { recursive: true });
+    expect(await pruneTaskDirs(new Date(Date.now() - 30 * 86_400_000))).toBe(1);
+    await expect(stat(taskDir(task.id))).rejects.toBeTruthy();
+    await expect(stat(taskDir(other.id))).resolves.toBeTruthy();
+  });
+
+  it('a retry whose session is gone starts a fresh one on the same branch instead of failing', async () => {
+    const owner = reqAs(ws.users.owner!.cookie);
+    const task = await newTask('Lost session');
+    await assign(task.id, [agentId]);
+    restoreAdapter = setRuntimeAdapter(adapter(async () => ({ status: 'failed', sessionId: 'gone-1', message: '', error: 'Reached maximum number of turns (200)', usage, retryAt: null, report: null })));
+    const first = await runToEnd(task.id);
+    expect(first.status).toBe('failed');
+    expect(first.branch).toMatch(/dsp-\d+-lost-session$/);
+
+    const { agentActor } = await import('../workers/agent-runs');
+    await (await import('../domains/agents/runs')).retryRun(await agentActor(ws.users.owner!.userId), first.id);
+    const inputs: RuntimeRunInput[] = [];
+    restoreAdapter();
+    restoreAdapter = setRuntimeAdapter(adapter(async (input) => {
+      inputs.push(input);
+      if (input.resume) return { status: 'failed', sessionId: input.resume, message: '', error: `No conversation found with session ID: ${input.resume}`, usage: { ...usage, turns: 0 }, retryAt: null, report: null };
+      return { ...done(), sessionId: 'fresh-2' };
+    }));
+    const [claimed] = await claimRuns('w', 1);
+    await executeRun(claimed!);
+    const { db } = getDb();
+    const [after] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, claimed!.id));
+    expect(after!.status).toBe('succeeded');
+    expect(after!.sessionId).toBe('fresh-2');
+    expect(inputs).toHaveLength(2);
+    expect(inputs[0]!.resume).toBe('gone-1');
+    expect(inputs[1]!.resume).toBeNull();
+    // The second attempt gets the full brief plus a pointer at the branch, not the "Continue" brief.
+    expect(inputs[1]!.prompt).toContain('# DSP-');
+    expect(inputs[1]!.prompt).toContain('Earlier work');
+    expect(inputs[1]!.prompt).toContain(first.branch);
+    expect(inputs[1]!.prompt).not.toContain('# Continue');
+    const events = await eventsForRun(claimed!.id);
+    expect(JSON.stringify(events)).toContain('not on this worker');
+    const detail = await json(owner.get(`/tasks/${task.id}?include=comments`));
+    expect(JSON.stringify((detail.comments as unknown[]).at(-1))).not.toContain('No conversation found');
   });
 
   it('a cancel request aborts a running run', async () => {

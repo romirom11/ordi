@@ -6,8 +6,7 @@
  * replicas may run it; the claim query and the heartbeat keep them apart.
  */
 import { hostname } from 'node:os';
-import { mkdir, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir } from 'node:fs/promises';
 import { getDb, schema, eq, and, inArray, sql } from '@ordi/db';
 import { textToDoc } from '@ordi/shared';
 import { env } from '../env';
@@ -25,7 +24,7 @@ import {
   cancelRequested, claimRuns, finishRun, newestHumanCommentSince, parkRunForQuota, queueRun, requeueStaleRuns, startRun, touchRun, type RunRow,
 } from '../domains/agents/runs';
 import { runtimeAdapter, type RuntimeMcpServer, type RuntimeOutcome } from '../domains/agents/runtime';
-import { cleanupWorkspace, prepareWorkspace, publishWorkspace, runDir, type Workspace } from '../domains/agents/workspace';
+import { cleanupWorkspace, harnessDir, prepareWorkspace, pruneTaskDirs, publishWorkspace, SESSION_RETENTION_DAYS, type Workspace } from '../domains/agents/workspace';
 import * as tasksSvc from '../domains/projects/service';
 
 const { agentProfiles, agentWorkers, users, tasks, projects, taskStatuses, agentConnectors, mcpConnectors } = schema;
@@ -34,6 +33,7 @@ const POLL_MS = 3_000;
 const HEARTBEAT_MS = 15_000;
 const STALE_RUN_MS = 3 * 60_000;
 const QUOTA_RETRY_DEFAULT_MS = 30 * 60_000;
+const PRUNE_MS = 6 * 60 * 60_000;
 
 export const workerId = `${hostname()}:${process.pid}`;
 const inFlight = new Set<string>();
@@ -129,9 +129,10 @@ export async function executeRun(claimed: RunRow): Promise<void> {
   inFlight.add(runId);
   let ws: Workspace | null = null;
   let token: string | null = null;
-  // Outside the checkout: the harness keeps session transcripts under its
-  // HOME, and nothing of that may end up in the agent's commits.
-  const configDir = join(env.agentWorkDir, `${runId}.harness`);
+  // Outside the checkout, so nothing of it ends up in the agent's commits,
+  // and per task rather than per run: the session transcript written here
+  // is what a follow-up or a retry resumes.
+  const configDir = harnessDir(claimed.taskId);
   // Liveness from claim to finish: a slow clone or push must not look like a
   // dead worker to requeueStaleRuns.
   const liveness = setInterval(() => { void touchRun(runId).catch(() => {}); }, 30_000);
@@ -147,10 +148,9 @@ export async function executeRun(claimed: RunRow): Promise<void> {
     }
 
     ws = await prepareWorkspace({
-      runId, projectId: project.id, projectKey: project.key, taskNumber: task.number, taskTitle: task.title,
+      taskId: task.id, projectId: project.id, projectKey: project.key, taskNumber: task.number, taskTitle: task.title,
       existingBranch: claimed.branch ?? null, agentName: agent.name, agentEmail: agent.email,
     });
-    await mkdir(configDir, { recursive: true });
     await recordRunEvent(runId, 'log', { message: ws.repo ? `Checked out ${ws.repo.fullName} on ${ws.branch}` : 'No repository linked; working in a scratch directory' });
 
     const started = await startRun(runId);
@@ -166,7 +166,7 @@ export async function executeRun(claimed: RunRow): Promise<void> {
       resumedAfterStop: claimed.trigger === 'retry' && Boolean(claimed.sessionId),
       connectorSlugs: setup.connectors.map((c) => c.slug),
     };
-    const prompt = await buildTaskBrief(ctx);
+    let prompt = await buildTaskBrief(ctx);
     const systemAppend = buildRulesOfEngagement(ctx);
     const base = `http://localhost:${env.port}/api/v1`;
     const mcpServers: Record<string, RuntimeMcpServer> = {
@@ -186,15 +186,19 @@ export async function executeRun(claimed: RunRow): Promise<void> {
     let outcome: RuntimeOutcome | null = null;
     let usedCredentialId: string | null = null;
     let resume = claimed.sessionId ?? null;
-    try {
+    /** Try the credential chain once; the last outcome is returned (null when no credential loads). */
+    const workspace = ws;
+    const runToken = started.token;
+    const attempt = async (): Promise<RuntimeOutcome | null> => {
+      let last: RuntimeOutcome | null = null;
       for (const credentialId of chain) {
         const cred = await loadRuntimeCredential(credentialId);
         if (!cred) continue;
         usedCredentialId = credentialId;
-        registerRunSecrets(runId, [cred.secret, token, ws.repo?.token ?? '', ...setup.connectors.flatMap((c) => secretValues(c))]);
+        registerRunSecrets(runId, [cred.secret, runToken, workspace.repo?.token ?? '', ...setup.connectors.flatMap((c) => secretValues(c))]);
         await recordRunEvent(runId, 'log', { message: `Starting ${profile.runtime} with credential ${credentialId === chain[0] ? '(primary)' : '(fallback)'}` });
-        outcome = await runtime.run({
-          prompt, systemAppend, cwd: ws.dir, configDir, credential: { kind: cred.kind, secret: cred.secret },
+        last = await runtime.run({
+          prompt, systemAppend, cwd: workspace.dir, configDir, credential: { kind: cred.kind, secret: cred.secret },
           model: profile.model, mcpServers, maxTurns: profile.maxTurns,
           maxBudgetUsd: cred.kind === 'api_key' && profile.maxBudgetUsd != null ? Number(profile.maxBudgetUsd) : null,
           resume, allowedTools: allowedToolsFor(Object.keys(mcpServers)), disallowedTools: DISALLOWED_TOOLS,
@@ -210,9 +214,21 @@ export async function executeRun(claimed: RunRow): Promise<void> {
             }
           },
         });
-        if (outcome.sessionId) resume = outcome.sessionId;
-        if (outcome.status !== 'rate_limited') break;
+        if (last.sessionId) resume = last.sessionId;
+        if (last.status !== 'rate_limited') break;
         await recordRunEvent(runId, 'log', { message: `Credential ${credentialId} is rate limited${chain.indexOf(credentialId) < chain.length - 1 ? ', switching to the fallback' : ''}` });
+      }
+      return last;
+    };
+    try {
+      outcome = await attempt();
+      // The session to resume is gone (another worker's disk, a pruned or
+      // rebuilt volume): start over on the branch instead of failing.
+      if (outcome && sessionLost(outcome) && claimed.sessionId) {
+        await recordRunEvent(runId, 'log', { message: `Session ${claimed.sessionId} is not on this worker; starting a fresh one on the same branch` });
+        resume = null;
+        prompt = await buildTaskBrief({ ...ctx, sessionLost: true });
+        outcome = await attempt();
       }
     } finally {
       clearTimeout(timer);
@@ -321,9 +337,13 @@ export async function executeRun(claimed: RunRow): Promise<void> {
     forgetRunSecrets(runId);
     forgetRunScope(runId);
     await closeRunConnections(runId).catch(() => {});
-    await rm(configDir, { recursive: true, force: true }).catch(() => {});
-    await cleanupWorkspace(runId).catch(() => {});
+    await cleanupWorkspace(claimed.taskId).catch(() => {});
   }
+}
+
+/** The runtime could not find the transcript it was asked to resume. */
+function sessionLost(outcome: RuntimeOutcome): boolean {
+  return outcome.status === 'failed' && /no conversation found/i.test(outcome.error ?? '');
 }
 
 /** R13/R30: a human comment written during the run becomes the next run's prompt. */
@@ -365,13 +385,23 @@ export function startAgentRunsWorker(): () => void {
   void mkdir(env.agentWorkDir, { recursive: true }).catch((e) => logger.warn({ err: e, dir: env.agentWorkDir }, 'agent work dir unavailable'));
   const poll = setInterval(() => { if (!stopped) pollOnce().catch((e) => logger.error({ err: e }, 'agent worker poll failed')); }, POLL_MS);
   const beat = setInterval(() => { if (!stopped) heartbeat(runtimeAvailable).catch(() => {}); }, HEARTBEAT_MS);
+  const prune = setInterval(() => { if (!stopped) pruneSessions().catch(() => {}); }, PRUNE_MS);
   void heartbeat(runtimeAvailable).catch(() => {});
+  void pruneSessions().catch(() => {});
   logger.info({ workerId, concurrency: env.agentWorkerConcurrency }, 'agent run worker started');
   return () => {
     stopped = true;
     clearInterval(poll);
     clearInterval(beat);
+    clearInterval(prune);
   };
+}
+
+/** Task directories (checkout leftovers and session transcripts) untouched for SESSION_RETENTION_DAYS go. */
+export async function pruneSessions(): Promise<number> {
+  const removed = await pruneTaskDirs(new Date(Date.now() - SESSION_RETENTION_DAYS * 86_400_000));
+  if (removed) logger.info({ removed }, 'agent task dirs pruned');
+  return removed;
 }
 
 /** For tests and the status endpoint. */

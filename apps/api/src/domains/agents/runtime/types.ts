@@ -23,7 +23,7 @@ export interface RuntimeRunInput {
   /** Rules of engagement appended to the harness's own system prompt. */
   systemAppend: string;
   cwd: string;
-  /** Per-run home for the harness's own state; deleted after the run. */
+  /** Home for the harness's own state, kept per task so a later run can resume the session. */
   configDir: string;
   credential: RuntimeCredential;
   model?: string | null;

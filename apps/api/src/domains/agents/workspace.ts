@@ -4,10 +4,15 @@
  * branch pushed and a pull request opened with the GitHub App installation
  * token. The token never lands in .git/config: every git call that needs it
  * passes it as a one-off extra header.
+ *
+ * Layout under AGENT_WORK_DIR, keyed by task so a follow-up or a retry finds
+ * the previous run's session: `tasks/<taskId>/checkout` is the clone (deleted
+ * when the run ends) and `tasks/<taskId>/harness` the runtime's own home with
+ * the session transcripts (kept, pruned after SESSION_RETENTION_DAYS).
  */
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, rm, stat } from 'node:fs/promises';
+import { mkdir, readdir, rm, stat, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 import { getDb, schema, eq } from '@ordi/db';
 import { buildBranchName } from '@ordi/shared';
@@ -121,12 +126,24 @@ export function setGitRunner(next: GitRunner | null): void {
   git = next ?? defaultGit;
 }
 
-export function runDir(runId: string): string {
-  return join(env.agentWorkDir, runId);
+/** Sessions of a task nobody touched for this long are deleted. */
+export const SESSION_RETENTION_DAYS = 30;
+
+export function taskDir(taskId: string): string {
+  return join(env.agentWorkDir, 'tasks', taskId);
+}
+
+export function checkoutDir(taskId: string): string {
+  return join(taskDir(taskId), 'checkout');
+}
+
+/** HOME / CLAUDE_CONFIG_DIR for the runtime: session transcripts live here. */
+export function harnessDir(taskId: string): string {
+  return join(taskDir(taskId), 'harness');
 }
 
 export interface PrepareInput {
-  runId: string;
+  taskId: string;
   projectId: string;
   projectKey: string;
   taskNumber: number;
@@ -139,9 +156,10 @@ export interface PrepareInput {
 
 /** R26: fresh clone (or an empty scratch dir) with the task branch checked out. */
 export async function prepareWorkspace(input: PrepareInput): Promise<Workspace> {
-  const dir = runDir(input.runId);
+  const dir = checkoutDir(input.taskId);
   await rm(dir, { recursive: true, force: true });
   await mkdir(dir, { recursive: true });
+  await mkdir(harnessDir(input.taskId), { recursive: true });
   const repo = await resolveRepository(input.projectId);
   if (!repo) return { dir, repo: null, branch: null };
 
@@ -212,8 +230,32 @@ async function openGithubPullRequest(repo: RepoBinding, pr: { head: string; base
   return data.html_url ?? null;
 }
 
-export async function cleanupWorkspace(runId: string): Promise<void> {
-  const dir = runDir(runId);
+/** The checkout goes; the harness home stays so the next run can resume the session. */
+export async function cleanupWorkspace(taskId: string): Promise<void> {
+  const dir = checkoutDir(taskId);
   try { await stat(dir); } catch { return; }
   await rm(dir, { recursive: true, force: true }).catch((e) => logger.warn({ err: e, dir }, 'workspace cleanup failed'));
+  // Retention counts from the last run, not from the first transcript write.
+  const now = new Date();
+  await utimes(taskDir(taskId), now, now).catch(() => {});
+}
+
+/** Delete task directories (sessions included) whose last run is older than the cutoff. Returns how many went. */
+export async function pruneTaskDirs(olderThan: Date): Promise<number> {
+  const root = join(env.agentWorkDir, 'tasks');
+  let entries: string[];
+  try { entries = await readdir(root); } catch { return 0; }
+  let removed = 0;
+  for (const name of entries) {
+    const dir = join(root, name);
+    try {
+      const info = await stat(dir);
+      if (!info.isDirectory() || info.mtime >= olderThan) continue;
+      await rm(dir, { recursive: true, force: true });
+      removed += 1;
+    } catch (e) {
+      logger.warn({ err: e, dir }, 'agent task dir prune failed');
+    }
+  }
+  return removed;
 }
