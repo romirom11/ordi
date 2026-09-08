@@ -3,6 +3,15 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.29.3
+
+- **Branch names for non-Latin titles**: the slug transliterates Cyrillic
+  (Ukrainian romanization) and strips accents instead of dropping every
+  non-ASCII letter, so a task titled in Ukrainian no longer gets the branch
+  `feature/ord-26-` with nothing after the number; a title with nothing to
+  keep yields `feature/ord-26` without a dangling dash. Applies to agent
+  runs and to "Copy branch name" alike.
+
 ## v1.29.2
 
 - **Sessions survive between runs**: the runtime's home moves from a per-run
