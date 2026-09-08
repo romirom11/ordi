@@ -690,6 +690,44 @@ export async function softDeleteTask(actor: Actor, id: string) {
 }
 
 /**
+ * Where a task's status lands in another project (ORD-23): the status with
+ * the same name if the target has one, else the first status of the same
+ * category, else the target's default. Each project owns its statuses, so
+ * "Review" in one is a different row from "Review" in another – but to the
+ * person moving the task it is the same column.
+ */
+async function matchStatusInProject(sourceStatusId: string, targetProjectId: string): Promise<string> {
+  const { db } = getDb();
+  const [from] = await db.select({ name: taskStatuses.name, category: taskStatuses.category })
+    .from(taskStatuses).where(eq(taskStatuses.id, sourceStatusId));
+  const candidates = await db.select({
+    id: taskStatuses.id, name: taskStatuses.name, category: taskStatuses.category, isDefault: taskStatuses.isDefault,
+  }).from(taskStatuses).where(eq(taskStatuses.projectId, targetProjectId)).orderBy(asc(taskStatuses.position));
+  if (!candidates.length) throw err.domain('Project has no task statuses');
+  const wanted = from?.name.trim().toLowerCase();
+  const byName = wanted ? candidates.find((s) => s.name.trim().toLowerCase() === wanted) : undefined;
+  const byCategory = from ? candidates.find((s) => s.category === from.category) : undefined;
+  return (byName ?? byCategory ?? candidates.find((s) => s.isDefault) ?? candidates[0]!).id;
+}
+
+/**
+ * Custom-field keys a task may carry in a project: workspace-wide fields plus
+ * the ones defined for that project. A key defined only for the source
+ * project has no editor, filter or column in the target – it is dropped on
+ * the move rather than left as an invisible blob.
+ */
+async function customFieldKeysFor(projectId: string): Promise<Set<string>> {
+  const { db } = getDb();
+  const rows = await db.select({ key: schema.customFieldDefinitions.key })
+    .from(schema.customFieldDefinitions)
+    .where(and(
+      eq(schema.customFieldDefinitions.entityType, 'tasks'),
+      or(isNull(schema.customFieldDefinitions.projectId), eq(schema.customFieldDefinitions.projectId, projectId)),
+    ));
+  return new Set(rows.map((r) => r.key));
+}
+
+/**
  * Moving a task moves the work, not a copy of its title. The whole subtree goes
  * (children keep their parent, re-pointed to the new ids), and everything that
  * hangs off each task follows: comments, relations, external and git links,
@@ -697,16 +735,26 @@ export async function softDeleteTask(actor: Actor, id: string) {
  * the soft-deleted original and subtasks were orphaned under a parent nothing
  * could open any more.
  *
- * Project-scoped fields cannot travel: status resets to the target's default,
- * and type/cycle/milestone clear (each belongs to the source project).
+ * Project-scoped fields travel as far as they can (ORD-23): each task keeps
+ * the status of the same name (or category, or the target's default), custom
+ * fields keep the keys the target knows, labels are workspace-wide and stay.
+ * Type, cycle and milestone clear – each belongs to the source project.
+ * Moving needs admin rights on both projects: it renumbers the task and
+ * rewrites what the source project's board shows.
  */
 export async function moveTask(actor: Actor, id: string, targetProjectId: string) {
   const { db } = getDb();
   const source = await loadTask(id);
-  await assertProject(actor, source.projectId, 'member');
-  await assertProject(actor, targetProjectId, 'member');
+  await assertProject(actor, source.projectId, 'admin');
+  await assertProject(actor, targetProjectId, 'admin');
   if (source.projectId === targetProjectId) return { ...source, ref: await taskRef(source) };
-  const statusId = await defaultStatusId(targetProjectId);
+  const keepKeys = await customFieldKeysFor(targetProjectId);
+  const statusFor = new Map<string, string>();
+  const targetStatusOf = async (statusId: string): Promise<string> => {
+    let mapped = statusFor.get(statusId);
+    if (!mapped) { mapped = await matchStatusInProject(statusId, targetProjectId); statusFor.set(statusId, mapped); }
+    return mapped;
+  };
 
   const newId = await db.transaction(async (tx) => {
     // Collect the subtree breadth-first, so a parent is always inserted first.
@@ -732,13 +780,16 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
 
     for (const t of subtree) {
       lastPos = appendPosition(lastPos);
+      const cf = Object.fromEntries(
+        Object.entries((t.customFields ?? {}) as Record<string, unknown>).filter(([key]) => keepKeys.has(key)),
+      );
       await tx.insert(tasks).values({
         id: newIdOf.get(t.id)!, projectId: targetProjectId, number: 0, title: t.title,
-        description: t.description, statusId, typeId: null, priority: t.priority,
+        description: t.description, statusId: await targetStatusOf(t.statusId), typeId: null, priority: t.priority,
         parentId: t.parentId ? newIdOf.get(t.parentId) ?? null : null,
         milestoneId: null, dueDate: t.dueDate, startDate: t.startDate,
         estimate: t.estimate, cycleId: null, position: String(lastPos),
-        customFields: t.customFields, createdBy: t.createdBy,
+        customFields: cf, createdBy: t.createdBy,
       });
     }
     if (assigneeRows.length) {
