@@ -24,7 +24,7 @@ export const agentProfileFieldsSchema = z.object({
   completionCategory: z.enum(['in_review']).default('in_review'),
   assignPolicy: z.enum(AGENT_ASSIGN_POLICIES).default('project_members'),
   maxRunMinutes: z.number().int().min(1).max(24 * 60).default(30),
-  maxTurns: z.number().int().min(1).max(1000).default(60),
+  maxTurns: z.number().int().min(1).max(2000).default(200),
   maxBudgetUsd: z.number().min(0).max(10_000).nullable().optional(),
   concurrency: z.number().int().min(1).max(10).default(1),
   credentialId: idSchema.nullable().optional(),

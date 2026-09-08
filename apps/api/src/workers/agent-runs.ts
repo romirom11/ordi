@@ -163,6 +163,7 @@ export async function executeRun(claimed: RunRow): Promise<void> {
       completionCategory: profile.completionCategory, completionStatusName: status?.name ?? null,
       branch: ws.branch, repoFullName: ws.repo?.fullName ?? null, agentName: agent.name, instructions: profile.instructions,
       followUpCommentId: claimed.trigger === 'comment' ? claimed.commentId : null,
+      resumedAfterStop: claimed.trigger === 'retry' && Boolean(claimed.sessionId),
       connectorSlugs: setup.connectors.map((c) => c.slug),
     };
     const prompt = await buildTaskBrief(ctx);
@@ -229,12 +230,30 @@ export async function executeRun(claimed: RunRow): Promise<void> {
     const actor = await agentActor(agent.id);
     const usage = { ...outcome.usage, credentialId: usedCredentialId };
 
+    // A run that stops early (limit, timeout, cancel, error) must not lose
+    // what the agent already did: the branch is pushed without a pull
+    // request, and a retry continues on it with the same session.
+    const preserveWork = async (): Promise<string | null> => {
+      try {
+        const kept = await publishWorkspace(ws!, { ref, title: task.title, summary: '', existingPrUrl: claimed.prUrl ?? null, openPullRequest: false });
+        if (kept.pushed) await recordRunEvent(runId, 'log', { message: `Pushed ${kept.commits} commit(s) of unfinished work to ${ws!.branch}` });
+        return kept.pushed ? ws!.branch : null;
+      } catch (e) {
+        await recordRunEvent(runId, 'error', { message: `Could not push unfinished work: ${(e as Error).message}` });
+        return null;
+      }
+    };
+    const nextSteps = (branch: string | null, limitHint: string | null): string => [
+      branch ? `The work so far is on branch ${branch}; Retry on the task continues from it in the same session.` : 'Retry on the task starts the same session again.',
+      limitHint,
+    ].filter(Boolean).join(' ');
+
     if (controller.signal.aborted) {
-      const reason = (controller.signal.reason as Error | undefined)?.message === 'timeout'
-        ? `Stopped after ${profile.maxRunMinutes} minutes`
-        : 'Cancelled';
-      await postComment(actor, task.id, `Run stopped: ${reason}.`).catch(() => {});
-      await finishRun(runId, { status: reason === 'Cancelled' ? 'cancelled' : 'failed', error: reason, sessionId: outcome.sessionId, usage });
+      const timedOut = (controller.signal.reason as Error | undefined)?.message === 'timeout';
+      const reason = timedOut ? `Stopped after ${profile.maxRunMinutes} minutes` : 'Cancelled';
+      const branch = await preserveWork();
+      await postComment(actor, task.id, `Run stopped: ${reason}. ${nextSteps(branch, timedOut ? 'Raise "Max run minutes" in the agent profile if the task needs longer.' : null)}`).catch(() => {});
+      await finishRun(runId, { status: timedOut ? 'failed' : 'cancelled', error: reason, sessionId: outcome.sessionId, branch, usage });
       return;
     }
 
@@ -245,8 +264,13 @@ export async function executeRun(claimed: RunRow): Promise<void> {
     }
 
     if (outcome.status === 'failed') {
-      await postComment(actor, task.id, `I could not finish this run: ${(outcome.error ?? 'unknown error').slice(0, 500)}`).catch(() => {});
-      await finishRun(runId, { status: 'failed', error: outcome.error ?? 'unknown error', sessionId: outcome.sessionId, usage });
+      const error = outcome.error ?? 'unknown error';
+      const branch = await preserveWork();
+      const limitHint = /max_turns|maximum number of turns/i.test(error)
+        ? `The agent used all ${profile.maxTurns} steps ("Max turns" in its profile) before it could report; raise the limit or split the task.`
+        : /max_budget/i.test(error) ? 'The run hit "Max budget" in the agent profile.' : null;
+      await postComment(actor, task.id, `I could not finish this run: ${error.slice(0, 500)}. ${nextSteps(branch, limitHint)}`).catch(() => {});
+      await finishRun(runId, { status: 'failed', error, sessionId: outcome.sessionId, branch, usage });
       return;
     }
 

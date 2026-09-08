@@ -24,6 +24,8 @@ export interface PromptContext {
   instructions: string;
   /** Follow-up runs: only the new comment goes in the prompt. */
   followUpCommentId: string | null;
+  /** A retry of a run that stopped early, continuing the same session and branch. */
+  resumedAfterStop?: boolean;
   connectorSlugs: string[];
 }
 
@@ -43,7 +45,13 @@ export async function buildTaskBrief(ctx: PromptContext): Promise<string> {
   ]);
 
   const lines: string[] = [];
-  if (ctx.followUpCommentId) {
+  if (ctx.resumedAfterStop) {
+    lines.push(`# Continue ${ctx.ref}: ${task.title}`);
+    lines.push('');
+    lines.push('Your previous run on this task stopped before you could report (a step limit, a timeout or a cancel). This run continues the same session on the same branch.');
+    lines.push('Start by checking `git log` and `git status` to see what is already there, finish the remaining work with as few steps as possible, and end with the structured report.');
+    lines.push('');
+  } else if (ctx.followUpCommentId) {
     const followUp = commentRows.find((c) => c.id === ctx.followUpCommentId);
     lines.push(`# Follow-up on ${ctx.ref}: ${task.title}`);
     lines.push('');

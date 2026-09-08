@@ -253,6 +253,13 @@
       "when": 1788655666809,
       "tag": "0035_ai_agents",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1788877156753,
+      "tag": "0036_agent_max_turns",
+      "breakpoints": true
     }
   ]
 }
