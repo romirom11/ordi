@@ -11,6 +11,13 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   `feature/ord-26-` with nothing after the number; a title with nothing to
   keep yields `feature/ord-26` without a dangling dash. Applies to agent
   runs and to "Copy branch name" alike.
+- **A refused push loses nothing and leaks nothing**: the checkout with the
+  unpushed commits is kept and the next run (Retry) continues in it instead
+  of cloning afresh; the error names the cause (a GitHub App installation
+  still on read-only permissions, or a token without repo write) and what
+  to do; git errors no longer carry the `http.extraheader` value, which was
+  the installation token in base64. Long log lines wrap inside the run
+  block.
 
 ## v1.29.2
 

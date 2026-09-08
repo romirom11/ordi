@@ -24,7 +24,7 @@ import {
   cancelRequested, claimRuns, finishRun, newestHumanCommentSince, parkRunForQuota, queueRun, recordRunProgress, requeueStaleRuns, startRun, touchRun, type RunRow,
 } from '../domains/agents/runs';
 import { runtimeAdapter, type RuntimeMcpServer, type RuntimeOutcome } from '../domains/agents/runtime';
-import { cleanupWorkspace, harnessDir, prepareWorkspace, pruneTaskDirs, publishWorkspace, SESSION_RETENTION_DAYS, type Workspace } from '../domains/agents/workspace';
+import { cleanupWorkspace, explainPushError, harnessDir, prepareWorkspace, pruneTaskDirs, publishWorkspace, SESSION_RETENTION_DAYS, type Workspace } from '../domains/agents/workspace';
 import * as tasksSvc from '../domains/projects/service';
 
 const { agentProfiles, agentWorkers, users, tasks, projects, taskStatuses, agentConnectors, mcpConnectors } = schema;
@@ -134,6 +134,8 @@ export async function executeRun(claimed: RunRow): Promise<void> {
   inFlight.add(runId);
   let ws: Workspace | null = null;
   let token: string | null = null;
+  // A checkout whose push failed holds commits nobody else has: keep it for the retry.
+  let keepCheckout = false;
   // Outside the checkout, so nothing of it ends up in the agent's commits,
   // and per task rather than per run: the session transcript written here
   // is what a follow-up or a retry resumes.
@@ -156,7 +158,7 @@ export async function executeRun(claimed: RunRow): Promise<void> {
       taskId: task.id, projectId: project.id, projectKey: project.key, taskNumber: task.number, taskTitle: task.title,
       existingBranch: claimed.branch ?? null, agentName: agent.name, agentEmail: agent.email,
     });
-    await recordRunEvent(runId, 'log', { message: ws.repo ? `Checked out ${ws.repo.fullName} on ${ws.branch}` : 'No repository linked; working in a scratch directory' });
+    await recordRunEvent(runId, 'log', { message: ws.repo ? `${ws.reused ? 'Continuing the previous run\'s unpushed checkout of' : 'Checked out'} ${ws.repo.fullName} on ${ws.branch}` : 'No repository linked; working in a scratch directory' });
     // Written now, not at the end: a worker lost mid-run leaves a row the re-queued run continues from.
     await recordRunProgress(runId, { branch: ws.branch });
 
@@ -260,7 +262,8 @@ export async function executeRun(claimed: RunRow): Promise<void> {
         if (kept.pushed) await recordRunEvent(runId, 'log', { message: `Pushed ${kept.commits ?? 'the'} commit(s) of unfinished work to ${ws!.branch}` });
         return kept.pushed ? ws!.branch : null;
       } catch (e) {
-        await recordRunEvent(runId, 'error', { message: `Could not push unfinished work: ${(e as Error).message}` });
+        keepCheckout = true;
+        await recordRunEvent(runId, 'error', { message: `Could not push unfinished work: ${explainPushError((e as Error).message)}` });
         return null;
       }
     };
@@ -323,9 +326,11 @@ export async function executeRun(claimed: RunRow): Promise<void> {
       if (published.pushed) await recordRunEvent(runId, 'log', { message: `Pushed ${published.commits ?? 'the'} commit(s) to ${ws.branch}${prUrl ? `; pull request ${prUrl}` : ''}` });
       else if (ws.repo) await recordRunEvent(runId, 'log', { message: 'No commits to push' });
     } catch (e) {
-      await recordRunEvent(runId, 'error', { message: `Publishing the branch failed: ${(e as Error).message}` });
-      await postComment(actor, task.id, `${summary}\n\nI could not push the branch: ${(e as Error).message.slice(0, 300)}`).catch(() => {});
-      await finishRun(runId, { status: 'failed', error: `push failed: ${(e as Error).message}`, summary, sessionId: outcome.sessionId, branch: ws.branch, usage });
+      keepCheckout = true;
+      const why = explainPushError((e as Error).message);
+      await recordRunEvent(runId, 'error', { message: `Publishing the branch failed: ${why}` });
+      await postComment(actor, task.id, `${summary}\n\nI could not push the branch: ${why.slice(0, 900)}`).catch(() => {});
+      await finishRun(runId, { status: 'failed', error: `push failed: ${why}`, summary, sessionId: outcome.sessionId, branch: ws.branch, usage });
       return;
     }
     if (prUrl) {
@@ -359,7 +364,7 @@ export async function executeRun(claimed: RunRow): Promise<void> {
     forgetRunSecrets(runId);
     forgetRunScope(runId);
     await closeRunConnections(runId).catch(() => {});
-    await cleanupWorkspace(claimed.taskId).catch(() => {});
+    await cleanupWorkspace(claimed.taskId, { keepCheckout }).catch(() => {});
   }
 }
 

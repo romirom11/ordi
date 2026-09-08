@@ -41,6 +41,8 @@ export interface Workspace {
   repo: RepoBinding | null;
   branch: string | null;
   projectId: string;
+  /** The previous run's checkout was kept (its push failed) and is continued. */
+  reused?: boolean;
 }
 
 /** The first repository bound to the project, with a usable token, or null. */
@@ -107,18 +109,46 @@ export interface GitRunner {
  */
 const gitHome = (): string => join(env.agentWorkDir, '.git-home');
 
+/**
+ * execFile puts the whole command line into the error, extra header
+ * included: the token (base64 of `x-access-token:TOKEN`) must not reach the
+ * run log or the task comment.
+ */
+export function redactGitError(message: string, repo: RepoBinding | null | undefined): string {
+  if (!repo) return message;
+  const header = authHeader(repo);
+  const encoded = header.slice(header.indexOf('basic ') + 6);
+  return message.split(header).join('AUTHORIZATION: basic [redacted]').split(encoded).join('[redacted]').split(repo.token).join('[redacted]');
+}
+
+/** A push refused with 403 is almost always the GitHub App installation still on read-only permissions. */
+export function explainPushError(message: string): string {
+  if (/403|Permission to .* denied/i.test(message)) {
+    return `${message.trim()}\n\nThe repository connection has no write access. For a GitHub App, an owner has to accept the updated permissions (GitHub → Settings → Applications → Installed GitHub Apps → the ordi app → review the pending request); for a token, it needs repo write. The commits are kept on this worker: fix the access and press Retry.`;
+  }
+  return message;
+}
+
 const defaultGit: GitRunner = async (args, opts) => {
   const home = gitHome();
   await mkdir(home, { recursive: true });
   const full = opts.repo ? ['-c', `http.extraheader=${authHeader(opts.repo)}`, ...args] : args;
-  const { stdout, stderr } = await execFileAsync('git', full, {
-    cwd: opts.cwd, maxBuffer: 16 * 1024 * 1024,
-    env: {
-      PATH: process.env.PATH ?? '', HOME: home, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1',
-      GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'echo', LANG: 'C',
-    },
-  });
-  return { stdout, stderr };
+  try {
+    const { stdout, stderr } = await execFileAsync('git', full, {
+      cwd: opts.cwd, maxBuffer: 16 * 1024 * 1024,
+      env: {
+        PATH: process.env.PATH ?? '', HOME: home, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1',
+        GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'echo', LANG: 'C',
+      },
+    });
+    return { stdout, stderr };
+  } catch (e) {
+    const err = e as Error & { stderr?: string; code?: number | string };
+    const clean = new Error(redactGitError(err.message, opts.repo)) as Error & { stderr?: string; code?: number | string };
+    clean.stderr = redactGitError(err.stderr ?? '', opts.repo);
+    clean.code = err.code;
+    throw clean;
+  }
 };
 
 let git: GitRunner = defaultGit;
@@ -156,16 +186,38 @@ export interface PrepareInput {
   agentEmail: string;
 }
 
+/**
+ * A checkout left behind by a run whose push failed still holds the commits
+ * nobody else has. If it is intact and ahead of every remote ref, the next
+ * run continues in it (after refreshing origin) instead of cloning afresh.
+ */
+async function reuseCheckout(dir: string, branch: string, repo: RepoBinding): Promise<boolean> {
+  try {
+    await stat(join(dir, '.git'));
+    await git(['rev-parse', '--verify', '--quiet', branch], { cwd: dir });
+    const unpushed = await git(['rev-list', '--count', branch, '--not', '--remotes=origin'], { cwd: dir });
+    if (Number(unpushed.stdout.trim() || 0) === 0) return false;
+    await git(['fetch', '--depth', '50', 'origin', repo.defaultBranch], { cwd: dir, repo });
+    await git(['checkout', branch], { cwd: dir });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** R26: fresh clone (or an empty scratch dir) with the task branch checked out. */
 export async function prepareWorkspace(input: PrepareInput): Promise<Workspace> {
   const dir = checkoutDir(input.taskId);
-  await rm(dir, { recursive: true, force: true });
-  await mkdir(dir, { recursive: true });
   await mkdir(harnessDir(input.taskId), { recursive: true });
   const repo = await resolveRepository(input.projectId);
+  const branch = input.existingBranch ?? buildBranchName({ key: input.projectKey, number: input.taskNumber, title: input.taskTitle });
+  if (repo && await reuseCheckout(dir, branch, repo)) {
+    return { dir, repo, branch, projectId: input.projectId, reused: true };
+  }
+  await rm(dir, { recursive: true, force: true });
+  await mkdir(dir, { recursive: true });
   if (!repo) return { dir, repo: null, branch: null, projectId: input.projectId };
 
-  const branch = input.existingBranch ?? buildBranchName({ key: input.projectKey, number: input.taskNumber, title: input.taskTitle });
   await git(['clone', '--depth', '50', '--no-single-branch', '--branch', repo.defaultBranch, cloneUrl(repo), dir], { cwd: env.agentWorkDir, repo });
   await git(['config', 'user.name', input.agentName], { cwd: dir });
   await git(['config', 'user.email', input.agentEmail], { cwd: dir });
@@ -289,10 +341,12 @@ async function openGithubPullRequest(repo: RepoBinding, pr: { head: string; base
 }
 
 /** The checkout goes; the harness home stays so the next run can resume the session. */
-export async function cleanupWorkspace(taskId: string): Promise<void> {
+export async function cleanupWorkspace(taskId: string, opts: { keepCheckout?: boolean } = {}): Promise<void> {
   const dir = checkoutDir(taskId);
-  try { await stat(dir); } catch { return; }
-  await rm(dir, { recursive: true, force: true }).catch((e) => logger.warn({ err: e, dir }, 'workspace cleanup failed'));
+  if (!opts.keepCheckout) {
+    try { await stat(dir); } catch { return; }
+    await rm(dir, { recursive: true, force: true }).catch((e) => logger.warn({ err: e, dir }, 'workspace cleanup failed'));
+  }
   // Retention counts from the last run, not from the first transcript write.
   const now = new Date();
   await utimes(taskDir(taskId), now, now).catch(() => {});
