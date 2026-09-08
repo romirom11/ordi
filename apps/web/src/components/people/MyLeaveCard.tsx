@@ -1,15 +1,21 @@
 /**
  * Leave self-service on the profile page. Works without people.read: the API
- * scopes GET /leave-requests to the caller's own requests, /leave-balances to
- * their own balances, and `?scope=approvals` lists requests waiting on the
+ * scopes GET /leave-requests to the caller's own requests, /leave-entitlements
+ * to their own balances, and `?scope=approvals` lists requests waiting on the
  * caller as approver (empty for most people). When the account has no linked
  * employee record the own-requests query fails – we show a hint instead of the
  * list, but still render the approvals section if there is anything to decide.
+ *
+ * The card shows what is left per type and the form checks a range against it
+ * before it is sent, using the same `@ordi/shared` calc the API enforces with –
+ * the point being that you see the refusal while picking dates, not after.
  */
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, Check, ChevronRight, Plus, X } from 'lucide-react';
+import { leaveDays, exceedsEntitlement } from '@ordi/shared';
 import { api, ApiError } from '../../lib/api';
+import { useHolidaySet, useLeaveTypes, useMyLeaveEntitlements, type LeaveEntitlement } from '../../lib/queries';
 import { extendDict, useT } from '../../lib/i18n';
 import { Avatar, Badge, Button, Checkbox, Input, Select, Skeleton, Card, Spinner, cn, fmtDate } from '../ui';
 import { ConfirmDialog, Dialog, toast } from '../overlays';
@@ -53,6 +59,12 @@ extendDict({
     'leave.statusCanceled': 'Canceled',
     'leave.of': 'of',
     'leave.daysShort': 'd',
+    'leave.left': 'left',
+    'leave.pendingHeld': 'pending',
+    'leave.noQuota': 'no quota',
+    'leave.thisRequest': 'This request',
+    'leave.remaining': 'Left after it',
+    'leave.notEnough': 'That is more than you have left. Shorten the range or pick another type.',
   },
   uk: {
     'leave.myLeave': 'Мої відпустки',
@@ -91,18 +103,15 @@ extendDict({
     'leave.statusCanceled': 'Скасовано',
     'leave.of': 'з',
     'leave.daysShort': 'дн.',
+    'leave.left': 'лишилось',
+    'leave.pendingHeld': 'на погодженні',
+    'leave.noQuota': 'без квоти',
+    'leave.thisRequest': 'Ця заявка',
+    'leave.remaining': 'Залишок після неї',
+    'leave.notEnough': 'Це більше, ніж у вас лишилось. Скоротіть період або оберіть інший тип.',
   },
 });
 
-interface LeaveType {
-  id: string;
-  name: string;
-  isPaid?: boolean;
-  needsApproval?: boolean;
-  affectsBalance?: boolean;
-  allowHalfDay?: boolean;
-  annualQuota?: string | number | null;
-}
 interface LeaveRequest {
   id: string;
   employeeId?: string;
@@ -120,8 +129,6 @@ interface LeaveRequest {
   employeeAvatar?: string | null;
   leaveTypeName?: string | null;
 }
-/** Numeric columns arrive as strings. Available = allocated + carried - used. */
-interface LeaveBalance { id: string; leaveTypeId: string; period: string; allocated: string; used: string; carried: string }
 
 const STATUS_META: Record<LeaveRequest['status'], { color: string; key: string }> = {
   pending: { color: '#f59e0b', key: 'leave.statusPending' },
@@ -134,13 +141,15 @@ function fmtNum(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }
 
-/** Inclusive calendar days between two yyyy-MM-dd dates; a half day counts 0.5. */
-function requestDays(r: LeaveRequest): number | null {
-  const from = Date.parse(r.fromDate);
-  const to = Date.parse(r.toDate);
-  if (Number.isNaN(from) || Number.isNaN(to) || to < from) return null;
-  const days = Math.round((to - from) / 86_400_000) + 1;
-  return r.halfDay ? days - 0.5 : days;
+/**
+ * Working days a range costs – the shared calc the API charges with, so the
+ * number on a row is the number that was deducted. Counting calendar days here
+ * used to show a Mon–Fri week as 5 and a Fri–Mon one as 4, neither of which
+ * matched the balance.
+ */
+function requestDays(r: Pick<LeaveRequest, 'fromDate' | 'toDate' | 'halfDay'>, holidays: ReadonlySet<string>): number | null {
+  if (!r.fromDate || !r.toDate || r.toDate < r.fromDate) return null;
+  return leaveDays(r.fromDate, r.toDate, r.halfDay ?? false, holidays);
 }
 
 function DateRange({ from, to }: { from: string; to: string }) {
@@ -163,21 +172,15 @@ export function MyLeaveCard() {
   const t = useT();
   const qc = useQueryClient();
 
-  const types = useQuery({
-    queryKey: ['leave-types'],
-    queryFn: () => api.get<{ data: LeaveType[] }>('/leave-types').then((r) => r.data),
-  });
+  const types = useLeaveTypes();
   // 403 when the account has no employee record – surfaced as a hint, not retried.
   const mine = useQuery({
     queryKey: ['my-leave'],
     queryFn: () => api.get<{ data: LeaveRequest[] }>('/leave-requests').then((r) => r.data),
     retry: false,
   });
-  const balances = useQuery({
-    queryKey: ['my-leave-balances'],
-    queryFn: () => api.get<{ data: LeaveBalance[] }>('/leave-balances').then((r) => r.data),
-    retry: false,
-  });
+  const entitlements = useMyLeaveEntitlements();
+  const holidays = useHolidaySet();
   const approvals = useQuery({
     queryKey: ['leave-approvals'],
     queryFn: () => api.get<{ data: LeaveRequest[] }>('/leave-requests?scope=approvals').then((r) => r.data),
@@ -190,27 +193,31 @@ export function MyLeaveCard() {
     return map;
   }, [types.data]);
 
-  // One line per leave type for the current period (latest sub-period wins).
-  const currentBalances = useMemo(() => {
-    const year = String(new Date().getFullYear());
-    const map = new Map<string, LeaveBalance>();
-    for (const b of balances.data ?? []) {
-      if (!b.period.startsWith(year)) continue;
-      const prev = map.get(b.leaveTypeId);
-      if (!prev || b.period > prev.period) map.set(b.leaveTypeId, b);
-    }
-    return [...map.values()];
-  }, [balances.data]);
+  const entitlementOf = useMemo(() => {
+    const map = new Map<string, LeaveEntitlement>();
+    for (const e of entitlements.data ?? []) map.set(e.leaveTypeId, e);
+    return map;
+  }, [entitlements.data]);
+
+  // Only types with something to draw down say anything useful here; the rest
+  // ("no quota", or types that never touch a balance) would just be zeros.
+  const tracked = (entitlements.data ?? []).filter((e) => e.tracked);
 
   /* ── request dialog ── */
   const emptyForm = { leaveTypeId: '', fromDate: '', toDate: '', halfDay: false, reason: '' };
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const selectedType = (types.data ?? []).find((lt) => lt.id === form.leaveTypeId);
+  const selectedEntitlement = entitlementOf.get(form.leaveTypeId);
+  const formDays = requestDays(form, holidays);
+  // The same rule the API refuses with, so the form does not offer to send a
+  // request the server is going to reject.
+  const overBalance = selectedEntitlement != null && formDays != null
+    && exceedsEntitlement(selectedEntitlement, formDays);
 
   const invalidateOwn = () => {
     void qc.invalidateQueries({ queryKey: ['my-leave'] });
-    void qc.invalidateQueries({ queryKey: ['my-leave-balances'] });
+    void qc.invalidateQueries({ queryKey: ['my-leave-entitlements'] });
   };
 
   const create = useMutation({
@@ -278,20 +285,25 @@ export function MyLeaveCard() {
         </div>
         <p className="mb-3 text-xs text-muted-foreground">{t('leave.myLeaveHint')}</p>
 
-        {!notLinked && currentBalances.length > 0 && (
+        {!notLinked && tracked.length > 0 && (
           <div className="mb-3 flex flex-wrap gap-x-5 gap-y-1.5 text-xs">
-            {currentBalances.map((b) => {
-              const allocated = Number(b.allocated) || 0;
-              const available = allocated + (Number(b.carried) || 0) - (Number(b.used) || 0);
-              return (
-                <span key={b.id} className="flex items-center gap-1.5">
-                  <span className="text-muted-foreground">{typeName.get(b.leaveTypeId) ?? '–'}</span>
-                  <span className="font-medium tabular-nums">
-                    {fmtNum(available)} <span className="font-normal text-faint">{t('leave.of')} {fmtNum(allocated)}</span>
+            {tracked.map((e) => (
+              <span key={e.leaveTypeId} className="flex items-center gap-1.5">
+                <span className="text-muted-foreground">{e.leaveTypeName}</span>
+                <span className={cn('font-medium tabular-nums', e.remaining <= 0 && 'text-destructive')}>
+                  {fmtNum(e.remaining)}
+                  {' '}
+                  <span className="font-normal text-faint">
+                    {t('leave.of')} {fmtNum(e.allocated + e.carried)} {t('leave.daysShort')}
                   </span>
                 </span>
-              );
-            })}
+                {/* Days already asked for are gone from the remainder – say so,
+                    otherwise the number looks wrong next to a pending request. */}
+                {e.pending > 0 && (
+                  <span className="text-faint">· {fmtNum(e.pending)} {t('leave.pendingHeld')}</span>
+                )}
+              </span>
+            ))}
           </div>
         )}
 
@@ -307,7 +319,7 @@ export function MyLeaveCard() {
         ) : (
           <div className="overflow-hidden rounded-lg border border-border">
             {rows.map((r, i) => {
-              const days = requestDays(r);
+              const days = requestDays(r, holidays);
               return (
                 <div key={r.id} className={cn('flex items-center gap-3 px-3 py-2 text-[13px]', i > 0 && 'border-t border-border')}>
                   <div className="min-w-0 flex-1">
@@ -383,7 +395,7 @@ export function MyLeaveCard() {
           className="space-y-3 px-4 pb-4 pt-2"
           onSubmit={(e) => {
             e.preventDefault();
-            if (form.leaveTypeId && form.fromDate && form.toDate && !create.isPending) create.mutate();
+            if (form.leaveTypeId && form.fromDate && form.toDate && !overBalance && !create.isPending) create.mutate();
           }}
         >
           <label className="block space-y-1.5 text-xs text-muted-foreground">
@@ -396,6 +408,14 @@ export function MyLeaveCard() {
               <option value="">{t('leave.typePlaceholder')}</option>
               {(types.data ?? []).map((lt) => <option key={lt.id} value={lt.id}>{lt.name}</option>)}
             </Select>
+            {/* What the picked type leaves, before any dates are chosen. */}
+            {selectedEntitlement && (
+              <span className="block text-faint">
+                {selectedEntitlement.tracked
+                  ? `${fmtNum(selectedEntitlement.remaining)} ${t('leave.daysShort')} ${t('leave.left')}`
+                  : t('leave.noQuota')}
+              </span>
+            )}
           </label>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5 text-xs text-muted-foreground">
@@ -430,9 +450,28 @@ export function MyLeaveCard() {
               placeholder={t('leave.reasonPlaceholder')}
             />
           </label>
+          {/* Working days the range costs and what it leaves, live – weekends and
+              public holidays are not charged, so the count is rarely the span. */}
+          {formDays != null && (
+            <div className="rounded-lg border border-border px-3 py-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">{t('leave.thisRequest')}</span>
+                <span className="font-medium tabular-nums">{fmtNum(formDays)} {t('leave.daysShort')}</span>
+              </div>
+              {selectedEntitlement?.tracked && (
+                <div className="mt-1 flex items-center justify-between">
+                  <span className="text-muted-foreground">{t('leave.remaining')}</span>
+                  <span className={cn('font-medium tabular-nums', overBalance && 'text-destructive')}>
+                    {fmtNum(selectedEntitlement.remaining - formDays)} {t('leave.daysShort')}
+                  </span>
+                </div>
+              )}
+              {overBalance && <p className="mt-1.5 text-destructive">{t('leave.notEnough')}</p>}
+            </div>
+          )}
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" size="sm" variant="ghost" onClick={() => setDialogOpen(false)}>{t('common.cancel')}</Button>
-            <Button type="submit" size="sm" variant="primary" disabled={create.isPending || !form.leaveTypeId || !form.fromDate || !form.toDate}>
+            <Button type="submit" size="sm" variant="primary" disabled={create.isPending || overBalance || !form.leaveTypeId || !form.fromDate || !form.toDate}>
               {create.isPending ? <Spinner /> : t('leave.submit')}
             </Button>
           </div>

@@ -104,6 +104,67 @@ export function useLeaveTypes(): UseQueryResult<LeaveTypeLookup[]> {
   });
 }
 
+export interface Holiday {
+  id: string;
+  /** 'YYYY-MM-DD' */
+  date: string;
+  name: string;
+  calendarId?: string;
+}
+
+/** Public holidays from every calendar – the team calendar paints them, and a
+ *  leave request is not charged for them. */
+export function useHolidays(): UseQueryResult<Holiday[]> {
+  return useQuery({
+    queryKey: ['holidays'],
+    queryFn: () => api.get<{ data: Holiday[] }>('/holidays').then((r) => r.data),
+    staleTime: 5 * 60_000,
+  });
+}
+
+/**
+ * The same list in the shape `leaveDays()` takes. This is every calendar, while
+ * the API charges a request against the calendars assigned to that employee –
+ * the same approximation the API itself falls back to while assignment has no
+ * UI, and the API stays the authority on the number that is stored.
+ */
+export function useHolidaySet(): ReadonlySet<string> {
+  const { data } = useHolidays();
+  return useMemo(() => new Set((data ?? []).map((h) => (h.date ?? '').slice(0, 10))), [data]);
+}
+
+/** One leave type's standing for a person and period, as `/leave-entitlements` reports it. */
+export interface LeaveEntitlement {
+  leaveTypeId: string;
+  leaveTypeName: string;
+  period: string;
+  allocated: number;
+  carried: number;
+  used: number;
+  /** Days undecided requests already hold. */
+  pending: number;
+  /** allocated + carried − used − pending. */
+  remaining: number;
+  /** False for a type with no quota, or one that does not draw down a balance. */
+  tracked: boolean;
+  affectsBalance: boolean;
+  allowHalfDay: boolean;
+  annualQuota: number;
+}
+
+/**
+ * Days still bookable per leave type, for the caller's own card. Errors are not
+ * retried: an account with no employee record has no entitlement to report and
+ * the leave card shows its "not linked" hint instead.
+ */
+export function useMyLeaveEntitlements(): UseQueryResult<LeaveEntitlement[]> {
+  return useQuery({
+    queryKey: ['my-leave-entitlements'],
+    queryFn: () => api.get<{ data: LeaveEntitlement[] }>('/leave-entitlements').then((r) => r.data),
+    retry: false,
+  });
+}
+
 /**
  * The same lookup as a map, for tables that render an owner per row. Three CRM
  * tabs were each building this from `useUsersLookup` by hand, and one of them
