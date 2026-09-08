@@ -192,6 +192,23 @@ export function peopleRoutes() {
     return c.json({ data: await svc.listLeaveBalances(own.id) });
   });
 
+  // What is still bookable per leave type (ORD-26): the balance with pending
+  // requests already held back. Scoped like /leave-balances – your own without
+  // people.read, anyone else's with it – and always about one person, so it
+  // defaults to the caller's own employee card.
+  app.get('/leave-entitlements', async (c) => {
+    const actor = currentActor(c);
+    const requested = c.req.query('employeeId');
+    const period = c.req.query('period') ?? undefined;
+    const own = await svc.employeeOfUser(actor.userId);
+    if (!actor.access.permissions.has('people.read') && (!own || (requested && requested !== own.id))) {
+      throw err.forbidden('Missing permission people.read', 'people.read');
+    }
+    const employeeId = requested ?? own?.id;
+    if (!employeeId) throw err.validation('employeeId is required – this account is not linked to an employee record');
+    return c.json({ data: await svc.listLeaveEntitlements(employeeId, period) });
+  });
+
   app.post('/leave-balances/accrue', guard('people.manage_leave'), async (c) => {
     const body = await c.req.json();
     if (!body?.period) throw err.validation('period required');

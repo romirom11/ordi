@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseTaskRefs, buildBranchName } from './git-mentions';
 import { buildRedactedDiff } from './redaction';
-import { leaveDays, availableBalance, carryForward, rangesOverlap } from './leave';
+import { leaveDays, availableBalance, carryForward, rangesOverlap, remainingBalance, exceedsEntitlement } from './leave';
 import { computeAging } from './aging';
 import { positionBetween } from './fractional';
 
@@ -71,6 +71,26 @@ describe('leave calc', () => {
   it('overlap detection', () => {
     expect(rangesOverlap('2024-07-01', '2024-07-05', '2024-07-04', '2024-07-10')).toBe(true);
     expect(rangesOverlap('2024-07-01', '2024-07-05', '2024-07-06', '2024-07-10')).toBe(false);
+  });
+});
+
+describe('leave entitlement', () => {
+  const tracked = { allocated: 20, used: 5, carried: 3, pending: 2, tracked: true };
+
+  it('pending days are held back from what is still bookable', () => {
+    expect(availableBalance(tracked)).toBe(18);
+    expect(remainingBalance(tracked)).toBe(16);
+  });
+  it('a range that fits passes, one day more does not', () => {
+    expect(exceedsEntitlement(tracked, 16)).toBe(false);
+    expect(exceedsEntitlement(tracked, 16.5)).toBe(true);
+  });
+  it('an untracked type never caps a request', () => {
+    // Sick / unpaid leave: no quota, or a type that does not draw a balance.
+    expect(exceedsEntitlement({ ...tracked, tracked: false }, 99)).toBe(false);
+  });
+  it('an over-drawn balance goes negative rather than clamping to zero', () => {
+    expect(remainingBalance({ allocated: 5, used: 8, carried: 0, pending: 0, tracked: true })).toBe(-3);
   });
 });
 

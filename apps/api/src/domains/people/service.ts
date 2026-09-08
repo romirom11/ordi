@@ -6,7 +6,10 @@
  */
 import { getDb, schema, eq, and, isNull, inArray, desc, asc, gte, lte, sql } from '@ordi/db';
 import { ulid } from 'ulid';
-import { leaveDays, availableBalance, carryForward, rangesOverlap, LEAVE_TRANSITIONS } from '@ordi/shared';
+import {
+  leaveDays, availableBalance, carryForward, rangesOverlap, remainingBalance, exceedsEntitlement,
+  LEAVE_TRANSITIONS, type LeaveEntitlement,
+} from '@ordi/shared';
 import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
 import { writeActivity, recordSensitiveAccess } from '../../core/activity';
@@ -634,6 +637,108 @@ export async function accrueLeave(actor: Actor, input: { period: string; employe
   return { period: input.period, accrued: count };
 }
 
+// ─── leave entitlements: what is still bookable (ORD-26) ───
+
+/** The period a request is charged to – the year it starts in, the rule `decideLeave` deducts by. */
+function periodOf(fromDate: string): string {
+  return fromDate.slice(0, 4);
+}
+
+function fmtDays(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+}
+
+type LeaveTypeRow = typeof schema.leaveTypes.$inferSelect;
+type LeaveBalanceRow = typeof schema.leaveBalances.$inferSelect;
+
+/**
+ * A balance row as an entitlement. Without a row the type's annual quota is the
+ * allocation: HR may not have run the accrual for the period yet, and until it
+ * does every profile would otherwise read "0 of 0" and no request could be
+ * checked against anything. Quota 0 means "no quota" (as the settings panel and
+ * the request form both label it), so such a type stays untracked, not capped
+ * at zero days.
+ */
+function toEntitlement(type: LeaveTypeRow, bal: LeaveBalanceRow | undefined, pending: number): LeaveEntitlement {
+  const allocated = Number(bal?.allocated ?? type.annualQuota);
+  const carried = Number(bal?.carried ?? 0);
+  const used = Number(bal?.used ?? 0);
+  return { allocated, carried, used, pending, tracked: type.affectsBalance && allocated + carried > 0 };
+}
+
+export interface LeaveEntitlementRow extends LeaveEntitlement {
+  leaveTypeId: string;
+  leaveTypeName: string;
+  period: string;
+  affectsBalance: boolean;
+  allowHalfDay: boolean;
+  annualQuota: number;
+  /** allocated + carried − used − pending, precomputed so every reader agrees. */
+  remaining: number;
+}
+
+/**
+ * Per-type entitlement for one employee and period – what the profile shows and
+ * what a new request is checked against. Days held by pending requests count
+ * against the remainder: a person who already asked for the rest of their quota
+ * has nothing left to ask for, even before anyone approves it.
+ */
+export async function listLeaveEntitlements(employeeId: string, period?: string, leaveTypeIds?: string[]): Promise<LeaveEntitlementRow[]> {
+  const { db } = getDb();
+  const p = period ?? String(new Date().getFullYear());
+  const types = await db.select().from(schema.leaveTypes)
+    .where(leaveTypeIds?.length ? inArray(schema.leaveTypes.id, leaveTypeIds) : undefined)
+    .orderBy(asc(schema.leaveTypes.name));
+  if (!types.length) return [];
+
+  const balances = await db.select().from(schema.leaveBalances).where(and(
+    eq(schema.leaveBalances.employeeId, employeeId),
+    eq(schema.leaveBalances.period, p),
+  ));
+  const balanceByType = new Map(balances.map((b) => [b.leaveTypeId, b]));
+
+  const pendingRequests = await db.select().from(schema.leaveRequests).where(and(
+    eq(schema.leaveRequests.employeeId, employeeId),
+    eq(schema.leaveRequests.status, 'pending'),
+    gte(schema.leaveRequests.fromDate, `${p}-01-01`),
+    lte(schema.leaveRequests.fromDate, `${p}-12-31`),
+  ));
+  // One holiday read spanning every pending request, not one per request.
+  let holidays: ReadonlySet<string> = new Set<string>();
+  if (pendingRequests.length) {
+    const minFrom = pendingRequests.reduce((m, r) => (r.fromDate < m ? r.fromDate : m), pendingRequests[0]!.fromDate);
+    const maxTo = pendingRequests.reduce((m, r) => (r.toDate > m ? r.toDate : m), pendingRequests[0]!.toDate);
+    holidays = await employeeHolidaySet(employeeId, minFrom, maxTo);
+  }
+  const pendingByType = new Map<string, number>();
+  for (const r of pendingRequests) {
+    const days = leaveDays(r.fromDate, r.toDate, r.halfDay, holidays);
+    pendingByType.set(r.leaveTypeId, (pendingByType.get(r.leaveTypeId) ?? 0) + days);
+  }
+
+  return types.map((t) => {
+    const entitlement = toEntitlement(t, balanceByType.get(t.id), pendingByType.get(t.id) ?? 0);
+    return {
+      ...entitlement,
+      leaveTypeId: t.id,
+      leaveTypeName: t.name,
+      period: p,
+      affectsBalance: t.affectsBalance,
+      allowHalfDay: t.allowHalfDay,
+      annualQuota: Number(t.annualQuota),
+      remaining: remainingBalance(entitlement),
+    };
+  });
+}
+
+/** The one refusal both the request form and the approval path raise. */
+function notEnoughLeave(typeName: string, requested: number, remaining: number) {
+  return err.domain(
+    `Not enough ${typeName} left: ${fmtDays(requested)} day(s) requested, ${fmtDays(remaining)} available`,
+    { requested, remaining },
+  );
+}
+
 // ─── leave requests (PRD §12.2) ───
 async function managerUserId(managerEmployeeId: string | null): Promise<string | null> {
   if (!managerEmployeeId) return null;
@@ -817,6 +922,16 @@ export async function createLeaveRequest(actor: Actor, input: any) {
 
   const days = leaveDays(input.fromDate, input.toDate, input.halfDay ?? false,
     await employeeHolidaySet(employee.id, input.fromDate, input.toDate));
+
+  // Nobody may book more than they have (ORD-26). Pending requests already count
+  // against the remainder, so two requests that each fit cannot together exceed
+  // the quota – the second one is refused at submit rather than at approval.
+  const [entitlement] = await listLeaveEntitlements(employee.id, periodOf(input.fromDate), [input.leaveTypeId]);
+  if (!entitlement) throw err.validation('Unknown leave type');
+  if (exceedsEntitlement(entitlement, days)) {
+    throw notEnoughLeave(entitlement.leaveTypeName, days, entitlement.remaining);
+  }
+
   const approverId = (await managerUserId(employee.managerId)) ?? (await findApproverFallback());
 
   const id = ulid();
@@ -881,10 +996,25 @@ export async function decideLeave(actor: Actor, id: string, newStatus: 'approved
     const [type] = await tx.select().from(schema.leaveTypes).where(eq(schema.leaveTypes.id, req.leaveTypeId));
     const days = leaveDays(req.fromDate, req.toDate, req.halfDay,
       await employeeHolidaySet(req.employeeId, req.fromDate, req.toDate));
-    const period = req.fromDate.slice(0, 4);
+    const period = periodOf(req.fromDate);
     if (type?.affectsBalance) {
-      if (req.status === 'pending' && newStatus === 'approved') await adjustBalanceUsed(tx, req.employeeId, req.leaveTypeId, period, days);
-      else if (req.status === 'approved' && newStatus === 'canceled') await adjustBalanceUsed(tx, req.employeeId, req.leaveTypeId, period, -days);
+      if (req.status === 'pending' && newStatus === 'approved') {
+        // Re-checked here and not only at submit: the quota may have been
+        // accrued down, or another request approved, since this one was filed.
+        // Pending days are excluded – this request must not block itself.
+        const [bal] = await tx.select().from(schema.leaveBalances).where(and(
+          eq(schema.leaveBalances.employeeId, req.employeeId),
+          eq(schema.leaveBalances.leaveTypeId, req.leaveTypeId),
+          eq(schema.leaveBalances.period, period),
+        )).for('update');
+        const entitlement = toEntitlement(type, bal, 0);
+        if (exceedsEntitlement(entitlement, days)) {
+          throw notEnoughLeave(type.name, days, remainingBalance(entitlement));
+        }
+        await adjustBalanceUsed(tx, req.employeeId, req.leaveTypeId, period, days);
+      } else if (req.status === 'approved' && newStatus === 'canceled') {
+        await adjustBalanceUsed(tx, req.employeeId, req.leaveTypeId, period, -days);
+      }
     }
 
     await tx.update(schema.leaveRequests).set({
