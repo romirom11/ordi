@@ -12,6 +12,7 @@ import { trySendEmail } from '../../lib/email';
 import { asLocale, loadBranding, renderEmail, tr } from '../../lib/email-templates';
 import { createPasswordReset, sendPasswordResetEmail } from '../../core/password-reset';
 import { env } from '../../env';
+import { handOffOpenTasks, openTasksAssignedTo } from '../projects/service';
 
 export function usersRoutes() {
   const app = new Hono<AppEnv>();
@@ -206,6 +207,13 @@ export function usersRoutes() {
     return c.json({ ok: true });
   });
 
+  // What deactivating this person would orphan (ORD-20): the open tasks they
+  // hold, so the admin can decide who takes them over before pulling the plug.
+  app.get('/:id/open-tasks', guard('users.manage'), async (c) => {
+    const rows = await openTasksAssignedTo(c.req.param('id'));
+    return c.json({ count: rows.length, data: rows.slice(0, 20) });
+  });
+
   app.post('/:id/deactivate', guard('users.manage'), async (c) => {
     const actor = currentActor(c);
     const { db } = getDb();
@@ -213,14 +221,30 @@ export function usersRoutes() {
     const [target] = await db.select().from(schema.users).where(eq(schema.users.id, id));
     if (!target) throw err.notFound();
     await ensureNotLastOwner(target, null);
+
+    // Open tasks go to a named successor, or become unassigned – never stay
+    // with someone who can no longer sign in (ORD-20). The body is optional so
+    // older callers keep working; they get the unassign behaviour.
+    const body = (await c.req.json().catch(() => ({}))) as { reassignTo?: unknown };
+    const reassignTo = typeof body.reassignTo === 'string' && body.reassignTo ? body.reassignTo : null;
+    if (reassignTo) {
+      if (reassignTo === id) throw err.validation('Tasks cannot be handed over to the user being deactivated');
+      const [successor] = await db.select({ id: schema.users.id, isActive: schema.users.isActive })
+        .from(schema.users).where(eq(schema.users.id, reassignTo));
+      if (!successor) throw err.validation('Unknown user to hand tasks over to', { reassignTo });
+      if (!successor.isActive) throw err.validation('Tasks cannot be handed over to a deactivated user');
+    }
+    const handedOff = await handOffOpenTasks(actor, id, reassignTo);
+
     await db.update(schema.users).set({ isActive: false }).where(eq(schema.users.id, id));
     await db.delete(schema.sessions).where(eq(schema.sessions.userId, id));
     await db.update(schema.apiTokens).set({ revokedAt: new Date() }).where(eq(schema.apiTokens.userId, id));
     await writeActivity(db, {
       entityType: 'user', entityId: id, action: 'deactivated',
+      after: { reassignTo, handedOffTasks: handedOff.count },
       actorId: actor.userId, actorType: actor.actorType,
     });
-    return c.json({ ok: true });
+    return c.json({ ok: true, handedOffTasks: handedOff.count, reassignTo });
   });
 
   app.post('/:id/reactivate', guard('users.manage'), async (c) => {

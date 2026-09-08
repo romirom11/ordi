@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Copy, ExternalLink, Link2, Settings, Trash2 } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowRightLeft, Copy, ExternalLink, Link2, Settings, Trash2 } from 'lucide-react';
 import { appOrigin, api, ApiError } from '../../lib/api';
 import { useNavigate } from '../../lib/router';
 import { useTabs } from '../../lib/tabs';
@@ -23,6 +23,11 @@ extendDict({
     'ctx.deleteTaskBody': 'This permanently deletes the task. This cannot be undone.',
     'ctx.projectDeleted': 'Project deleted',
     'ctx.taskDeleted': 'Task deleted',
+    'ctx.moveTask': 'Move to project',
+    'ctx.moveTaskBody': 'The task and its sub-tasks move with comments, links and logged time. It gets a new number in the target project; the old link redirects. Status is matched by name, custom fields the target does not define are dropped.',
+    'ctx.moveTaskConfirm': 'Move',
+    'ctx.taskMoved': 'Task moved',
+    'ctx.noOtherProjects': 'No other projects',
     'ctx.priorityUrgent': 'Urgent',
     'ctx.priorityHigh': 'High',
     'ctx.priorityMedium': 'Medium',
@@ -42,6 +47,11 @@ extendDict({
     'ctx.deleteTaskBody': 'Задачу буде видалено назавжди. Цю дію не можна скасувати.',
     'ctx.projectDeleted': 'Проєкт видалено',
     'ctx.taskDeleted': 'Задачу видалено',
+    'ctx.moveTask': 'Перенести в проєкт',
+    'ctx.moveTaskBody': 'Задача разом з підзадачами, коментарями, посиланнями і залогованим часом переїде в інший проєкт. Вона отримає новий номер, старе посилання редіректитиме. Статус підбирається за назвою, custom fields, яких немає в цільовому проєкті, буде прибрано.',
+    'ctx.moveTaskConfirm': 'Перенести',
+    'ctx.taskMoved': 'Задачу перенесено',
+    'ctx.noOtherProjects': 'Інших проєктів немає',
     'ctx.priorityUrgent': 'Терміново',
     'ctx.priorityHigh': 'Високий',
     'ctx.priorityMedium': 'Середній',
@@ -185,6 +195,30 @@ export function TaskContextMenu({ task, projectId, projectKey, statuses, canWrit
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
   });
 
+  // "Move to project" (ORD-23): the target list is every project the person
+  // can see; the API answers 403 for one they do not administer, and that
+  // message lands in the toast rather than being second-guessed here.
+  const [moveTarget, setMoveTarget] = useState<{ id: string; name: string } | null>(null);
+  const projectsQ = useQuery<{ id: string; name: string; key?: string | null }[]>({
+    queryKey: ['projects'],
+    queryFn: () => api.get<{ data: { id: string; name: string; key?: string | null }[] }>('/projects').then((r) => r.data),
+    enabled: canWrite,
+  });
+  const otherProjects = (projectsQ.data ?? [])
+    .filter((p) => p.id !== projectId)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const move = useMutation({
+    mutationFn: (targetProjectId: string) => api.post<{ id: string; ref?: string }>(`/tasks/${task.id}/move`, { targetProjectId }),
+    onSuccess: (moved, targetProjectId) => {
+      qc.invalidateQueries({ queryKey: ['tasks', projectId] });
+      qc.invalidateQueries({ queryKey: ['tasks', targetProjectId] });
+      qc.invalidateQueries({ queryKey: ['me-tasks'] });
+      toast(moved.ref ? `${t('ctx.taskMoved')} · ${moved.ref}` : t('ctx.taskMoved'));
+      setMoveTarget(null);
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
+  });
+
   const current = statuses.find((s) => s.id === task.statusId);
   const ref = taskRef(task, projectKey);
   const priority = task.priority ?? 'none';
@@ -213,6 +247,15 @@ export function TaskContextMenu({ task, projectId, projectKey, statuses, canWrit
   if (ref) items.push({ key: 'copyref', label: t('ctx.copyRef'), icon: <Copy size={15} />, onSelect: () => copyToClipboard(ref, t('ctx.refCopied')) });
   if (canWrite) {
     items.push({ type: 'separator' });
+    items.push({
+      key: 'move', label: t('ctx.moveTask'), icon: <ArrowRightLeft size={15} />,
+      children: otherProjects.length
+        ? otherProjects.map((p) => ({
+          key: p.id, label: p.key ? `${p.key} · ${p.name}` : p.name,
+          onSelect: () => setMoveTarget({ id: p.id, name: p.name }),
+        }))
+        : [{ key: 'none', label: t('ctx.noOtherProjects'), disabled: true }],
+    });
     items.push({ key: 'delete', label: t('ctx.deleteTask'), icon: <Trash2 size={15} />, danger: true, onSelect: () => setConfirmOpen(true) });
   }
 
@@ -228,6 +271,15 @@ export function TaskContextMenu({ task, projectId, projectKey, statuses, canWrit
         confirmLabel={t('ctx.deleteTask')}
         danger
         pending={del.isPending}
+      />
+      <ConfirmDialog
+        open={!!moveTarget}
+        onClose={() => setMoveTarget(null)}
+        onConfirm={() => moveTarget && move.mutate(moveTarget.id)}
+        title={`${ref || t('ctx.moveTask')} → ${moveTarget?.name ?? ''}`}
+        body={t('ctx.moveTaskBody')}
+        confirmLabel={t('ctx.moveTaskConfirm')}
+        pending={move.isPending}
       />
     </>
   );

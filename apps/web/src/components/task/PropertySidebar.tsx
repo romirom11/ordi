@@ -30,6 +30,7 @@ extendDict({
     'task.setMilestone': 'No milestone',
     'task.noMilestones': 'No milestones in this project yet',
     'task.unassigned': 'Unassigned',
+    'task.deactivatedUser': 'deactivated',
     'task.addLabel': 'Add label',
     'task.setDue': 'Set due date',
     'task.setStart': 'Set start date',
@@ -57,6 +58,7 @@ extendDict({
     'task.setMilestone': 'Без майлстоуна',
     'task.noMilestones': 'У проєкті ще немає майлстоунів',
     'task.unassigned': 'Не призначено',
+    'task.deactivatedUser': 'деактивовано',
     'task.addLabel': 'Додати мітку',
     'task.setDue': 'Вказати дедлайн',
     'task.setStart': 'Вказати початок',
@@ -217,6 +219,16 @@ export function PropertySidebar({ task, statuses, users, onPatch, hasRepos }: {
   const toggleAssignee = (id: string) => {
     onPatch({ assigneeIds: assigneeIds.includes(id) ? assigneeIds.filter((a) => a !== id) : [...assigneeIds, id] });
   };
+  // Deactivated people are not offered, but one already on the task stays in
+  // the list so they can be taken off it (ORD-22): hiding them left the task
+  // stuck with an assignee nobody could remove. Someone missing from the
+  // lookup altogether gets a row from the task's own assignee record.
+  const pickableAssignees: UserLite[] = [
+    ...activeUsers(users),
+    ...task.assignees
+      .filter((a) => !users.some((u) => u.id === a.userId && u.isActive !== false))
+      .map((a) => users.find((u) => u.id === a.userId) ?? { id: a.userId, name: a.name, avatar: a.avatar, isActive: false }),
+  ];
 
   return (
     <div className="flex flex-col gap-0.5 py-3">
@@ -305,14 +317,16 @@ export function PropertySidebar({ task, statuses, users, onPatch, hasRepos }: {
           }
         >
           <MenuLabel>{t('tasks.assignees')}</MenuLabel>
-          {activeUsers(users).map((u) => (
+          {pickableAssignees.map((u) => (
             <ToggleItem
               key={u.id}
-              icon={<Avatar name={u.name} src={u.avatar} size={18} agent={u.actorType === 'agent'} />}
+              icon={<Avatar name={u.name} src={u.avatar} size={18} agent={u.actorType === 'agent'} className={u.isActive === false ? 'opacity-60' : undefined} />}
               checked={assigneeIds.includes(u.id)}
               onToggle={() => toggleAssignee(u.id)}
             >
-              {u.name}
+              {u.isActive === false ? (
+                <span className="text-muted-foreground">{u.name} <span className="text-[11px] text-faint">· {t('task.deactivatedUser')}</span></span>
+              ) : u.name}
             </ToggleItem>
           ))}
         </DropdownMenu>

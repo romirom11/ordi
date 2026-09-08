@@ -83,6 +83,64 @@ describe('move task between projects', () => {
   });
 });
 
+describe('move rules (ORD-23)', () => {
+  const owner = () => reqAs(users.owner!.cookie);
+
+  async function statusByName(projectId: string, name: string): Promise<{ id: string; category: string }> {
+    const statuses = await json(owner().get(`/projects/${projectId}/task-statuses`));
+    return statuses.data.find((s: { name: string }) => s.name === name);
+  }
+
+  it('lands on the status of the same name, else the same category, else the default', async () => {
+    // "Review" exists on both sides; "QA" only on the source.
+    await json(owner().post(`/projects/${projectA.id}/task-statuses`, { name: 'Review', category: 'in_progress' }));
+    await json(owner().post(`/projects/${projectB.id}/task-statuses`, { name: 'Review', category: 'in_progress' }));
+    await json(owner().post(`/projects/${projectA.id}/task-statuses`, { name: 'QA', category: 'in_progress' }));
+
+    const inReview = await createTask(projectA.id, 'Under review', { statusId: (await statusByName(projectA.id, 'Review')).id });
+    const inQa = await createTask(projectA.id, 'In QA', { statusId: (await statusByName(projectA.id, 'QA')).id });
+    const done = await createTask(projectA.id, 'Shipped', { statusId: await doneStatusId(projectA.id) });
+
+    const movedReview = await json(owner().post(`/tasks/${inReview.id}/move`, { targetProjectId: projectB.id }));
+    expect(movedReview.statusId).toBe((await statusByName(projectB.id, 'Review')).id);
+
+    const movedQa = await json(owner().post(`/tasks/${inQa.id}/move`, { targetProjectId: projectB.id }));
+    const qaLanded = (await json(owner().get(`/projects/${projectB.id}/task-statuses`))).data
+      .find((s: { id: string }) => s.id === movedQa.statusId);
+    expect(qaLanded.category).toBe('in_progress');
+    expect(qaLanded.name).not.toBe('QA');
+
+    // Same name on both sides again, via the seeded set: Done stays Done.
+    const movedDone = await json(owner().post(`/tasks/${done.id}/move`, { targetProjectId: projectB.id }));
+    expect(movedDone.statusId).toBe(await doneStatusId(projectB.id));
+  });
+
+  it('keeps custom fields the target knows and drops the source-only ones', async () => {
+    await json(owner().post('/custom-fields', { entityType: 'tasks', key: 'platform', label: 'Platform', type: 'text' }));
+    await json(owner().post('/custom-fields', { entityType: 'tasks', projectId: projectA.id, key: 'src_only', label: 'Source only', type: 'text' }));
+    await json(owner().post('/custom-fields', { entityType: 'tasks', projectId: projectB.id, key: 'tgt_only', label: 'Target only', type: 'text' }));
+
+    const task = await createTask(projectA.id, 'With fields', { customFields: { platform: 'linkedin', src_only: 'gone' } });
+    const moved = await json(owner().post(`/tasks/${task.id}/move`, { targetProjectId: projectB.id }));
+    expect(moved.customFields).toEqual({ platform: 'linkedin' });
+  });
+
+  it('needs admin rights on both projects', async () => {
+    const task = await createTask(projectA.id, 'Guarded');
+    await owner().post(`/projects/${projectA.id}/members`, { userId: users.member!.userId, role: 'admin', canWriteTasks: true });
+    await owner().post(`/projects/${projectB.id}/members`, { userId: users.member!.userId, role: 'member', canWriteTasks: true });
+
+    const asMember = await reqAs(users.member!.cookie).post(`/tasks/${task.id}/move`, { targetProjectId: projectB.id });
+    expect(asMember.status).toBe(403);
+    // Nothing moved: the task is still where it was.
+    expect((await owner().get(`/tasks/${task.id}`)).status).toBe(200);
+
+    await owner().post(`/projects/${projectB.id}/members`, { userId: users.member!.userId, role: 'admin', canWriteTasks: true });
+    const asAdmin = await reqAs(users.member!.cookie).post(`/tasks/${task.id}/move`, { targetProjectId: projectB.id });
+    expect(asAdmin.status).toBe(200);
+  });
+});
+
 describe('project task counts', () => {
   it('returns totals and done per accessible project from one call', async () => {
     const done = await createTask(projectA.id, 'Counted done');

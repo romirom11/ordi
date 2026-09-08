@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CalendarDays, ChevronDown, Tag, UserRound, X } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
+import { usePathname } from '../lib/router';
 import { Avatar, Button, Kbd, PriorityIcon, Spinner, StatusIcon, Switch, cn, fmtDate } from './ui';
 import { Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator, toast, useMenuClose } from './overlays';
 import { ProjectIcon } from './project/ProjectIcon';
@@ -161,13 +162,28 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
   const users = (usersQ.data ?? []) as UserLite[];
   const labels = useLabels('task').data ?? [];
 
-  // Initial project: last used (localStorage) if still available, else first.
+  // A task composed from inside a project belongs to that project (ORD-21):
+  // the project page and its task pages both live under /projects/:id.
+  const pathname = usePathname();
+  const routeProjectId = pathname.match(/^\/projects\/([^/]+)/)?.[1] ?? null;
+
+  // Initial project: the one whose page is open; otherwise last used
+  // (localStorage) if still available, else first. The route wins once per
+  // opening only – a project picked by hand afterwards must stick.
+  const routeApplied = useRef(false);
+  useEffect(() => { if (!open) routeApplied.current = false; }, [open]);
   useEffect(() => {
-    if (!open || projectId || !projects.length) return;
+    if (!open || !projects.length) return;
+    if (!routeApplied.current) {
+      routeApplied.current = true;
+      const fromRoute = routeProjectId ? projects.find((p) => p.id === routeProjectId) : undefined;
+      if (fromRoute) { setProjectId(fromRoute.id); return; }
+    }
+    if (projectId) return;
     const last = localStorage.getItem(LAST_PROJECT_KEY);
     const preset = projects.find((p) => p.id === last) ?? projects[0]!;
     setProjectId(preset.id);
-  }, [open, projects, projectId]);
+  }, [open, projects, projectId, routeProjectId]);
 
   // Default status: project default (falls back to the first by position).
   useEffect(() => {

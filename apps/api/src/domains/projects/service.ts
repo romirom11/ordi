@@ -623,12 +623,113 @@ export async function updateTask(actor: Actor, id: string, input: any) {
   return { ...task, ref };
 }
 
+// ── Hand-off when someone leaves (ORD-20) ──
+
+/** Statuses that still mean work to do; done/canceled tasks stay with whoever closed them. */
+const OPEN_CATEGORIES = ['backlog', 'todo', 'in_progress'];
+
+/**
+ * Open tasks a user is assigned to, across every project. Not membership
+ * gated: the caller is an admin deactivating that user (users.manage), who
+ * has to see the whole picture even for projects they are not a member of.
+ */
+export async function openTasksAssignedTo(userId: string) {
+  const { db } = getDb();
+  const rows = await db.select({
+    id: tasks.id, projectId: tasks.projectId, number: tasks.number, title: tasks.title, key: projects.key,
+  })
+    .from(tasks)
+    .innerJoin(taskAssignees, eq(taskAssignees.taskId, tasks.id))
+    .innerJoin(taskStatuses, eq(taskStatuses.id, tasks.statusId))
+    .innerJoin(projects, eq(projects.id, tasks.projectId))
+    .where(and(
+      eq(taskAssignees.userId, userId),
+      isNull(tasks.deletedAt),
+      inArray(taskStatuses.category, OPEN_CATEGORIES),
+    ))
+    .orderBy(desc(tasks.id));
+  return rows.map((r) => ({ id: r.id, projectId: r.projectId, title: r.title, ref: refOf(r.key, r.number) }));
+}
+
+/**
+ * Take a leaving person off their open work. Every open task assigned to
+ * them loses that assignee and, when a successor is named, gains the
+ * successor (a task the successor already had stays as it is). Closed tasks
+ * keep their history. Each task gets a `reassigned` activity row, so the
+ * hand-off reads on the task itself, not only in the user's audit trail.
+ */
+export async function handOffOpenTasks(actor: Actor, fromUserId: string, toUserId: string | null) {
+  const { db } = getDb();
+  const open = await openTasksAssignedTo(fromUserId);
+  if (!open.length) return { count: 0, taskIds: [] as string[] };
+  const ids = open.map((t) => t.id);
+  await db.transaction(async (tx) => {
+    await tx.delete(taskAssignees).where(and(inArray(taskAssignees.taskId, ids), eq(taskAssignees.userId, fromUserId)));
+    if (toUserId) {
+      await tx.insert(taskAssignees).values(ids.map((taskId) => ({ taskId, userId: toUserId }))).onConflictDoNothing();
+    }
+    await tx.update(tasks).set({ updatedAt: new Date() }).where(inArray(tasks.id, ids));
+    for (const t of open) {
+      await writeActivity(tx, {
+        entityType: 'task', entityId: t.id, action: 'reassigned',
+        before: { assigneeId: fromUserId }, after: { assigneeId: toUserId },
+        actorId: actor.userId, actorType: actor.actorType,
+      });
+    }
+  });
+  if (toUserId) {
+    // The successor learns about their new work the same way any assignee does.
+    for (const t of open) {
+      await emit({ type: 'task.assigned', aggregateType: 'task', aggregateId: t.id, payload: { assigneeIds: [toUserId], ref: t.ref, taskId: t.id, projectId: t.projectId }, actorId: actor.userId, actorType: actor.actorType });
+    }
+  }
+  return { count: ids.length, taskIds: ids };
+}
+
 export async function softDeleteTask(actor: Actor, id: string) {
   const { db } = getDb();
   const task = await loadTask(id);
   await assertProject(actor, task.projectId, 'member');
   await db.update(tasks).set({ deletedAt: new Date() }).where(eq(tasks.id, id));
   await writeActivity(db, { entityType: 'task', entityId: id, action: 'deleted', actorId: actor.userId, actorType: actor.actorType });
+}
+
+/**
+ * Where a task's status lands in another project (ORD-23): the status with
+ * the same name if the target has one, else the first status of the same
+ * category, else the target's default. Each project owns its statuses, so
+ * "Review" in one is a different row from "Review" in another – but to the
+ * person moving the task it is the same column.
+ */
+async function matchStatusInProject(sourceStatusId: string, targetProjectId: string): Promise<string> {
+  const { db } = getDb();
+  const [from] = await db.select({ name: taskStatuses.name, category: taskStatuses.category })
+    .from(taskStatuses).where(eq(taskStatuses.id, sourceStatusId));
+  const candidates = await db.select({
+    id: taskStatuses.id, name: taskStatuses.name, category: taskStatuses.category, isDefault: taskStatuses.isDefault,
+  }).from(taskStatuses).where(eq(taskStatuses.projectId, targetProjectId)).orderBy(asc(taskStatuses.position));
+  if (!candidates.length) throw err.domain('Project has no task statuses');
+  const wanted = from?.name.trim().toLowerCase();
+  const byName = wanted ? candidates.find((s) => s.name.trim().toLowerCase() === wanted) : undefined;
+  const byCategory = from ? candidates.find((s) => s.category === from.category) : undefined;
+  return (byName ?? byCategory ?? candidates.find((s) => s.isDefault) ?? candidates[0]!).id;
+}
+
+/**
+ * Custom-field keys a task may carry in a project: workspace-wide fields plus
+ * the ones defined for that project. A key defined only for the source
+ * project has no editor, filter or column in the target – it is dropped on
+ * the move rather than left as an invisible blob.
+ */
+async function customFieldKeysFor(projectId: string): Promise<Set<string>> {
+  const { db } = getDb();
+  const rows = await db.select({ key: schema.customFieldDefinitions.key })
+    .from(schema.customFieldDefinitions)
+    .where(and(
+      eq(schema.customFieldDefinitions.entityType, 'tasks'),
+      or(isNull(schema.customFieldDefinitions.projectId), eq(schema.customFieldDefinitions.projectId, projectId)),
+    ));
+  return new Set(rows.map((r) => r.key));
 }
 
 /**
@@ -639,16 +740,26 @@ export async function softDeleteTask(actor: Actor, id: string) {
  * the soft-deleted original and subtasks were orphaned under a parent nothing
  * could open any more.
  *
- * Project-scoped fields cannot travel: status resets to the target's default,
- * and type/cycle/milestone clear (each belongs to the source project).
+ * Project-scoped fields travel as far as they can (ORD-23): each task keeps
+ * the status of the same name (or category, or the target's default), custom
+ * fields keep the keys the target knows, labels are workspace-wide and stay.
+ * Type, cycle and milestone clear – each belongs to the source project.
+ * Moving needs admin rights on both projects: it renumbers the task and
+ * rewrites what the source project's board shows.
  */
 export async function moveTask(actor: Actor, id: string, targetProjectId: string) {
   const { db } = getDb();
   const source = await loadTask(id);
-  await assertProject(actor, source.projectId, 'member');
-  await assertProject(actor, targetProjectId, 'member');
+  await assertProject(actor, source.projectId, 'admin');
+  await assertProject(actor, targetProjectId, 'admin');
   if (source.projectId === targetProjectId) return { ...source, ref: await taskRef(source) };
-  const statusId = await defaultStatusId(targetProjectId);
+  const keepKeys = await customFieldKeysFor(targetProjectId);
+  const statusFor = new Map<string, string>();
+  const targetStatusOf = async (statusId: string): Promise<string> => {
+    let mapped = statusFor.get(statusId);
+    if (!mapped) { mapped = await matchStatusInProject(statusId, targetProjectId); statusFor.set(statusId, mapped); }
+    return mapped;
+  };
 
   const newId = await db.transaction(async (tx) => {
     // Collect the subtree breadth-first, so a parent is always inserted first.
@@ -674,13 +785,16 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
 
     for (const t of subtree) {
       lastPos = appendPosition(lastPos);
+      const cf = Object.fromEntries(
+        Object.entries((t.customFields ?? {}) as Record<string, unknown>).filter(([key]) => keepKeys.has(key)),
+      );
       await tx.insert(tasks).values({
         id: newIdOf.get(t.id)!, projectId: targetProjectId, number: 0, title: t.title,
-        description: t.description, statusId, typeId: null, priority: t.priority,
+        description: t.description, statusId: await targetStatusOf(t.statusId), typeId: null, priority: t.priority,
         parentId: t.parentId ? newIdOf.get(t.parentId) ?? null : null,
         milestoneId: null, dueDate: t.dueDate, startDate: t.startDate,
         estimate: t.estimate, cycleId: null, position: String(lastPos),
-        customFields: t.customFields, createdBy: t.createdBy,
+        customFields: cf, createdBy: t.createdBy,
       });
     }
     if (assigneeRows.length) {
