@@ -1,6 +1,6 @@
 {
   "name": "@ordi/desktop",
-  "version": "1.29.3",
+  "version": "1.29.4",
   "private": true,
   "type": "module",
   "scripts": {

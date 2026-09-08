@@ -3,19 +3,24 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
-## v1.29.3
+## v1.29.4
 
 - **English branch names in any task language**: before cloning, the worker
   asks the cheapest model (`haiku`, one turn, no tools, through the same
   Agent SDK so a subscription token works) for a 3–6 word English slug from
   the task title and description – `feature/ord-26-show-remaining-leave-days`
-  for a task written in Ukrainian. Without an answer the slug transliterates
-  Cyrillic (Ukrainian romanization) and strips accents instead of dropping
-  every non-ASCII letter, and a title with nothing to keep yields
-  `feature/ord-26` without a dangling dash; "Copy branch name" uses that
-  fallback. A retry whose previous branch never reached origin is named
-  afresh, so branches left as `feature/ord-26-` by the earlier release are
-  replaced.
+  for a task written in Ukrainian; transliteration stays as the fallback.
+  A retry whose previous branch never reached origin is named afresh, so
+  the `feature/ord-26-` names left by v1.29.2 are replaced.
+
+## v1.29.3
+
+- **Branch names for non-Latin titles**: the slug transliterates Cyrillic
+  (Ukrainian romanization) and strips accents instead of dropping every
+  non-ASCII letter, so a task titled in Ukrainian no longer gets the branch
+  `feature/ord-26-` with nothing after the number; a title with nothing to
+  keep yields `feature/ord-26` without a dangling dash. Applies to agent
+  runs and to "Copy branch name" alike.
 - **A refused push loses nothing and leaks nothing**: the checkout with the
   unpushed commits is kept and the next run (Retry) continues in it instead
   of cloning afresh; the error names the cause (a GitHub App installation
