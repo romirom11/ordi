@@ -67,6 +67,9 @@ extendDict({
     'agents.newSecret': 'New secret',
     'agents.expiresAt': 'Expires (optional)',
     'agents.slotLabel': 'Role in rotation',
+    'agents.slotNone': 'Not in rotation',
+    'agents.slotTaken.primary': 'Replaces the current primary credential.',
+    'agents.slotTaken.fallback': 'Replaces the current fallback credential.',
     'agents.subscriptionHelp': 'Run “claude setup-token” on your own machine and paste the token it prints here. It is valid for a year.',
     'agents.apiKeyHelp': 'An Anthropic API key from the console. Usage is billed to that account.',
     'agents.credentialAdded': 'Credential added',
@@ -90,6 +93,7 @@ extendDict({
     'agents.created': 'Agent created',
     'agents.updated': 'Agent updated',
     'agents.saveFailed': 'Could not save the agent',
+    'agents.saveConflict': 'Someone else changed this agent – the latest version was loaded, save again to apply your edits.',
     'agents.runtime': 'Runtime',
     'agents.runtime.claude_code': 'Claude Code',
     'agents.runtime.codex': 'Codex',
@@ -107,7 +111,9 @@ extendDict({
     'agents.policyHint.agents_managers': 'Only people with the “Manage agents” permission may hand work to this agent.',
     'agents.maxRunMinutes': 'Max minutes per run',
     'agents.maxTurns': 'Max turns',
+    'agents.maxTurnsHint': 'One turn is one model reply, including the tool calls it makes; a typical task takes 20–60.',
     'agents.maxBudget': 'Max budget, USD',
+    'agents.maxBudgetHint': 'Applies to API-key credentials only; subscription runs are capped by the plan.',
     'agents.concurrency': 'Parallel runs',
     'agents.credential': 'Credential',
     'agents.fallbackCredential': 'Fallback credential',
@@ -174,6 +180,9 @@ extendDict({
     'agents.newSecret': 'Новий секрет',
     'agents.expiresAt': 'Діє до (необов’язково)',
     'agents.slotLabel': 'Роль у ротації',
+    'agents.slotNone': 'Не в ротації',
+    'agents.slotTaken.primary': 'Замінить поточний основний доступ.',
+    'agents.slotTaken.fallback': 'Замінить поточний резервний доступ.',
     'agents.subscriptionHelp': 'Виконайте «claude setup-token» на своєму комп’ютері та вставте сюди токен, який він виведе. Він дійсний рік.',
     'agents.apiKeyHelp': 'API-ключ Anthropic із консолі. Використання оплачує той акаунт.',
     'agents.credentialAdded': 'Доступ додано',
@@ -197,6 +206,7 @@ extendDict({
     'agents.created': 'Агента створено',
     'agents.updated': 'Агента оновлено',
     'agents.saveFailed': 'Не вдалося зберегти агента',
+    'agents.saveConflict': 'Агента змінив хтось інший – завантажено свіжу версію, збережіть ще раз, щоб застосувати ваші правки.',
     'agents.runtime': 'Середовище',
     'agents.runtime.claude_code': 'Claude Code',
     'agents.runtime.codex': 'Codex',
@@ -214,7 +224,9 @@ extendDict({
     'agents.policyHint.agents_managers': 'Лише люди з дозволом «Керування агентами» можуть дати роботу цьому агентові.',
     'agents.maxRunMinutes': 'Максимум хвилин на запуск',
     'agents.maxTurns': 'Максимум кроків',
+    'agents.maxTurnsHint': 'Крок – це одна відповідь моделі разом із викликами інструментів у ній; типова задача займає 20–60.',
     'agents.maxBudget': 'Максимальний бюджет, USD',
+    'agents.maxBudgetHint': 'Діє лише для доступу за API-ключем; запуски на підписці обмежені її планом.',
     'agents.concurrency': 'Паралельних запусків',
     'agents.credential': 'Доступ',
     'agents.fallbackCredential': 'Резервний доступ',
@@ -448,17 +460,28 @@ function RotateSecretDialog({ open, onClose, cred }: { open: boolean; onClose: (
   );
 }
 
-function AddCredentialDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+type CredentialSlot = 'primary' | 'fallback' | null;
+
+function AddCredentialDialog({ open, onClose, credentials }: {
+  open: boolean; onClose: () => void; credentials: CredentialView[];
+}) {
   const t = useT();
   const qc = useQueryClient();
   const [kind, setKind] = useState<'subscription' | 'api_key'>('subscription');
   const [label, setLabel] = useState('');
   const [secret, setSecret] = useState('');
-  const [slot, setSlot] = useState<'primary' | 'fallback'>('primary');
+  const [slot, setSlot] = useState<CredentialSlot>(null);
   const [expires, setExpires] = useState('');
 
+  // A slot holds one credential: picking an occupied one demotes whatever sits
+  // there. So the second credential defaults to no slot at all, and the first
+  // one – with nothing to displace – becomes the primary.
+  const taken = (s: 'primary' | 'fallback') => credentials.some((c) => c.slot === s && c.status !== 'revoked');
+  const defaultSlot: CredentialSlot = taken('primary') ? null : 'primary';
+
   useEffect(() => {
-    if (open) { setKind('subscription'); setLabel(''); setSecret(''); setSlot('primary'); setExpires(''); }
+    if (open) { setKind('subscription'); setLabel(''); setSecret(''); setSlot(defaultSlot); setExpires(''); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const create = useMutation({
@@ -499,11 +522,15 @@ function AddCredentialDialog({ open, onClose }: { open: boolean; onClose: () => 
           <Input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" placeholder={kind === 'api_key' ? 'sk-ant-…' : 'sk-ant-oat…'} />
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label={t('agents.slotLabel')}>
-            <Select value={slot} onChange={(e) => setSlot(e.target.value as 'primary' | 'fallback')} className="w-full">
-              {AGENT_CREDENTIAL_SLOTS.map((s) => <option key={s} value={s}>{t(`agents.slot.${s}`)}</option>)}
-            </Select>
-          </Field>
+          <div>
+            <Field label={t('agents.slotLabel')}>
+              <Select value={slot ?? ''} onChange={(e) => setSlot((e.target.value || null) as CredentialSlot)} className="w-full">
+                <option value="">{t('agents.slotNone')}</option>
+                {AGENT_CREDENTIAL_SLOTS.map((s) => <option key={s} value={s}>{t(`agents.slot.${s}`)}</option>)}
+              </Select>
+            </Field>
+            {slot && taken(slot) && <p className="mt-1 text-[11px] text-warning">{t(`agents.slotTaken.${slot}`)}</p>}
+          </div>
           <Field label={t('agents.expiresAt')}>
             <Input type="date" value={expires} onChange={(e) => setExpires(e.target.value)} />
           </Field>
@@ -576,7 +603,14 @@ function AgentDialog({ open, onClose, agent, roles, credentials }: {
   const defaultRoleId = roles.find((r) => r.key === 'agent')?.id ?? roles[0]?.id ?? '';
   const [draft, setDraft] = useState<AgentDraft>(() => draftOf(agent, defaultRoleId));
 
-  useEffect(() => { if (open) setDraft(draftOf(agent, defaultRoleId)); }, [open, agent, defaultRoleId]);
+  // The row version travels with the form rather than being read off the prop
+  // at submit time: a 409 re-seeds it from the fresh row, so the next Save
+  // works instead of failing forever on a version the server has moved past.
+  const [version, setVersion] = useState(agent?.version ?? 0);
+
+  useEffect(() => {
+    if (open) { setDraft(draftOf(agent, defaultRoleId)); setVersion(agent?.version ?? 0); }
+  }, [open, agent, defaultRoleId]);
 
   const set = <K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) => setDraft((d) => ({ ...d, [key]: value }));
 
@@ -600,16 +634,27 @@ function AgentDialog({ open, onClose, agent, roles, credentials }: {
 
   const save = useMutation({
     mutationFn: () => (agent
-      ? api.patch(`/agents/${agent.id}`, { ...payload(), version: agent.version })
+      ? api.patch(`/agents/${agent.id}`, { ...payload(), version })
       : api.post('/agents', payload())),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['agents'] });
       qc.invalidateQueries({ queryKey: ['users'] });
       qc.invalidateQueries({ queryKey: ['users-lookup'] });
+      // Granting a connector changes its "used by N agents" line.
+      qc.invalidateQueries({ queryKey: ['mcp-connectors'] });
       toast(agent ? t('agents.updated') : t('agents.created'));
       onClose();
     },
-    onError: (e) => toast.error(errMessage(e, t('agents.saveFailed'))),
+    onError: async (e) => {
+      if (agent && e instanceof ApiError && (e.status === 409 || e.code === 'version_conflict' || e.code === 'conflict')) {
+        await qc.invalidateQueries({ queryKey: ['agents'] });
+        const fresh = qc.getQueryData<AgentLookup[]>(['agents'])?.find((a) => a.id === agent.id);
+        if (fresh) setVersion(fresh.version);
+        toast.error(t('agents.saveConflict'));
+        return;
+      }
+      toast.error(errMessage(e, t('agents.saveFailed')));
+    },
   });
 
   // The env credential cannot be picked explicitly: it is the fallback the API
@@ -676,12 +721,18 @@ function AgentDialog({ open, onClose, agent, roles, credentials }: {
           <Field label={t('agents.maxRunMinutes')}>
             <Input type="number" min={1} max={1440} value={draft.maxRunMinutes} onChange={(e) => set('maxRunMinutes', e.target.value)} />
           </Field>
-          <Field label={t('agents.maxTurns')}>
-            <Input type="number" min={1} max={1000} value={draft.maxTurns} onChange={(e) => set('maxTurns', e.target.value)} />
-          </Field>
-          <Field label={t('agents.maxBudget')}>
-            <Input type="number" min={0} step="0.5" value={draft.maxBudgetUsd} onChange={(e) => set('maxBudgetUsd', e.target.value)} placeholder="–" />
-          </Field>
+          <div>
+            <Field label={t('agents.maxTurns')}>
+              <Input type="number" min={1} max={2000} value={draft.maxTurns} onChange={(e) => set('maxTurns', e.target.value)} />
+            </Field>
+            <p className="mt-1 text-[11px] text-faint">{t('agents.maxTurnsHint')}</p>
+          </div>
+          <div>
+            <Field label={t('agents.maxBudget')}>
+              <Input type="number" min={0} step="0.5" value={draft.maxBudgetUsd} onChange={(e) => set('maxBudgetUsd', e.target.value)} placeholder="–" />
+            </Field>
+            <p className="mt-1 text-[11px] text-faint">{t('agents.maxBudgetHint')}</p>
+          </div>
           <Field label={t('agents.concurrency')}>
             <Input type="number" min={1} max={10} value={draft.concurrency} onChange={(e) => set('concurrency', e.target.value)} />
           </Field>
@@ -921,7 +972,7 @@ export function AgentsPanel() {
         </Card>
       ) : null}
 
-      <AddCredentialDialog open={credOpen} onClose={() => setCredOpen(false)} />
+      <AddCredentialDialog open={credOpen} onClose={() => setCredOpen(false)} credentials={credentials} />
       <AgentDialog
         open={agentOpen}
         onClose={() => setAgentOpen(false)}

@@ -26,6 +26,8 @@ export interface PromptContext {
   followUpCommentId: string | null;
   /** A retry of a run that stopped early, continuing the same session and branch. */
   resumedAfterStop?: boolean;
+  /** The session to continue could not be found: the full brief again, plus what is already on the branch. */
+  sessionLost?: boolean;
   connectorSlugs: string[];
 }
 
@@ -45,14 +47,14 @@ export async function buildTaskBrief(ctx: PromptContext): Promise<string> {
   ]);
 
   const lines: string[] = [];
-  if (ctx.resumedAfterStop) {
+  const followUp = ctx.followUpCommentId ? commentRows.find((c) => c.id === ctx.followUpCommentId) : undefined;
+  if (ctx.resumedAfterStop && !ctx.sessionLost) {
     lines.push(`# Continue ${ctx.ref}: ${task.title}`);
     lines.push('');
     lines.push('Your previous run on this task stopped before you could report (a step limit, a timeout or a cancel). This run continues the same session on the same branch.');
     lines.push('Start by checking `git log` and `git status` to see what is already there, finish the remaining work with as few steps as possible, and end with the structured report.');
     lines.push('');
-  } else if (ctx.followUpCommentId) {
-    const followUp = commentRows.find((c) => c.id === ctx.followUpCommentId);
+  } else if (ctx.followUpCommentId && !ctx.sessionLost) {
     lines.push(`# Follow-up on ${ctx.ref}: ${task.title}`);
     lines.push('');
     lines.push('You already worked on this task in this session. A teammate replied on the task:');
@@ -102,6 +104,24 @@ export async function buildTaskBrief(ctx: PromptContext): Promise<string> {
         lines.push('');
       }
     }
+    if (ctx.sessionLost) {
+      lines.push('## Earlier work');
+      lines.push('');
+      lines.push('A previous run already worked on this task, but its conversation is no longer available, so you start with a fresh context.');
+      lines.push(ctx.branch
+        ? `Its commits are on branch ${ctx.branch}, already checked out: read \`git log\` and \`git status\` first and continue from there rather than starting over.`
+        : 'Read the comments above to see what was already done and continue from there.');
+      lines.push('');
+      if (followUp) {
+        lines.push('## Latest reply');
+        lines.push('');
+        lines.push(`> **${followUp.authorName ?? 'Someone'}** wrote:`);
+        lines.push(quote(docToText(followUp.body)));
+        lines.push('');
+        lines.push('Address this reply as part of the work.');
+        lines.push('');
+      }
+    }
   }
   return lines.join('\n').trim() + '\n';
 }
@@ -144,7 +164,8 @@ export function buildRulesOfEngagement(ctx: PromptContext): string {
 
 /** Tools the harness may call without asking (R35). MCP servers are named at run time. */
 export function allowedToolsFor(mcpServerNames: string[]): string[] {
-  const base = ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'TodoWrite', 'Task', 'NotebookEdit'];
+  // dontAsk denies anything not listed: background Bash needs BashOutput/KillShell to be usable at all.
+  const base = ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep', 'LS', 'Bash', 'BashOutput', 'KillShell', 'WebFetch', 'WebSearch', 'TodoWrite', 'Task', 'NotebookEdit', 'Skill'];
   const mcp = mcpServerNames.flatMap((n) => [`mcp__${n}`, `mcp__${n}__*`]);
   return [...base, ...mcp];
 }
@@ -154,6 +175,5 @@ export const DISALLOWED_TOOLS = [
   'Bash(git reset --hard*)',
   'Bash(git branch -D*)',
   'Bash(git remote*)',
-  'Bash(rm -rf /*)',
   'Bash(sudo*)',
 ];

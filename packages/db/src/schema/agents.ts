@@ -143,8 +143,8 @@ export const agentRuns = pgTable('agent_runs', {
   ...timestamps,
   version: version(),
 }, (t) => ({
-  /** One active run per task (R13). */
-  taskActiveIdx: uniqueIndex('agent_runs_task_active_idx').on(t.taskId)
+  /** One active run per task and agent (R13): two agents on one task each get theirs. */
+  taskActiveIdx: uniqueIndex('agent_runs_task_agent_active_idx').on(t.taskId, t.agentUserId)
     .where(sql`status in ('queued', 'claimed', 'running', 'waiting_quota')`),
   statusIdx: index('agent_runs_status_idx').on(t.status, t.nextAttemptAt),
   agentIdx: index('agent_runs_agent_idx').on(t.agentUserId, t.createdAt),

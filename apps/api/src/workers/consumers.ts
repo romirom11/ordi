@@ -465,6 +465,15 @@ const slack: Consumer = {
  * queues a run; a human comment or @-mention on a task an agent is assigned
  * to queues a follow-up. Queueing is idempotent per task (one active run).
  */
+/** Done or cancelled: nothing for an agent to do, whoever assigns or comments. */
+async function taskIsClosed(taskId: string): Promise<boolean> {
+  const { db } = getDb();
+  const [row] = await db.select({ category: schema.taskStatuses.category })
+    .from(schema.tasks).leftJoin(schema.taskStatuses, eq(schema.taskStatuses.id, schema.tasks.statusId))
+    .where(eq(schema.tasks.id, taskId));
+  return !row || row.category === 'done' || row.category === 'canceled';
+}
+
 const agents: Consumer = {
   name: 'agents',
   async handle(ev) {
@@ -472,6 +481,7 @@ const agents: Consumer = {
     if (ev.type === 'task.assigned') {
       if (ev.actorType === 'agent') return;
       const profiles = await agentProfilesAmong((p.assigneeIds as string[]) ?? []);
+      if (!profiles.size || await taskIsClosed(p.taskId)) return;
       for (const [agentUserId, profile] of profiles) {
         if (!profile.enabled) continue;
         await queueRun({
@@ -488,10 +498,12 @@ const agents: Consumer = {
       const mentioned = new Set<string>((p.mentions as string[]) ?? []);
       const candidates = [...new Set([...assignees.map((a) => a.userId), ...mentioned])];
       const profiles = await agentProfilesAmong(candidates);
+      // A closed task is not reopened by a comment: the agent would drag it back to review.
+      if (!profiles.size || await taskIsClosed(p.taskId)) return;
       for (const [agentUserId, profile] of profiles) {
         if (!profile.enabled) continue;
         // A run in flight picks the comment up as a follow-up when it ends.
-        if (await activeRunForTask(p.taskId)) continue;
+        if (await activeRunForTask(p.taskId, agentUserId)) continue;
         const [last] = await db.select({ sessionId: schema.agentRuns.sessionId, branch: schema.agentRuns.branch })
           .from(schema.agentRuns)
           .where(and(eq(schema.agentRuns.taskId, p.taskId), eq(schema.agentRuns.agentUserId, agentUserId)))
@@ -501,7 +513,7 @@ const agents: Consumer = {
         await queueRun({
           agentUserId, taskId: p.taskId, projectId: p.projectId, trigger: last?.sessionId ? 'comment' : 'assigned',
           requestedBy: ev.actorId ?? null, commentId: p.commentId ?? ev.aggregateId, sessionId: last?.sessionId ?? null,
-          actorType: ev.actorType ?? 'user',
+          branch: last?.branch ?? null, actorType: ev.actorType ?? 'user',
         });
       }
     }

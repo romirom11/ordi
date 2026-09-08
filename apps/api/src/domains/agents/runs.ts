@@ -71,6 +71,8 @@ export interface QueueRunInput {
   parentRunId?: string | null;
   /** Session to resume (follow-ups and retries). */
   sessionId?: string | null;
+  /** Branch of the previous run, so a renamed task does not start a second one. */
+  branch?: string | null;
   actorType?: 'user' | 'agent' | 'system' | 'integration';
 }
 
@@ -89,7 +91,7 @@ export async function queueRun(input: QueueRunInput): Promise<string | null> {
       id, agentUserId: input.agentUserId, taskId: input.taskId, projectId: input.projectId,
       trigger: input.trigger, status: 'queued', runtime: profile.runtime,
       requestedBy: input.requestedBy, commentId: input.commentId ?? null, parentRunId: input.parentRunId ?? null,
-      sessionId: input.sessionId ?? null,
+      sessionId: input.sessionId ?? null, branch: input.branch ?? null,
     });
   } catch (e) {
     // The partial unique index refuses a second active run per task.
@@ -109,11 +111,26 @@ export async function queueRun(input: QueueRunInput): Promise<string | null> {
   return id;
 }
 
-export async function activeRunForTask(taskId: string): Promise<RunRow | null> {
+/** The active run of this agent on the task (the unique index allows one per task and agent). */
+export async function activeRunForTask(taskId: string, agentUserId: string): Promise<RunRow | null> {
   const { db } = getDb();
   const [row] = await db.select().from(agentRuns)
-    .where(and(eq(agentRuns.taskId, taskId), inArray(agentRuns.status, [...AGENT_RUN_ACTIVE_STATUSES])));
+    .where(and(eq(agentRuns.taskId, taskId), eq(agentRuns.agentUserId, agentUserId), inArray(agentRuns.status, [...AGENT_RUN_ACTIVE_STATUSES])));
   return row ?? null;
+}
+
+/**
+ * Facts learned while the run is in flight – the session id from the
+ * runtime's init message and the branch after checkout – so a worker that
+ * dies mid-run leaves a row the re-queued run can resume from.
+ */
+export async function recordRunProgress(runId: string, input: { sessionId?: string | null; branch?: string | null }): Promise<void> {
+  const { db } = getDb();
+  const set: Partial<typeof agentRuns.$inferInsert> = {};
+  if (input.sessionId) set.sessionId = input.sessionId;
+  if (input.branch) set.branch = input.branch;
+  if (!Object.keys(set).length) return;
+  await db.update(agentRuns).set(set).where(eq(agentRuns.id, runId));
 }
 
 /**
@@ -239,13 +256,15 @@ export async function finishRun(runId: string, input: FinishRunInput): Promise<R
 }
 
 /** R32: park the run until the provider's window resets; the claim query resumes it. */
-export async function parkRunForQuota(runId: string, retryAt: Date, reason: string): Promise<void> {
+export async function parkRunForQuota(runId: string, retryAt: Date, reason: string, progress: { sessionId?: string | null; branch?: string | null } = {}): Promise<void> {
   const { db } = getDb();
   const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, runId));
   if (!run) return;
   await revokeRunToken(run);
-  await db.update(agentRuns).set({ status: 'waiting_quota', nextAttemptAt: retryAt, error: reason, tokenId: null, workerId: null })
-    .where(eq(agentRuns.id, runId));
+  await db.update(agentRuns).set({
+    status: 'waiting_quota', nextAttemptAt: retryAt, error: reason, tokenId: null, workerId: null,
+    sessionId: progress.sessionId ?? run.sessionId, branch: progress.branch ?? run.branch,
+  }).where(eq(agentRuns.id, runId));
   await recordRunEvent(runId, 'status', { status: 'waiting_quota', retryAt: retryAt.toISOString(), reason });
 }
 
@@ -310,8 +329,9 @@ export async function getRunEvents(actor: Actor, id: string, afterSeq: number) {
   return listRunEvents(id, afterSeq);
 }
 
-/** R50: cancel needs task write on the project or agents.manage. */
+/** R50: cancel needs task write on the project or agents.manage; never an agent's own run token. */
 async function assertRunWrite(actor: Actor, run: RunRow): Promise<void> {
+  if (actor.actorType === 'agent') throw err.forbidden('Agents cannot manage runs');
   if (actor.access.permissions.has('agents.manage')) {
     await assertProject(actor, run.projectId, 'viewer');
     return;
@@ -341,7 +361,7 @@ export async function retryRun(actor: Actor, id: string): Promise<RunView> {
   if ((AGENT_RUN_ACTIVE_STATUSES as readonly string[]).includes(run.status)) throw err.domain('The run is still active');
   const newId = await queueRun({
     agentUserId: run.agentUserId, taskId: run.taskId, projectId: run.projectId, trigger: 'retry',
-    requestedBy: actor.userId, parentRunId: run.id, sessionId: run.sessionId, actorType: actor.actorType,
+    requestedBy: actor.userId, parentRunId: run.id, sessionId: run.sessionId, branch: run.branch, actorType: actor.actorType,
   });
   if (!newId) throw err.domain('The task already has an active run');
   return toView(await loadRun(newId));
@@ -360,9 +380,11 @@ export async function cancelRequested(runId: string): Promise<boolean> {
  */
 export async function newestHumanCommentSince(taskId: string, since: Date | null, agentUserId: string) {
   const { db } = getDb();
-  const rows = await db.select({ id: comments.id, authorId: comments.authorId, createdAt: comments.createdAt })
-    .from(comments)
+  // Other agents' comments do not count either: two agents on one task would
+  // otherwise answer each other without end.
+  const rows = await db.select({ id: comments.id, authorId: comments.authorId, createdAt: comments.createdAt, authorType: users.actorType })
+    .from(comments).leftJoin(users, eq(users.id, comments.authorId))
     .where(and(eq(comments.taskId, taskId), sql`${comments.deletedAt} is null`, since ? sql`${comments.createdAt} > ${since.toISOString()}::timestamptz` : sql`true`))
     .orderBy(desc(comments.createdAt)).limit(5);
-  return rows.find((r) => r.authorId && r.authorId !== agentUserId) ?? null;
+  return rows.find((r) => r.authorId && r.authorId !== agentUserId && r.authorType !== 'agent') ?? null;
 }

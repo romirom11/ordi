@@ -97,10 +97,21 @@ export async function recordRunEvent(runId: string, type: RunEventType, payload:
   });
 }
 
+/**
+ * Events of one run, oldest first. Without `afterSeq` this is the TAIL – the
+ * last `limit` rows – because a long run's result, error and "pushed" lines
+ * live at the end and the first page of a thousand-event log is the part
+ * nobody needs. `afterSeq > 0` is the incremental fetch and reads forward
+ * from that sequence instead.
+ */
 export async function listRunEvents(runId: string, afterSeq = 0, limit = 500) {
   const { db } = getDb();
-  const rows = await db.select().from(agentRunEvents)
-    .where(sql`${agentRunEvents.runId} = ${runId} and ${agentRunEvents.seq} > ${afterSeq}`)
-    .orderBy(agentRunEvents.seq).limit(limit);
+  const rows = afterSeq > 0
+    ? await db.select().from(agentRunEvents)
+      .where(sql`${agentRunEvents.runId} = ${runId} and ${agentRunEvents.seq} > ${afterSeq}`)
+      .orderBy(agentRunEvents.seq).limit(limit)
+    : (await db.select().from(agentRunEvents)
+      .where(sql`${agentRunEvents.runId} = ${runId}`)
+      .orderBy(sql`${agentRunEvents.seq} desc`).limit(limit)).reverse();
   return rows.map((r) => ({ id: r.id, seq: r.seq, type: r.type, payload: r.payload, createdAt: r.createdAt.toISOString() }));
 }

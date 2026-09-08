@@ -1,0 +1,2 @@
+DROP INDEX "agent_runs_task_active_idx";--> statement-breakpoint
+CREATE UNIQUE INDEX "agent_runs_task_agent_active_idx" ON "agent_runs" USING btree ("task_id","agent_user_id") WHERE status in ('queued', 'claimed', 'running', 'waiting_quota');

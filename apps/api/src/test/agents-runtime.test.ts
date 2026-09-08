@@ -79,7 +79,7 @@ describe('claude adapter', () => {
     expect(seen.prompt).toBe('Fix it');
     expect(seen.options).toMatchObject({
       permissionMode: 'dontAsk', strictMcpConfig: true, maxTurns: 20, maxBudgetUsd: 3, resume: 'prev-session', cwd: '/tmp',
-      settingSources: [], allowedTools: ['Read'],
+      settingSources: ['project'], allowedTools: ['Read'],
     });
     expect((seen.options!.systemPrompt as { append: string }).append).toBe('rules');
     expect(seen.options!.env!.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-secret');

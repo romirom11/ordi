@@ -142,6 +142,7 @@ export function agentsRoutes() {
 
   app.get('/agent-runs/:id', async (c) => c.json(await runs.getRun(currentActor(c), c.req.param('id'))));
 
+  // No `after` means "the tail": the last page of the log, not the first.
   app.get('/agent-runs/:id/events', async (c) => {
     const after = Number(c.req.query('after') ?? 0);
     return c.json({ data: await runs.getRunEvents(currentActor(c), c.req.param('id'), Number.isFinite(after) ? after : 0) });

@@ -7,14 +7,15 @@
  * follow-ups from comments, secret scrubbing and stale-run recovery.
  */
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, utimes, writeFile } from 'node:fs/promises';
 import { getDb, schema, eq, and, desc } from '@ordi/db';
+import { ulid } from 'ulid';
 import { resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
 import {
   setupWorkspace, createAgent, addProjectMember, addCredential, drainOutbox, runsForTask, eventsForRun, type Workspace,
 } from './agents-helpers';
 import { setRuntimeAdapter, type RuntimeAdapter, type RuntimeOutcome, type RuntimeRunInput, type RuntimeUsage } from '../domains/agents/runtime';
-import { setGitRunner, type GitRunner } from '../domains/agents/workspace';
+import { setGitRunner, harnessDir, taskDir, pruneTaskDirs, type GitRunner } from '../domains/agents/workspace';
 import { executeRun, completionStatus } from '../workers/agent-runs';
 import { claimRuns, requeueStaleRuns, listRuns, cancelRun } from '../domains/agents/runs';
 import { env } from '../env';
@@ -123,6 +124,28 @@ describe('dispatch', () => {
     expect(events[0]!.type).toBe('status');
   });
 
+  it('the events endpoint returns the tail of a long log, and reads forward from ?after=', async () => {
+    const { db } = getDb();
+    const task = await newTask('Long log');
+    await assign(task.id, [agentId]);
+    const [run] = await runsForTask(task.id);
+    // The ack event is already there; top the run up well past one page.
+    const existing = (await eventsForRun(run!.id)).length;
+    const total = existing + 620;
+    await db.insert(schema.agentRunEvents).values(
+      Array.from({ length: total - existing }, (_, i) => ({
+        id: ulid(), runId: run!.id, seq: existing + i + 1, type: 'log', payload: { message: `line ${existing + i + 1}` },
+      })),
+    );
+    const owner = reqAs(ws.users.owner!.cookie);
+    const tail = (await json(owner.get(`/agent-runs/${run!.id}/events`))).data as { seq: number }[];
+    expect(tail).toHaveLength(500);
+    expect(tail[0]!.seq).toBe(total - 499);
+    expect(tail.at(-1)!.seq).toBe(total);
+    const incremental = (await json(owner.get(`/agent-runs/${run!.id}/events?after=${total - 3}`))).data as { seq: number }[];
+    expect(incremental.map((e) => e.seq)).toEqual([total - 2, total - 1, total]);
+  });
+
   it('does not dispatch for humans or disabled agents', async () => {
     const task = await newTask('Humans only');
     await assign(task.id, [ws.users.member!.userId]);
@@ -137,6 +160,43 @@ describe('dispatch', () => {
     await owner.patch(`/tasks/${other.id}`, { version: t.version, assigneeIds: [sleepy.id] });
     await drainOutbox();
     expect(await runsForTask(other.id)).toHaveLength(0);
+  });
+
+  it('two agents on one task each get their own run', async () => {
+    const task = await newTask('Pair');
+    const second = await createAgent(ws.users, { name: 'Second' });
+    await addProjectMember(ws.users, ws.projectId, second.id);
+    await assign(task.id, [agentId, second.id]);
+    const runs = await runsForTask(task.id);
+    expect(runs.map((r) => r.agentUserId).sort()).toEqual([agentId, second.id].sort());
+    const { db } = getDb();
+    await db.update(schema.agentRuns).set({ status: 'cancelled' }).where(eq(schema.agentRuns.taskId, task.id));
+    await db.update(schema.agentProfiles).set({ enabled: false }).where(eq(schema.agentProfiles.userId, second.id));
+  });
+
+  it('a closed task gets no run, whether assigned or commented on', async () => {
+    const owner = reqAs(ws.users.owner!.cookie);
+    const task = await newTask('Already done');
+    const statuses = (await json(owner.get(`/projects/${ws.projectId}/task-statuses`))).data as { id: string; category: string }[];
+    const doneStatus = statuses.find((s) => s.category === 'done')!;
+    const t = await json(owner.get(`/tasks/${task.id}`));
+    await owner.patch(`/tasks/${task.id}`, { version: t.version, statusId: doneStatus.id });
+    await assign(task.id, [agentId]);
+    expect(await runsForTask(task.id)).toHaveLength(0);
+    await owner.post(`/tasks/${task.id}/comments`, { body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Reopen?' }] }] } });
+    await drainOutbox();
+    expect(await runsForTask(task.id)).toHaveLength(0);
+  });
+
+  it('an agent cannot cancel or retry runs with its own token', async () => {
+    const task = await newTask('Hands off');
+    await assign(task.id, [agentId]);
+    const [run] = await runsForTask(task.id);
+    const { agentActor } = await import('../workers/agent-runs');
+    const runsSvc = await import('../domains/agents/runs');
+    await expect(cancelRun(await agentActor(agentId), run!.id)).rejects.toMatchObject({ code: 'forbidden' });
+    await cancelRun(await agentActor(ws.users.owner!.userId), run!.id);
+    await expect(runsSvc.retryRun(await agentActor(agentId), run!.id)).rejects.toMatchObject({ code: 'forbidden' });
   });
 
   it('claim respects per-agent concurrency', async () => {
@@ -188,7 +248,7 @@ describe('the worker end to end', () => {
     expect(input.mcpServers.ordi!.url).toContain('/api/v1/mcp');
     expect(input.allowedTools).toContain('mcp__ordi');
     expect(input.maxTurns).toBe(200);
-    expect(input.cwd).toContain(run.id);
+    expect(input.cwd).toContain(task.id);
 
     // Git: clone, branch, push with the repo token; the token never reaches the log.
     expect(gitLog.some((a) => a[0] === 'clone')).toBe(true);
@@ -268,10 +328,16 @@ describe('the worker end to end', () => {
     const parked = await newTask('Parked');
     await assign(parked.id, [agentId]);
     restoreAdapter();
-    restoreAdapter = setRuntimeAdapter(adapter(async () => ({ status: 'rate_limited', sessionId: null, message: '', error: 'limit', usage, retryAt: Date.now() + 3600_000, report: null })));
+    restoreAdapter = setRuntimeAdapter(adapter(async () => ({ status: 'rate_limited', sessionId: 's-rl', message: '', error: 'limit', usage, retryAt: Date.now() + 3600_000, report: null })));
+    const parkedGit: string[][] = [];
+    setGitRunner(fakeGit(parkedGit));
     const waiting = await runToEnd(parked.id);
     expect(waiting.status).toBe('waiting_quota');
     expect(waiting.nextAttemptAt!.getTime()).toBeGreaterThan(Date.now());
+    // Parked, not abandoned: the work is pushed and the run resumes the same session on the same branch.
+    expect(parkedGit.some((a) => a[0] === 'push')).toBe(true);
+    expect(waiting.sessionId).toBe('s-rl');
+    expect(waiting.branch).toMatch(/dsp-\d+-/);
     const { db } = getDb();
     const [tok] = await db.select().from(schema.apiTokens).where(eq(schema.apiTokens.userId, agentId)).orderBy(desc(schema.apiTokens.createdAt)).limit(1);
     expect(tok!.revokedAt).not.toBeNull();
@@ -320,6 +386,68 @@ describe('the worker end to end', () => {
     expect(resumed!.prompt).toContain('git status');
   });
 
+  it('the harness home survives between runs of a task, so a follow-up can resume the session', async () => {
+    const task = await newTask('Remember me');
+    await assign(task.id, [agentId]);
+    restoreAdapter = setRuntimeAdapter(adapter(async (input) => {
+      expect(input.configDir).toBe(harnessDir(task.id));
+      await writeFile(`${input.configDir}/transcript.jsonl`, 'hello');
+      return done();
+    }));
+    const first = await runToEnd(task.id);
+    expect(first.status).toBe('succeeded');
+    // The checkout is gone, the harness home is not.
+    await expect(stat(`${taskDir(task.id)}/checkout`)).rejects.toBeTruthy();
+    expect(await readFile(`${harnessDir(task.id)}/transcript.jsonl`, 'utf8')).toBe('hello');
+
+    // Retention: a task dir last touched before the cutoff is pruned, a fresh one stays.
+    const old = new Date(Date.now() - 40 * 86_400_000);
+    await utimes(taskDir(task.id), old, old);
+    const other = await newTask('Keep me');
+    await mkdir(harnessDir(other.id), { recursive: true });
+    expect(await pruneTaskDirs(new Date(Date.now() - 30 * 86_400_000))).toBe(1);
+    await expect(stat(taskDir(task.id))).rejects.toBeTruthy();
+    await expect(stat(taskDir(other.id))).resolves.toBeTruthy();
+  });
+
+  it('a retry whose session is gone starts a fresh one on the same branch instead of failing', async () => {
+    const owner = reqAs(ws.users.owner!.cookie);
+    const task = await newTask('Lost session');
+    await assign(task.id, [agentId]);
+    restoreAdapter = setRuntimeAdapter(adapter(async () => ({ status: 'failed', sessionId: 'gone-1', message: '', error: 'Reached maximum number of turns (200)', usage, retryAt: null, report: null })));
+    const first = await runToEnd(task.id);
+    expect(first.status).toBe('failed');
+    expect(first.branch).toMatch(/dsp-\d+-lost-session$/);
+
+    const { agentActor } = await import('../workers/agent-runs');
+    await (await import('../domains/agents/runs')).retryRun(await agentActor(ws.users.owner!.userId), first.id);
+    const inputs: RuntimeRunInput[] = [];
+    restoreAdapter();
+    restoreAdapter = setRuntimeAdapter(adapter(async (input) => {
+      inputs.push(input);
+      if (input.resume) return { status: 'failed', sessionId: input.resume, message: '', error: `No conversation found with session ID: ${input.resume}`, usage: { ...usage, turns: 0 }, retryAt: null, report: null };
+      return { ...done(), sessionId: 'fresh-2' };
+    }));
+    const [claimed] = await claimRuns('w', 1);
+    await executeRun(claimed!);
+    const { db } = getDb();
+    const [after] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, claimed!.id));
+    expect(after!.status).toBe('succeeded');
+    expect(after!.sessionId).toBe('fresh-2');
+    expect(inputs).toHaveLength(2);
+    expect(inputs[0]!.resume).toBe('gone-1');
+    expect(inputs[1]!.resume).toBeNull();
+    // The second attempt gets the full brief plus a pointer at the branch, not the "Continue" brief.
+    expect(inputs[1]!.prompt).toContain('# DSP-');
+    expect(inputs[1]!.prompt).toContain('Earlier work');
+    expect(inputs[1]!.prompt).toContain(first.branch);
+    expect(inputs[1]!.prompt).not.toContain('# Continue');
+    const events = await eventsForRun(claimed!.id);
+    expect(JSON.stringify(events)).toContain('not on this worker');
+    const detail = await json(owner.get(`/tasks/${task.id}?include=comments`));
+    expect(JSON.stringify((detail.comments as unknown[]).at(-1))).not.toContain('No conversation found');
+  });
+
   it('a cancel request aborts a running run', async () => {
     const task = await newTask('Cancel me');
     await assign(task.id, [agentId]);
@@ -363,6 +491,21 @@ describe('the worker end to end', () => {
     expect(followUp!.resume).toBe('sess-42');
     expect(followUp!.prompt).toContain('Also update the docs');
     expect(followUp!.prompt).toContain('Follow-up');
+  });
+
+  it('a comment written while the run was still queued is not lost', async () => {
+    const owner = reqAs(ws.users.owner!.cookie);
+    const task = await newTask('Early bird');
+    await assign(task.id, [agentId]);
+    await owner.post(`/tasks/${task.id}/comments`, { body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Before you start: use v2' }] }] } });
+    await drainOutbox();
+    expect(await runsForTask(task.id)).toHaveLength(1); // coalesced into the queued run
+    restoreAdapter = setRuntimeAdapter(adapter(async () => done()));
+    const run = await runToEnd(task.id);
+    expect(run.status).toBe('succeeded');
+    const runs = (await runsForTask(task.id)).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    expect(runs).toHaveLength(2);
+    expect(runs[1]).toMatchObject({ trigger: 'comment', status: 'queued', sessionId: 'sess-42', branch: run.branch, parentRunId: run.id });
   });
 
   it('a comment on an idle task with an agent assignee queues a follow-up run', async () => {

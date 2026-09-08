@@ -3,6 +3,36 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.29.2
+
+- **Sessions survive between runs**: the runtime's home moves from a per-run
+  directory to `tasks/<taskId>/harness` on the `agent_work` volume, so
+  follow-ups and Retry actually resume the conversation instead of failing
+  with "No conversation found"; a missing session starts a fresh one on the
+  task's branch with the full brief. Task directories untouched for 30 days
+  are pruned.
+- **Nothing is lost on an early stop**: rate-limited runs push their work
+  and resume the same session; session id and branch are recorded as soon
+  as they are known, so a lost worker's run continues; a finalization error
+  pushes before failing; the push uses a fresh installation token; a failing
+  `rev-list` no longer reads as "nothing to push".
+- **Commits carry only real work**: tracked edits plus new files that pass a
+  junk filter (no `node_modules/`, `dist/`, `.env*`, logs, caches) instead
+  of `git add -A`.
+- **Runs and tasks**: one active run per task and agent (migration
+  `0037_agent_runs_task_agent`); follow-ups and Retry carry the branch; a
+  comment written while the run was queued is picked up; closed tasks get
+  no run and stay closed; other agents' comments never trigger a run; a run
+  token cannot cancel or retry runs.
+- **Runtime**: the repository's `CLAUDE.md` is loaded; the `ordi` MCP tools
+  are in the prompt from turn one; `BashOutput`, `KillShell` and `Skill`
+  are allowed.
+- **Task page**: the run log shows the last 500 events and appends streamed
+  ones; run rows poll while active; Retry only on the newest run, disabled
+  while one is active; translated, linked agent notifications; the profile
+  form accepts 2000 turns and explains turns and budget; credential slot
+  "Not in rotation"; no "0 turns · $0.00" on instant failures.
+
 ## v1.29.1
 
 - **Unfinished agent work survives**: a run that hits its step limit, times

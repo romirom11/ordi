@@ -3,9 +3,10 @@
  *
  * Visibility follows the task: anyone who can open it sees the runs and the
  * live log. Cancel and retry need task write or `agents.manage`, exactly as
- * the API enforces. Events arrive over SSE (see lib/sse.ts, which invalidates
- * ['agent-run-events', runId]); the 5s poll while a run is active is the
- * fallback for a dropped stream.
+ * the API enforces. Events arrive over SSE (see lib/sse.ts, which appends each
+ * frame to ['agent-run-events', runId] and refreshes ['agent-runs'] on the
+ * frames that change the row); while any run is active both the list and the
+ * open log poll every 5s, which is the fallback for a dropped stream.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -44,6 +45,7 @@ extendDict({
     'runs.cancel': 'Cancel',
     'runs.cancelled': 'Cancel requested',
     'runs.retry': 'Retry',
+    'runs.retryBlocked': 'This task already has a run going – wait for it to finish or cancel it.',
     'runs.retried': 'A new run is queued',
     'runs.actionFailed': 'Could not do that',
     'runs.noEvents': 'Nothing logged yet.',
@@ -79,6 +81,7 @@ extendDict({
     'runs.cancel': 'Скасувати',
     'runs.cancelled': 'Скасування надіслано',
     'runs.retry': 'Повторити',
+    'runs.retryBlocked': 'Для цієї задачі вже є активний запуск – дочекайтеся його завершення або скасуйте його.',
     'runs.retried': 'Новий запуск у черзі',
     'runs.actionFailed': 'Не вдалося виконати дію',
     'runs.noEvents': 'Поки що порожньо.',
@@ -276,7 +279,14 @@ function RunLog({ run }: { run: AgentRun }) {
   );
 }
 
-function RunRow({ run, canAct }: { run: AgentRun; canAct: boolean }) {
+function RunRow({ run, canAct, canRetry, hasActive }: {
+  run: AgentRun;
+  canAct: boolean;
+  /** Only the newest run offers Retry – retrying an old one queues the same task twice. */
+  canRetry: boolean;
+  /** Some run of this task is still going, so the API would refuse a retry. */
+  hasActive: boolean;
+}) {
   const t = useT();
   const qc = useQueryClient();
   const [open, setOpen] = useState(ACTIVE.includes(run.status));
@@ -295,7 +305,12 @@ function RunRow({ run, canAct }: { run: AgentRun; canAct: boolean }) {
   const retry = useMutation({
     mutationFn: () => api.post(`/agent-runs/${run.id}/retry`, {}),
     onSuccess: () => { invalidate(); toast(t('runs.retried')); },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('runs.actionFailed')),
+    onError: (e) => {
+      // The API refuses a second active run with a domain rule; say it in the
+      // reader's language instead of echoing the English sentence.
+      if (e instanceof ApiError && e.code === 'domain_rule') { invalidate(); toast.error(t('runs.retryBlocked')); return; }
+      toast.error(e instanceof ApiError ? e.message : t('runs.actionFailed'));
+    },
   });
 
   const duration = runDuration(run);
@@ -323,12 +338,16 @@ function RunRow({ run, canAct }: { run: AgentRun; canAct: boolean }) {
               when: fmtRelative(run.finishedAt ?? run.startedAt ?? run.createdAt),
             })}</span>
             {duration && <span>· {fill(t('runs.duration'), { value: duration })}</span>}
-            {typeof run.usage.turns === 'number' && <span>· {fill(t('runs.turns'), { n: run.usage.turns })}</span>}
-            {typeof run.usage.costUsd === 'number' && <span>· {fmtMoney(run.usage.costUsd, 'USD')}</span>}
+            {/* Usage is zero-filled, so a run that failed before its first turn
+                would read "0 turns · $0.00" – say nothing instead. */}
+            {typeof run.usage.turns === 'number' && run.usage.turns > 0 && <span>· {fill(t('runs.turns'), { n: run.usage.turns })}</span>}
+            {typeof run.usage.costUsd === 'number' && run.usage.costUsd > 0 && <span>· {fmtMoney(run.usage.costUsd, 'USD')}</span>}
           </div>
-          {(run.summary || run.error) && (
-            <p className={cn('mt-1 whitespace-pre-wrap text-[12px]', run.error ? 'text-destructive' : 'text-muted-foreground')}>
-              {run.error ?? run.summary}
+          {/* An active row can carry a note like "cancel requested"; that is not
+              a failure, so it must not paint the row red. */}
+          {(run.summary || (run.error && !active)) && (
+            <p className={cn('mt-1 whitespace-pre-wrap text-[12px]', run.error && !active ? 'text-destructive' : 'text-muted-foreground')}>
+              {(!active && run.error) || run.summary}
             </p>
           )}
           <div className="mt-1 flex flex-wrap items-center gap-3">
@@ -353,8 +372,14 @@ function RunRow({ run, canAct }: { run: AgentRun; canAct: boolean }) {
           <Button size="xs" variant="ghost" onClick={() => cancel.mutate()} disabled={cancel.isPending}>
             {cancel.isPending ? <Spinner className="h-3 w-3" /> : <CircleStop size={13} />} {t('runs.cancel')}
           </Button>
-        ) : (
-          <Button size="xs" variant="ghost" onClick={() => retry.mutate()} disabled={retry.isPending}>
+        ) : canRetry && (
+          <Button
+            size="xs"
+            variant="ghost"
+            onClick={() => retry.mutate()}
+            disabled={retry.isPending || hasActive}
+            title={hasActive ? t('runs.retryBlocked') : undefined}
+          >
             {retry.isPending ? <Spinner className="h-3 w-3" /> : <RotateCcw size={13} />} {t('runs.retry')}
           </Button>
         ))}
@@ -381,11 +406,15 @@ export function AgentRunsBlock({ taskId, canWrite, showWhenEmpty }: {
   const runsQ = useQuery({
     queryKey: ['agent-runs', taskId],
     queryFn: () => api.get<{ data: AgentRun[] }>(`/agent-runs?taskId=${taskId}&limit=20`).then((r) => r.data),
+    // Without this the row only ever moved on an SSE frame: poll while a run
+    // is going, stop the moment none is.
+    refetchInterval: (query) => ((query.state.data ?? []).some((r) => ACTIVE.includes(r.status)) ? 5000 : false),
   });
   const runs = useMemo(
     () => [...(runsQ.data ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [runsQ.data],
   );
+  const hasActive = runs.some((r) => ACTIVE.includes(r.status));
 
   if (runs.length === 0 && !showWhenEmpty) return null;
   const canAct = canWrite || can('agents.manage');
@@ -400,7 +429,9 @@ export function AgentRunsBlock({ taskId, canWrite, showWhenEmpty }: {
           <p className="text-[13px] text-faint">{t('runs.none')}</p>
         ) : (
           <div className="rounded-lg border border-border bg-card px-3">
-            {runs.map((run) => <RunRow key={run.id} run={run} canAct={canAct} />)}
+            {runs.map((run, i) => (
+              <RunRow key={run.id} run={run} canAct={canAct} canRetry={i === 0} hasActive={hasActive} />
+            ))}
           </div>
         )}
       </section>

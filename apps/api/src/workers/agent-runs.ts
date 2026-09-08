@@ -6,8 +6,7 @@
  * replicas may run it; the claim query and the heartbeat keep them apart.
  */
 import { hostname } from 'node:os';
-import { mkdir, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir } from 'node:fs/promises';
 import { getDb, schema, eq, and, inArray, sql } from '@ordi/db';
 import { textToDoc } from '@ordi/shared';
 import { env } from '../env';
@@ -22,10 +21,10 @@ import { closeRunConnections } from '../domains/agents/gateway';
 import { allowedToolsFor, buildRulesOfEngagement, buildTaskBrief, DISALLOWED_TOOLS, type PromptContext } from '../domains/agents/prompt';
 import { forgetRunScope, forgetRunSecrets, recordRunEvent, registerRunScope, registerRunSecrets } from '../domains/agents/run-events';
 import {
-  cancelRequested, claimRuns, finishRun, newestHumanCommentSince, parkRunForQuota, queueRun, requeueStaleRuns, startRun, touchRun, type RunRow,
+  cancelRequested, claimRuns, finishRun, newestHumanCommentSince, parkRunForQuota, queueRun, recordRunProgress, requeueStaleRuns, startRun, touchRun, type RunRow,
 } from '../domains/agents/runs';
 import { runtimeAdapter, type RuntimeMcpServer, type RuntimeOutcome } from '../domains/agents/runtime';
-import { cleanupWorkspace, prepareWorkspace, publishWorkspace, runDir, type Workspace } from '../domains/agents/workspace';
+import { cleanupWorkspace, harnessDir, prepareWorkspace, pruneTaskDirs, publishWorkspace, SESSION_RETENTION_DAYS, type Workspace } from '../domains/agents/workspace';
 import * as tasksSvc from '../domains/projects/service';
 
 const { agentProfiles, agentWorkers, users, tasks, projects, taskStatuses, agentConnectors, mcpConnectors } = schema;
@@ -34,19 +33,25 @@ const POLL_MS = 3_000;
 const HEARTBEAT_MS = 15_000;
 const STALE_RUN_MS = 3 * 60_000;
 const QUOTA_RETRY_DEFAULT_MS = 30 * 60_000;
+const PRUNE_MS = 6 * 60 * 60_000;
 
 export const workerId = `${hostname()}:${process.pid}`;
 const inFlight = new Set<string>();
 
-/** An Actor for the agent user, so the worker can comment and move status through the services. */
-export async function agentActor(agentUserId: string): Promise<Actor> {
+/**
+ * An Actor for a user row, so the worker can comment and move status through
+ * the services as the agent. The actor type comes from the row: an agent user
+ * acts as 'agent' (which the services and consumers treat differently from a
+ * person), anyone else as 'user'.
+ */
+export async function agentActor(userId: string): Promise<Actor> {
   const { db } = getDb();
-  const [user] = await db.select().from(users).where(eq(users.id, agentUserId));
+  const [user] = await db.select().from(users).where(eq(users.id, userId));
   if (!user) throw new Error('Agent user not found');
   const permissions = await loadRolePermissions(user.roleId);
   const access = await buildAccessContext(user.id, permissions, false);
   return {
-    userId: user.id, actorType: 'agent', roleId: user.roleId, roleName: '', email: user.email, name: user.name,
+    userId: user.id, actorType: user.actorType === 'agent' ? 'agent' : 'user', roleId: user.roleId, roleName: '', email: user.email, name: user.name,
     locale: user.locale, timezone: user.timezone, readOnly: false, tokenScopes: null, access,
   };
 }
@@ -129,9 +134,10 @@ export async function executeRun(claimed: RunRow): Promise<void> {
   inFlight.add(runId);
   let ws: Workspace | null = null;
   let token: string | null = null;
-  // Outside the checkout: the harness keeps session transcripts under its
-  // HOME, and nothing of that may end up in the agent's commits.
-  const configDir = join(env.agentWorkDir, `${runId}.harness`);
+  // Outside the checkout, so nothing of it ends up in the agent's commits,
+  // and per task rather than per run: the session transcript written here
+  // is what a follow-up or a retry resumes.
+  const configDir = harnessDir(claimed.taskId);
   // Liveness from claim to finish: a slow clone or push must not look like a
   // dead worker to requeueStaleRuns.
   const liveness = setInterval(() => { void touchRun(runId).catch(() => {}); }, 30_000);
@@ -147,11 +153,12 @@ export async function executeRun(claimed: RunRow): Promise<void> {
     }
 
     ws = await prepareWorkspace({
-      runId, projectId: project.id, projectKey: project.key, taskNumber: task.number, taskTitle: task.title,
+      taskId: task.id, projectId: project.id, projectKey: project.key, taskNumber: task.number, taskTitle: task.title,
       existingBranch: claimed.branch ?? null, agentName: agent.name, agentEmail: agent.email,
     });
-    await mkdir(configDir, { recursive: true });
     await recordRunEvent(runId, 'log', { message: ws.repo ? `Checked out ${ws.repo.fullName} on ${ws.branch}` : 'No repository linked; working in a scratch directory' });
+    // Written now, not at the end: a worker lost mid-run leaves a row the re-queued run continues from.
+    await recordRunProgress(runId, { branch: ws.branch });
 
     const started = await startRun(runId);
     if (!started) return; // cancelled during preparation
@@ -166,11 +173,13 @@ export async function executeRun(claimed: RunRow): Promise<void> {
       resumedAfterStop: claimed.trigger === 'retry' && Boolean(claimed.sessionId),
       connectorSlugs: setup.connectors.map((c) => c.slug),
     };
-    const prompt = await buildTaskBrief(ctx);
+    let prompt = await buildTaskBrief(ctx);
     const systemAppend = buildRulesOfEngagement(ctx);
     const base = `http://localhost:${env.port}/api/v1`;
     const mcpServers: Record<string, RuntimeMcpServer> = {
-      ordi: { type: 'http', url: `${base}/mcp`, headers: { Authorization: `Bearer ${token}` } },
+      // alwaysLoad: the brief tells the agent to call get_task first, so the
+      // tools must be in the prompt on turn 1 rather than behind tool search.
+      ordi: { type: 'http', url: `${base}/mcp`, headers: { Authorization: `Bearer ${token}` }, alwaysLoad: true },
     };
     for (const c of setup.connectors) {
       mcpServers[c.slug] = { type: 'http', url: `${base}/mcp-connectors/${c.slug}/mcp`, headers: { Authorization: `Bearer ${token}` } };
@@ -186,22 +195,29 @@ export async function executeRun(claimed: RunRow): Promise<void> {
     let outcome: RuntimeOutcome | null = null;
     let usedCredentialId: string | null = null;
     let resume = claimed.sessionId ?? null;
-    try {
+    /** Try the credential chain once; the last outcome is returned (null when no credential loads). */
+    const workspace = ws;
+    const runToken = started.token;
+    const attempt = async (): Promise<RuntimeOutcome | null> => {
+      let last: RuntimeOutcome | null = null;
       for (const credentialId of chain) {
         const cred = await loadRuntimeCredential(credentialId);
         if (!cred) continue;
         usedCredentialId = credentialId;
-        registerRunSecrets(runId, [cred.secret, token, ws.repo?.token ?? '', ...setup.connectors.flatMap((c) => secretValues(c))]);
+        registerRunSecrets(runId, [cred.secret, runToken, workspace.repo?.token ?? '', ...setup.connectors.flatMap((c) => secretValues(c))]);
         await recordRunEvent(runId, 'log', { message: `Starting ${profile.runtime} with credential ${credentialId === chain[0] ? '(primary)' : '(fallback)'}` });
-        outcome = await runtime.run({
-          prompt, systemAppend, cwd: ws.dir, configDir, credential: { kind: cred.kind, secret: cred.secret },
+        last = await runtime.run({
+          prompt, systemAppend, cwd: workspace.dir, configDir, credential: { kind: cred.kind, secret: cred.secret },
           model: profile.model, mcpServers, maxTurns: profile.maxTurns,
           maxBudgetUsd: cred.kind === 'api_key' && profile.maxBudgetUsd != null ? Number(profile.maxBudgetUsd) : null,
           resume, allowedTools: allowedToolsFor(Object.keys(mcpServers)), disallowedTools: DISALLOWED_TOOLS,
           signal: controller.signal,
           onEvent: async (event) => {
             switch (event.type) {
-              case 'init': await recordRunEvent(runId, 'init', { sessionId: event.sessionId, model: event.model, mcpServers: event.mcpServers }); break;
+              case 'init':
+                await recordRunProgress(runId, { sessionId: event.sessionId });
+                await recordRunEvent(runId, 'init', { sessionId: event.sessionId, model: event.model, mcpServers: event.mcpServers });
+                break;
               case 'assistant': if (event.text || event.toolUses.length) await recordRunEvent(runId, 'assistant', { text: event.text.slice(0, 8000), toolUses: event.toolUses.map((t) => ({ id: t.id, name: t.name })) }); break;
               case 'tool_use': await recordRunEvent(runId, 'tool_use', { toolUseId: event.toolUseId, name: event.name, input: truncate(event.input) }); break;
               case 'tool_result': await recordRunEvent(runId, 'tool_result', { toolUseId: event.toolUseId, text: event.text.slice(0, 2000), isError: event.isError }); break;
@@ -210,9 +226,21 @@ export async function executeRun(claimed: RunRow): Promise<void> {
             }
           },
         });
-        if (outcome.sessionId) resume = outcome.sessionId;
-        if (outcome.status !== 'rate_limited') break;
+        if (last.sessionId) resume = last.sessionId;
+        if (last.status !== 'rate_limited') break;
         await recordRunEvent(runId, 'log', { message: `Credential ${credentialId} is rate limited${chain.indexOf(credentialId) < chain.length - 1 ? ', switching to the fallback' : ''}` });
+      }
+      return last;
+    };
+    try {
+      outcome = await attempt();
+      // The session to resume is gone (another worker's disk, a pruned or
+      // rebuilt volume): start over on the branch instead of failing.
+      if (outcome && sessionLost(outcome) && claimed.sessionId) {
+        await recordRunEvent(runId, 'log', { message: `Session ${claimed.sessionId} is not on this worker; starting a fresh one on the same branch` });
+        resume = null;
+        prompt = await buildTaskBrief({ ...ctx, sessionLost: true });
+        outcome = await attempt();
       }
     } finally {
       clearTimeout(timer);
@@ -223,20 +251,13 @@ export async function executeRun(claimed: RunRow): Promise<void> {
       await finishRun(runId, { status: 'failed', error: 'No usable credential' });
       return;
     }
-    await recordRunEvent(runId, 'result', {
-      status: outcome.status, report: outcome.report, message: outcome.message?.slice(0, 4000), error: outcome.error, usage: outcome.usage,
-    });
-
-    const actor = await agentActor(agent.id);
-    const usage = { ...outcome.usage, credentialId: usedCredentialId };
-
     // A run that stops early (limit, timeout, cancel, error) must not lose
     // what the agent already did: the branch is pushed without a pull
     // request, and a retry continues on it with the same session.
     const preserveWork = async (): Promise<string | null> => {
       try {
         const kept = await publishWorkspace(ws!, { ref, title: task.title, summary: '', existingPrUrl: claimed.prUrl ?? null, openPullRequest: false });
-        if (kept.pushed) await recordRunEvent(runId, 'log', { message: `Pushed ${kept.commits} commit(s) of unfinished work to ${ws!.branch}` });
+        if (kept.pushed) await recordRunEvent(runId, 'log', { message: `Pushed ${kept.commits ?? 'the'} commit(s) of unfinished work to ${ws!.branch}` });
         return kept.pushed ? ws!.branch : null;
       } catch (e) {
         await recordRunEvent(runId, 'error', { message: `Could not push unfinished work: ${(e as Error).message}` });
@@ -247,6 +268,14 @@ export async function executeRun(claimed: RunRow): Promise<void> {
       branch ? `The work so far is on branch ${branch}; Retry on the task continues from it in the same session.` : 'Retry on the task starts the same session again.',
       limitHint,
     ].filter(Boolean).join(' ');
+
+    // From here on a throw (a DB blip, the agent user gone) still keeps the work.
+    try {
+    await recordRunEvent(runId, 'result', {
+      status: outcome.status, report: outcome.report, message: outcome.message?.slice(0, 4000), error: outcome.error, usage: outcome.usage,
+    });
+    const actor = await agentActor(agent.id);
+    const usage = { ...outcome.usage, credentialId: usedCredentialId };
 
     if (controller.signal.aborted) {
       const timedOut = (controller.signal.reason as Error | undefined)?.message === 'timeout';
@@ -259,7 +288,9 @@ export async function executeRun(claimed: RunRow): Promise<void> {
 
     if (outcome.status === 'rate_limited') {
       const retryAt = new Date(outcome.retryAt ?? Date.now() + QUOTA_RETRY_DEFAULT_MS);
-      await parkRunForQuota(runId, retryAt, outcome.error ?? 'Provider rate limit');
+      // The parked run resumes the same session on the same branch when the window resets.
+      const branch = await preserveWork();
+      await parkRunForQuota(runId, retryAt, outcome.error ?? 'Provider rate limit', { sessionId: outcome.sessionId, branch });
       return;
     }
 
@@ -279,7 +310,7 @@ export async function executeRun(claimed: RunRow): Promise<void> {
       await postComment(actor, task.id, `I need input before I can continue:\n\n${question}`).catch(() => {});
       await finishRun(runId, { status: 'needs_input', summary: outcome.report?.summary ?? null, sessionId: outcome.sessionId, branch: ws.branch, usage });
       // A reply that arrived while we were still working is the answer.
-      await queueFollowUp(agent.id, task.id, project.id, runId, started.run.startedAt, outcome.sessionId);
+      await queueFollowUp(agent.id, task.id, project.id, runId, started.run.createdAt, outcome.sessionId, ws.branch);
       return;
     }
 
@@ -289,7 +320,7 @@ export async function executeRun(claimed: RunRow): Promise<void> {
     try {
       const published = await publishWorkspace(ws, { ref, title: task.title, summary, existingPrUrl: prUrl });
       prUrl = published.prUrl ?? prUrl;
-      if (published.pushed) await recordRunEvent(runId, 'log', { message: `Pushed ${published.commits} commit(s) to ${ws.branch}${prUrl ? `; pull request ${prUrl}` : ''}` });
+      if (published.pushed) await recordRunEvent(runId, 'log', { message: `Pushed ${published.commits ?? 'the'} commit(s) to ${ws.branch}${prUrl ? `; pull request ${prUrl}` : ''}` });
       else if (ws.repo) await recordRunEvent(runId, 'log', { message: 'No commits to push' });
     } catch (e) {
       await recordRunEvent(runId, 'error', { message: `Publishing the branch failed: ${(e as Error).message}` });
@@ -302,15 +333,22 @@ export async function executeRun(claimed: RunRow): Promise<void> {
     }
     await postComment(actor, task.id, prUrl ? `${summary}\n\nPull request: ${prUrl}` : summary).catch((e) => logger.warn({ err: e }, 'agent comment failed'));
     if (status) {
-      const [fresh] = await getDb().db.select({ version: tasks.version, statusId: tasks.statusId }).from(tasks).where(eq(tasks.id, task.id));
-      if (fresh && fresh.statusId !== status.id) {
+      const [fresh] = await getDb().db.select({ version: tasks.version, statusId: tasks.statusId, category: taskStatuses.category })
+        .from(tasks).leftJoin(taskStatuses, eq(taskStatuses.id, tasks.statusId)).where(eq(tasks.id, task.id));
+      // A task someone closed while the agent worked stays closed.
+      if (fresh && fresh.statusId !== status.id && fresh.category !== 'done' && fresh.category !== 'canceled') {
         await tasksSvc.updateTask(actor, task.id, { statusId: status.id, version: fresh.version }).catch((e) => logger.warn({ err: e }, 'agent status move failed'));
       }
     }
     await finishRun(runId, { status: 'succeeded', summary, sessionId: outcome.sessionId, branch: ws.branch, prUrl, usage });
 
-    // R13/R30: a human wrote while we worked – continue in a follow-up.
-    await queueFollowUp(agent.id, task.id, project.id, runId, started.run.startedAt, outcome.sessionId);
+    // R13/R30: a human wrote while we worked (queued or running) – continue in a follow-up.
+    await queueFollowUp(agent.id, task.id, project.id, runId, started.run.createdAt, outcome.sessionId, ws.branch);
+    } catch (e) {
+      const branch = await preserveWork();
+      await recordRunEvent(runId, 'error', { message: `Finalizing the run failed: ${(e as Error).message}` }).catch(() => {});
+      await finishRun(runId, { status: 'failed', error: (e as Error).message, sessionId: outcome.sessionId, branch, usage: { ...outcome.usage, credentialId: usedCredentialId } });
+    }
   } catch (e) {
     logger.error({ err: e, runId }, 'agent run crashed');
     await recordRunEvent(runId, 'error', { message: (e as Error).message }).catch(() => {});
@@ -321,18 +359,22 @@ export async function executeRun(claimed: RunRow): Promise<void> {
     forgetRunSecrets(runId);
     forgetRunScope(runId);
     await closeRunConnections(runId).catch(() => {});
-    await rm(configDir, { recursive: true, force: true }).catch(() => {});
-    await cleanupWorkspace(runId).catch(() => {});
+    await cleanupWorkspace(claimed.taskId).catch(() => {});
   }
 }
 
+/** The runtime could not find the transcript it was asked to resume. */
+function sessionLost(outcome: RuntimeOutcome): boolean {
+  return outcome.status === 'failed' && /no conversation found/i.test(outcome.error ?? '');
+}
+
 /** R13/R30: a human comment written during the run becomes the next run's prompt. */
-async function queueFollowUp(agentUserId: string, taskId: string, projectId: string, parentRunId: string, since: Date | null, sessionId: string | null): Promise<void> {
+async function queueFollowUp(agentUserId: string, taskId: string, projectId: string, parentRunId: string, since: Date | null, sessionId: string | null, branch: string | null): Promise<void> {
   const followUp = await newestHumanCommentSince(taskId, since, agentUserId);
   if (!followUp) return;
   await queueRun({
     agentUserId, taskId, projectId, trigger: sessionId ? 'comment' : 'assigned', requestedBy: followUp.authorId,
-    commentId: followUp.id, parentRunId, sessionId,
+    commentId: followUp.id, parentRunId, sessionId, branch,
   });
 }
 
@@ -365,13 +407,23 @@ export function startAgentRunsWorker(): () => void {
   void mkdir(env.agentWorkDir, { recursive: true }).catch((e) => logger.warn({ err: e, dir: env.agentWorkDir }, 'agent work dir unavailable'));
   const poll = setInterval(() => { if (!stopped) pollOnce().catch((e) => logger.error({ err: e }, 'agent worker poll failed')); }, POLL_MS);
   const beat = setInterval(() => { if (!stopped) heartbeat(runtimeAvailable).catch(() => {}); }, HEARTBEAT_MS);
+  const prune = setInterval(() => { if (!stopped) pruneSessions().catch(() => {}); }, PRUNE_MS);
   void heartbeat(runtimeAvailable).catch(() => {});
+  void pruneSessions().catch(() => {});
   logger.info({ workerId, concurrency: env.agentWorkerConcurrency }, 'agent run worker started');
   return () => {
     stopped = true;
     clearInterval(poll);
     clearInterval(beat);
+    clearInterval(prune);
   };
+}
+
+/** Task directories (checkout leftovers and session transcripts) untouched for SESSION_RETENTION_DAYS go. */
+export async function pruneSessions(): Promise<number> {
+  const removed = await pruneTaskDirs(new Date(Date.now() - SESSION_RETENTION_DAYS * 86_400_000));
+  if (removed) logger.info({ removed }, 'agent task dirs pruned');
+  return removed;
 }
 
 /** For tests and the status endpoint. */
