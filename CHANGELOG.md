@@ -3,6 +3,31 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.29.0
+
+- **AI agent employees**: an agent is a member with `actor_type = 'agent'`
+  created from the "Add member" dialog; assigning it a task queues a run
+  that a worker inside the `api` container executes – fresh clone, Claude
+  Code headless via the Agent SDK with the ordi MCP server and the agent's
+  connectors, live log on the task page, a pull request at the end and the
+  task in review. Claude is connected once per workspace (subscription
+  token or API key, encrypted, with who-connected-it on the card); MCP
+  connectors live in a workspace library with a per-agent allowlist and go
+  through the ordi gateway, OAuth included. New `agents.manage` permission
+  and `Agent` preset role; the GitHub App asks for `contents: write` and
+  `pull_requests: write`. Migration `0035_ai_agents`. Ops: `AGENT_WORKER_*`
+  env, the `agent_work` volume, an optional `agent-worker` service.
+- **Deactivation hands work over**: deactivating a user asks who takes their
+  open tasks (or leaves them unassigned); closed tasks keep their history.
+  `GET /users/:id/open-tasks`, `POST /users/:id/deactivate { reassignTo }`.
+- **Deactivated assignees can be taken off a task**: the picker keeps
+  anyone already assigned, marked deactivated, so they can be removed.
+- **Move to project** from the task row menu: new number with a redirect,
+  status matched by name then category, custom fields filtered to what the
+  target defines, admin rights on both projects.
+- **Quick-create picks the open project**; **expense currency is a select**
+  starting at the workspace default.
+
 ## v1.28.0
 
 - **One name per person**: `/users/lookup` prefers the linked HR card's full
