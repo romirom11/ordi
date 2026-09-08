@@ -3,6 +3,15 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.29.1
+
+- **Unfinished agent work survives**: a run that hits its step limit, times
+  out or is cancelled pushes what the agent committed (loose changes as a
+  `WIP` commit) to the task branch without opening a pull request, records
+  the branch on the run, and the comment names the limit to raise. Retry
+  resumes the same session on that branch. Default `max_turns` goes from 60
+  to 200; migration `0036_agent_max_turns` moves existing profiles along.
+
 ## v1.29.0
 
 - **AI agent employees**: an agent is a member with `actor_type = 'agent'`
