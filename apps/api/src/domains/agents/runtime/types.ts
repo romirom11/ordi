@@ -85,6 +85,12 @@ export interface RuntimeAdapter {
   run(input: RuntimeRunInput): Promise<RuntimeOutcome>;
   /** A minimal call proving a credential works; never touches a task. */
   verify(credential: RuntimeCredential, opts: { configDir: string; model?: string | null; signal?: AbortSignal }): Promise<{ ok: boolean; error: string | null; model: string | null }>;
+  /**
+   * A short English kebab-case slug for a branch name, from the task title
+   * and description in whatever language they are written. Null when the
+   * runtime cannot answer; the caller falls back to transliteration.
+   */
+  suggestBranchSlug(input: { title: string; description: string; credential: RuntimeCredential; configDir: string; signal?: AbortSignal }): Promise<string | null>;
 }
 
 export class RuntimeUnavailableError extends Error {

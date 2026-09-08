@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import { buildRuntimeEnv, createClaudeCodeAdapter, type QueryFn } from '../domains/agents/runtime/claude-code';
+import { buildRuntimeEnv, createClaudeCodeAdapter, type QueryFn, extractSlug } from '../domains/agents/runtime/claude-code';
 import type { RuntimeEvent, RuntimeRunInput } from '../domains/agents/runtime/types';
 
 function msg<T extends Partial<SDKMessage>>(m: T): SDKMessage {
@@ -126,6 +126,28 @@ describe('claude adapter', () => {
     const outcome = await adapter.run(input());
     expect(outcome.status).toBe('failed');
     expect(outcome.error).toContain('ENOENT');
+  });
+
+  it('suggestBranchSlug asks haiku for one turn without tools and validates the answer', async () => {
+    const seen: { options?: Options; prompt?: string } = {};
+    const adapter = createClaudeCodeAdapter(scripted([resultOk({ result: 'Show Remaining Leave Days\n' })], seen));
+    const slug = await adapter.suggestBranchSlug({ title: 'Додати доступну кількість днів відпустки', description: 'щоб не брати більше, ніж є', credential: { kind: 'subscription', secret: 's' }, configDir: '/tmp/cfg' });
+    expect(slug).toBe('show-remaining-leave-days');
+    expect(seen.options).toMatchObject({ model: 'haiku', maxTurns: 1, tools: [], settingSources: [] });
+    expect(seen.prompt).toContain('днів відпустки');
+    expect(seen.options!.env!.CLAUDE_CODE_OAUTH_TOKEN).toBe('s');
+    // Garbage, an error result or a throw all mean "no suggestion".
+    expect(await createClaudeCodeAdapter(scripted([resultOk({ result: '???' })])).suggestBranchSlug({ title: 't', description: '', credential: { kind: 'api_key', secret: 'k' }, configDir: '/tmp' })).toBeNull();
+    expect(await createClaudeCodeAdapter(scripted([resultOk({ is_error: true, result: 'nope' })])).suggestBranchSlug({ title: 't', description: '', credential: { kind: 'api_key', secret: 'k' }, configDir: '/tmp' })).toBeNull();
+    expect(await createClaudeCodeAdapter(() => { throw new Error('down'); }).suggestBranchSlug({ title: 't', description: '', credential: { kind: 'api_key', secret: 'k' }, configDir: '/tmp' })).toBeNull();
+  });
+
+  it('extractSlug keeps only a usable kebab-case answer', () => {
+    expect(extractSlug('`add-leave-balance`')).toBe('add-leave-balance');
+    expect(extractSlug('Sure! Here it is:\nadd leave balance to profile')).toBe('sure-here-it-is');
+    expect(extractSlug('1234')).toBeNull();
+    expect(extractSlug('')).toBeNull();
+    expect(extractSlug('a'.repeat(80))).toHaveLength(50);
   });
 
   it('verify reports the model and refuses on an auth error', async () => {

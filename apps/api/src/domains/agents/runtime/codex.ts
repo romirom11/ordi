@@ -16,5 +16,8 @@ export function createCodexAdapter(): RuntimeAdapter {
     async verify() {
       return { ok: false, error: 'Codex runtime is coming soon', model: null };
     },
+    async suggestBranchSlug() {
+      return null;
+    },
   };
 }
