@@ -169,19 +169,22 @@ export interface PublishResult {
 /** R28: commit leftovers, push, open (or find) the pull request. */
 export async function publishWorkspace(ws: Workspace, input: {
   ref: string; title: string; summary: string; existingPrUrl: string | null;
+  /** False preserves work from a run that stopped early: push the branch, open no pull request. */
+  openPullRequest?: boolean;
 }): Promise<PublishResult> {
   if (!ws.repo || !ws.branch) return { pushed: false, prUrl: null, commits: 0 };
   const { repo, branch, dir } = ws;
+  const openPr = input.openPullRequest ?? true;
   const status = await git(['status', '--porcelain'], { cwd: dir });
   if (status.stdout.trim()) {
     await git(['add', '-A'], { cwd: dir });
-    await git(['commit', '-m', `${input.ref}: ${input.title}`], { cwd: dir });
+    await git(['commit', '-m', openPr ? `${input.ref}: ${input.title}` : `WIP ${input.ref}: ${input.title} (run stopped early)`], { cwd: dir });
   }
   const ahead = await git(['rev-list', '--count', `origin/${repo.defaultBranch}..${branch}`], { cwd: dir }).catch(() => ({ stdout: '0', stderr: '' }));
   const commits = Number(ahead.stdout.trim() || 0);
   if (commits === 0) return { pushed: false, prUrl: input.existingPrUrl, commits: 0 };
   await git(['push', '-u', 'origin', branch], { cwd: dir, repo });
-  if (input.existingPrUrl) return { pushed: true, prUrl: input.existingPrUrl, commits };
+  if (input.existingPrUrl || !openPr) return { pushed: true, prUrl: input.existingPrUrl, commits };
   if (repo.provider !== 'github') return { pushed: true, prUrl: null, commits };
   const prUrl = await openGithubPullRequest(repo, { head: branch, base: repo.defaultBranch, title: `${input.ref}: ${input.title}`, body: input.summary });
   return { pushed: true, prUrl, commits };

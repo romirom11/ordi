@@ -187,7 +187,7 @@ describe('the worker end to end', () => {
     expect(Object.keys(input.mcpServers)).toEqual(['ordi']);
     expect(input.mcpServers.ordi!.url).toContain('/api/v1/mcp');
     expect(input.allowedTools).toContain('mcp__ordi');
-    expect(input.maxTurns).toBe(60);
+    expect(input.maxTurns).toBe(200);
     expect(input.cwd).toContain(run.id);
 
     // Git: clone, branch, push with the repo token; the token never reaches the log.
@@ -287,12 +287,21 @@ describe('the worker end to end', () => {
     const owner = reqAs(ws.users.owner!.cookie);
     const task = await newTask('Broken');
     await assign(task.id, [agentId]);
-    restoreAdapter = setRuntimeAdapter(adapter(async () => ({ status: 'failed', sessionId: 's3', message: '', error: 'error_max_turns', usage, retryAt: null, report: null })));
+    restoreAdapter = setRuntimeAdapter(adapter(async () => ({ status: 'failed', sessionId: 's3', message: '', error: 'Reached maximum number of turns (60)', usage, retryAt: null, report: null })));
+    const gitLog: string[][] = [];
+    setGitRunner(fakeGit(gitLog));
     const run = await runToEnd(task.id);
     expect(run.status).toBe('failed');
-    expect(run.error).toBe('error_max_turns');
+    expect(run.error).toContain('maximum number of turns');
+    // Unfinished work is pushed to the branch, but no pull request is opened.
+    expect(gitLog.some((a) => a[0] === 'push')).toBe(true);
+    expect(run.branch).toMatch(/dsp-\d+-broken$/);
+    expect(run.prUrl).toBeNull();
     const detail = await json(owner.get(`/tasks/${task.id}?include=comments`));
     expect(detail.statusId).toBe(ws.todoStatusId);
+    const last = JSON.stringify((detail.comments as unknown[]).at(-1));
+    expect(last).toContain('Max turns');
+    expect(last).toContain(run.branch);
     // Retry queues a new run that resumes the session; cancel/retry need write on the project.
     const { agentActor } = await import('../workers/agent-runs');
     const memberActor = await agentActor(ws.users.member!.userId);
@@ -300,6 +309,15 @@ describe('the worker end to end', () => {
     expect(retried.trigger).toBe('retry');
     expect(retried.sessionId).toBe('s3');
     expect(retried.parentRunId).toBe(run.id);
+    // The retry resumes the session and tells the agent it is continuing.
+    let resumed: RuntimeRunInput | null = null;
+    restoreAdapter();
+    restoreAdapter = setRuntimeAdapter(adapter(async (input) => { resumed = input; return done(); }));
+    const [claimed] = await claimRuns('w', 1);
+    await executeRun(claimed!);
+    expect(resumed!.resume).toBe('s3');
+    expect(resumed!.prompt).toContain('Continue');
+    expect(resumed!.prompt).toContain('git status');
   });
 
   it('a cancel request aborts a running run', async () => {

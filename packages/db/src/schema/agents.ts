@@ -45,7 +45,7 @@ export const agentProfiles = pgTable('agent_profiles', {
   completionCategory: text('completion_category').notNull().default('in_review'),
   assignPolicy: text('assign_policy').notNull().default('project_members'),
   maxRunMinutes: integer('max_run_minutes').notNull().default(30),
-  maxTurns: integer('max_turns').notNull().default(60),
+  maxTurns: integer('max_turns').notNull().default(200),
   maxBudgetUsd: numeric('max_budget_usd', { precision: 10, scale: 2 }),
   concurrency: integer('concurrency').notNull().default(1),
   /** Overrides of the workspace primary/fallback credentials. */
