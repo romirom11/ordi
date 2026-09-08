@@ -136,6 +136,15 @@ commits ahead of the default branch (a renamed default branch, shallow
 history), the branch is pushed anyway rather than reported as "nothing to
 push".
 
+**Refused pushes.** A push refused by the provider (403: a GitHub App
+installation whose owner has not accepted the write permissions yet, or a
+token without repo write) fails the run with the cause in the error and the
+task comment, and the checkout is kept under `tasks/<taskId>/checkout`. The
+next run of the task continues in that checkout when it holds commits no
+remote has, so nothing is redone after the access is fixed. Git errors are
+redacted before they are stored: the `http.extraheader` value never reaches
+the log.
+
 **Runs and tasks.** One active run per task *and agent*: two agents assigned
 to one task each get their own run. A task in a done or cancelled status gets
 no run, whoever assigns or comments; a task closed while the agent works is

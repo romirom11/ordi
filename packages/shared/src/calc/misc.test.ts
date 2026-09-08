@@ -26,6 +26,19 @@ describe('buildBranchName', () => {
   it('builds slugged branch name', () => {
     expect(buildBranchName({ key: 'KLD', number: 42, title: 'Add Login Flow!' })).toBe('feature/kld-42-add-login-flow');
   });
+  it('transliterates Cyrillic titles instead of dropping them', () => {
+    expect(buildBranchName({ key: 'ORD', number: 26, title: 'Додати перевірку ролей у API' })).toBe('feature/ord-26-dodaty-perevirku-rolei-u-api');
+    expect(buildBranchName({ key: 'ORD', number: 3, title: 'Щоденний звіт: підсумки' })).toBe('feature/ord-3-shchodennyi-zvit-pidsumky');
+    expect(buildBranchName({ key: 'ORD', number: 4, title: 'Résumé upload für Kunden' })).toBe('feature/ord-4-resume-upload-fur-kunden');
+  });
+  it('leaves no dangling dash when nothing of the title survives', () => {
+    expect(buildBranchName({ key: 'ORD', number: 7, title: '🚀🔥' })).toBe('feature/ord-7');
+    expect(buildBranchName({ key: 'ORD', number: 8, title: '日本語のタイトル', template: '{key}-{number}-{slug}' })).toBe('ord-8');
+  });
+  it('does not cut the slug in the middle of a dash', () => {
+    const long = 'a'.repeat(49) + ' more words here';
+    expect(buildBranchName({ key: 'X', number: 1, title: long })).toBe(`feature/x-1-${'a'.repeat(49)}`);
+  });
 });
 
 describe('buildRedactedDiff', () => {

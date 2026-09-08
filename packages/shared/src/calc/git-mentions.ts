@@ -32,6 +32,30 @@ export function parseTaskRefs(text: string | null | undefined, opts?: { anyCase?
 }
 
 /** Generate a branch name from a template (PRD §13.1 "Copy branch name"). */
+/** Cyrillic → Latin (Ukrainian official romanization, plus the Russian-only letters). */
+const CYRILLIC: Record<string, string> = {
+  а: 'a', б: 'b', в: 'v', г: 'h', ґ: 'g', д: 'd', е: 'e', є: 'ie', ж: 'zh', з: 'z', и: 'y', і: 'i', ї: 'i', й: 'i',
+  к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch',
+  ш: 'sh', щ: 'shch', ю: 'iu', я: 'ia', ь: '', ъ: '', ы: 'y', э: 'e', ё: 'e',
+};
+
+/**
+ * A branch-safe slug of a title: Cyrillic transliterated, accents stripped,
+ * everything else collapsed to dashes. Empty when nothing survives (a title
+ * of emoji or CJK), and the caller drops the segment rather than leaving a
+ * dangling dash.
+ */
+export function slugifyTitle(title: string, max = 50): string {
+  return title
+    .toLowerCase()
+    .replace(/[\u0400-\u04ff]/g, (ch) => CYRILLIC[ch] ?? '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, max)
+    .replace(/-+$/, '');
+}
+
 export function buildBranchName(params: {
   template?: string;
   typePrefix?: string;
@@ -39,15 +63,13 @@ export function buildBranchName(params: {
   number: number;
   title: string;
 }): string {
-  const slug = params.title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 50);
+  const slug = slugifyTitle(params.title);
   const template = params.template ?? '{type}/{key}-{number}-{slug}';
-  return template
+  const name = template
     .replace('{type}', params.typePrefix ?? 'feature')
     .replace('{key}', params.key.toLowerCase())
     .replace('{number}', String(params.number))
     .replace('{slug}', slug);
+  // An empty slug must not leave "key-12-" behind.
+  return name.replace(/-+(?=\/|$)/g, '').replace(/-{2,}/g, '-');
 }

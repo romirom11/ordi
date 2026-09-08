@@ -191,7 +191,7 @@ function EventLine({ event }: { event: RunEvent }) {
 
   switch (event.type) {
     case 'assistant':
-      return shell(<Bot size={11} />, <p className="whitespace-pre-wrap text-[12px] text-foreground">{str(p.text)}</p>);
+      return shell(<Bot size={11} />, <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[12px] text-foreground">{str(p.text)}</p>);
     case 'tool_use':
       return shell(<Wrench size={11} />, (
         <details>
@@ -243,7 +243,7 @@ function EventLine({ event }: { event: RunEvent }) {
     case 'result': {
       const report = p.report as { summary?: string; question?: string } | null | undefined;
       const text = report?.summary || report?.question || str(p.message) || str(p.error);
-      return shell(<ChevronRight size={11} />, <p className="whitespace-pre-wrap text-[12px] text-foreground">{text}</p>);
+      return shell(<ChevronRight size={11} />, <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[12px] text-foreground">{text}</p>);
     }
     default:
       return shell(<ChevronRight size={11} />, <p className="text-[12px] text-muted-foreground">{str(p.message) || event.type}</p>);
@@ -346,7 +346,7 @@ function RunRow({ run, canAct, canRetry, hasActive }: {
           {/* An active row can carry a note like "cancel requested"; that is not
               a failure, so it must not paint the row red. */}
           {(run.summary || (run.error && !active)) && (
-            <p className={cn('mt-1 whitespace-pre-wrap text-[12px]', run.error && !active ? 'text-destructive' : 'text-muted-foreground')}>
+            <p className={cn('mt-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[12px]', run.error && !active ? 'text-destructive' : 'text-muted-foreground')}>
               {(!active && run.error) || run.summary}
             </p>
           )}

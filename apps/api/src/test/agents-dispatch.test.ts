@@ -448,6 +448,27 @@ describe('the worker end to end', () => {
     expect(JSON.stringify((detail.comments as unknown[]).at(-1))).not.toContain('No conversation found');
   });
 
+  it('a push refused with 403 keeps the checkout and tells the user what to fix', async () => {
+    const owner = reqAs(ws.users.owner!.cookie);
+    const task = await newTask('Denied');
+    await assign(task.id, [agentId]);
+    restoreAdapter = setRuntimeAdapter(adapter(async () => done()));
+    setGitRunner(async (args, opts) => {
+      if (args[0] === 'clone') { await mkdir(args[args.length - 1]!, { recursive: true }); return { stdout: '', stderr: '' }; }
+      if (args[0] === 'rev-list') return { stdout: '1\n', stderr: '' };
+      if (args[0] === 'push') throw new Error(`Command failed: git push -u origin ${opts.cwd}\nremote: Permission to acme/app.git denied to ordi[bot].\nfatal: unable to access: The requested URL returned error: 403`);
+      return { stdout: '', stderr: '' };
+    });
+    const run = await runToEnd(task.id);
+    expect(run.status).toBe('failed');
+    expect(run.error).toContain('write access');
+    await expect(stat(`${taskDir(task.id)}/checkout`)).resolves.toBeTruthy();
+    const detail = await json(owner.get(`/tasks/${task.id}?include=comments`));
+    const last = JSON.stringify((detail.comments as unknown[]).at(-1));
+    expect(last).toContain('Installed GitHub Apps');
+    expect(last).toContain('Retry');
+  });
+
   it('a cancel request aborts a running run', async () => {
     const task = await newTask('Cancel me');
     await assign(task.id, [agentId]);

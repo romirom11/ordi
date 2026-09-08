@@ -7,13 +7,13 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getDb, schema } from '@ordi/db';
 import { resetDb, seedRolesAndUsers } from './helpers';
 import { setupWorkspace, type Workspace } from './agents-helpers';
-import { prepareWorkspace, publishWorkspace, cleanupWorkspace, setGitRunner, checkoutDir } from '../domains/agents/workspace';
+import { prepareWorkspace, publishWorkspace, cleanupWorkspace, setGitRunner, checkoutDir, redactGitError, explainPushError } from '../domains/agents/workspace';
 import { encrypt } from '../lib/crypto';
 import { env } from '../env';
 
@@ -109,4 +109,54 @@ describe('workspace with real git', () => {
     expect(await git(['log', '-1', '--format=%s', branch], bare)).toContain('WIP WSG-1');
     await cleanupWorkspace(ws.taskId);
   }, 30_000);
+
+  it('a refused push keeps the checkout, leaks no token, and the next run continues in it', async () => {
+    const input = { taskId: ws.taskId, projectId: ws.projectId, projectKey: 'WSG', taskNumber: 2, taskTitle: 'Refused push', agentName: 'Claude', agentEmail: 'claude@test.local' };
+    const w = await prepareWorkspace(input);
+    expect(w.reused).toBeUndefined();
+    await writeFile(join(w.dir, 'src.txt'), 'work worth keeping\n');
+    // origin refuses every push, the way a read-only installation does.
+    const hook = join(bare, 'hooks', 'pre-receive');
+    await writeFile(hook, '#!/bin/sh\necho "remote: Permission to acme/real denied to ordi[bot]." >&2\nexit 1\n');
+    await chmod(hook, 0o755);
+    let failure: Error | null = null;
+    try {
+      await publishWorkspace(w, { ref: 'WSG-2', title: 'Refused push', summary: '', existingPrUrl: null });
+    } catch (e) { failure = e as Error; }
+    expect(failure).not.toBeNull();
+    expect(failure!.message).toContain('Permission to acme/real denied');
+    expect(failure!.message).not.toContain('basic eC1hY2Nlc3M');
+    expect(failure!.message).not.toMatch(/basic [A-Za-z0-9+/=]{20,}/);
+    expect(failure!.message).not.toContain('local');
+    expect(failure!.message).toContain('[redacted]');
+    expect(explainPushError(failure!.message)).toContain('Retry');
+
+    // The worker keeps the checkout; the next run for the task continues in it.
+    await cleanupWorkspace(ws.taskId, { keepCheckout: true });
+    await expect(stat(join(w.dir, '.git'))).resolves.toBeTruthy();
+    const again = await prepareWorkspace({ ...input, existingBranch: w.branch });
+    expect(again.reused).toBe(true);
+    expect((await git(['log', '-1', '--format=%s'], again.dir)).trim()).toBe('WSG-2: Refused push');
+    // Access fixed: the same commits go out.
+    await rm(hook);
+    const published = await publishWorkspace(again, { ref: 'WSG-2', title: 'Refused push', summary: '', existingPrUrl: null });
+    expect(published).toMatchObject({ pushed: true, commits: 1 });
+    expect(await git(['log', '-1', '--format=%s', again.branch!], bare)).toContain('WSG-2: Refused push');
+    // Pushed now: a later run clones afresh instead of reusing.
+    await cleanupWorkspace(ws.taskId, { keepCheckout: true });
+    const fresh = await prepareWorkspace({ ...input, existingBranch: w.branch });
+    expect(fresh.reused).toBeUndefined();
+    await cleanupWorkspace(ws.taskId);
+  }, 30_000);
+
+  it('redactGitError strips the header, its base64 payload and the raw token', () => {
+    const repo = { repositoryId: 'r', fullName: 'acme/real', defaultBranch: 'main', provider: 'github', instanceUrl: null, token: 'ghs_secret_token_value', htmlUrl: 'https://github.com' };
+    const encoded = Buffer.from('x-access-token:ghs_secret_token_value').toString('base64');
+    const message = `Command failed: git -c http.extraheader=AUTHORIZATION: basic ${encoded} push -u origin b\nremote: denied ${encoded} ghs_secret_token_value`;
+    const out = redactGitError(message, repo);
+    expect(out).not.toContain(encoded);
+    expect(out).not.toContain('ghs_secret_token_value');
+    expect(out).toContain('AUTHORIZATION: basic [redacted]');
+    expect(redactGitError(message, null)).toBe(message);
+  });
 });
