@@ -44,6 +44,7 @@ export function usersRoutes() {
     const [rows, emps] = await Promise.all([
       db.select({
         id: schema.users.id, name: schema.users.name, avatar: schema.users.avatar, isActive: schema.users.isActive,
+        actorType: schema.users.actorType,
       }).from(schema.users),
       db.select({
         userId: schema.employees.userId, firstName: schema.employees.firstName,

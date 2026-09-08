@@ -93,6 +93,16 @@ function invalidateFor(qc: QueryClient, type: string, data: any): void {
   } else if (type.startsWith('time.')) {
     inv(['time']);
     inv(['timer']);
+  } else if (type === 'agent.run_event') {
+    // One frame per streamed SDK message: refresh the open log, nothing else.
+    if (data?.runId) inv(['agent-run-events', data.runId]);
+  } else if (type.startsWith('agent.')) {
+    // Run lifecycle – the runs list on the task, and the task itself, because
+    // the agent comments and moves the status as it works.
+    inv(['agent-runs']); // prefix-matches ['agent-runs', taskId]
+    if (data?.taskId) inv(['task', data.taskId]);
+    inv(['tasks']);
+    inv(['me-tasks']);
   } else if (type === 'role.updated') {
     inv(['me']);
   }
@@ -159,6 +169,8 @@ export function useRealtime(): void {
         'git.branch_created', 'git.pr_opened', 'git.pr_merged', 'git.pr_closed',
         'employee.onboarded', 'employee.exited', 'leave.requested', 'leave.decided',
         'applicant.hired', 'role.updated',
+        'agent.run_queued', 'agent.run_started', 'agent.run_finished', 'agent.needs_input',
+        'agent.run_event',
     ]);
 
     const onEvent = (type: string, raw: string) => {

@@ -64,6 +64,16 @@ const HR: Permission[] = [
   'projects.read',
 ];
 
+/**
+ * The default role for AI agent users: work tasks in the projects they are a
+ * member of and read the knowledge base. No finance, people or settings –
+ * an owner who wants more picks another role for the agent.
+ */
+const AGENT: Permission[] = [
+  'projects.read', 'projects.write',
+  'kb.read',
+];
+
 /** Guest: no global permissions; access is purely via project/space membership. */
 const GUEST: Permission[] = [];
 
@@ -79,6 +89,7 @@ export const PRESET_ROLES: RoleSeed[] = [
   { key: 'finance', name: 'Finance', description: 'Full finance incl. costs & profitability.', isSystem: false, permissions: FINANCE },
   { key: 'hr', name: 'HR', description: 'People module fully except compensation.', isSystem: false, permissions: HR },
   { key: 'guest', name: 'Guest', description: 'External: access only via project/space membership.', isSystem: false, permissions: GUEST },
+  { key: 'agent', name: 'Agent', description: 'AI agent: works tasks in its projects and reads the knowledge base.', isSystem: false, permissions: AGENT },
 ];
 
 export const ALL_ROLE_SEEDS: RoleSeed[] = [...SYSTEM_ROLES, ...PRESET_ROLES];

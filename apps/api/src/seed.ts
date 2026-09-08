@@ -52,12 +52,21 @@ async function main() {
   }
   const ownerId = owner!.id;
 
-  const [agentUser] = await db.select().from(schema.users).where(eq(schema.users.email, 'agent@ordi.local'));
+  // The demo AI agent (plan 2026-09-05-001): an agent user on the Agent
+  // preset role with a profile, so the assignee picker shows one out of the
+  // box. It dispatches once an owner connects Claude under Settings → Agents.
+  let [agentUser] = await db.select().from(schema.users).where(eq(schema.users.email, 'agent@ordi.local'));
   if (!agentUser) {
+    const id = ulid();
     await db.insert(schema.users).values({
-      id: ulid(), email: 'agent@ordi.local', name: 'Agent', roleId: roleIds.get('manager')!, actorType: 'agent',
+      id, email: 'agent@ordi.local', name: 'Claude', roleId: roleIds.get('agent') ?? roleIds.get('manager')!, actorType: 'agent',
+      emailNotificationPrefs: { __all: false },
     });
+    [agentUser] = await db.select().from(schema.users).where(eq(schema.users.id, id));
   }
+  await db.insert(schema.agentProfiles).values({
+    userId: agentUser!.id, runtime: 'claude_code', instructions: 'Keep diffs small and explain what you changed in the pull request.',
+  }).onConflictDoNothing();
 
   // Extra demo members
   const memberEmail = 'member@ordi.local';
@@ -95,6 +104,8 @@ async function main() {
     await db.insert(schema.projectMembers).values([
       { projectId: id, userId: ownerId, role: 'admin', canWriteTasks: true },
       { projectId: id, userId: member!.id, role: 'member', canWriteTasks: true },
+      // The demo agent is a member here, so it can be assigned work (R48).
+      { projectId: id, userId: agentUser!.id, role: 'member', canWriteTasks: true },
     ]);
     const statuses = [
       { name: 'Backlog', category: 'backlog', position: 0, isDefault: false, color: '#94a3b8' },

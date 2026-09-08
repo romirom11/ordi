@@ -1,7 +1,7 @@
 import { clsx } from 'clsx';
 import { forwardRef, Fragment, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { Bot, ChevronDown, ChevronRight } from 'lucide-react';
 import { usePageTitle } from '../lib/tabs';
 import { Link } from '../lib/router';
 import { resolveFileSrc } from '../lib/uploads';
@@ -386,30 +386,59 @@ function hueFor(seed: string): number {
   return AVATAR_HUES[Math.abs(h) % AVATAR_HUES.length]!;
 }
 
-export function Avatar({ name, src, size = 20, className }: { name?: string | null; src?: string | null; size?: number; className?: string }) {
+/**
+ * The marker that tells a human apart from an AI agent employee (R4). It rides
+ * on the avatar itself, so every list, chip and comment that already renders a
+ * face gets the distinction for free.
+ */
+function AgentMark({ size }: { size: number }) {
+  const dot = Math.max(9, Math.round(size * 0.46));
+  return (
+    <span
+      aria-hidden
+      style={{ width: dot, height: dot }}
+      className="pointer-events-none absolute -bottom-0.5 -right-0.5 grid place-items-center rounded-full border border-card bg-primary text-primary-foreground"
+    >
+      <Bot size={Math.max(6, Math.round(dot * 0.68))} strokeWidth={2.5} />
+    </span>
+  );
+}
+
+export function Avatar({ name, src, size = 20, className, agent }: {
+  name?: string | null; src?: string | null; size?: number; className?: string;
+  /** Render the AI agent marker over the avatar. */
+  agent?: boolean;
+}) {
   const initials = (name ?? '?')
     .split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('') || '?';
   const hue = hueFor(name ?? '?');
   const style: CSSProperties = { width: size, height: size, fontSize: Math.max(8, Math.round(size * 0.42)) };
-  if (src) {
+  const face = src
     // Stored avatars are root-relative signed paths; in the desktop shell they
     // would resolve against tauri://localhost and silently render nothing.
-    return <img src={resolveFileSrc(src)} alt={name ?? ''} style={style} className={cn('shrink-0 rounded-full object-cover', className)} />;
-  }
+    ? <img src={resolveFileSrc(src)} alt={name ?? ''} style={style} className={cn('shrink-0 rounded-full object-cover', className)} />
+    : (
+      <span
+        style={{ ...style, backgroundColor: `hsl(${hue} 45% 38%)`, color: 'white' }}
+        className={cn('grid shrink-0 select-none place-items-center rounded-full font-semibold leading-none', className)}
+        title={name ?? undefined}
+      >
+        {initials}
+      </span>
+    );
+  if (!agent) return face;
   return (
-    <span
-      style={{ ...style, backgroundColor: `hsl(${hue} 45% 38%)`, color: 'white' }}
-      className={cn('grid shrink-0 select-none place-items-center rounded-full font-semibold leading-none', className)}
-      title={name ?? undefined}
-    >
-      {initials}
+    <span className="relative inline-flex shrink-0" style={{ width: size, height: size }}>
+      {face}
+      <AgentMark size={size} />
     </span>
   );
 }
 
 /** Overlapping avatar row with lift-on-hover (transitions.dev №11, simplified). */
 export function AvatarGroup({ users, size = 20, max = 4 }: {
-  users: { id: string; name?: string | null; avatar?: string | null }[]; size?: number; max?: number;
+  users: { id: string; name?: string | null; avatar?: string | null; actorType?: string | null }[];
+  size?: number; max?: number;
 }) {
   const shown = users.slice(0, max);
   const rest = users.length - shown.length;
@@ -421,7 +450,7 @@ export function AvatarGroup({ users, size = 20, max = 4 }: {
           className="rounded-full ring-2 ring-card transition-transform duration-[350ms] [transition-timing-function:var(--ease-bounce-strong)] hover:-translate-y-0.5 hover:scale-105 hover:duration-150 hover:[transition-timing-function:var(--ease-smooth-out)]"
           style={{ marginLeft: i === 0 ? 0 : -Math.round(size / 3), zIndex: i + 1 }}
         >
-          <Avatar name={u.name} src={u.avatar} size={size} />
+          <Avatar name={u.name} src={u.avatar} size={size} agent={u.actorType === 'agent'} />
         </span>
       ))}
       {rest > 0 && (

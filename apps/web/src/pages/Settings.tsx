@@ -1,22 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { PERMISSIONS, PERMISSION_META, type Permission } from '@ordi/shared';
+import {
+  AGENT_ASSIGN_POLICIES, AGENT_RUNTIMES, EXECUTABLE_AGENT_RUNTIMES,
+  PERMISSIONS, PERMISSION_META, type Permission,
+} from '@ordi/shared';
 import {
   Building2, ArrowLeftRight, Users as UsersIcon, Shield, SlidersHorizontal, Wallet, Plug,
   ScrollText, Inbox, Plus, Copy, Upload, Trash2, Lock, Globe, ImageIcon, ChevronRight,
   ChevronLeft, MoreHorizontal, Check, RotateCcw, Boxes, Receipt, FolderKanban, Bot, CalendarClock,
-  KeyRound, Sun,
+  KeyRound, Sun, Plug2,
 } from 'lucide-react';
-import { api, qs } from '../lib/api';
+import { api, qs, ApiError } from '../lib/api';
 import { Link } from '../lib/router';
 import { useCan } from '../lib/auth';
 import {
-  Button, Input, Select, Card, Badge, PageBody, Breadcrumbs, EmptyState, Skeleton, Switch, Avatar, Spinner, cn,
+  Button, Input, Select, Card, Badge, Checkbox, PageBody, Breadcrumbs, EmptyState, Skeleton, Switch, Avatar, Spinner, cn,
 } from '../components/ui';
 import { Dialog, ConfirmDialog, DropdownMenu, MenuItem, toast } from '../components/overlays';
 import { ImportExportPanel } from '../components/ImportExportPanel';
 import { IntegrationsPanel } from '../components/settings/IntegrationsPanel';
 import { McpPanel } from '../components/settings/McpPanel';
+import { AgentsPanel } from '../components/settings/AgentsPanel';
+import { McpConnectorsPanel } from '../components/settings/McpConnectorsPanel';
 import { InvoicesPanel } from '../components/settings/InvoicesPanel';
 import { ModulesPanel } from '../components/settings/ModulesPanel';
 import { ChartOfAccountsBlock, ExpenseCategoriesBlock } from '../components/finance/accounts';
@@ -27,6 +32,7 @@ import { CustomFieldsPanel } from '../components/settings/CustomFieldsPanel';
 import { FieldGroupMatrix } from '../components/settings/FieldGroupMatrix';
 import { SectionHead, SettingRow, Field, RowList, AnimatedRow } from '../components/settings/primitives';
 import { downscaleImage } from '../components/settings/image';
+import { useMcpConnectors } from '../lib/queries';
 import { usePageTitle } from '../lib/tabs';
 import { useT } from '../lib/i18n';
 import { extendDict } from '../lib/i18n';
@@ -39,6 +45,15 @@ extendDict({
     'settings.groupMembers': 'Members',
     'settings.groupConfig': 'Configuration',
     'settings.groupSystem': 'System',
+    'settings.groupAgents': 'AI agents',
+    'settings.agents': 'Agents',
+    'settings.connectors': 'Connectors',
+    'settings.agentBadge': 'Agent',
+    'settings.isAgent': 'This is an AI agent',
+    'settings.isAgentHint': 'It joins as a member without a password and works through Claude Code.',
+    'settings.agentCreated': 'Agent created',
+    'settings.agentCreateFailed': 'Could not create the agent',
+    'settings.createAgent': 'Create agent',
     'settings.workspaceDesc': 'Your workspace identity and defaults.',
     'settings.logo': 'Logo',
     'settings.logoHint': 'Square image, at least 128×128. PNG or WebP.',
@@ -110,6 +125,15 @@ extendDict({
     'settings.groupMembers': 'Учасники',
     'settings.groupConfig': 'Налаштування',
     'settings.groupSystem': 'Система',
+    'settings.groupAgents': 'AI-агенти',
+    'settings.agents': 'Агенти',
+    'settings.connectors': 'Конектори',
+    'settings.agentBadge': 'Агент',
+    'settings.isAgent': 'Це AI-агент',
+    'settings.isAgentHint': 'Він приєднається як учасник без пароля і працюватиме через Claude Code.',
+    'settings.agentCreated': 'Агента створено',
+    'settings.agentCreateFailed': 'Не вдалося створити агента',
+    'settings.createAgent': 'Створити агента',
     'settings.workspaceDesc': 'Ідентичність робочого простору та типові значення.',
     'settings.logo': 'Логотип',
     'settings.logoHint': 'Квадратне зображення, щонайменше 128×128. PNG або WebP.',
@@ -266,6 +290,13 @@ const GROUPS: NavGroup[] = [
     ],
   },
   {
+    label: 'settings.groupAgents',
+    items: [
+      { id: 'agents', label: 'settings.agents', perm: 'agents.manage', icon: Bot },
+      { id: 'connectors', label: 'settings.connectors', perm: 'integrations.manage', icon: Plug2 },
+    ],
+  },
+  {
     label: 'settings.groupSystem',
     items: [
       { id: 'audit', label: 'settings.auditLog', perm: 'audit.read', icon: ScrollText },
@@ -373,6 +404,8 @@ export function SettingsPage({ section }: { section?: string }) {
             {active.id === 'invoices' && <InvoicesPanel />}
             {active.id === 'integrations' && <IntegrationsPanel />}
             {active.id === 'mcp' && <McpPanel />}
+            {active.id === 'agents' && <AgentsPanel />}
+            {active.id === 'connectors' && <McpConnectorsPanel />}
             {active.id === 'audit' && <AuditPanel />}
             {active.id === 'events' && <DlqPanel />}
             {active.id === 'import-export' && <ImportExportPanel />}
@@ -720,10 +753,11 @@ function UsersPanel() {
           ))}
           {rows.map((u, i) => (
             <AnimatedRow key={u.id} index={pending.length + i} className="flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-0">
-              <Avatar name={u.name} src={u.avatar} size={28} />
+              <Avatar name={u.name} src={u.avatar} size={28} agent={u.actorType === 'agent'} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="truncate text-[13px] font-medium">{u.name ?? '–'}</span>
+                  {u.actorType === 'agent' && <Badge className="bg-primary/10 text-primary">{t('settings.agentBadge')}</Badge>}
                   {u.isActive === false && <Badge className="bg-destructive/10 text-destructive">{t('settings.deactivated')}</Badge>}
                 </div>
                 <div className="truncate text-xs text-faint">{u.email}</div>
@@ -788,6 +822,7 @@ function UsersPanel() {
 
 function InviteDialog({ open, onClose, roles }: { open: boolean; onClose: () => void; roles: Role[] }) {
   const t = useT();
+  const can = useCan();
   const qc = useQueryClient();
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
@@ -795,9 +830,50 @@ function InviteDialog({ open, onClose, roles }: { open: boolean; onClose: () => 
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [emailSent, setEmailSent] = useState(true);
 
+  // The agent path of the same dialog (R1): same person, same permissions,
+  // one switch. Creating an agent needs users.manage *and* agents.manage.
+  const canCreateAgent = can('users.manage') && can('agents.manage');
+  const [isAgent, setIsAgent] = useState(false);
+  const [runtime, setRuntime] = useState<string>('claude_code');
+  const [assignPolicy, setAssignPolicy] = useState<string>('project_members');
+  const [connectorIds, setConnectorIds] = useState<string[]>([]);
+  const connectorsQ = useMcpConnectors(open && isAgent && can('integrations.manage'));
+  const connectors = connectorsQ.data ?? [];
+  const humanRoleId = roles.find((r) => !r.isSystem)?.id ?? roles[0]?.id ?? '';
+  const agentRoleId = roles.find((r) => r.key === 'agent')?.id ?? humanRoleId;
+
   useEffect(() => {
-    if (open) { setEmail(''); setName(''); setRoleId(roles.find((r) => !r.isSystem)?.id ?? roles[0]?.id ?? ''); setInviteUrl(null); setEmailSent(true); }
+    if (open) {
+      setEmail(''); setName(''); setRoleId(humanRoleId); setInviteUrl(null); setEmailSent(true);
+      setIsAgent(false); setRuntime('claude_code'); setAssignPolicy('project_members'); setConnectorIds([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, roles]);
+
+  // Switching mode swaps the sensible default role, not one the admin picked.
+  const toggleAgent = (on: boolean) => {
+    setIsAgent(on);
+    setRoleId(on ? agentRoleId : humanRoleId);
+  };
+
+  const createAgent = useMutation({
+    mutationFn: () => api.post('/agents', {
+      name: name.trim(),
+      roleId: roleId || undefined,
+      runtime,
+      assignPolicy,
+      connectorIds,
+      enabled: true,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+      qc.invalidateQueries({ queryKey: ['users-lookup'] });
+      qc.invalidateQueries({ queryKey: ['agents'] });
+      toast(t('settings.agentCreated'));
+      onClose();
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('settings.agentCreateFailed')),
+  });
 
   const invite = useMutation({
     mutationFn: () => api.post<{ inviteUrl?: string; emailSent?: boolean }>('/users/invite', { email, name, roleId }),
@@ -814,15 +890,72 @@ function InviteDialog({ open, onClose, roles }: { open: boolean; onClose: () => 
   });
 
   return (
-    <Dialog open={open} onClose={onClose} title={t('settings.inviteUser')} width={420}>
+    <Dialog open={open} onClose={onClose} title={isAgent ? t('settings.createAgent') : t('settings.inviteUser')} width={420}>
       <div className="space-y-3 p-4">
-        <Field label={t('settings.name')}><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Jane Doe" autoFocus /></Field>
-        <Field label={t('auth.email')}><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="jane@company.com" /></Field>
+        {canCreateAgent && (
+          <div className="flex items-center justify-between gap-4 rounded-md border border-border bg-muted/40 px-3 py-2">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 text-[13px] font-medium"><Bot size={14} /> {t('settings.isAgent')}</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">{t('settings.isAgentHint')}</div>
+            </div>
+            <Switch checked={isAgent} onChange={toggleAgent} label={t('settings.isAgent')} />
+          </div>
+        )}
+        <Field label={t('settings.name')}><Input value={name} onChange={(e) => setName(e.target.value)} placeholder={isAgent ? 'Ada' : 'Jane Doe'} autoFocus /></Field>
+        {!isAgent && (
+          <Field label={t('auth.email')}><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="jane@company.com" /></Field>
+        )}
         <Field label={t('settings.role')}>
           <Select value={roleId} onChange={(e) => setRoleId(e.target.value)} className="w-full">
             {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </Select>
         </Field>
+
+        {isAgent && (
+          <>
+            <Field label={t('agents.runtime')}>
+              <Select value={runtime} onChange={(e) => setRuntime(e.target.value)} className="w-full">
+                {AGENT_RUNTIMES.map((r) => {
+                  const executable = (EXECUTABLE_AGENT_RUNTIMES as readonly string[]).includes(r);
+                  return (
+                    <option key={r} value={r} disabled={!executable}>
+                      {t(`agents.runtime.${r}`)}{executable ? '' : ` – ${t('agents.comingSoon')}`}
+                    </option>
+                  );
+                })}
+              </Select>
+            </Field>
+            <Field label={t('agents.assignPolicy')}>
+              <Select value={assignPolicy} onChange={(e) => setAssignPolicy(e.target.value)} className="w-full">
+                {AGENT_ASSIGN_POLICIES.map((p) => <option key={p} value={p}>{t(`agents.policy.${p}`)}</option>)}
+              </Select>
+            </Field>
+            <p className="-mt-1 text-[11px] text-faint">{t(`agents.policyHint.${assignPolicy}`)}</p>
+            <div>
+              <div className="mb-1 text-xs font-medium text-muted-foreground">{t('agents.connectors')}</div>
+              <div className="grid max-h-32 grid-cols-2 gap-x-3 gap-y-1.5 overflow-y-auto rounded-md border border-border p-2.5">
+                {/* Always attached – the agent talks to ordi through it. */}
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground" title={t('agents.builtinConnectorHint')}>
+                  <Checkbox checked disabled />
+                  <span className="truncate">{t('agents.builtinConnector')}</span>
+                </label>
+                {connectors.map((c) => (
+                  <label key={c.id} className="flex cursor-pointer items-center gap-1.5 text-xs">
+                    <Checkbox
+                      checked={connectorIds.includes(c.id)}
+                      onChange={() => setConnectorIds((ids) => (ids.includes(c.id) ? ids.filter((x) => x !== c.id) : [...ids, c.id]))}
+                    />
+                    <span className="truncate">{c.name}</span>
+                  </label>
+                ))}
+              </div>
+              {!can('integrations.manage')
+                ? <p className="mt-1 text-[11px] text-faint">{t('agents.connectorsNoAccess')}</p>
+                : connectors.length === 0 ? <p className="mt-1 text-[11px] text-faint">{t('agents.connectorsEmpty')}</p> : null}
+            </div>
+          </>
+        )}
+
         {inviteUrl ? (
           <div className={cn('rounded-md border p-3', emailSent ? 'border-border bg-muted/50' : 'border-warning/40 bg-warning/5')}>
             <p className="mb-2 text-xs text-muted-foreground">
@@ -836,7 +969,15 @@ function InviteDialog({ open, onClose, roles }: { open: boolean; onClose: () => 
         ) : null}
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="ghost" size="sm" onClick={onClose}>{inviteUrl ? t('common.close') : t('common.cancel')}</Button>
-          {!inviteUrl && <Button size="sm" onClick={() => invite.mutate()} disabled={!email || !name || !roleId || invite.isPending}>{invite.isPending ? <Spinner /> : <Plus size={14} />} {t('settings.invite')}</Button>}
+          {!inviteUrl && (isAgent ? (
+            <Button size="sm" onClick={() => createAgent.mutate()} disabled={!name || !roleId || createAgent.isPending}>
+              {createAgent.isPending ? <Spinner /> : <Bot size={14} />} {t('settings.createAgent')}
+            </Button>
+          ) : (
+            <Button size="sm" onClick={() => invite.mutate()} disabled={!email || !name || !roleId || invite.isPending}>
+              {invite.isPending ? <Spinner /> : <Plus size={14} />} {t('settings.invite')}
+            </Button>
+          ))}
         </div>
       </div>
     </Dialog>

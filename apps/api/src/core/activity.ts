@@ -51,6 +51,10 @@ const FEED_VISIBILITY: Record<string, Permission> = {
   custom_field: 'settings.manage',
   slack_connection: 'integrations.manage',
   git_connection: 'integrations.manage',
+  mcp_connector: 'integrations.manage',
+  agent: 'agents.manage',
+  agent_credential: 'agents.manage',
+  agent_run: 'projects.read',
   dead_letter_event: 'audit.read',
   event: 'audit.read',
 };

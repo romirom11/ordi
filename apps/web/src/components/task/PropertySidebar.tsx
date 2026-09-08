@@ -303,6 +303,7 @@ export function PropertySidebar({ task, statuses, users, onPatch, hasRepos }: {
                     users={task.assignees.map((a) => ({
                       id: a.userId, name: a.name,
                       avatar: a.avatar ?? users.find((u) => u.id === a.userId)?.avatar,
+                      actorType: users.find((u) => u.id === a.userId)?.actorType,
                     }))}
                     size={18}
                     max={4}
@@ -319,7 +320,7 @@ export function PropertySidebar({ task, statuses, users, onPatch, hasRepos }: {
           {pickableAssignees.map((u) => (
             <ToggleItem
               key={u.id}
-              icon={<Avatar name={u.name} src={u.avatar} size={18} className={u.isActive === false ? 'opacity-60' : undefined} />}
+              icon={<Avatar name={u.name} src={u.avatar} size={18} agent={u.actorType === 'agent'} className={u.isActive === false ? 'opacity-60' : undefined} />}
               checked={assigneeIds.includes(u.id)}
               onToggle={() => toggleAssignee(u.id)}
             >

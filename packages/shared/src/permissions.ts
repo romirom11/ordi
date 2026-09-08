@@ -15,6 +15,7 @@ export const PERMISSION_DOMAINS = [
   'finance',
   'people',
   'integrations',
+  'agents',
   'settings',
 ] as const;
 
@@ -64,6 +65,8 @@ export const PERMISSIONS = [
   'people.recruit',
   // integrations
   'integrations.manage',
+
+  'agents.manage',
   // settings
   'settings.manage',
   'users.manage',
@@ -115,7 +118,8 @@ export const PERMISSION_META: Record<Permission, { domain: PermissionDomain; lab
   'people.manage_leave': { domain: 'people', label: 'Manage leave types/quotas/calendars' },
   'people.approve_leave': { domain: 'people', label: 'Approve leave outside manager line' },
   'people.recruit': { domain: 'people', label: 'Openings, applicants, interviews' },
-  'integrations.manage': { domain: 'integrations', label: 'Manage git & webhooks' },
+  'integrations.manage': { domain: 'integrations', label: 'Manage git, webhooks & MCP connectors' },
+  'agents.manage': { domain: 'agents', label: 'Connect Claude, create AI agents, grant them connectors' },
   'settings.manage': { domain: 'settings', label: 'Workspace settings, templates, custom fields' },
   'users.manage': { domain: 'settings', label: 'Invite/manage users' },
   'roles.manage': { domain: 'settings', label: 'Manage roles' },

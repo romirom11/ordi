@@ -214,6 +214,7 @@ export function ActivityFeed({ taskId, comments, users }: {
               <Avatar
                 name={item.comment.authorName ?? nameOf(item.comment.authorId)}
                 src={users.find((u) => u.id === item.comment.authorId)?.avatar}
+                agent={users.find((u) => u.id === item.comment.authorId)?.actorType === 'agent'}
                 size={22}
                 className="mt-0.5"
               />
@@ -235,7 +236,7 @@ export function ActivityFeed({ taskId, comments, users }: {
               {(() => {
                 const actor = item.entry.actorId ? users.find((u) => u.id === item.entry.actorId) : undefined;
                 return actor
-                  ? <Avatar name={actor.name} src={actor.avatar} size={16} className="shrink-0" />
+                  ? <Avatar name={actor.name} src={actor.avatar} size={16} agent={actor.actorType === 'agent'} className="shrink-0" />
                   : <span className="mx-1 h-1.5 w-1.5 shrink-0 rounded-full bg-border-strong" />;
               })()}
               <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">

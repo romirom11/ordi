@@ -40,6 +40,8 @@ import { financeRoutes } from './domains/finance/routes';
 import { peopleRoutes } from './domains/people/routes';
 import { integrationsRoutes } from './domains/integrations/routes';
 import { publicRoutes } from './domains/public/routes';
+import { agentsRoutes } from './domains/agents/routes';
+import { gatewayRoutes } from './domains/agents/gateway';
 import { mountWeb, webDistDir } from './web';
 
 async function readyz(c: Context) {
@@ -65,7 +67,7 @@ export function createApp() {
   const publicOAuthPath = (path: string): boolean =>
     path.startsWith('/.well-known/') || path.includes('/.well-known/')
     || path === '/api/v1/oauth/register' || path === '/api/v1/oauth/token'
-    || path === '/api/v1/mcp';
+    || path === '/api/v1/mcp' || /^\/api\/v1\/mcp-connectors\/[^/]+\/mcp$/.test(path);
   const openCors = cors({ origin: '*', allowHeaders: ['Content-Type', 'Authorization', 'mcp-protocol-version'] });
   const appCors = cors({
     origin: (origin) => (env.corsOrigins.includes(origin) || !origin ? origin : env.corsOrigins[0]!),
@@ -104,6 +106,8 @@ export function createApp() {
   // can answer 401 with the discovery header instead of the app error shape.
   app.route('/api/v1/oauth', oauthRoutes());
   app.route('/api/v1/mcp', mcpRoutes());
+  // Connector gateway for agent runs: bearer = the per-run token, checked there.
+  app.route('/api/v1/mcp-connectors', gatewayRoutes());
 
   // Public routes (no auth): invoices/quotes/portal/intake/careers/git webhooks.
   // Mounted twice: at the root (direct API access) and under /api/v1, because the
@@ -146,6 +150,7 @@ export function createApp() {
   api.route('/', financeRoutes()); // /invoices, /quotes, /payments...
   api.route('/', peopleRoutes()); // /employees, /leave...
   api.route('/', integrationsRoutes()); // /integrations, /webhooks, /git
+  api.route('/', agentsRoutes()); // /agents, /agent-credentials, /mcp-connectors, /agent-runs
 
   app.route('/api/v1', api);
 

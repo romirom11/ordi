@@ -26,6 +26,12 @@ FROM node:22-slim AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
+# git is a runtime dependency, not a build tool: the agent worker clones the
+# project's repository per run and pushes the agent's branch back (plan R15,
+# R26). ca-certificates comes with it so those https clones can verify GitHub.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 # Install deps (workspace-aware). Every workspace package the API depends on
@@ -38,6 +44,27 @@ COPY packages/db/package.json packages/db/
 COPY packages/mcp/package.json packages/mcp/
 COPY apps/api/package.json apps/api/
 RUN pnpm install --frozen-lockfile=false --filter @ordi/api...
+
+# The Claude runtime the agent worker drives ships as an OPTIONAL platform
+# dependency of @anthropic-ai/claude-agent-sdk (…-linux-x64 / …-linux-arm64),
+# so a well-meaning --no-optional here would build an image that installs
+# cleanly and then fails at the first agent run. Fail the build instead:
+# import the SDK the way the adapter does and resolve the binary it spawns.
+WORKDIR /app/apps/api
+RUN node --input-type=module -e "\
+import { createRequire } from 'node:module'; \
+const sdk = await import('@anthropic-ai/claude-agent-sdk'); \
+if (typeof sdk.query !== 'function') throw new Error('claude-agent-sdk did not export query()'); \
+const require = createRequire(import.meta.resolve('@anthropic-ai/claude-agent-sdk')); \
+const bin = require.resolve('@anthropic-ai/claude-agent-sdk-' + process.platform + '-' + process.arch + '/claude'); \
+console.log('claude runtime: ' + bin);"
+WORKDIR /app
+
+# Per-run checkouts live here (AGENT_WORK_DIR): the worker clones into
+# /data/agent-work/<runId> and deletes the directory when the run ends. Both
+# compose files mount a named volume on it – no VOLUME instruction here, or
+# every `docker run` of this image would leave an anonymous volume behind.
+RUN mkdir -p /data/agent-work
 
 # Copy sources
 COPY packages/shared packages/shared
