@@ -869,6 +869,8 @@ function InviteDialog({ open, onClose, roles }: { open: boolean; onClose: () => 
       qc.invalidateQueries({ queryKey: ['users'] });
       qc.invalidateQueries({ queryKey: ['users-lookup'] });
       qc.invalidateQueries({ queryKey: ['agents'] });
+      // The new agent may hold connectors – their "used by N agents" changes.
+      qc.invalidateQueries({ queryKey: ['mcp-connectors'] });
       toast(t('settings.agentCreated'));
       onClose();
     },

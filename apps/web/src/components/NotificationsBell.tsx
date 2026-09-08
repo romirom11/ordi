@@ -30,6 +30,10 @@ extendDict({
     'notif.leave.decided': 'Leave request decided',
     'notif.git.pr_merged': 'Pull request merged',
     'notif.sales.work_digest': 'Your sales work is ready',
+    'notif.agent.run_finished': 'An agent finished your task',
+    'notif.agent.needs_input': 'An agent needs your input',
+    'notif.agent.credential_expiring': 'A Claude credential expires soon',
+    'notif.agent.credential_expired': 'A Claude credential expired',
   },
   uk: {
     'notif.task.assigned': 'Вам призначено задачу',
@@ -43,6 +47,10 @@ extendDict({
     'notif.leave.decided': 'Рішення щодо відпустки',
     'notif.git.pr_merged': 'Пулреквест злито',
     'notif.sales.work_digest': 'Черга продажів готова',
+    'notif.agent.run_finished': 'Агент завершив вашу задачу',
+    'notif.agent.needs_input': 'Агенту потрібна ваша відповідь',
+    'notif.agent.credential_expiring': 'Доступ Claude скоро протермінується',
+    'notif.agent.credential_expired': 'Доступ Claude протерміновано',
   },
 });
 
@@ -61,6 +69,13 @@ function notifLink(n: Notif): string | null {
     return p.invoiceId ? `/finance/invoices/${p.invoiceId as string}` : '/finance';
   }
   if (n.type === 'quote.accepted') return '/finance';
+  // A run notification is about a task; a credential one carries the absolute
+  // link the emails use, and the router navigates by path.
+  if (n.type === 'agent.run_finished' || n.type === 'agent.needs_input') {
+    return projectId && taskId ? `/projects/${projectId}/tasks/${taskId}` : '/my-tasks';
+  }
+  // The server's payload.link always points at Settings → Agents; the route is the stable part.
+  if (n.type.startsWith('agent.credential_')) return '/settings/agents';
   if (n.type.startsWith('leave.')) return '/people';
   if (n.type === 'sales.work_digest') return '/crm/work';
   return null;

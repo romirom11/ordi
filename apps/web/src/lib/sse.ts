@@ -62,6 +62,38 @@ const OS_NOTIFY: Record<string, string> = {
   'git.pr_merged': 'PR merged in your task',
 };
 
+/** One row of the run log, exactly as ['agent-run-events', runId] stores it (see RunLog). */
+interface CachedRunEvent {
+  id: string;
+  seq: number;
+  type: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+/**
+ * Append one streamed event to the open log instead of invalidating it: a run
+ * emits hundreds of frames and each invalidation refetched the whole log.
+ * A cache that is not loaded (or still empty) is left alone – the log's own
+ * fetch fills it. The frame carries no row id, so the sequence stands in for
+ * one; a refetch later replaces it with the stored row.
+ */
+function appendRunEvent(qc: QueryClient, data: any): void {
+  const key = ['agent-run-events', data.runId];
+  const current = qc.getQueryData<CachedRunEvent[]>(key);
+  if (!current || current.length === 0) return;
+  const seq = Number(data.seq);
+  if (!Number.isFinite(seq) || current.some((e) => e.seq === seq)) return;
+  const event: CachedRunEvent = {
+    id: `sse-${data.runId}-${seq}`,
+    seq,
+    type: String(data.eventType ?? 'log'),
+    payload: (data.payload ?? {}) as Record<string, unknown>,
+    createdAt: String(data.createdAt ?? new Date().toISOString()),
+  };
+  qc.setQueryData(key, [...current, event].sort((a, b) => a.seq - b.seq));
+}
+
 /** Map event families to the query keys they invalidate. */
 function invalidateFor(qc: QueryClient, type: string, data: any): void {
   const inv = (key: unknown[]) => qc.invalidateQueries({ queryKey: key });
@@ -94,8 +126,15 @@ function invalidateFor(qc: QueryClient, type: string, data: any): void {
     inv(['time']);
     inv(['timer']);
   } else if (type === 'agent.run_event') {
-    // One frame per streamed SDK message: refresh the open log, nothing else.
-    if (data?.runId) inv(['agent-run-events', data.runId]);
+    // One frame per streamed SDK message: appended to the open log rather than
+    // refetching it. The run row itself changes with the frames that carry the
+    // status, the result or an error (badge, summary, PR), so those – and only
+    // those – refresh the list.
+    if (data?.runId) appendRunEvent(qc, data);
+    if (data?.eventType === 'status' || data?.eventType === 'result' || data?.eventType === 'error') {
+      inv(['agent-runs']); // prefix-matches ['agent-runs', taskId]
+    }
+    return; // a log line is never a notification – skip the refetch below
   } else if (type.startsWith('agent.')) {
     // Run lifecycle – the runs list on the task, and the task itself, because
     // the agent comments and moves the status as it works.
