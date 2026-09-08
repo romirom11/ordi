@@ -66,10 +66,13 @@ export function createClaudeCodeAdapter(queryFn: QueryFn = sdkQuery as unknown a
 
     async available() {
       try {
-        // The SDK resolves its bundled binary at import time; a missing
-        // optional dependency surfaces as a module resolution error here.
         const mod = await import('@anthropic-ai/claude-agent-sdk');
-        return { ok: typeof mod.query === 'function', version: null, error: null };
+        if (typeof mod.query !== 'function') return { ok: false, version: null, error: 'query() missing from the SDK' };
+        // The runtime is an optional platform package; without it every run fails at spawn.
+        const pkg = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}/package.json`;
+        const { createRequire } = await import('node:module');
+        const meta = createRequire(import.meta.url)(pkg) as { version?: string };
+        return { ok: true, version: meta.version ?? null, error: null };
       } catch (e) {
         return { ok: false, version: null, error: (e as Error).message };
       }
@@ -121,7 +124,10 @@ export function createClaudeCodeAdapter(queryFn: QueryFn = sdkQuery as unknown a
         systemPrompt: { type: 'preset', preset: 'claude_code', append: input.systemAppend },
         mcpServers: input.mcpServers,
         strictMcpConfig: true,
-        settingSources: [],
+        // 'project' loads the repository's CLAUDE.md and .claude/settings.json
+        // (its conventions and checks); the worker's own user/local settings
+        // stay out, and strictMcpConfig keeps .mcp.json out.
+        settingSources: ['project'],
         permissionMode: 'dontAsk',
         allowedTools: input.allowedTools,
         disallowedTools: input.disallowedTools,

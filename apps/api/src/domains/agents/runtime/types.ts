@@ -15,6 +15,8 @@ export interface RuntimeMcpServer {
   type: 'http';
   url: string;
   headers: Record<string, string>;
+  /** Tools in the prompt from turn 1 instead of behind tool search (and startup waits for the server). */
+  alwaysLoad?: boolean;
 }
 
 export interface RuntimeRunInput {

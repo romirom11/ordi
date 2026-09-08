@@ -60,10 +60,11 @@ const bin = require.resolve('@anthropic-ai/claude-agent-sdk-' + process.platform
 console.log('claude runtime: ' + bin);"
 WORKDIR /app
 
-# Per-run checkouts live here (AGENT_WORK_DIR): the worker clones into
-# /data/agent-work/<runId> and deletes the directory when the run ends. Both
-# compose files mount a named volume on it – no VOLUME instruction here, or
-# every `docker run` of this image would leave an anonymous volume behind.
+# Agent work lives here (AGENT_WORK_DIR): tasks/<taskId>/checkout is the
+# clone, deleted when the run ends; tasks/<taskId>/harness is the runtime's
+# home with the session transcripts, kept for 30 days so follow-ups resume.
+# Both compose files mount a named volume on it – no VOLUME instruction here,
+# or every `docker run` of this image would leave an anonymous volume behind.
 RUN mkdir -p /data/agent-work
 
 # Copy sources

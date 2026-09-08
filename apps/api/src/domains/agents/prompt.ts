@@ -164,7 +164,8 @@ export function buildRulesOfEngagement(ctx: PromptContext): string {
 
 /** Tools the harness may call without asking (R35). MCP servers are named at run time. */
 export function allowedToolsFor(mcpServerNames: string[]): string[] {
-  const base = ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep', 'LS', 'Bash', 'WebFetch', 'WebSearch', 'TodoWrite', 'Task', 'NotebookEdit'];
+  // dontAsk denies anything not listed: background Bash needs BashOutput/KillShell to be usable at all.
+  const base = ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep', 'LS', 'Bash', 'BashOutput', 'KillShell', 'WebFetch', 'WebSearch', 'TodoWrite', 'Task', 'NotebookEdit', 'Skill'];
   const mcp = mcpServerNames.flatMap((n) => [`mcp__${n}`, `mcp__${n}__*`]);
   return [...base, ...mcp];
 }
@@ -174,6 +175,5 @@ export const DISALLOWED_TOOLS = [
   'Bash(git reset --hard*)',
   'Bash(git branch -D*)',
   'Bash(git remote*)',
-  'Bash(rm -rf /*)',
   'Bash(sudo*)',
 ];

@@ -2532,7 +2532,7 @@ dependencies = [
 
 [[package]]
 name = "ordi-desktop"
-version = "1.29.1"
+version = "1.29.2"
 dependencies = [
  "serde",
  "serde_json",

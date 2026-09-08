@@ -122,9 +122,11 @@ services:
       # source for API keys, for a PaaS that configures everything by env.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
-      # One fresh clone per run under /data/agent-work/<runId>, deleted when
-      # the run ends – size it for AGENT_WORKER_CONCURRENCY × repository size
-      # (docs/operations.md). Not a cache: nothing here survives a run.
+      # tasks/<taskId>/checkout: one fresh clone per run, deleted when it
+      # ends – size for AGENT_WORKER_CONCURRENCY × repository size; and
+      # tasks/<taskId>/harness: session transcripts kept 30 days so follow-ups
+      # resume. Every container that claims runs must mount the same volume
+      # (docs/operations.md).
       - agent_work:/data/agent-work
     depends_on:
       db:

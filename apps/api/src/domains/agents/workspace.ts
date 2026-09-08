@@ -40,6 +40,7 @@ export interface Workspace {
   dir: string;
   repo: RepoBinding | null;
   branch: string | null;
+  projectId: string;
 }
 
 /** The first repository bound to the project, with a usable token, or null. */
@@ -161,7 +162,7 @@ export async function prepareWorkspace(input: PrepareInput): Promise<Workspace> 
   await mkdir(dir, { recursive: true });
   await mkdir(harnessDir(input.taskId), { recursive: true });
   const repo = await resolveRepository(input.projectId);
-  if (!repo) return { dir, repo: null, branch: null };
+  if (!repo) return { dir, repo: null, branch: null, projectId: input.projectId };
 
   const branch = input.existingBranch ?? buildBranchName({ key: input.projectKey, number: input.taskNumber, title: input.taskTitle });
   await git(['clone', '--depth', '50', '--no-single-branch', '--branch', repo.defaultBranch, cloneUrl(repo), dir], { cwd: env.agentWorkDir, repo });
@@ -175,13 +176,46 @@ export async function prepareWorkspace(input: PrepareInput): Promise<Workspace> 
   } else {
     await git(['checkout', '-b', branch], { cwd: dir });
   }
-  return { dir, repo, branch };
+  return { dir, repo, branch, projectId: input.projectId };
 }
 
 export interface PublishResult {
   pushed: boolean;
   prUrl: string | null;
-  commits: number;
+  /** Commits ahead of the default branch; null when git could not tell (the branch was pushed anyway). */
+  commits: number | null;
+}
+
+/**
+ * Left-overs that must never ride into a pull request: dependency and build
+ * trees, caches, env files, logs. Tracked files always go in (`git add -u`);
+ * untracked ones only when they pass this filter, and not by the hundreds.
+ */
+const UNWANTED_UNTRACKED = /(^|\/)(node_modules|dist|build|out|coverage|target|__pycache__|\.venv|venv|\.next|\.turbo|\.cache|\.pytest_cache|\.mypy_cache)\/|(^|\/)\.env(\.[^/]*)?$|\.(log|tmp|swp)$|(^|\/)\.DS_Store$/;
+const MAX_UNTRACKED = 500;
+
+export interface StageResult {
+  staged: boolean;
+  skipped: string[];
+}
+
+/** Stage what the agent changed: tracked modifications, plus untracked files that are not junk. */
+export async function stageChanges(dir: string): Promise<StageResult> {
+  await git(['add', '-u'], { cwd: dir });
+  const status = await git(['status', '--porcelain', '-z', '--untracked-files=all'], { cwd: dir });
+  const untracked = status.stdout.split('\0').filter((l) => l.startsWith('?? ')).map((l) => l.slice(3));
+  const skipped = untracked.filter((p) => UNWANTED_UNTRACKED.test(p));
+  let keep = untracked.filter((p) => !UNWANTED_UNTRACKED.test(p));
+  if (keep.length > MAX_UNTRACKED) {
+    logger.warn({ dir, count: keep.length }, 'too many untracked files; none staged');
+    skipped.push(...keep);
+    keep = [];
+  }
+  for (let i = 0; i < keep.length; i += 200) {
+    await git(['add', '--', ...keep.slice(i, i + 200)], { cwd: dir });
+  }
+  const staged = await git(['diff', '--cached', '--name-only'], { cwd: dir });
+  return { staged: Boolean(staged.stdout.trim()), skipped };
 }
 
 /** R28: commit leftovers, push, open (or find) the pull request. */
@@ -191,21 +225,44 @@ export async function publishWorkspace(ws: Workspace, input: {
   openPullRequest?: boolean;
 }): Promise<PublishResult> {
   if (!ws.repo || !ws.branch) return { pushed: false, prUrl: null, commits: 0 };
-  const { repo, branch, dir } = ws;
+  const { branch, dir } = ws;
+  // Installation tokens live an hour and the clone may be older than that by
+  // now: take a fresh binding for the push, falling back to the one we have.
+  const fresh = await resolveRepository(ws.projectId).catch(() => null);
+  const repo = fresh && fresh.repositoryId === ws.repo.repositoryId ? fresh : ws.repo;
   const openPr = input.openPullRequest ?? true;
-  const status = await git(['status', '--porcelain'], { cwd: dir });
-  if (status.stdout.trim()) {
-    await git(['add', '-A'], { cwd: dir });
+  const stage = await stageChanges(dir);
+  if (stage.skipped.length) logger.info({ dir, skipped: stage.skipped.slice(0, 20), count: stage.skipped.length }, 'untracked files left out of the commit');
+  if (stage.staged) {
     await git(['commit', '-m', openPr ? `${input.ref}: ${input.title}` : `WIP ${input.ref}: ${input.title} (run stopped early)`], { cwd: dir });
   }
-  const ahead = await git(['rev-list', '--count', `origin/${repo.defaultBranch}..${branch}`], { cwd: dir }).catch(() => ({ stdout: '0', stderr: '' }));
-  const commits = Number(ahead.stdout.trim() || 0);
+  const commits = await commitsAhead(dir, repo.defaultBranch, branch);
   if (commits === 0) return { pushed: false, prUrl: input.existingPrUrl, commits: 0 };
   await git(['push', '-u', 'origin', branch], { cwd: dir, repo });
   if (input.existingPrUrl || !openPr) return { pushed: true, prUrl: input.existingPrUrl, commits };
   if (repo.provider !== 'github') return { pushed: true, prUrl: null, commits };
   const prUrl = await openGithubPullRequest(repo, { head: branch, base: repo.defaultBranch, title: `${input.ref}: ${input.title}`, body: input.summary });
   return { pushed: true, prUrl, commits };
+}
+
+/**
+ * How far the branch is ahead. A failing rev-list (stale default branch
+ * name, shallow grafts without a merge base) must not read as "nothing to
+ * push": null means unknown, and the caller pushes.
+ */
+async function commitsAhead(dir: string, defaultBranch: string, branch: string): Promise<number | null> {
+  try {
+    const ahead = await git(['rev-list', '--count', `origin/${defaultBranch}..${branch}`], { cwd: dir });
+    return Number(ahead.stdout.trim() || 0);
+  } catch {
+    try {
+      const ahead = await git(['rev-list', '--count', branch, '--not', '--remotes=origin'], { cwd: dir });
+      return Number(ahead.stdout.trim() || 0);
+    } catch (e) {
+      logger.warn({ err: e, dir, branch }, 'could not count commits ahead; pushing anyway');
+      return null;
+    }
+  }
 }
 
 async function openGithubPullRequest(repo: RepoBinding, pr: { head: string; base: string; title: string; body: string }): Promise<string | null> {

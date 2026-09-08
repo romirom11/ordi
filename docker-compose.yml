@@ -55,8 +55,9 @@ services:
       # fallback for API keys, handy when developing without touching the UI:
       # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
-      # One fresh clone per run under /data/agent-work/<runId>, deleted when
-      # the run ends. A volume keeps the checkouts off the container layer.
+      # tasks/<taskId>/checkout: one fresh clone per run, deleted when it
+      # ends; tasks/<taskId>/harness: session transcripts, kept 30 days so a
+      # follow-up resumes the conversation. Must survive container rebuilds.
       - agent_work:/data/agent-work
     depends_on:
       db:

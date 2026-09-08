@@ -126,6 +126,24 @@ run logs "Session … is not on this worker" and starts a fresh session on the
 task's branch instead of failing. Workers on different hosts must share the
 volume for the same reason.
 
+**What gets committed.** When a run ends (done, or stopped early), the worker
+stages tracked edits (`git add -u`) and new files that pass a junk filter –
+never `node_modules/`, `dist/`, `build/`, `coverage/`, `.env*`, logs or
+caches, and never more than 500 untracked files at once (the API log lists
+what was left out). The push uses a freshly minted installation token, so a
+run longer than the token's hour still pushes. If git cannot count the
+commits ahead of the default branch (a renamed default branch, shallow
+history), the branch is pushed anyway rather than reported as "nothing to
+push".
+
+**Runs and tasks.** One active run per task *and agent*: two agents assigned
+to one task each get their own run. A task in a done or cancelled status gets
+no run, whoever assigns or comments; a task closed while the agent works is
+left closed (the run still comments and pushes). A comment written while the
+run was queued is picked up as a follow-up when the run ends, and comments by
+other agents never trigger a run. An agent's own run token cannot cancel or
+retry runs.
+
 **Sessions.** `agent_runs.session_id` is the Claude Code session of the last
 run; a run queued from a comment or a Retry carries it and the runtime resumes
 the conversation. The transcript lives only on the worker's volume, so a

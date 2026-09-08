@@ -260,6 +260,13 @@
       "when": 1788877156753,
       "tag": "0036_agent_max_turns",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1788904733611,
+      "tag": "0037_agent_runs_task_agent",
+      "breakpoints": true
     }
   ]
 }
