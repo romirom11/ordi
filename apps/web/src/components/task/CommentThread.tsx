@@ -4,10 +4,10 @@
  */
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { MessageSquare, SmilePlus } from 'lucide-react';
+import { MessageSquare, Pencil, SmilePlus } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
-import { useMe } from '../../lib/auth';
-import { Avatar, Button, Kbd, cn, fmtRelative } from '../ui';
+import { useMe, type ProjectRole } from '../../lib/auth';
+import { Avatar, Button, IconButton, Kbd, cn, fmtRelative } from '../ui';
 import { DropdownMenu, toast, useMenuClose } from '../overlays';
 import { RichEditor, EMPTY_DOC } from '../richtext/RichEditor';
 import { useT, extendDict } from '../../lib/i18n';
@@ -24,6 +24,9 @@ extendDict({
     'task.noActivity': 'No activity yet – start the conversation below.',
     'task.react': 'Add reaction',
     'task.reactFailed': 'Could not update the reaction',
+    'task.editComment': 'Edit comment',
+    'task.commentEdited': 'edited',
+    'task.editCommentFailed': 'Could not save the comment',
   },
   uk: {
     'task.activity': 'Активність',
@@ -34,6 +37,9 @@ extendDict({
     'task.noActivity': 'Активності поки немає – почніть обговорення нижче.',
     'task.react': 'Додати реакцію',
     'task.reactFailed': 'Не вдалося оновити реакцію',
+    'task.editComment': 'Редагувати коментар',
+    'task.commentEdited': 'відредаговано',
+    'task.editCommentFailed': 'Не вдалося зберегти коментар',
   },
 });
 
@@ -145,10 +151,116 @@ function ReactionPalette({ onPick }: { onPick: (emoji: string) => void }) {
   );
 }
 
-export function ActivityFeed({ taskId, comments, users }: {
-  taskId: string; comments: TaskComment[]; users: UserLite[];
+/**
+ * The ⌘↵ hint and the actions under a rich editor – the same row for the
+ * composer at the bottom of the thread and for an inline comment edit, which
+ * only adds a way out.
+ */
+function ComposerActions({ submitLabel, canSubmit, onSubmit, onCancel }: {
+  submitLabel: string; canSubmit: boolean; onSubmit: () => void; onCancel?: () => void;
 }) {
   const t = useT();
+  return (
+    <div className="mt-2 flex items-center justify-end gap-2.5">
+      <span className="flex items-center gap-1 text-[11px] text-faint">
+        <Kbd>⌘</Kbd><Kbd>↵</Kbd>
+      </span>
+      {onCancel && <Button size="sm" variant="ghost" onClick={onCancel}>{t('common.cancel')}</Button>}
+      <Button size="sm" disabled={!canSubmit} onClick={onSubmit}>{submitLabel}</Button>
+    </div>
+  );
+}
+
+/**
+ * Who may rewrite a comment – the rule the API enforces: its author edits it as
+ * a project member, anyone else needs project admin. Resolved here so the
+ * pencil never shows on a comment the server would refuse to save.
+ */
+function canEditComment(comment: TaskComment, role: ProjectRole, myId?: string): boolean {
+  if (role === 'admin') return true;
+  return role === 'member' && !!myId && comment.authorId === myId;
+}
+
+/**
+ * One comment card: body, reactions, and – for whoever may rewrite it – an
+ * inline editor that swaps the rendered body for the same composer the thread
+ * posts with. ⌘↵ saves, Esc leaves the comment as it was.
+ */
+function CommentCard({ taskId, comment, users, authorName, canEdit }: {
+  taskId: string; comment: TaskComment; users: UserLite[]; authorName: string; canEdit: boolean;
+}) {
+  const t = useT();
+  const qc = useQueryClient();
+  // Non-null only while editing – the draft doubles as the mode flag.
+  const [draft, setDraft] = useState<unknown>(null);
+  const editing = draft !== null;
+
+  const save = useMutation({
+    mutationFn: (body: unknown) => api.patch(`/comments/${comment.id}`, { body }),
+    onSuccess: () => {
+      setDraft(null);
+      qc.invalidateQueries({ queryKey: ['task', taskId] });
+    },
+    onError: (e: Error) => toast.error(e instanceof ApiError ? e.message : t('task.editCommentFailed')),
+  });
+
+  const canSave = editing && docHasText(draft) && !save.isPending;
+  const submit = () => { if (canSave) save.mutate(draft); };
+
+  return (
+    <div className="group/comment min-w-0 flex-1 rounded-lg border border-border bg-card px-3 py-2 transition-colors duration-150 hover:border-border-strong">
+      <p className="mb-1 flex items-baseline gap-2">
+        <span className="text-[13px] font-medium">{authorName}</span>
+        <span className="text-[11px] text-faint">{fmtRelative(comment.createdAt)}</span>
+        {comment.editedAt && (
+          <span className="text-[11px] text-faint" title={fmtRelative(comment.editedAt)}>
+            ({t('task.commentEdited')})
+          </span>
+        )}
+        {canEdit && !editing && (
+          <IconButton
+            size="sm"
+            aria-label={t('task.editComment')}
+            title={t('task.editComment')}
+            onClick={() => setDraft(comment.body ?? EMPTY_DOC)}
+            className="ml-auto self-start text-faint opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-hover/comment:opacity-100"
+          >
+            <Pencil size={12} />
+          </IconButton>
+        )}
+      </p>
+
+      {editing ? (
+        <div onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setDraft(null); } }}>
+          <RichEditor
+            value={draft}
+            onChange={setDraft}
+            placeholder={t('tasks.writeComment')}
+            compact
+            onSubmit={submit}
+          />
+          <ComposerActions
+            submitLabel={t('common.save')}
+            canSubmit={canSave}
+            onSubmit={submit}
+            onCancel={() => setDraft(null)}
+          />
+        </div>
+      ) : (
+        <>
+          <RichBody doc={comment.body} className="text-[13px]" />
+          <ReactionBar taskId={taskId} comment={comment} users={users} />
+        </>
+      )}
+    </div>
+  );
+}
+
+export function ActivityFeed({ taskId, comments, users, projectRole }: {
+  taskId: string; comments: TaskComment[]; users: UserLite[]; projectRole: ProjectRole;
+}) {
+  const t = useT();
+  const me = useMe();
   const qc = useQueryClient();
   const [draft, setDraft] = useState<unknown>(EMPTY_DOC);
   const [composerKey, setComposerKey] = useState(0);
@@ -218,14 +330,13 @@ export function ActivityFeed({ taskId, comments, users }: {
                 size={22}
                 className="mt-0.5"
               />
-              <div className="group/comment min-w-0 flex-1 rounded-lg border border-border bg-card px-3 py-2 transition-colors duration-150 hover:border-border-strong">
-                <p className="mb-1 flex items-baseline gap-2">
-                  <span className="text-[13px] font-medium">{item.comment.authorName ?? nameOf(item.comment.authorId)}</span>
-                  <span className="text-[11px] text-faint">{fmtRelative(item.comment.createdAt)}</span>
-                </p>
-                <RichBody doc={item.comment.body} className="text-[13px]" />
-                <ReactionBar taskId={taskId} comment={item.comment} users={users} />
-              </div>
+              <CommentCard
+                taskId={taskId}
+                comment={item.comment}
+                users={users}
+                authorName={item.comment.authorName ?? nameOf(item.comment.authorId)}
+                canEdit={canEditComment(item.comment, projectRole, me.user?.id)}
+              />
             </div>
           ) : (
             <div
@@ -259,14 +370,11 @@ export function ActivityFeed({ taskId, comments, users }: {
           compact
           onSubmit={submit}
         />
-        <div className="mt-2 flex items-center justify-end gap-2.5">
-          <span className="flex items-center gap-1 text-[11px] text-faint">
-            <Kbd>⌘</Kbd><Kbd>↵</Kbd>
-          </span>
-          <Button size="sm" disabled={!canSend || addComment.isPending} onClick={submit}>
-            {t('tasks.comment')}
-          </Button>
-        </div>
+        <ComposerActions
+          submitLabel={t('tasks.comment')}
+          canSubmit={canSend && !addComment.isPending}
+          onSubmit={submit}
+        />
       </div>
     </section>
   );

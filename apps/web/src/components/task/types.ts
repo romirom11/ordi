@@ -19,6 +19,8 @@ export interface TaskComment {
   authorName?: string | null;
   body: unknown;
   createdAt: string;
+  /** Set once the comment has been rewritten – null while it is untouched. */
+  editedAt?: string | null;
   /** Emoji → ids of the users who reacted with it. */
   reactions?: Record<string, string[]>;
 }
