@@ -1,6 +1,6 @@
 {
   "name": "@ordi/mcp",
-  "version": "1.29.3",
+  "version": "1.29.4",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",

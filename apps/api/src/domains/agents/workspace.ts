@@ -180,8 +180,10 @@ export interface PrepareInput {
   projectKey: string;
   taskNumber: number;
   taskTitle: string;
-  /** A previous run's branch to continue on (follow-ups). */
+  /** A previous run's branch to continue on (follow-ups); used only if it exists on origin or in a kept checkout. */
   existingBranch?: string | null;
+  /** An English slug for a new branch (from the runtime); the title is transliterated otherwise. */
+  suggestedSlug?: string | null;
   agentName: string;
   agentEmail: string;
 }
@@ -210,9 +212,9 @@ export async function prepareWorkspace(input: PrepareInput): Promise<Workspace> 
   const dir = checkoutDir(input.taskId);
   await mkdir(harnessDir(input.taskId), { recursive: true });
   const repo = await resolveRepository(input.projectId);
-  const branch = input.existingBranch ?? buildBranchName({ key: input.projectKey, number: input.taskNumber, title: input.taskTitle });
-  if (repo && await reuseCheckout(dir, branch, repo)) {
-    return { dir, repo, branch, projectId: input.projectId, reused: true };
+  const freshName = buildBranchName({ key: input.projectKey, number: input.taskNumber, title: input.suggestedSlug || input.taskTitle });
+  if (repo && input.existingBranch && await reuseCheckout(dir, input.existingBranch, repo)) {
+    return { dir, repo, branch: input.existingBranch, projectId: input.projectId, reused: true };
   }
   await rm(dir, { recursive: true, force: true });
   await mkdir(dir, { recursive: true });
@@ -221,15 +223,18 @@ export async function prepareWorkspace(input: PrepareInput): Promise<Workspace> 
   await git(['clone', '--depth', '50', '--no-single-branch', '--branch', repo.defaultBranch, cloneUrl(repo), dir], { cwd: env.agentWorkDir, repo });
   await git(['config', 'user.name', input.agentName], { cwd: dir });
   await git(['config', 'user.email', input.agentEmail], { cwd: dir });
-  // Continue a branch that already exists (follow-up), else start it from the default branch.
-  const remote = await git(['ls-remote', '--heads', 'origin', branch], { cwd: dir, repo }).catch(() => ({ stdout: '', stderr: '' }));
+  // Continue a branch that already exists on origin (follow-up, retry). A
+  // name from a run that never pushed is not worth keeping: the branch is
+  // named afresh, which also drops names left broken by an older release.
+  const wanted = input.existingBranch ?? freshName;
+  const remote = await git(['ls-remote', '--heads', 'origin', wanted], { cwd: dir, repo }).catch(() => ({ stdout: '', stderr: '' }));
   if (remote.stdout.trim()) {
-    await git(['fetch', '--depth', '50', 'origin', `${branch}:${branch}`], { cwd: dir, repo });
-    await git(['checkout', branch], { cwd: dir });
-  } else {
-    await git(['checkout', '-b', branch], { cwd: dir });
+    await git(['fetch', '--depth', '50', 'origin', `${wanted}:${wanted}`], { cwd: dir, repo });
+    await git(['checkout', wanted], { cwd: dir });
+    return { dir, repo, branch: wanted, projectId: input.projectId };
   }
-  return { dir, repo, branch, projectId: input.projectId };
+  await git(['checkout', '-b', freshName], { cwd: dir });
+  return { dir, repo, branch: freshName, projectId: input.projectId };
 }
 
 export interface PublishResult {

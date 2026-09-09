@@ -3,6 +3,16 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.29.4
+
+- **English branch names in any task language**: before cloning, the worker
+  asks the cheapest model (`haiku`, one turn, no tools, through the same
+  Agent SDK so a subscription token works) for a 3–6 word English slug from
+  the task title and description – `feature/ord-26-show-remaining-leave-days`
+  for a task written in Ukrainian; transliteration stays as the fallback.
+  A retry whose previous branch never reached origin is named afresh, so
+  the `feature/ord-26-` names left by v1.29.2 are replaced.
+
 ## v1.29.3
 
 - **Branch names for non-Latin titles**: the slug transliterates Cyrillic

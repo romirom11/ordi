@@ -29,6 +29,7 @@ function fakeAdapter(verify: RuntimeAdapter['verify']): RuntimeAdapter {
     available: async () => ({ ok: true, version: 'test', error: null }),
     run: async () => { throw new Error('not in this test'); },
     verify,
+    suggestBranchSlug: async () => null,
   };
 }
 

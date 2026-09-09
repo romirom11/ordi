@@ -107,6 +107,39 @@ export function createClaudeCodeAdapter(queryFn: QueryFn = sdkQuery as unknown a
       }
     },
 
+    async suggestBranchSlug(input) {
+      const env = buildRuntimeEnv(input.credential, input.configDir);
+      const controller = abortFrom(input.signal);
+      const timer = setTimeout(() => controller.abort(), 30_000);
+      try {
+        const brief = `Title: ${input.title.slice(0, 300)}\n${input.description ? `Description: ${input.description.slice(0, 1500)}` : ''}`;
+        for await (const message of queryFn({
+          prompt: brief,
+          options: {
+            env, cwd: input.configDir,
+            // The cheapest model does this well; the alias follows whatever the plan maps it to.
+            model: 'haiku', maxTurns: 1, tools: [], mcpServers: {}, strictMcpConfig: true,
+            permissionMode: 'dontAsk', settingSources: [],
+            systemPrompt: {
+              type: 'custom',
+              prompt: 'You name git branches. Answer with one English kebab-case slug of 3 to 6 words that says what the task does (lowercase a-z, digits and dashes only), nothing else. Translate if the task is not in English.',
+            },
+            abortController: controller,
+          },
+        })) {
+          if (message.type === 'result') {
+            if (message.is_error || message.subtype !== 'success') return null;
+            return extractSlug(message.result);
+          }
+        }
+        return null;
+      } catch {
+        return null;
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+
     async run(input): Promise<RuntimeOutcome> {
       const env = buildRuntimeEnv(input.credential, input.configDir);
       const usage = emptyUsage();
@@ -239,6 +272,14 @@ export function createClaudeCodeAdapter(queryFn: QueryFn = sdkQuery as unknown a
       return outcome;
     },
   };
+}
+
+/** The model's answer, or null when it is not a usable slug. */
+export function extractSlug(text: string): string | null {
+  const line = text.trim().split('\n').map((l) => l.trim().replace(/^[`"'*\-\s]+|[`"'*.\s]+$/g, '')).find(Boolean) ?? '';
+  const slug = line.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50).replace(/-+$/, '');
+  if (slug.length < 3 || !/[a-z]/.test(slug)) return null;
+  return slug;
 }
 
 function abortFrom(signal?: AbortSignal): AbortController {

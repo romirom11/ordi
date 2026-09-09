@@ -149,6 +149,16 @@ describe('workspace with real git', () => {
     await cleanupWorkspace(ws.taskId);
   }, 30_000);
 
+  it('an existing branch name that never reached origin is replaced by a fresh one', async () => {
+    const input = { taskId: ws.taskId, projectId: ws.projectId, projectKey: 'WSG', taskNumber: 26, taskTitle: 'Додати відпустки', agentName: 'Claude', agentEmail: 'claude@test.local' };
+    const w = await prepareWorkspace({ ...input, existingBranch: 'feature/wsg-26-', suggestedSlug: 'add-leave-days' });
+    expect(w.branch).toBe('feature/wsg-26-add-leave-days');
+    await cleanupWorkspace(ws.taskId);
+    const plain = await prepareWorkspace({ ...input, existingBranch: 'feature/wsg-26-' });
+    expect(plain.branch).toBe('feature/wsg-26-dodaty-vidpustky');
+    await cleanupWorkspace(ws.taskId);
+  }, 30_000);
+
   it('redactGitError strips the header, its base64 payload and the raw token', () => {
     const repo = { repositoryId: 'r', fullName: 'acme/real', defaultBranch: 'main', provider: 'github', instanceUrl: null, token: 'ghs_secret_token_value', htmlUrl: 'https://github.com' };
     const encoded = Buffer.from('x-access-token:ghs_secret_token_value').toString('base64');

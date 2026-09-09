@@ -8,7 +8,7 @@
 import { hostname } from 'node:os';
 import { mkdir } from 'node:fs/promises';
 import { getDb, schema, eq, and, inArray, sql } from '@ordi/db';
-import { textToDoc } from '@ordi/shared';
+import { docToText, textToDoc } from '@ordi/shared';
 import { env } from '../env';
 import { logger } from '../lib/logger';
 import { SERVER_VERSION } from '../version';
@@ -154,9 +154,22 @@ export async function executeRun(claimed: RunRow): Promise<void> {
       return;
     }
 
+    const runtime = runtimeAdapter(profile.runtime as 'claude_code' | 'codex');
+    // A new branch gets an English name from the cheapest model, whatever
+    // language the task is written in; transliteration is the fallback.
+    let suggestedSlug: string | null = null;
+    if (!claimed.branch) {
+      const cred = await loadRuntimeCredential(chain[0]!);
+      if (cred) {
+        await mkdir(configDir, { recursive: true });
+        suggestedSlug = await runtime.suggestBranchSlug({
+          title: task.title, description: docToText(task.description).slice(0, 1500), credential: { kind: cred.kind, secret: cred.secret }, configDir,
+        }).catch(() => null);
+      }
+    }
     ws = await prepareWorkspace({
       taskId: task.id, projectId: project.id, projectKey: project.key, taskNumber: task.number, taskTitle: task.title,
-      existingBranch: claimed.branch ?? null, agentName: agent.name, agentEmail: agent.email,
+      existingBranch: claimed.branch ?? null, suggestedSlug, agentName: agent.name, agentEmail: agent.email,
     });
     await recordRunEvent(runId, 'log', { message: ws.repo ? `${ws.reused ? 'Continuing the previous run\'s unpushed checkout of' : 'Checked out'} ${ws.repo.fullName} on ${ws.branch}` : 'No repository linked; working in a scratch directory' });
     // Written now, not at the end: a worker lost mid-run leaves a row the re-queued run continues from.
@@ -186,8 +199,6 @@ export async function executeRun(claimed: RunRow): Promise<void> {
     for (const c of setup.connectors) {
       mcpServers[c.slug] = { type: 'http', url: `${base}/mcp-connectors/${c.slug}/mcp`, headers: { Authorization: `Bearer ${token}` } };
     }
-    const runtime = runtimeAdapter(profile.runtime as 'claude_code' | 'codex');
-
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error('timeout')), profile.maxRunMinutes * 60_000);
     const cancelPoll = setInterval(async () => {

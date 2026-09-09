@@ -27,11 +27,12 @@ let restoreAdapter: (() => void) | null = null;
 
 const usage: RuntimeUsage = { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 0, costUsd: 0.01, turns: 2, durationMs: 100 };
 
-function adapter(run: (input: RuntimeRunInput) => Promise<RuntimeOutcome>): RuntimeAdapter {
+function adapter(run: (input: RuntimeRunInput) => Promise<RuntimeOutcome>, slug: string | null = null): RuntimeAdapter {
   return {
     runtime: 'claude_code',
     available: async () => ({ ok: true, version: 'test', error: null }),
     verify: async () => ({ ok: true, error: null, model: 'test' }),
+    suggestBranchSlug: async () => slug,
     run,
   };
 }
@@ -446,6 +447,25 @@ describe('the worker end to end', () => {
     expect(JSON.stringify(events)).toContain('not on this worker');
     const detail = await json(owner.get(`/tasks/${task.id}?include=comments`));
     expect(JSON.stringify((detail.comments as unknown[]).at(-1))).not.toContain('No conversation found');
+  });
+
+  it('a new branch takes the English slug the runtime suggests, in any task language', async () => {
+    const task = await newTask('Додати доступну кількість днів відпустки');
+    await assign(task.id, [agentId]);
+    let seen: RuntimeRunInput | null = null;
+    restoreAdapter = setRuntimeAdapter(adapter(async (input) => { seen = input; return done(); }, 'Show Remaining Leave Days'));
+    const run = await runToEnd(task.id);
+    expect(run.status).toBe('succeeded');
+    expect(run.branch).toMatch(/^feature\/dsp-\d+-show-remaining-leave-days$/);
+    expect(seen!.prompt).toContain('show-remaining-leave-days');
+  });
+
+  it('without a suggestion the branch falls back to the transliterated title', async () => {
+    const task = await newTask('Звіт по відпустках');
+    await assign(task.id, [agentId]);
+    restoreAdapter = setRuntimeAdapter(adapter(async () => done()));
+    const run = await runToEnd(task.id);
+    expect(run.branch).toMatch(/^feature\/dsp-\d+-zvit-po-vidpustkakh$/);
   });
 
   it('a push refused with 403 keeps the checkout and tells the user what to fix', async () => {
