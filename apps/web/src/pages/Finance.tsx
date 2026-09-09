@@ -10,7 +10,8 @@ import { Plus, Trash2, Wallet, AlertTriangle, CheckCircle2, Receipt, FileStack, 
 import { useT, extendDict } from '../lib/i18n';
 import { usePersistedState, oneOfPref, stringPref } from '../lib/prefs';
 import { byName } from '../lib/queries';
-import { CURRENCIES } from '../components/crm/shared';
+import { currencyOptions } from '../lib/currency';
+import { useDefaultCurrency } from '../components/finance/workspace';
 import { RecurringExpensesSection } from '../components/finance/subscriptions';
 import { SortHeader, sortRows, useStatusRank, useTableSort } from '../components/tableSort';
 import { TransactionsTab, AddIncomeDialog } from '../components/finance/ledger';
@@ -606,8 +607,7 @@ function ExpensesView() {
   const expenses = useQuery({ queryKey: ['expenses'], queryFn: () => api.get<{ data: Expense[] }>('/expenses') });
   // The form's currency starts at the workspace default (ORD-24): it used to
   // be a free-text box stuck on USD, so every UAH expense landed in dollars.
-  const ws = useQuery({ queryKey: ['workspace-settings'], queryFn: () => api.get<{ defaultCurrency?: string | null }>('/settings/workspace') });
-  const defaultCurrency = ws.data?.defaultCurrency || 'USD';
+  const defaultCurrency = useDefaultCurrency();
   const [showForm, setShowForm] = useState(false);
   const blankForm = (currency: string) => ({ description: '', amount: '', currency, date: '', category: '' });
   const [form, setForm] = useState(() => blankForm(defaultCurrency));
@@ -684,7 +684,7 @@ function ExpensesView() {
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">{t('common.currency')}</label>
                 <Select value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))} className="w-full">
-                  {(CURRENCIES.includes(form.currency) ? CURRENCIES : [form.currency, ...CURRENCIES]).map((c) => <option key={c} value={c}>{c}</option>)}
+                  {currencyOptions(form.currency).map((c) => <option key={c} value={c}>{c}</option>)}
                 </Select>
               </div>
               <div className="space-y-1">

@@ -17,6 +17,8 @@ import { api, qs, ApiError } from '../../lib/api';
 import { useCan } from '../../lib/auth';
 import { useT, extendDict } from '../../lib/i18n';
 import { usePersistedState, stringPref } from '../../lib/prefs';
+import { currencyOptions } from '../../lib/currency';
+import { useDefaultCurrency } from './workspace';
 import {
   Badge, Button, Card, EmptyState, Input, Select, Skeleton, Spinner, cn, fmtMoney, fmtDate,
 } from '../ui';
@@ -81,8 +83,6 @@ extendDict({
     'ledger.descPlaceholder': 'Виплата Stripe, підписки на застосунок…',
   },
 });
-
-const CURRENCIES = ['USD', 'EUR', 'GBP', 'UAH', 'PLN'];
 
 export interface LedgerAccount {
   id: string; code?: string | null; name: string; type: string;
@@ -377,9 +377,10 @@ export function AddIncomeDialog({ onClose }: { onClose: () => void }) {
   });
   const revenueAccounts = (accountsQ.data ?? []).filter((a) => a.type === 'revenue' && !a.archived);
   const defaultAccount = revenueAccounts.find((a) => a.code === '4100') ?? revenueAccounts[0];
+  const defaultCurrency = useDefaultCurrency();
 
   const [amount, setAmount] = useState('');
-  const [currency, setCurrency] = useState('USD');
+  const [currency, setCurrency] = useState(defaultCurrency);
   const [date, setDate] = useState(todayIso());
   const [accountId, setAccountId] = useState('');
   const [projectId, setProjectId] = useState('');
@@ -422,7 +423,7 @@ export function AddIncomeDialog({ onClose }: { onClose: () => void }) {
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">{t('common.currency')}</label>
             <Select value={currency} onChange={(e) => setCurrency(e.target.value)} className="w-full">
-              {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              {currencyOptions(currency).map((c) => <option key={c} value={c}>{c}</option>)}
             </Select>
           </div>
         </div>

@@ -24,8 +24,9 @@ import {
 import { DropdownMenu, MenuItem, MenuLabel, toast } from '../components/overlays';
 import {
   useDealStages, useLead, useProjectsLookup, useUsersLookup,
-  CURRENCIES, type Company, type Deal, type ProjectLite, type Stage,
+  type Company, type Deal, type ProjectLite, type Stage,
 } from '../components/crm/shared';
+import { currencyOptions } from '../lib/currency';
 import { EditableName, NotesSection, SectionHeader } from '../components/crm/detail';
 import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
 import { FilesSection } from '../components/FilesSection';
@@ -354,7 +355,7 @@ function DealRail({
               className="w-full"
               trigger={<RailChip caret><span className="tabular-nums">{deal.currency ?? 'USD'}</span></RailChip>}
             >
-              {CURRENCIES.map((cur) => (
+              {currencyOptions(deal.currency).map((cur) => (
                 <MenuItem key={cur} checked={cur === (deal.currency ?? 'USD')} onSelect={() => cur !== deal.currency && onPatch({ currency: cur })}>{cur}</MenuItem>
               ))}
             </DropdownMenu>

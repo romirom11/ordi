@@ -11,9 +11,10 @@ import { Button, Input, Spinner } from '../ui';
 import { Dialog, toast } from '../overlays';
 import { SearchSelect } from '../SearchSelect';
 import {
-  CURRENCIES, COMPANY_STATUSES, NEW_LEAD_STATUSES, StatusPill, useCompanies, useDealStages,
+  COMPANY_STATUSES, NEW_LEAD_STATUSES, StatusPill, useCompanies, useDealStages,
   useProjectsLookup, type Company, type Stage,
 } from './shared';
+import { currencyOptions } from '../../lib/currency';
 import { CustomFieldsSection } from './CustomFieldsSection';
 import { byName } from '../../lib/queries';
 
@@ -88,7 +89,7 @@ export function NewClientDialog({ open, onClose, onCreated }: {
               width={140}
               value={currency}
               onChange={setCurrency}
-              options={CURRENCIES.map((c) => ({ value: c, label: c }))}
+              options={currencyOptions(currency).map((c) => ({ value: c, label: c }))}
             />
           </Field>
         </div>
@@ -309,7 +310,7 @@ export function NewDealDialog({ open, onClose, lockedCompanyId, defaultStageId, 
               width={140}
               value={currency}
               onChange={setCurrency}
-              options={CURRENCIES.map((c) => ({ value: c, label: c }))}
+              options={currencyOptions(currency).map((c) => ({ value: c, label: c }))}
             />
           </Field>
         </div>

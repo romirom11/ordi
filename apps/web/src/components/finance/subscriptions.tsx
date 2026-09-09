@@ -21,6 +21,8 @@ import { api, ApiError } from '../../lib/api';
 import { useCan } from '../../lib/auth';
 import { useT, extendDict } from '../../lib/i18n';
 import { byName } from '../../lib/queries';
+import { currencyOptions } from '../../lib/currency';
+import { useDefaultCurrency } from './workspace';
 import {
   Badge, Button, EmptyState, Input, Select, Skeleton, Switch, Spinner,
   cn, fmtMoney, fmtDate,
@@ -114,7 +116,6 @@ extendDict({
 
 const INTERVALS = ['weekly', 'monthly', 'quarterly', 'yearly'] as const;
 type Interval = (typeof INTERVALS)[number];
-const CURRENCIES = ['USD', 'EUR', 'GBP', 'UAH', 'PLN'];
 
 /** Monthly-normalization factor matching the API summary math. */
 const MONTHLY_FACTOR: Record<Interval, number> = {
@@ -427,7 +428,8 @@ function SubscriptionDialog({ mode, sub, companies, onClose, onSaved }: {
   const [name, setName] = useState(sub?.name ?? '');
   const [vendor, setVendor] = useState(sub?.vendor ?? '');
   const [amount, setAmount] = useState(sub ? String(sub.amount) : '');
-  const [currency, setCurrency] = useState(sub?.currency ?? 'USD');
+  const defaultCurrency = useDefaultCurrency();
+  const [currency, setCurrency] = useState(sub?.currency ?? defaultCurrency);
   const [interval, setInterval] = useState<Interval>(sub?.interval ?? 'monthly');
   const [nextDate, setNextDate] = useState(sub?.nextDate ?? '');
   const [category, setCategory] = useState(sub?.category ?? '');
@@ -482,7 +484,7 @@ function SubscriptionDialog({ mode, sub, companies, onClose, onSaved }: {
           </LabeledField>
           <LabeledField label={t('common.currency')}>
             <Select value={currency} onChange={(e) => setCurrency(e.target.value)} className="w-full">
-              {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              {currencyOptions(currency).map((c) => <option key={c} value={c}>{c}</option>)}
             </Select>
           </LabeledField>
         </div>

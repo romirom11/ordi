@@ -26,9 +26,10 @@ import { EntityActivity } from '../components/EntityActivity';
 import { useT } from '../lib/i18n';
 import { RailResizeHandle, useRailWidth } from '../components/RailResize';
 import {
-  COMPANY_STATUSES, CURRENCIES, StatusPill, useDealStages, useLeads, useUsersLookup,
+  COMPANY_STATUSES, StatusPill, useDealStages, useLeads, useUsersLookup,
   type Company, type Contact, type Deal, type Stage,
 } from '../components/crm/shared';
+import { currencyOptions } from '../lib/currency';
 import {
   EditableName, InlineEdit, NotesSection, OwnerRailValue, SectionHeader,
 } from '../components/crm/detail';
@@ -605,7 +606,7 @@ function CompanyRail({ company, loading, editable, users, onPatch }: {
               className="w-full"
               trigger={<RailChip caret><span className="tabular-nums">{company.defaultCurrency || 'USD'}</span></RailChip>}
             >
-              {CURRENCIES.map((cur) => (
+              {currencyOptions(company.defaultCurrency).map((cur) => (
                 <MenuItem key={cur} checked={cur === company.defaultCurrency} onSelect={() => cur !== company.defaultCurrency && onPatch({ defaultCurrency: cur })}>{cur}</MenuItem>
               ))}
             </DropdownMenu>
