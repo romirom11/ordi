@@ -153,14 +153,17 @@ export interface LeaveEntitlement {
 }
 
 /**
- * Days still bookable per leave type, for the caller's own card. Errors are not
- * retried: an account with no employee record has no entitlement to report and
- * the leave card shows its "not linked" hint instead.
+ * Days still bookable per leave type. Without an employeeId this is the caller's
+ * own card – self-service, no people.read needed; with one it is that person's,
+ * which the API gates on people.read. Errors are not retried: an account with no
+ * employee record has no entitlement to report and the card says so instead.
  */
-export function useMyLeaveEntitlements(): UseQueryResult<LeaveEntitlement[]> {
+export function useLeaveEntitlements(employeeId?: string): UseQueryResult<LeaveEntitlement[]> {
   return useQuery({
-    queryKey: ['my-leave-entitlements'],
-    queryFn: () => api.get<{ data: LeaveEntitlement[] }>('/leave-entitlements').then((r) => r.data),
+    queryKey: ['leave-entitlements', employeeId ?? 'me'],
+    queryFn: () => api
+      .get<{ data: LeaveEntitlement[] }>(`/leave-entitlements${qs({ employeeId })}`)
+      .then((r) => r.data),
     retry: false,
   });
 }

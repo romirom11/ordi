@@ -15,7 +15,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, Check, ChevronRight, Plus, X } from 'lucide-react';
 import { leaveDays, exceedsEntitlement } from '@ordi/shared';
 import { api, ApiError } from '../../lib/api';
-import { useHolidaySet, useLeaveTypes, useMyLeaveEntitlements, type LeaveEntitlement } from '../../lib/queries';
+import { useHolidaySet, useLeaveTypes, useLeaveEntitlements, type LeaveEntitlement } from '../../lib/queries';
+import { LeaveBalanceSummary, fmtNum } from './LeaveBalances';
 import { extendDict, useT } from '../../lib/i18n';
 import { Avatar, Badge, Button, Checkbox, Input, Select, Skeleton, Card, Spinner, cn, fmtDate } from '../ui';
 import { ConfirmDialog, Dialog, toast } from '../overlays';
@@ -57,10 +58,7 @@ extendDict({
     'leave.statusApproved': 'Approved',
     'leave.statusRejected': 'Rejected',
     'leave.statusCanceled': 'Canceled',
-    'leave.of': 'of',
-    'leave.daysShort': 'd',
     'leave.left': 'left',
-    'leave.pendingHeld': 'pending',
     'leave.noQuota': 'no quota',
     'leave.thisRequest': 'This request',
     'leave.remaining': 'Left after it',
@@ -101,10 +99,7 @@ extendDict({
     'leave.statusApproved': 'Погоджено',
     'leave.statusRejected': 'Відхилено',
     'leave.statusCanceled': 'Скасовано',
-    'leave.of': 'з',
-    'leave.daysShort': 'дн.',
     'leave.left': 'лишилось',
-    'leave.pendingHeld': 'на погодженні',
     'leave.noQuota': 'без квоти',
     'leave.thisRequest': 'Ця заявка',
     'leave.remaining': 'Залишок після неї',
@@ -136,10 +131,6 @@ const STATUS_META: Record<LeaveRequest['status'], { color: string; key: string }
   rejected: { color: '#ef4444', key: 'leave.statusRejected' },
   canceled: { color: '#6b7280', key: 'leave.statusCanceled' },
 };
-
-function fmtNum(n: number): string {
-  return Number.isInteger(n) ? String(n) : n.toFixed(1);
-}
 
 /**
  * Working days a range costs – the shared calc the API charges with, so the
@@ -179,7 +170,7 @@ export function MyLeaveCard() {
     queryFn: () => api.get<{ data: LeaveRequest[] }>('/leave-requests').then((r) => r.data),
     retry: false,
   });
-  const entitlements = useMyLeaveEntitlements();
+  const entitlements = useLeaveEntitlements();
   const holidays = useHolidaySet();
   const approvals = useQuery({
     queryKey: ['leave-approvals'],
@@ -199,10 +190,6 @@ export function MyLeaveCard() {
     return map;
   }, [entitlements.data]);
 
-  // Only types with something to draw down say anything useful here; the rest
-  // ("no quota", or types that never touch a balance) would just be zeros.
-  const tracked = (entitlements.data ?? []).filter((e) => e.tracked);
-
   /* ── request dialog ── */
   const emptyForm = { leaveTypeId: '', fromDate: '', toDate: '', halfDay: false, reason: '' };
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -217,7 +204,7 @@ export function MyLeaveCard() {
 
   const invalidateOwn = () => {
     void qc.invalidateQueries({ queryKey: ['my-leave'] });
-    void qc.invalidateQueries({ queryKey: ['my-leave-entitlements'] });
+    void qc.invalidateQueries({ queryKey: ['leave-entitlements'] });
   };
 
   const create = useMutation({
@@ -285,25 +272,9 @@ export function MyLeaveCard() {
         </div>
         <p className="mb-3 text-xs text-muted-foreground">{t('leave.myLeaveHint')}</p>
 
-        {!notLinked && tracked.length > 0 && (
-          <div className="mb-3 flex flex-wrap gap-x-5 gap-y-1.5 text-xs">
-            {tracked.map((e) => (
-              <span key={e.leaveTypeId} className="flex items-center gap-1.5">
-                <span className="text-muted-foreground">{e.leaveTypeName}</span>
-                <span className={cn('font-medium tabular-nums', e.remaining <= 0 && 'text-destructive')}>
-                  {fmtNum(e.remaining)}
-                  {' '}
-                  <span className="font-normal text-faint">
-                    {t('leave.of')} {fmtNum(e.allocated + e.carried)} {t('leave.daysShort')}
-                  </span>
-                </span>
-                {/* Days already asked for are gone from the remainder – say so,
-                    otherwise the number looks wrong next to a pending request. */}
-                {e.pending > 0 && (
-                  <span className="text-faint">· {fmtNum(e.pending)} {t('leave.pendingHeld')}</span>
-                )}
-              </span>
-            ))}
+        {!notLinked && (
+          <div className="mb-3">
+            <LeaveBalanceSummary entitlements={entitlements.data} loading={entitlements.isLoading} />
           </div>
         )}
 
