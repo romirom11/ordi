@@ -186,6 +186,16 @@ export const commentInputSchema = z.object({
 });
 
 /**
+ * A comment rewrite replaces the whole body, so the body has to be there:
+ * rich text is `z.any()`, which alone would let a bodyless PATCH validate and
+ * blank the comment it was meant to fix. The object-level check runs even when
+ * the key is absent, which a field-level one on `z.any()` does not.
+ */
+export const commentEditSchema = commentInputSchema
+  .pick({ body: true })
+  .refine((v) => v.body !== undefined, { message: 'body is required', path: ['body'] });
+
+/**
  * One reaction toggle. The emoji is stored as the map key on the comment, so
  * it is capped tight – 16 chars fits any emoji sequence (flags, skin tones)
  * but no sentence.
