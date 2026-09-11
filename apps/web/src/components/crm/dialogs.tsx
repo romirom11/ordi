@@ -15,6 +15,7 @@ import {
   useProjectsLookup, type Company, type Stage,
 } from './shared';
 import { currencyOptions } from '../../lib/currency';
+import { useDefaultCurrency } from '../finance/workspace';
 import { CustomFieldsSection } from './CustomFieldsSection';
 import { byName } from '../../lib/queries';
 
@@ -39,10 +40,13 @@ export function NewClientDialog({ open, onClose, onCreated }: {
   const [name, setName] = useState('');
   const [domain, setDomain] = useState('');
   const [status, setStatus] = useState<string>('lead');
-  const [currency, setCurrency] = useState('USD');
+  // Seeded from the workspace default like the finance forms – a UAH workspace
+  // should not open every new client in dollars.
+  const defaultCurrency = useDefaultCurrency();
+  const [currency, setCurrency] = useState(defaultCurrency);
   const [error, setError] = useState<string | null>(null);
 
-  const reset = () => { setName(''); setDomain(''); setStatus('lead'); setCurrency('USD'); setError(null); };
+  const reset = () => { setName(''); setDomain(''); setStatus('lead'); setCurrency(defaultCurrency); setError(null); };
 
   const mut = useMutation({
     mutationFn: () => api.post<Company>('/companies', {
@@ -246,7 +250,8 @@ export function NewDealDialog({ open, onClose, lockedCompanyId, defaultStageId, 
   const [companyId, setCompanyId] = useState(lockedCompanyId ?? '');
   const [projectId, setProjectId] = useState('');
   const [amount, setAmount] = useState('');
-  const [currency, setCurrency] = useState('USD');
+  const defaultCurrency = useDefaultCurrency();
+  const [currency, setCurrency] = useState(defaultCurrency);
   const [stageId, setStageId] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -254,7 +259,7 @@ export function NewDealDialog({ open, onClose, lockedCompanyId, defaultStageId, 
   const effectiveStage = stageId || defaultStageId || stages[0]?.id || '';
   const effectiveCompany = lockedCompanyId ?? companyId;
 
-  const reset = () => { setTitle(''); setCompanyId(lockedCompanyId ?? ''); setProjectId(''); setAmount(''); setCurrency('USD'); setStageId(''); setError(null); };
+  const reset = () => { setTitle(''); setCompanyId(lockedCompanyId ?? ''); setProjectId(''); setAmount(''); setCurrency(defaultCurrency); setStageId(''); setError(null); };
 
   const mut = useMutation({
     mutationFn: () => api.post('/deals', {
