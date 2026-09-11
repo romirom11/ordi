@@ -13,7 +13,11 @@ import { join } from 'node:path';
 import { getDb, schema } from '@ordi/db';
 import { resetDb, seedRolesAndUsers } from './helpers';
 import { setupWorkspace, type Workspace } from './agents-helpers';
-import { prepareWorkspace, publishWorkspace, cleanupWorkspace, setGitRunner, checkoutDir, redactGitError, explainPushError } from '../domains/agents/workspace';
+import {
+  prepareWorkspace, publishWorkspace, cleanupWorkspace, setGitRunner, checkoutDir, redactGitError, explainPushError,
+  pullRequestTitle, buildPullRequestBody, readPullRequestTemplate,
+} from '../domains/agents/workspace';
+import { buildTaskBrief } from '../domains/agents/prompt';
 import { encrypt } from '../lib/crypto';
 import { env } from '../env';
 
@@ -168,5 +172,70 @@ describe('workspace with real git', () => {
     expect(out).not.toContain('ghs_secret_token_value');
     expect(out).toContain('AUTHORIZATION: basic [redacted]');
     expect(redactGitError(message, null)).toBe(message);
+  });
+});
+
+describe('pull request title and description', () => {
+  it('the title is the task key and the title on one line, whatever the card carries', () => {
+    expect(pullRequestTitle('ORD-26', 'Додати доступну кількість днів відпустки  ')).toBe('ORD-26: Додати доступну кількість днів відпустки');
+    expect(pullRequestTitle('ORD-1', '  two\n lines\t here ')).toBe('ORD-1: two lines here');
+  });
+
+  it('the description follows the repository template: change, verification, risks, and a link to the task', () => {
+    const body = buildPullRequestBody({
+      ref: 'ORD-24', taskUrl: 'https://ordi.test/projects/p1/tasks/t1',
+      summary: 'Currency pickers offer USD, EUR and UAH.',
+      verification: 'pnpm test (387 tests) and the Finance page in both themes.',
+      risks: 'A record saved in PLN must keep its currency when edited.',
+    });
+    expect(body).toBe([
+      '## What this changes', '', 'Currency pickers offer USD, EUR and UAH.', '',
+      '## How it was verified', '', 'pnpm test (387 tests) and the Finance page in both themes.', '',
+      '## What breaks if this is wrong', '', 'A record saved in PLN must keep its currency when edited.', '',
+      'Task: [ORD-24](https://ordi.test/projects/p1/tasks/t1)', '',
+      '_Opened by an ordi agent._',
+    ].join('\n'));
+  });
+
+  it('a report without verification says so instead of hiding it; no risks means no section', () => {
+    const body = buildPullRequestBody({ ref: 'ORD-9', taskUrl: null, summary: 'Did it.', verification: '  ', risks: null });
+    expect(body).toContain('## How it was verified\n\nNot stated by the agent – treat the change as unverified.');
+    expect(body).not.toContain('What breaks');
+    expect(body).toContain('\n\nTask: ORD-9\n\n_Opened by an ordi agent._');
+  });
+});
+
+describe('the repository pull request template', () => {
+  it('is read from where GitHub looks for it, capped, and quoted into the brief for the agent to answer', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ordi-tpl-'));
+    expect(await readPullRequestTemplate(dir)).toBeNull();
+    await mkdir(join(dir, '.github'), { recursive: true });
+    await writeFile(join(dir, '.github', 'pull_request_template.md'), '## What this changes\n\n## How it was verified\n\n- [ ] typecheck\n');
+    const template = await readPullRequestTemplate(dir);
+    expect(template).toBe('## What this changes\n\n## How it was verified\n\n- [ ] typecheck');
+    // GitHub's order: a root file loses to the .github one; on its own it counts.
+    await writeFile(join(dir, 'PULL_REQUEST_TEMPLATE.md'), 'root '.repeat(2000));
+    expect(await readPullRequestTemplate(dir)).toBe(template);
+    await rm(join(dir, '.github'), { recursive: true });
+    const long = await readPullRequestTemplate(dir);
+    expect(long!.length).toBeLessThan(4100);
+    expect(long!.endsWith('[…]')).toBe(true);
+
+    const brief = await buildTaskBrief({
+      taskId: ws.taskId, ref: 'WSG-1', title: 'Real git', projectKey: 'WSG', projectName: 'Workspace',
+      completionCategory: 'in_review', completionStatusName: null, branch: 'feature/wsg-1', repoFullName: 'acme/real',
+      agentName: 'Claude', instructions: '', followUpCommentId: null, connectorSlugs: [], pullRequestTemplate: template,
+    });
+    expect(brief).toContain('## Pull request template of the repository');
+    expect(brief).toContain('> ## How it was verified');
+    expect(brief).toContain('> - [ ] typecheck');
+    // Without a template the section is absent rather than empty.
+    const plain = await buildTaskBrief({
+      taskId: ws.taskId, ref: 'WSG-1', title: 'Real git', projectKey: 'WSG', projectName: 'Workspace',
+      completionCategory: 'in_review', completionStatusName: null, branch: 'feature/wsg-1', repoFullName: 'acme/real',
+      agentName: 'Claude', instructions: '', followUpCommentId: null, connectorSlugs: [], pullRequestTemplate: null,
+    });
+    expect(plain).not.toContain('Pull request template');
+    await rm(dir, { recursive: true, force: true });
   });
 });

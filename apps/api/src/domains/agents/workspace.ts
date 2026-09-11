@@ -12,7 +12,7 @@
  */
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, readdir, rm, stat, utimes } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, stat, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 import { getDb, schema, eq } from '@ordi/db';
 import { buildBranchName } from '@ordi/shared';
@@ -276,9 +276,71 @@ export async function stageChanges(dir: string): Promise<StageResult> {
   return { staged: Boolean(staged.stdout.trim()), skipped };
 }
 
+/** Where GitHub (and the other forges) look for a pull request template, in GitHub's order. */
+const PR_TEMPLATE_PATHS = [
+  '.github/pull_request_template.md', '.github/PULL_REQUEST_TEMPLATE.md',
+  'pull_request_template.md', 'PULL_REQUEST_TEMPLATE.md',
+  'docs/pull_request_template.md', 'docs/PULL_REQUEST_TEMPLATE.md',
+];
+const PR_TEMPLATE_MAX_CHARS = 4000;
+
+/**
+ * The repository's own pull request template, if it has one, so the brief can
+ * ask the agent to answer what the repository asks for. The platform still
+ * writes the description in its own shape: the template goes to the agent,
+ * not into the pull request. Capped so a long template cannot crowd the brief.
+ */
+export async function readPullRequestTemplate(dir: string): Promise<string | null> {
+  for (const rel of PR_TEMPLATE_PATHS) {
+    let text: string;
+    try { text = (await readFile(join(dir, rel), 'utf8')).trim(); } catch { continue; }
+    if (!text) continue;
+    return text.length > PR_TEMPLATE_MAX_CHARS ? `${text.slice(0, PR_TEMPLATE_MAX_CHARS)}\n[…]` : text;
+  }
+  return null;
+}
+
+/** `ORD-24: Title` – the task title collapsed to one line, so a trailing space in the card never lands in git. */
+export function pullRequestTitle(ref: string, title: string): string {
+  return `${ref}: ${title.replace(/\s+/g, ' ').trim()}`;
+}
+
+export interface PullRequestReport {
+  summary: string;
+  verification: string | null;
+  risks: string | null;
+  /** The task in ordi, for the reviewer who starts from GitHub. */
+  taskUrl: string | null;
+  ref: string;
+}
+
+/**
+ * The pull request description in the shape of the repository's own
+ * `.github/pull_request_template.md`: what changed, how it was verified, and
+ * what breaks if it is wrong, each from its own field of the agent's report
+ * rather than one paragraph written for the task comment. The template's
+ * checklist is left out – nobody ticks boxes on the agent's behalf – and a
+ * missing verification is said outright instead of being glossed over.
+ */
+export function buildPullRequestBody(r: PullRequestReport): string {
+  const para = (text: string | null, fallback: string) => (text?.trim() || fallback);
+  const sections = [
+    `## What this changes\n\n${para(r.summary, '(the agent gave no summary)')}`,
+    `## How it was verified\n\n${para(r.verification, 'Not stated by the agent – treat the change as unverified.')}`,
+  ];
+  if (r.risks?.trim()) sections.push(`## What breaks if this is wrong\n\n${r.risks.trim()}`);
+  sections.push(r.taskUrl ? `Task: [${r.ref}](${r.taskUrl})` : `Task: ${r.ref}`);
+  sections.push('_Opened by an ordi agent._');
+  return sections.join('\n\n');
+}
+
 /** R28: commit leftovers, push, open (or find) the pull request. */
 export async function publishWorkspace(ws: Workspace, input: {
   ref: string; title: string; summary: string; existingPrUrl: string | null;
+  /** The rest of the agent's report, for the pull request description. */
+  verification?: string | null;
+  risks?: string | null;
+  taskUrl?: string | null;
   /** False preserves work from a run that stopped early: push the branch, open no pull request. */
   openPullRequest?: boolean;
 }): Promise<PublishResult> {
@@ -292,14 +354,18 @@ export async function publishWorkspace(ws: Workspace, input: {
   const stage = await stageChanges(dir);
   if (stage.skipped.length) logger.info({ dir, skipped: stage.skipped.slice(0, 20), count: stage.skipped.length }, 'untracked files left out of the commit');
   if (stage.staged) {
-    await git(['commit', '-m', openPr ? `${input.ref}: ${input.title}` : `WIP ${input.ref}: ${input.title} (run stopped early)`], { cwd: dir });
+    const subject = pullRequestTitle(input.ref, input.title);
+    await git(['commit', '-m', openPr ? subject : `WIP ${subject} (run stopped early)`], { cwd: dir });
   }
   const commits = await commitsAhead(dir, repo.defaultBranch, branch);
   if (commits === 0) return { pushed: false, prUrl: input.existingPrUrl, commits: 0 };
   await git(['push', '-u', 'origin', branch], { cwd: dir, repo });
   if (input.existingPrUrl || !openPr) return { pushed: true, prUrl: input.existingPrUrl, commits };
   if (repo.provider !== 'github') return { pushed: true, prUrl: null, commits };
-  const prUrl = await openGithubPullRequest(repo, { head: branch, base: repo.defaultBranch, title: `${input.ref}: ${input.title}`, body: input.summary });
+  const prUrl = await openGithubPullRequest(repo, {
+    head: branch, base: repo.defaultBranch, title: pullRequestTitle(input.ref, input.title),
+    body: buildPullRequestBody({ summary: input.summary, verification: input.verification ?? null, risks: input.risks ?? null, taskUrl: input.taskUrl ?? null, ref: input.ref }),
+  });
   return { pushed: true, prUrl, commits };
 }
 
@@ -335,7 +401,7 @@ async function openGithubPullRequest(repo: RepoBinding, pr: { head: string; base
   }
   const res = await fetch(`${api}/repos/${repo.fullName}/pulls`, {
     method: 'POST', headers,
-    body: JSON.stringify({ title: pr.title, head: pr.head, base: pr.base, body: `${pr.body}\n\n_Opened by an ordi agent._` }),
+    body: JSON.stringify({ title: pr.title, head: pr.head, base: pr.base, body: pr.body }),
   });
   if (!res.ok) {
     logger.warn({ status: res.status, repo: repo.fullName }, 'pull request creation failed');

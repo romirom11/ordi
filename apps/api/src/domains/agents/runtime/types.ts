@@ -60,7 +60,12 @@ export interface RuntimeUsage {
 /** What the agent said it did, parsed from its structured final answer. */
 export interface RuntimeReport {
   status: 'done' | 'needs_input' | 'blocked';
+  /** For the task comment: what changed and why. */
   summary: string;
+  /** For the pull request: what was run or clicked to prove the change. */
+  verification: string | null;
+  /** For the pull request: what breaks if the change is wrong, where to look first. */
+  risks: string | null;
   prUrl: string | null;
   branch: string | null;
   question: string | null;
@@ -107,7 +112,9 @@ export const AGENT_REPORT_SCHEMA = {
   required: ['status', 'summary'],
   properties: {
     status: { type: 'string', enum: ['done', 'needs_input', 'blocked'] },
-    summary: { type: 'string', description: 'Two to five sentences on what was done, for the task comment.' },
+    summary: { type: 'string', description: 'Two to five sentences on what was done and why, for the task comment. About the change, not the session.' },
+    verification: { type: ['string', 'null'], description: 'For the pull request: what was actually run or clicked to prove the change works, and the outcome – commands, test counts, pages opened. Null when nothing was verified.' },
+    risks: { type: ['string', 'null'], description: 'For the pull request: what breaks if the change is wrong, and what a reviewer should look at first. Null when there is nothing to flag.' },
     prUrl: { type: ['string', 'null'], description: 'The pull request url when one was opened.' },
     branch: { type: ['string', 'null'], description: 'The branch that carries the change.' },
     question: { type: ['string', 'null'], description: 'When status is needs_input: the question for the task author.' },
@@ -122,6 +129,8 @@ export function parseReport(value: unknown): RuntimeReport | null {
   return {
     status,
     summary: typeof v.summary === 'string' ? v.summary : '',
+    verification: typeof v.verification === 'string' && v.verification.trim() ? v.verification : null,
+    risks: typeof v.risks === 'string' && v.risks.trim() ? v.risks : null,
     prUrl: typeof v.prUrl === 'string' && v.prUrl ? v.prUrl : null,
     branch: typeof v.branch === 'string' && v.branch ? v.branch : null,
     question: typeof v.question === 'string' && v.question ? v.question : null,
