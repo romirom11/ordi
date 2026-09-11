@@ -69,7 +69,11 @@ describe('comment editing', () => {
   it('rejects a patch without a body instead of blanking the comment', async () => {
     const commentId = await addComment(users.member!.cookie, doc('Keep me'));
 
-    expect((await reqAs(users.member!.cookie).patch(`/comments/${commentId}`, { mentions: [] })).status).toBe(400);
+    // Absent, null, and a document with nothing in it – each would otherwise
+    // have overwritten the comment with an empty body.
+    for (const body of [{ mentions: [] }, { body: null }, { body: doc('   ') }, { body: { type: 'doc', content: [] } }]) {
+      expect((await reqAs(users.member!.cookie).patch(`/comments/${commentId}`, body)).status).toBe(400);
+    }
     expect(JSON.stringify((await comments(users.member!.cookie)).find((c) => c.id === commentId).body)).toContain('Keep me');
   });
 

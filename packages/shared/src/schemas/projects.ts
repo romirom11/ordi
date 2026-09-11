@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { idSchema, customFieldsSchema, richTextSchema } from './common';
+import { docToText } from '../calc/richtext';
 import {
   PROJECT_STATUSES, VISIBILITY, PROJECT_MEMBER_ROLES, REVENUE_SOURCES,
   TASK_STATUS_CATEGORIES, TASK_PRIORITIES, TASK_RELATION_TYPES, CYCLE_STATUSES, ESTIMATE_UNITS,
@@ -186,14 +187,16 @@ export const commentInputSchema = z.object({
 });
 
 /**
- * A comment rewrite replaces the whole body, so the body has to be there:
- * rich text is `z.any()`, which alone would let a bodyless PATCH validate and
- * blank the comment it was meant to fix. The object-level check runs even when
- * the key is absent, which a field-level one on `z.any()` does not.
+ * A comment rewrite replaces the whole body, so the body has to say something:
+ * rich text is `z.any()`, which alone would let a bodyless PATCH – or one with
+ * `null`, or an empty document – validate and blank the comment it was meant
+ * to fix. The object-level check runs even when the key is absent, which a
+ * field-level one on `z.any()` does not, and `docToText` is the same reading
+ * of a document the rest of the app uses, so a mention-only comment counts.
  */
 export const commentEditSchema = commentInputSchema
   .pick({ body: true })
-  .refine((v) => v.body !== undefined, { message: 'body is required', path: ['body'] });
+  .refine((v) => docToText(v.body) !== '', { message: 'body must contain text', path: ['body'] });
 
 /**
  * One reaction toggle. The emoji is stored as the map key on the comment, so
