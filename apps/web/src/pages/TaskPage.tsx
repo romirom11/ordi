@@ -294,7 +294,7 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
 
             <AgentRunsBlock taskId={taskId} canWrite={canWriteTasks} showWhenEmpty={hasAgentAssignee} />
 
-            <ActivityFeed taskId={taskId} comments={task.comments ?? []} users={usersQ.data ?? []} />
+            <ActivityFeed taskId={taskId} comments={task.comments ?? []} users={usersQ.data ?? []} projectRole={projectRole} />
           </div>
         </div>
 

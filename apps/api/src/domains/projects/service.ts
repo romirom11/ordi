@@ -935,16 +935,33 @@ export async function addComment(actor: Actor, taskId: string, input: any) {
   return { id };
 }
 
+/**
+ * Rewrites one comment: its author may fix it as a member, anyone else needs
+ * project admin – the same rule delete follows. `editedAt` is what tells the
+ * reader the text they see is not the text that was posted.
+ */
 export async function editComment(actor: Actor, commentId: string, body: unknown) {
   const { db } = getDb();
   const [comment] = await db.select().from(schema.comments).where(and(eq(schema.comments.id, commentId), isNull(schema.comments.deletedAt)));
   if (!comment) throw err.notFound('Comment not found');
   const task = await loadTask(comment.taskId);
-  await assertProject(actor, task.projectId, 'member');
-  if (comment.authorId !== actor.userId) {
-    await assertProject(actor, task.projectId, 'admin');
-  }
+  await assertProject(actor, task.projectId, comment.authorId === actor.userId ? 'member' : 'admin');
   await db.update(schema.comments).set({ body: body ?? {}, editedAt: new Date() }).where(eq(schema.comments.id, commentId));
+  // A mention added by the edit notifies like a fresh one; the mentions that
+  // were already in the comment stay quiet instead of pinging twice.
+  const before = new Set(extractMentions(comment.body).users);
+  const mentions = extractMentions(body).users.filter((u) => u !== actor.userId && !before.has(u));
+  if (mentions.length) {
+    await emit({
+      type: 'comment.mentioned',
+      aggregateType: 'comment',
+      aggregateId: commentId,
+      payload: { mentions, ref: await taskRef(task), taskId: task.id, projectId: task.projectId, commentId },
+      actorId: actor.userId,
+      actorType: actor.actorType,
+    });
+  }
+  await writeActivity(db, { entityType: 'comment', entityId: commentId, action: 'updated', actorId: actor.userId, actorType: actor.actorType });
   return { ok: true };
 }
 

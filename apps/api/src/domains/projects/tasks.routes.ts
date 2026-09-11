@@ -3,7 +3,7 @@ import { getDb, schema, eq, and, isNull, desc } from '@ordi/db';
 import { ulid } from 'ulid';
 import {
   taskInputSchema, taskUpdateSchema, taskMoveSchema, taskRelationSchema, taskLinkSchema,
-  bulkTaskUpdateSchema, commentInputSchema, reactionToggleSchema, labelInputSchema, labelPatchSchema, cycleInputSchema, cycleCompleteSchema,
+  bulkTaskUpdateSchema, commentInputSchema, commentEditSchema, reactionToggleSchema, labelInputSchema, labelPatchSchema, cycleInputSchema, cycleCompleteSchema,
   taskTemplateInputSchema, recurringTaskInputSchema, intakeAcceptSchema, intakeDeclineSchema, intakeSettingsSchema,
   LABEL_SCOPES,
   type CustomFieldFilter, type LabelScope,
@@ -122,7 +122,7 @@ export function tasksRoutes() {
   });
 
   app.patch('/comments/:id', async (c) => {
-    const body = commentInputSchema.partial().parse(await c.req.json());
+    const body = commentEditSchema.parse(await c.req.json());
     return c.json(await svc.editComment(currentActor(c), c.req.param('id'), body.body));
   });
 
