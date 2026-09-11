@@ -12,7 +12,7 @@
  */
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, readdir, rm, stat, utimes } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, stat, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 import { getDb, schema, eq } from '@ordi/db';
 import { buildBranchName } from '@ordi/shared';
@@ -274,6 +274,30 @@ export async function stageChanges(dir: string): Promise<StageResult> {
   }
   const staged = await git(['diff', '--cached', '--name-only'], { cwd: dir });
   return { staged: Boolean(staged.stdout.trim()), skipped };
+}
+
+/** Where GitHub (and the other forges) look for a pull request template, in GitHub's order. */
+const PR_TEMPLATE_PATHS = [
+  '.github/pull_request_template.md', '.github/PULL_REQUEST_TEMPLATE.md',
+  'pull_request_template.md', 'PULL_REQUEST_TEMPLATE.md',
+  'docs/pull_request_template.md', 'docs/PULL_REQUEST_TEMPLATE.md',
+];
+const PR_TEMPLATE_MAX_CHARS = 4000;
+
+/**
+ * The repository's own pull request template, if it has one, so the brief can
+ * ask the agent to answer what the repository asks for. The platform still
+ * writes the description in its own shape: the template goes to the agent,
+ * not into the pull request. Capped so a long template cannot crowd the brief.
+ */
+export async function readPullRequestTemplate(dir: string): Promise<string | null> {
+  for (const rel of PR_TEMPLATE_PATHS) {
+    let text: string;
+    try { text = (await readFile(join(dir, rel), 'utf8')).trim(); } catch { continue; }
+    if (!text) continue;
+    return text.length > PR_TEMPLATE_MAX_CHARS ? `${text.slice(0, PR_TEMPLATE_MAX_CHARS)}\n[…]` : text;
+  }
+  return null;
 }
 
 /** `ORD-24: Title` – the task title collapsed to one line, so a trailing space in the card never lands in git. */

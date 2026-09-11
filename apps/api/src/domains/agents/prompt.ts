@@ -29,6 +29,8 @@ export interface PromptContext {
   /** The session to continue could not be found: the full brief again, plus what is already on the branch. */
   sessionLost?: boolean;
   connectorSlugs: string[];
+  /** The repository's pull request template, when the checkout has one. */
+  pullRequestTemplate?: string | null;
 }
 
 export async function buildTaskBrief(ctx: PromptContext): Promise<string> {
@@ -94,6 +96,14 @@ export async function buildTaskBrief(ctx: PromptContext): Promise<string> {
       for (const g of gitRows) lines.push(`- ${g.type}${g.state ? ` (${g.state})` : ''}: ${g.url ?? g.title ?? ''}`);
       lines.push('');
     }
+    if (ctx.pullRequestTemplate) {
+      lines.push('## Pull request template of the repository');
+      lines.push('');
+      lines.push('The platform writes the pull request description from your report. The repository asks contributors for the following; write `verification` and `risks` so they answer it, and leave out whatever only a human can tick or fill in:');
+      lines.push('');
+      lines.push(quote(ctx.pullRequestTemplate));
+      lines.push('');
+    }
     if (commentRows.length) {
       lines.push('## Comments so far');
       lines.push('');
@@ -139,7 +149,7 @@ export function buildRulesOfEngagement(ctx: PromptContext): string {
   const codeRules = ctx.repoFullName
     ? [
       `- The working directory is a fresh checkout of ${ctx.repoFullName} on branch ${ctx.branch}. Make focused commits with clear messages as you go: the subject in the imperative mood, a body saying why when the diff does not.`,
-      `- Start every commit subject with "${ctx.ref}: " – ordi links commits to the task by that key.`,
+      `- Follow the repository's own commit convention where it has one (commitlint, conventional commits, a CONTRIBUTING file). Whatever the format, mention ${ctx.ref} in every commit message – in the subject where the convention allows it, otherwise as a trailer line \`Refs: ${ctx.ref}\` – ordi links commits to the task by that key.`,
       '- Commit as yourself only: no Co-Authored-By or other trailers naming a model, a tool or a person.',
       '- Do not push, do not open pull requests and do not change remotes: the platform pushes your branch and opens the pull request when you report done.',
       '- Do not run destructive git commands (reset --hard, force pushes, branch deletion).',

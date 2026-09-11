@@ -15,8 +15,9 @@ import { resetDb, seedRolesAndUsers } from './helpers';
 import { setupWorkspace, type Workspace } from './agents-helpers';
 import {
   prepareWorkspace, publishWorkspace, cleanupWorkspace, setGitRunner, checkoutDir, redactGitError, explainPushError,
-  pullRequestTitle, buildPullRequestBody,
+  pullRequestTitle, buildPullRequestBody, readPullRequestTemplate,
 } from '../domains/agents/workspace';
+import { buildTaskBrief } from '../domains/agents/prompt';
 import { encrypt } from '../lib/crypto';
 import { env } from '../env';
 
@@ -201,5 +202,40 @@ describe('pull request title and description', () => {
     expect(body).toContain('## How it was verified\n\nNot stated by the agent – treat the change as unverified.');
     expect(body).not.toContain('What breaks');
     expect(body).toContain('\n\nTask: ORD-9\n\n_Opened by an ordi agent._');
+  });
+});
+
+describe('the repository pull request template', () => {
+  it('is read from where GitHub looks for it, capped, and quoted into the brief for the agent to answer', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ordi-tpl-'));
+    expect(await readPullRequestTemplate(dir)).toBeNull();
+    await mkdir(join(dir, '.github'), { recursive: true });
+    await writeFile(join(dir, '.github', 'pull_request_template.md'), '## What this changes\n\n## How it was verified\n\n- [ ] typecheck\n');
+    const template = await readPullRequestTemplate(dir);
+    expect(template).toBe('## What this changes\n\n## How it was verified\n\n- [ ] typecheck');
+    // GitHub's order: a root file loses to the .github one; on its own it counts.
+    await writeFile(join(dir, 'PULL_REQUEST_TEMPLATE.md'), 'root '.repeat(2000));
+    expect(await readPullRequestTemplate(dir)).toBe(template);
+    await rm(join(dir, '.github'), { recursive: true });
+    const long = await readPullRequestTemplate(dir);
+    expect(long!.length).toBeLessThan(4100);
+    expect(long!.endsWith('[…]')).toBe(true);
+
+    const brief = await buildTaskBrief({
+      taskId: ws.taskId, ref: 'WSG-1', title: 'Real git', projectKey: 'WSG', projectName: 'Workspace',
+      completionCategory: 'in_review', completionStatusName: null, branch: 'feature/wsg-1', repoFullName: 'acme/real',
+      agentName: 'Claude', instructions: '', followUpCommentId: null, connectorSlugs: [], pullRequestTemplate: template,
+    });
+    expect(brief).toContain('## Pull request template of the repository');
+    expect(brief).toContain('> ## How it was verified');
+    expect(brief).toContain('> - [ ] typecheck');
+    // Without a template the section is absent rather than empty.
+    const plain = await buildTaskBrief({
+      taskId: ws.taskId, ref: 'WSG-1', title: 'Real git', projectKey: 'WSG', projectName: 'Workspace',
+      completionCategory: 'in_review', completionStatusName: null, branch: 'feature/wsg-1', repoFullName: 'acme/real',
+      agentName: 'Claude', instructions: '', followUpCommentId: null, connectorSlugs: [], pullRequestTemplate: null,
+    });
+    expect(plain).not.toContain('Pull request template');
+    await rm(dir, { recursive: true, force: true });
   });
 });

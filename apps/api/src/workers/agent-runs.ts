@@ -24,7 +24,7 @@ import {
   cancelRequested, claimRuns, finishRun, newestHumanCommentSince, parkRunForQuota, queueRun, recordRunProgress, requeueStaleRuns, startRun, touchRun, type RunRow,
 } from '../domains/agents/runs';
 import { runtimeAdapter, type RuntimeMcpServer, type RuntimeOutcome } from '../domains/agents/runtime';
-import { cleanupWorkspace, explainPushError, harnessDir, prepareWorkspace, pruneTaskDirs, publishWorkspace, SESSION_RETENTION_DAYS, type Workspace } from '../domains/agents/workspace';
+import { cleanupWorkspace, explainPushError, harnessDir, prepareWorkspace, pruneTaskDirs, publishWorkspace, readPullRequestTemplate, SESSION_RETENTION_DAYS, type Workspace } from '../domains/agents/workspace';
 import * as tasksSvc from '../domains/projects/service';
 
 const { agentProfiles, agentWorkers, users, tasks, projects, taskStatuses, agentConnectors, mcpConnectors } = schema;
@@ -187,6 +187,7 @@ export async function executeRun(claimed: RunRow): Promise<void> {
       followUpCommentId: claimed.trigger === 'comment' ? claimed.commentId : null,
       resumedAfterStop: claimed.trigger === 'retry' && Boolean(claimed.sessionId),
       connectorSlugs: setup.connectors.map((c) => c.slug),
+      pullRequestTemplate: ws.repo ? await readPullRequestTemplate(ws.dir) : null,
     };
     let prompt = await buildTaskBrief(ctx);
     const systemAppend = buildRulesOfEngagement(ctx);
