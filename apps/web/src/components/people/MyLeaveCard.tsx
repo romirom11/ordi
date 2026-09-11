@@ -274,7 +274,7 @@ export function MyLeaveCard() {
 
         {!notLinked && (
           <div className="mb-3">
-            <LeaveBalanceSummary entitlements={entitlements.data} loading={entitlements.isLoading} />
+            <LeaveBalanceSummary entitlements={entitlements.data} loading={entitlements.isLoading} failed={entitlements.isError} />
           </div>
         )}
 

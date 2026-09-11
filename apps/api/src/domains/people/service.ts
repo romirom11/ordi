@@ -658,12 +658,18 @@ type LeaveBalanceRow = typeof schema.leaveBalances.$inferSelect;
  * checked against anything. Quota 0 means "no quota" (as the settings panel and
  * the request form both label it), so such a type stays untracked, not capped
  * at zero days.
+ *
+ * Whether the type caps at all is read from the quota as well as the stored
+ * row: a period accrued while the quota was 0 leaves a row with nothing
+ * allocated, and once the quota is raised that row must read as "0 days left
+ * until HR re-accrues", not as "no limit".
  */
 function toEntitlement(type: LeaveTypeRow, bal: LeaveBalanceRow | undefined, pending: number): LeaveEntitlement {
   const allocated = Number(bal?.allocated ?? type.annualQuota);
   const carried = Number(bal?.carried ?? 0);
   const used = Number(bal?.used ?? 0);
-  return { allocated, carried, used, pending, tracked: type.affectsBalance && allocated + carried > 0 };
+  const tracked = type.affectsBalance && (allocated + carried > 0 || Number(type.annualQuota) > 0);
+  return { allocated, carried, used, pending, tracked };
 }
 
 export interface LeaveEntitlementRow extends LeaveEntitlement {
@@ -683,8 +689,10 @@ export interface LeaveEntitlementRow extends LeaveEntitlement {
  * against the remainder: a person who already asked for the rest of their quota
  * has nothing left to ask for, even before anyone approves it.
  */
-export async function listLeaveEntitlements(employeeId: string, period?: string, leaveTypeIds?: string[]): Promise<LeaveEntitlementRow[]> {
-  const { db } = getDb();
+export async function listLeaveEntitlements(
+  employeeId: string, period?: string, leaveTypeIds?: string[],
+  db: Pick<ReturnType<typeof getDb>['db'], 'select'> = getDb().db,
+): Promise<LeaveEntitlementRow[]> {
   const p = period ?? String(new Date().getFullYear());
   const types = await db.select().from(schema.leaveTypes)
     .where(leaveTypeIds?.length ? inArray(schema.leaveTypes.id, leaveTypeIds) : undefined)
@@ -909,39 +917,46 @@ export async function createLeaveRequest(actor: Actor, input: any) {
     throw err.forbidden('Cannot request leave for another employee', 'people.write');
   }
 
-  // Conflict: overlap with existing pending/approved requests for the same employee.
-  const existing = await db.select().from(schema.leaveRequests).where(and(
-    eq(schema.leaveRequests.employeeId, employee.id),
-    inArray(schema.leaveRequests.status, ['pending', 'approved']),
-  ));
-  for (const r of existing) {
-    if (rangesOverlap(input.fromDate, input.toDate, r.fromDate, r.toDate)) {
-      throw err.domain('Leave request overlaps an existing request', { conflictId: r.id });
-    }
-  }
-
   const days = leaveDays(input.fromDate, input.toDate, input.halfDay ?? false,
     await employeeHolidaySet(employee.id, input.fromDate, input.toDate));
-
-  // Nobody may book more than they have (ORD-26). Pending requests already count
-  // against the remainder, so two requests that each fit cannot together exceed
-  // the quota – the second one is refused at submit rather than at approval.
-  const [entitlement] = await listLeaveEntitlements(employee.id, periodOf(input.fromDate), [input.leaveTypeId]);
-  if (!entitlement) throw err.validation('Unknown leave type');
-  if (exceedsEntitlement(entitlement, days)) {
-    throw notEnoughLeave(entitlement.leaveTypeName, days, entitlement.remaining);
-  }
-
   const approverId = (await managerUserId(employee.managerId)) ?? (await findApproverFallback());
 
+  // The checks and the insert run in one transaction with the employee row
+  // locked, so two requests filed at the same moment are checked one after the
+  // other – each sees the other's pending days, and an overlap cannot slip in
+  // between the conflict check and the insert.
   const id = ulid();
-  await db.insert(schema.leaveRequests).values({
-    id, employeeId: employee.id, leaveTypeId: input.leaveTypeId,
-    fromDate: input.fromDate, toDate: input.toDate, halfDay: input.halfDay ?? false,
-    reason: input.reason ?? '', attachmentId: input.attachmentId ?? null,
-    status: 'pending', approverId: approverId ?? null, createdBy: actor.userId,
+  await db.transaction(async (tx) => {
+    await tx.select({ id: schema.employees.id }).from(schema.employees).where(eq(schema.employees.id, employee.id)).for('update');
+
+    // Conflict: overlap with existing pending/approved requests for the same employee.
+    const existing = await tx.select().from(schema.leaveRequests).where(and(
+      eq(schema.leaveRequests.employeeId, employee.id),
+      inArray(schema.leaveRequests.status, ['pending', 'approved']),
+    ));
+    for (const r of existing) {
+      if (rangesOverlap(input.fromDate, input.toDate, r.fromDate, r.toDate)) {
+        throw err.domain('Leave request overlaps an existing request', { conflictId: r.id });
+      }
+    }
+
+    // Nobody may book more than they have (ORD-26). Pending requests already count
+    // against the remainder, so two requests that each fit cannot together exceed
+    // the quota – the second one is refused at submit rather than at approval.
+    const [entitlement] = await listLeaveEntitlements(employee.id, periodOf(input.fromDate), [input.leaveTypeId], tx);
+    if (!entitlement) throw err.validation('Unknown leave type');
+    if (exceedsEntitlement(entitlement, days)) {
+      throw notEnoughLeave(entitlement.leaveTypeName, days, entitlement.remaining);
+    }
+
+    await tx.insert(schema.leaveRequests).values({
+      id, employeeId: employee.id, leaveTypeId: input.leaveTypeId,
+      fromDate: input.fromDate, toDate: input.toDate, halfDay: input.halfDay ?? false,
+      reason: input.reason ?? '', attachmentId: input.attachmentId ?? null,
+      status: 'pending', approverId: approverId ?? null, createdBy: actor.userId,
+    });
+    await writeActivity(tx, { entityType: 'leave_request', entityId: id, action: 'requested', after: { ...input, days }, actorId: actor.userId, actorType: actor.actorType });
   });
-  await writeActivity(db, { entityType: 'leave_request', entityId: id, action: 'requested', after: { ...input, days }, actorId: actor.userId, actorType: actor.actorType });
   await emit({ type: 'leave.requested', aggregateType: 'leave_request', aggregateId: id, payload: { approverId, employeeUserId: employee.userId, days }, actorId: actor.userId, actorType: actor.actorType });
   // employeeId back in the response: the caller may not have named one, and a
   // client that just filed a request should not have to guess who it is for.

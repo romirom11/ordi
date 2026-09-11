@@ -92,6 +92,27 @@ describe('leave entitlements', () => {
   });
 });
 
+describe('leave entitlements after a zero-quota accrual', () => {
+  it('keeps the cap once the type gets a quota, until HR re-accrues', async () => {
+    const compId = (await json(hr.post('/leave-types', { name: 'Comp', affectsBalance: true, annualQuota: 0 }))).id;
+    await json(hr.post('/leave-balances/accrue', { period: PERIOD, employeeId, leaveTypeId: compId }));
+    // Nothing allocated and no quota: not capped.
+    expect((await entitlement(member, compId)).tracked).toBe(false);
+
+    // The quota is raised but the stored row still says 0 – that is "0 left",
+    // not "unlimited".
+    await json(hr.patch(`/leave-types/${compId}`, { annualQuota: 3 }));
+    expect(await entitlement(member, compId)).toMatchObject({ allocated: 0, remaining: 0, tracked: true });
+    const res = await member.post('/leave-requests', { leaveTypeId: compId, fromDate: monday(11), toDate: monday(11) });
+    expect(res.status).toBe(422);
+
+    // Re-accruing picks the quota up and the same request goes through.
+    await json(hr.post('/leave-balances/accrue', { period: PERIOD, employeeId, leaveTypeId: compId }));
+    expect(await entitlement(member, compId)).toMatchObject({ allocated: 3, remaining: 3 });
+    expect((await member.post('/leave-requests', { leaveTypeId: compId, fromDate: monday(11), toDate: monday(11) })).status).toBe(201);
+  });
+});
+
 describe('leave entitlements access', () => {
   it('is self-service for your own card and needs people.read for anyone else', async () => {
     expect((await member.get('/leave-entitlements')).status).toBe(200);
