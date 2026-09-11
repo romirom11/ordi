@@ -13,6 +13,7 @@ import {
 import { api, qs, ApiError } from '../lib/api';
 import { Link } from '../lib/router';
 import { useCan } from '../lib/auth';
+import { WORKSPACE_CURRENCIES, currencyOptions } from '../lib/currency';
 import {
   Button, Input, Select, Card, Badge, Checkbox, PageBody, Breadcrumbs, EmptyState, Skeleton, Switch, Avatar, Spinner, cn,
 } from '../components/ui';
@@ -418,7 +419,6 @@ export function SettingsPage({ section }: { section?: string }) {
 
 /* ────────────────────────────── Workspace ────────────────────────────── */
 
-const CURRENCIES = ['USD', 'EUR', 'GBP', 'UAH', 'CAD', 'AUD', 'CHF', 'JPY', 'PLN', 'SEK', 'NOK', 'INR', 'BRL', 'SGD'];
 const ESTIMATE_UNITS = ['hours', 'days', 'points'];
 const DAY_KEYS = [1, 2, 3, 4, 5, 6, 7];
 const DAY_LABELS: Record<number, string> = { 1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat', 7: 'Sun' };
@@ -533,7 +533,7 @@ function WorkspacePanel() {
       {/* Currency */}
       <SettingRow label={t('settings.defaultCurrency')}>
         <Select value={currency} onChange={(e) => setCurrency(e.target.value)} className="w-32">
-          {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          {currencyOptions(currency, WORKSPACE_CURRENCIES).map((c) => <option key={c} value={c}>{c}</option>)}
         </Select>
       </SettingRow>
 

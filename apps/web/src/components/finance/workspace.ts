@@ -19,6 +19,7 @@ export interface WorkspaceSettings {
   id?: string;
   name?: string | null;
   logo?: string | null;
+  defaultCurrency?: string | null;
   modules?: Record<string, boolean>;
   invoiceSettings?: InvoiceSettings;
 }
@@ -29,6 +30,15 @@ export function useWorkspaceSettings() {
     queryFn: () => api.get<WorkspaceSettings>('/settings/workspace'),
     staleTime: 5 * 60_000,
   });
+}
+
+/**
+ * The currency a new money record starts in. Every finance form seeds from the
+ * workspace default instead of a hardcoded USD, so a UAH workspace stops
+ * booking its expenses in dollars.
+ */
+export function useDefaultCurrency(): string {
+  return useWorkspaceSettings().data?.defaultCurrency || 'USD';
 }
 
 /** Finance module is on unless explicitly disabled (missing key = enabled). */

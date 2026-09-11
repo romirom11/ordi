@@ -12,9 +12,9 @@ import { cn } from '../ui';
 
 /**
  * Enums the API validates against come from @ordi/shared, so a status added
- * there shows up in the dropdowns instead of being silently missing. CURRENCIES
- * is the only local list: it is a picker shortcut, not a contract – the API
- * accepts any ISO 4217 code.
+ * there shows up in the dropdowns instead of being silently missing. The
+ * currency picker list is not one of those – it lives in lib/currency, shared
+ * with the finance forms.
  */
 export {
   COMPANY_STATUSES,
@@ -23,8 +23,6 @@ export {
   LEAD_ACTIVITY_OUTCOME_STATUSES,
   SALES_ACTIVITY_TYPES,
 } from '@ordi/shared';
-
-export const CURRENCIES = ['USD', 'EUR', 'GBP', 'UAH', 'PLN'];
 
 /**
  * Statuses offered when creating a lead. `nurture` needs a return date the
