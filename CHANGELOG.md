@@ -3,6 +3,31 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.30.0
+
+- **Leave balances people can see**: `GET /leave-entitlements` reports
+  allocated, carried, used, pending and remaining per leave type, falling
+  back to the type's quota until HR accrues the period; a request longer
+  than what is left is refused at submit (pending days already held back)
+  and again at approval, under a lock on the employee. The leave card shows
+  remaining-of-allocated per type on your own card and, with `people.read`,
+  on every employee page; the request dialog previews the working days a
+  range costs and blocks an over-quota submit. Shared rule in
+  `@ordi/shared`.
+- **Comments can be edited**: a pencil on comments you may rewrite (own as
+  member, any as project admin) opens the rich composer in place; edited
+  comments carry an "(edited)" marker. `PATCH /comments/:id` requires a
+  body with content, notifies only mentions the edit adds, and logs the
+  rewrite.
+- **Money starts in the workspace currency**: record pickers offer USD, EUR
+  and UAH from one shared list that keeps an already-stored code; income,
+  subscription, client and deal dialogs seed from the workspace default
+  instead of a hardcoded USD.
+- **Agent pull requests follow the repository**: descriptions are built in
+  the shape of the repo's PR template from the agent's report (change,
+  verification, risks) with a link to the task; commits carry the task key
+  where the commit convention allows it, else as a `Refs:` trailer.
+
 ## v1.29.4
 
 - **English branch names in any task language**: before cloning, the worker
