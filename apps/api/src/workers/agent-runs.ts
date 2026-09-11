@@ -332,7 +332,11 @@ export async function executeRun(claimed: RunRow): Promise<void> {
     const summary = outcome.report?.summary?.trim() || outcome.message?.trim() || 'Done.';
     let prUrl = outcome.report?.prUrl ?? claimed.prUrl ?? null;
     try {
-      const published = await publishWorkspace(ws, { ref, title: task.title, summary, existingPrUrl: prUrl });
+      const published = await publishWorkspace(ws, {
+        ref, title: task.title, summary, existingPrUrl: prUrl,
+        verification: outcome.report?.verification ?? null, risks: outcome.report?.risks ?? null,
+        taskUrl: `${env.appUrl.replace(/\/$/, '')}/projects/${project.id}/tasks/${task.id}`,
+      });
       prUrl = published.prUrl ?? prUrl;
       if (published.pushed) await recordRunEvent(runId, 'log', { message: `Pushed ${published.commits ?? 'the'} commit(s) to ${ws.branch}${prUrl ? `; pull request ${prUrl}` : ''}` });
       else if (ws.repo) await recordRunEvent(runId, 'log', { message: 'No commits to push' });

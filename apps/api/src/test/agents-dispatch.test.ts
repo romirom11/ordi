@@ -39,7 +39,7 @@ function adapter(run: (input: RuntimeRunInput) => Promise<RuntimeOutcome>, slug:
 
 const done = (report: Partial<NonNullable<RuntimeOutcome['report']>> = {}): RuntimeOutcome => ({
   status: 'succeeded', sessionId: 'sess-42', message: 'Done', error: null, usage, retryAt: null,
-  report: { status: 'done', summary: 'Fixed the retry logic and added a test.', prUrl: null, branch: null, question: null, ...report },
+  report: { status: 'done', summary: 'Fixed the retry logic and added a test.', verification: null, risks: null, prUrl: null, branch: null, question: null, ...report },
 });
 
 /** A git runner that records calls and pretends there is one commit ahead. */
@@ -291,7 +291,7 @@ describe('the worker end to end', () => {
     await assign(task.id, [agentId]);
     restoreAdapter = setRuntimeAdapter(adapter(async () => ({
       status: 'needs_input', sessionId: 's2', message: '', error: null, usage, retryAt: null,
-      report: { status: 'needs_input', summary: 'Need the target API version', prUrl: null, branch: null, question: 'Should this target v1 or v2?' },
+      report: { status: 'needs_input', summary: 'Need the target API version', verification: null, risks: null, prUrl: null, branch: null, question: 'Should this target v1 or v2?' },
     })));
     const run = await runToEnd(task.id);
     expect(run.status).toBe('needs_input');

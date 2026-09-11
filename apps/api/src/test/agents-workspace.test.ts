@@ -13,7 +13,10 @@ import { join } from 'node:path';
 import { getDb, schema } from '@ordi/db';
 import { resetDb, seedRolesAndUsers } from './helpers';
 import { setupWorkspace, type Workspace } from './agents-helpers';
-import { prepareWorkspace, publishWorkspace, cleanupWorkspace, setGitRunner, checkoutDir, redactGitError, explainPushError } from '../domains/agents/workspace';
+import {
+  prepareWorkspace, publishWorkspace, cleanupWorkspace, setGitRunner, checkoutDir, redactGitError, explainPushError,
+  pullRequestTitle, buildPullRequestBody,
+} from '../domains/agents/workspace';
 import { encrypt } from '../lib/crypto';
 import { env } from '../env';
 
@@ -168,5 +171,35 @@ describe('workspace with real git', () => {
     expect(out).not.toContain('ghs_secret_token_value');
     expect(out).toContain('AUTHORIZATION: basic [redacted]');
     expect(redactGitError(message, null)).toBe(message);
+  });
+});
+
+describe('pull request title and description', () => {
+  it('the title is the task key and the title on one line, whatever the card carries', () => {
+    expect(pullRequestTitle('ORD-26', 'Додати доступну кількість днів відпустки  ')).toBe('ORD-26: Додати доступну кількість днів відпустки');
+    expect(pullRequestTitle('ORD-1', '  two\n lines\t here ')).toBe('ORD-1: two lines here');
+  });
+
+  it('the description follows the repository template: change, verification, risks, and a link to the task', () => {
+    const body = buildPullRequestBody({
+      ref: 'ORD-24', taskUrl: 'https://ordi.test/projects/p1/tasks/t1',
+      summary: 'Currency pickers offer USD, EUR and UAH.',
+      verification: 'pnpm test (387 tests) and the Finance page in both themes.',
+      risks: 'A record saved in PLN must keep its currency when edited.',
+    });
+    expect(body).toBe([
+      '## What this changes', '', 'Currency pickers offer USD, EUR and UAH.', '',
+      '## How it was verified', '', 'pnpm test (387 tests) and the Finance page in both themes.', '',
+      '## What breaks if this is wrong', '', 'A record saved in PLN must keep its currency when edited.', '',
+      'Task: [ORD-24](https://ordi.test/projects/p1/tasks/t1)', '',
+      '_Opened by an ordi agent._',
+    ].join('\n'));
+  });
+
+  it('a report without verification says so instead of hiding it; no risks means no section', () => {
+    const body = buildPullRequestBody({ ref: 'ORD-9', taskUrl: null, summary: 'Did it.', verification: '  ', risks: null });
+    expect(body).toContain('## How it was verified\n\nNot stated by the agent – treat the change as unverified.');
+    expect(body).not.toContain('What breaks');
+    expect(body).toContain('\n\nTask: ORD-9\n\n_Opened by an ordi agent._');
   });
 });

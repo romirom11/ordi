@@ -67,13 +67,15 @@ describe('claude adapter', () => {
       msg({ type: 'system', subtype: 'init', model: 'claude-test', mcp_servers: [{ name: 'ordi', status: 'connected' }], tools: [], cwd: '/tmp', permissionMode: 'dontAsk', apiKeySource: 'none', claude_code_version: 'x', slash_commands: [], output_style: 'default' } as never),
       msg({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: 'Looking at the test' }, { type: 'tool_use', id: 'tu1', name: 'Read', input: { path: 'a.ts' } }] } } as never),
       msg({ type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu1', content: [{ type: 'text', text: 'file contents' }] }] } } as never),
-      resultOk({ structured_output: { status: 'done', summary: 'Fixed the retry', prUrl: null, branch: 'fix/AGT-1', question: null } }),
+      resultOk({ structured_output: { status: 'done', summary: 'Fixed the retry', verification: 'pnpm test: 12 passed', risks: '', prUrl: null, branch: 'fix/AGT-1', question: null } }),
     ], seen));
     const inp = input({ maxBudgetUsd: 3, resume: 'prev-session' });
     const outcome = await adapter.run(inp);
     expect(outcome.status).toBe('succeeded');
     expect(outcome.sessionId).toBe('sess-1');
     expect(outcome.report?.summary).toBe('Fixed the retry');
+    expect(outcome.report?.verification).toBe('pnpm test: 12 passed');
+    expect(outcome.report?.risks).toBeNull(); // blank reads as nothing to flag
     expect(outcome.usage).toMatchObject({ turns: 3, costUsd: 0.42, inputTokens: 100, outputTokens: 50 });
     expect(inp.events.map((e) => e.type)).toEqual(['init', 'assistant', 'tool_result']);
     expect(seen.prompt).toBe('Fix it');
