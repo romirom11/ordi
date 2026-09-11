@@ -12,6 +12,7 @@ import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
 import { EmployeeFieldGroups } from '../components/people/EmployeeFieldGroups';
 import { EmployeeDocuments } from '../components/people/EmployeeDocuments';
 import { MyLeaveCard } from '../components/people/MyLeaveCard';
+import { EmployeeLeaveBalances } from '../components/people/LeaveBalances';
 import { CompensationDialog } from '../components/people/CompensationDialog';
 import { EditEmployeeDialog } from '../components/people/EditEmployeeDialog';
 import {
@@ -279,8 +280,15 @@ export function EmployeePage({ id }: { id: string }) {
         />
 
         {/* Leave self-service lives on the person's own card (ORD-19) – it
-          * moved here from the profile, which now keeps account things only. */}
-        {e.userId === me.user.id && <div className="mb-6"><MyLeaveCard /></div>}
+          * moved here from the profile, which now keeps account things only.
+          * On somebody else's card the remaining days are still the first thing
+          * HR is asked for, so the balance shows on its own – gated on
+          * people.read, which is what the endpoint requires (ORD-26). */}
+        {e.userId === me.user.id ? (
+          <div className="mb-6"><MyLeaveCard /></div>
+        ) : can('people.read') && (
+          <div className="mb-6"><EmployeeLeaveBalances employeeId={id} /></div>
+        )}
 
         {can('people.read_documents') && <EmployeeDocuments employeeId={id} canWrite={canWrite} />}
 

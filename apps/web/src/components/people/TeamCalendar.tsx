@@ -9,7 +9,7 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Cake, ChevronLeft, ChevronRight, Sun } from 'lucide-react';
 import { api } from '../../lib/api';
-import { useUserMap } from '../../lib/queries';
+import { useHolidays, useUserMap, type Holiday } from '../../lib/queries';
 import { useT, extendDict } from '../../lib/i18n';
 import { Avatar, Button, Skeleton, appLocale, cn } from '../ui';
 import { DropdownMenu } from '../overlays';
@@ -38,7 +38,6 @@ interface LeaveRow {
   fromDate?: string | null; toDate?: string | null; status?: string | null; halfDay?: boolean;
   employeeAvatar?: string | null;
 }
-interface Holiday { id: string; date: string; name: string; calendarId?: string }
 interface EmpRow { id: string; userId?: string | null; firstName?: string | null; lastName?: string | null; birthday?: string | null; status?: string | null }
 
 const TYPE_COLORS = ['#6366f1', '#f59e0b', '#06b6d4', '#ec4899', '#a855f7', '#84cc16', '#f43f5e', '#22c55e'];
@@ -125,7 +124,7 @@ export function TeamCalendar() {
 
   const userMap = useUserMap();
   const leavesQ = useQuery({ queryKey: ['leaveRequests'], queryFn: () => api.get<{ data: LeaveRow[] }>('/leave-requests') });
-  const holidaysQ = useQuery({ queryKey: ['holidays'], queryFn: () => api.get<{ data: Holiday[] }>('/holidays') });
+  const holidaysQ = useHolidays();
   const employeesQ = useQuery({ queryKey: ['employees'], queryFn: () => api.get<{ data: EmpRow[] }>('/employees') });
 
   // Monday-first 6x7 grid, same as the tasks calendar.
@@ -157,7 +156,7 @@ export function TeamCalendar() {
 
   const holidaysByDay = useMemo(() => {
     const map = new Map<string, Holiday[]>();
-    for (const h of holidaysQ.data?.data ?? []) {
+    for (const h of holidaysQ.data ?? []) {
       const key = (h.date ?? '').slice(0, 10);
       if (!key) continue;
       // Two calendars can name the same day – show it once per name.

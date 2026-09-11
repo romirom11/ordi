@@ -250,6 +250,7 @@ const ROWS: Row[] = [
   ['/leave-requests', 'post', 'Create leave request', null, 'LeaveRequestInput', 'people'],
   ['/leave-requests/{id}/approve', 'post', 'Approve leave request (manager or people.approve_leave)', null, 'free', 'people'],
   ['/leave-requests/{id}/reject', 'post', 'Reject leave request (manager or people.approve_leave)', null, 'free', 'people'],
+  ['/leave-entitlements', 'get', 'Remaining leave days per type (own, or anyone with people.read)', null, undefined, 'people'],
   ['/job-openings', 'get', 'List job openings', 'people.recruit', undefined, 'people'],
   ['/job-openings', 'post', 'Create job opening', 'people.recruit', 'JobOpeningInput', 'people'],
   ['/applicants', 'get', 'List applicants', 'people.recruit', undefined, 'people'],

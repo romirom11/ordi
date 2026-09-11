@@ -557,8 +557,8 @@ reminder_rules: зсуви від due_date (напр. -3, +1, +7, +14 днів),
 ### 12.2. Відпустки і відсутності (leaves)
 
 - **Типи відсутностей** (конфігуровані): щорічна відпустка, лікарняний (sick leave), відгул, неоплачувана, компенсаційний, кастомні. Параметри типу: оплачувана/ні, чи потребує апруву, чи зменшує баланс, чи дозволений half-day, річна квота, перенос залишку (carry-forward) з лімітом і терміном згорання.
-- **Баланси:** нарахування квоти на період (річне, помісячне-earned), таблиця leave_balances per співробітник per тип; перегляд балансу співробітником.
-- **Заявки (request → approval):** співробітник подає заявку (тип, діапазон дат або half-day, коментар, опційне вкладення напр. довідка); маршрут апруву: менеджер співробітника, з фолбеком на роль `people.approve_leave`. Стани: pending → approved | rejected | canceled. Апрув списує баланс; скасування повертає. Конфлікт (перекриття з наявною заявкою) блокується.
+- **Баланси:** нарахування квоти на період (річне, помісячне-earned), таблиця leave_balances per співробітник per тип; перегляд балансу співробітником. **Залишок** (leave-entitlements) = allocated + carried − used − дні заявок у статусі pending, per тип per період; поки період не нарахований, allocated береться з річної квоти типу, тож залишок видно ще до першого accrue. Квота 0 і типи, що не списують баланс, залишку не мають і нічим не обмежені.
+- **Заявки (request → approval):** співробітник подає заявку (тип, діапазон дат або half-day, коментар, опційне вкладення напр. довідка); маршрут апруву: менеджер співробітника, з фолбеком на роль `people.approve_leave`. Стани: pending → approved | rejected | canceled. Апрув списує баланс; скасування повертає. Конфлікт (перекриття з наявною заявкою) блокується. Заявка довша за залишок відхиляється — і при поданні (з урахуванням уже поданих pending-заявок), і повторно при апруві (квоту могли зменшити після подання).
 - **Календар відсутностей:** командний календар хто коли відсутній (з урахуванням прав); інтеграція в резолвінг завантаження (Resourcing, 12.4) і попередження при асайні задачі на людину у відпустці.
 - **Holiday calendars:** конфігуровані святкові календарі (пер-регіон/офіс), призначаються співробітникам; впливають на робочі дні в розрахунках і календарі.
 - Нотифікації: подання заявки → менеджеру; рішення → співробітнику; наближення відпустки → команді (опційно).
@@ -766,7 +766,7 @@ projects: projects (+members, +repositories, +templates apply/save), task-status
 kb: spaces (+members), pages (tree, +versions, +restore, +lock, +export), templates.
 time: entries CRUD, timer start/stop, rates, reports, unbilled.
 finance: quotes (+send/accept-internal/convert/pdf), invoices (+send/cancel/duplicate/pdf/from-time), payments, credit-notes, recurring, expenses (+categories), tax-rates, reminder-rules, email-templates, finance/dashboard, finance/profitability (проєкт/клієнт/labor, лише finance.read_costs).
-people: employees (+lifecycle, +documents), departments, positions, leave-types, leave-requests (+approve/reject), leave-balances, holiday-calendars, job-openings (+public `/careers/:token`), applicants (+move/hire), interviews, allocations, compensation (finance.read_costs/people.read_compensation), overhead-settings, people/dashboard.
+people: employees (+lifecycle, +documents), departments, positions, leave-types, leave-requests (+approve/reject), leave-balances, leave-entitlements, holiday-calendars, job-openings (+public `/careers/:token`), applicants (+move/hire), interviews, allocations, compensation (finance.read_costs/people.read_compensation), overhead-settings, people/dashboard.
 integrations: git connections/repositories, project bindings, automation rules, resync.
 
 ---
