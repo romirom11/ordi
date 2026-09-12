@@ -764,7 +764,9 @@ export function publicRoutes() {
           if (cand.event) {
             await emit({
               type: cand.event, aggregateType: 'task', aggregateId: task.id,
-              payload: { taskId: task.id, projectId: project.id, ref: `${r.key}-${r.number}`, assigneeIds: [] },
+              // No assigneeIds: the webhook does not know them, and claiming an
+              // empty list left the merge notification with nobody to reach.
+              payload: { taskId: task.id, projectId: project.id, ref: `${r.key}-${r.number}` },
               actorId: null, actorType: 'integration',
             });
           }
