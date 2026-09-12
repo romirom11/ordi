@@ -372,8 +372,8 @@
               </div>
               <h3>Time</h3>
               <p>
-                Timers and manual entries against tasks, billable and cost rates, timesheet
-                approval, invoice-from-time.
+                Timers and manual entries against tasks, billable and cost rates, a weekly
+                view and reports, invoice-from-time.
               </p>
             </article>
 
@@ -430,7 +430,7 @@
               <p>
                 A GitHub App created from ordi in one click. Every task hands you a branch name;
                 branches, commits and pull requests that mention the task key attach themselves to
-                it.
+                it. Agent employees push and open pull requests through the same App.
               </p>
             </article>
 
@@ -488,9 +488,10 @@
               <span class="section__label">Built-in MCP server</span>
               <h3>Point Claude or Cursor at your workspace</h3>
               <p>
-                ordi ships an MCP server over its own REST API. Connect an agent and it can plan a
-                cycle, log time, move a deal, chase an overdue invoice or draft a knowledge base
-                page – with exactly the permissions of its API token, and nothing more.
+                ordi ships an MCP server over its own REST API. Connect Claude, Cursor or any MCP
+                client and it can plan a cycle, log time, move a deal, chase an overdue invoice or
+                draft a knowledge base page – with exactly the permissions of its API token, and
+                nothing more.
               </p>
               <ul class="feature__list">
                 <li>OAuth with PKCE, so the client never holds your password</li>
@@ -507,6 +508,51 @@
                 loading="lazy"
                 decoding="async"
               />
+            </div>
+          </div>
+
+          <div class="feature feature--flip reveal" id="agents">
+            <div class="feature__text">
+              <span class="section__label">AI agent employees</span>
+              <h3>Add an agent to the team and assign it a task</h3>
+              <p>
+                An agent is a member of the workspace like anyone else. Assign it a task and a
+                worker inside your ordi instance clones the project's repository, runs Claude Code
+                headless with the ordi MCP server and the connectors you allowed, streams the log
+                to the task page and opens a pull request for a human to review.
+              </p>
+              <ul class="feature__list">
+                <li>Runs on your own Claude subscription or API key, connected once per workspace and stored encrypted</li>
+                <li>MCP connectors live in a workspace library with a per-agent allowlist</li>
+                <li>Unfinished work is pushed to the task branch, never lost – Retry resumes the same session</li>
+                <li>A separate <code>agents.manage</code> permission and an Agent role keep humans in charge</li>
+              </ul>
+            </div>
+            <div class="flow">
+              <div class="flow__step">
+                <i>1</i>
+                <div>Assign the task<small>The agent is picked like any teammate</small></div>
+              </div>
+              <div class="flow__link" aria-hidden="true"></div>
+              <div class="flow__step">
+                <i>2</i>
+                <div>Worker clones the repository<small>Fresh checkout on a branch named after the task</small></div>
+              </div>
+              <div class="flow__link" aria-hidden="true"></div>
+              <div class="flow__step">
+                <i>3</i>
+                <div>Claude Code works headless<small>ordi MCP tools and allowed connectors, live log on the task</small></div>
+              </div>
+              <div class="flow__link" aria-hidden="true"></div>
+              <div class="flow__step">
+                <i>4</i>
+                <div>Pull request opens<small>In the shape of the repo's PR template, commits carry the task key</small></div>
+              </div>
+              <div class="flow__link" aria-hidden="true"></div>
+              <div class="flow__step">
+                <i>5</i>
+                <div>Task moves to review<small>A human reads the diff and merges</small></div>
+              </div>
             </div>
           </div>
         </div>
@@ -693,7 +739,8 @@
                   <b>Install the desktop app</b>
                   macOS, Windows and Linux, with native notifications, a global quick-add shortcut
                   and signed auto-updates. It connects to your instance – enter your URL on first
-                  launch.
+                  launch and sign in through your browser instead of retyping credentials. The
+                  download link also lives in the web app's settings.
                 </div>
               </li>
             </ol>
