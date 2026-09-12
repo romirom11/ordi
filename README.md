@@ -114,7 +114,7 @@ so the books actually balance.
 - **Knowledge base** – Notion-style editor, spaces with per-space permissions, nested
   pages, versions, backlinks, publishing and Markdown export.
 - **Time** – timers and manual entries against tasks, billable rates and cost rates,
-  timesheet approval, invoice-from-time.
+  a weekly view and reports, invoice-from-time.
 - **People** – employee records, org structure, leave with balances, versioned
   compensation with audited access, recruiting with public careers pages.
 - **Resourcing and dashboards** – capacity planning and custom dashboard widgets.
