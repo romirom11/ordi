@@ -8,11 +8,12 @@
  * realtime simply never connected there. A fetch-based reader handles both
  * worlds with the same code path the rest of the API client uses.
  */
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { getInstanceUrl, getSessionToken } from './api';
 import { isTauri, notifyDesktop } from './desktop';
-import { useMe } from './auth';
+import { useT } from './i18n';
+import { notifText } from './notifications';
 import { toast } from '../components/overlays';
 
 /** Read one text/event-stream response, emitting (event, data) pairs. */
@@ -50,17 +51,6 @@ async function readSseStream(
     }
   }
 }
-
-/** Events worth an OS notification on desktop (PRD §18). */
-const OS_NOTIFY: Record<string, string> = {
-  'task.assigned': 'Task assigned to you',
-  'comment.mentioned': 'You were mentioned',
-  'quote.accepted': 'Quote accepted',
-  'invoice.paid': 'Invoice paid',
-  'leave.requested': 'Leave request pending',
-  'leave.decided': 'Leave request decided',
-  'git.pr_merged': 'PR merged in your task',
-};
 
 /** One row of the run log, exactly as ['agent-run-events', runId] stores it (see RunLog). */
 interface CachedRunEvent {
@@ -145,8 +135,6 @@ function invalidateFor(qc: QueryClient, type: string, data: any): void {
   } else if (type === 'role.updated') {
     inv(['me']);
   }
-  // notifications are produced by most events
-  inv(['notifications']);
 }
 
 /** Soft two-tone chirp for events addressed to the current user. */
@@ -174,34 +162,42 @@ function chirp(): void {
   } catch { /* audio blocked until first interaction – fine */ }
 }
 
-/** Events addressed directly to me → in-app toast + chirp (web equivalent of the desktop notification). */
-function personalPing(type: string, data: any, meId: string, locale: string): void {
-  const targets: string[] = type === 'task.assigned' ? (data?.assigneeIds ?? [])
-    : type === 'comment.mentioned' || type === 'page.mentioned' ? (data?.mentions ?? [])
-    : [];
-  if (!targets.includes(meId)) return;
-  if (data?.actorId === meId || data?.createdBy === meId) return; // not my own action
-  const uk = locale === 'uk';
-  const label = type === 'task.assigned'
-    ? (uk ? 'Вам призначено задачу' : 'Task assigned to you')
-    : (uk ? 'Вас згадали' : 'You were mentioned');
-  toast.info(data?.ref ? `${label}: ${data.ref}` : label);
+/**
+ * A notification the server wrote for me: an in-app toast and a chirp on the
+ * web, an OS notification on the desktop (PRD §18).
+ *
+ * The frame is user-scoped, so this fires for the addressed person and nobody
+ * else. It used to be guessed from the business event, and because a task
+ * event streams to every member of the project, "a task was assigned to you"
+ * went to the whole team for a task assigned to one of them.
+ */
+function personalPing(data: any, t: (key: string, fallback?: string) => string): void {
+  if (!data?.type) return;
+  const text = notifText({ type: String(data.type), entityRef: data.entityRef ?? null, payload: data.payload }, t);
+  if (isTauri) {
+    notifyDesktop('ordi', text);
+    return;
+  }
+  toast.info(text);
   chirp();
 }
 
 export function useRealtime(): void {
   const qc = useQueryClient();
-  const me = useMe();
-  const meId = me.user.id;
-  const meLocale = me.user.locale;
+  // Read through a ref: the stream must not reconnect when the language does.
+  const t = useT();
+  const tRef = useRef(t);
+  tRef.current = t;
   useEffect(() => {
     const controller = new AbortController();
     let stopped = false;
     let retryMs = 2000;
 
     const handled = new Set([
+        'notification.created',
         'deal.stage_changed', 'deal.won', 'deal.lost', 'project.created', 'project.completed',
-        'task.created', 'task.status_changed', 'task.assigned', 'comment.mentioned',
+        'task.created', 'task.status_changed', 'task.assigned',
+        'comment.created', 'comment.mentioned',
         'cycle.completed', 'page.published', 'page.mentioned', 'time.entry_created',
         'quote.accepted', 'quote.declined', 'invoice.created', 'invoice.sent', 'invoice.viewed',
         'invoice.overdue', 'invoice.paid', 'payment.recorded',
@@ -217,11 +213,12 @@ export function useRealtime(): void {
       if (!handled.has(type)) return;
       let data: any = {};
       try { data = JSON.parse(raw); } catch { /* ignore */ }
-      invalidateFor(qc, type, data);
-      if (!isTauri) personalPing(type, data, meId, meLocale);
-      if (isTauri && OS_NOTIFY[type]) {
-        notifyDesktop('ordi', data?.ref ? `${OS_NOTIFY[type]}: ${data.ref}` : OS_NOTIFY[type]!);
+      if (type === 'notification.created') {
+        qc.invalidateQueries({ queryKey: ['notifications'] });
+        personalPing(data, tRef.current);
+        return;
       }
+      invalidateFor(qc, type, data);
     };
 
     const connect = async (): Promise<void> => {
@@ -243,5 +240,5 @@ export function useRealtime(): void {
 
     void connect();
     return () => { stopped = true; controller.abort(); };
-  }, [qc, meId, meLocale]);
+  }, [qc]);
 }
