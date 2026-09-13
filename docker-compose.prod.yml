@@ -42,7 +42,7 @@ services:
   # the api uses, so the two can never drift apart. Nothing is published to
   # the host: all file traffic goes through the api.
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     restart: unless-stopped
     profiles: ["minio"]
     command: server /data
@@ -65,7 +65,7 @@ services:
   # Creates the bucket on first boot, so "make a bucket in the console" stops
   # being a manual step (the console is not even exposed).
   minio-init:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
     profiles: ["minio"]
     depends_on:
       minio:
