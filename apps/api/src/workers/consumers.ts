@@ -3,7 +3,7 @@
  * outbound webhooks. All idempotent – dedup is handled by the relay via
  * processed_events, and each handler is safe to re-run.
  */
-import { getDb, schema, eq, and, desc } from '@ordi/db';
+import { getDb, schema, eq, and, desc, isNull } from '@ordi/db';
 import { ulid } from 'ulid';
 import type { DomainEvent } from '@ordi/shared';
 import { broadcaster } from '../core/events';
@@ -23,21 +23,33 @@ export interface Consumer {
   handle: (ev: DomainEvent) => Promise<void>;
 }
 
+interface NotifyOptions {
+  /**
+   * Whoever caused the event. They already know what they did, so they are
+   * dropped from the audience – assigning a task to yourself or moving your
+   * own task used to notify you about your own click.
+   */
+  actorId?: string | null;
+}
+
 async function notify(
   eventId: string,
-  userIds: string[],
+  userIds: (string | null | undefined)[],
   type: string,
   entityRef: string | null,
   payload: Record<string, unknown>,
+  options: NotifyOptions = {},
 ): Promise<void> {
-  if (!userIds.length) return;
+  const unique = [...new Set(userIds)].filter((id): id is string => Boolean(id) && id !== options.actorId);
+  if (!unique.length) return;
   const { db } = getDb();
-  const unique = [...new Set(userIds)].filter(Boolean);
   let branding: Branding | null = null;
 
   for (const userId of unique) {
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId));
-    if (!user) continue;
+    // A deactivated account has no one reading it, and an agent has no bell:
+    // both only added rows nobody would ever open.
+    if (!user || !user.isActive || user.actorType !== 'user') continue;
     const prefs = (user?.emailNotificationPrefs as Record<string, boolean>) ?? {};
     const dedupeKey = `${eventId}:notifications:${userId}:${type}`;
     let email: QueuedEmailInput | null = null;
@@ -64,7 +76,7 @@ async function notify(
         expiresAt: (payload.expiresAt as string) ?? '',
         workspace: branding.workspaceName,
       };
-      const known = NOTIFY_KEYS.has(type) ? type : 'generic';
+      const known = templateFor(type);
       const link = notificationLink(type, payload);
       const { html, text } = renderEmail({
         locale,
@@ -82,51 +94,90 @@ async function notify(
       };
     }
 
-    await db.transaction(async (tx) => {
-      await tx.insert(schema.notifications).values({
+    const [inserted] = await db.transaction(async (tx) => {
+      const rows = await tx.insert(schema.notifications).values({
         id: ulid(), userId, type, dedupeKey, entityRef, payload,
-      }).onConflictDoNothing({ target: schema.notifications.dedupeKey });
+      }).onConflictDoNothing({ target: schema.notifications.dedupeKey })
+        .returning({ id: schema.notifications.id });
       if (email) await enqueueEmail(email, tx);
+      return rows;
     });
+
+    /**
+     * Tell that one person about the row that now exists, rather than letting
+     * every client guess from the business event whether it was addressed to
+     * them. A task event streams to the whole project, so the guess turned one
+     * person's assignment into a notification for everyone; and the guess ran
+     * before this consumer had written anything, so the bell refreshed too
+     * early and looked empty. A replay that deduped inserts nothing and stays
+     * silent.
+     */
+    if (inserted) {
+      broadcaster.broadcast({
+        event: 'notification.created',
+        data: { id: inserted.id, type, entityRef, payload },
+        userScope: [userId],
+      });
+    }
   }
 }
 
+/**
+ * Notification types with copy of their own. A type that is not here falls
+ * back to `generic`, which says "there is an update" and nothing more.
+ */
 const NOTIFY_KEYS = new Set([
-  'task.assigned', 'comment.mentioned', 'task.status_changed',
-  'invoice.paid', 'quote.accepted', 'leave.requested', 'leave.decided',
+  'task.assigned', 'comment.mentioned', 'comment.created', 'task.status_changed',
+  'invoice.paid', 'payment.recorded', 'quote.accepted', 'quote.declined',
+  'leave.requested', 'leave.decided',
   'sales.work_digest', 'agent.run_finished', 'agent.needs_input',
 ]);
 
-/** Deep link for a notification, mirroring the Slack consumer's targets. */
-function notificationLink(type: string, payload: Record<string, unknown>): string | null {
+/**
+ * Types that borrow another type's copy. The stored type is what happened – it
+ * is what the bell labels the row and what the deep link is built from – while
+ * the email reads the same as its next of kin.
+ */
+const NOTIFY_TEMPLATE_ALIASES: Record<string, string> = {
+  'page.mentioned': 'comment.mentioned',
+  'git.pr_merged': 'task.status_changed',
+};
+
+function templateFor(type: string): string {
+  const alias = NOTIFY_TEMPLATE_ALIASES[type];
+  if (alias) return alias;
+  return NOTIFY_KEYS.has(type) ? type : 'generic';
+}
+
+/**
+ * In-app path a notification opens. Mirrored by notifLink() in
+ * apps/web/src/lib/notifications.ts: the email button and the bell row must
+ * land the reader in the same place.
+ */
+export function notificationPath(type: string, payload: Record<string, unknown>): string | null {
   const projectId = payload.projectId as string | undefined;
   const taskId = (payload.taskId as string | undefined) ?? (payload.id as string | undefined);
-  switch (type) {
-    case 'task.assigned':
-    case 'task.status_changed':
-    case 'comment.mentioned':
-      if (projectId && taskId) return appLink(`/projects/${projectId}/tasks/${taskId}`);
-      // A KB page mention lands on the page, not on an unrelated task list.
-      if (payload.pageId && payload.spaceId) {
-        return appLink(`/kb/${payload.spaceId as string}/${payload.pageId as string}`);
-      }
-      return appLink('/my-tasks');
-    case 'invoice.paid':
-      return payload.invoiceId ? appLink(`/finance/invoices/${payload.invoiceId as string}`) : appLink('/finance');
-    case 'quote.accepted':
-      return appLink('/finance');
-    case 'leave.requested':
-    case 'leave.decided':
-      return appLink('/people');
-    case 'sales.work_digest':
-      return appLink('/crm/work');
-    case 'agent.run_finished':
-    case 'agent.needs_input':
-      if (projectId && taskId) return appLink(`/projects/${projectId}/tasks/${taskId}`);
-      return appLink('/my-tasks');
-    default:
-      return null;
+  const pageId = payload.pageId as string | undefined;
+  const spaceId = payload.spaceId as string | undefined;
+  // A KB mention lands on the page, not on an unrelated task list.
+  if (pageId && spaceId) return `/kb/${spaceId}/${pageId}`;
+  if (type.startsWith('task.') || type.startsWith('comment.') || type.startsWith('git.')
+    || type === 'agent.run_finished' || type === 'agent.needs_input') {
+    return projectId && taskId ? `/projects/${projectId}/tasks/${taskId}` : '/my-tasks';
   }
+  if (type === 'invoice.paid' || type === 'payment.recorded') {
+    return payload.invoiceId ? `/finance/invoices/${payload.invoiceId as string}` : '/finance';
+  }
+  if (type.startsWith('quote.')) return '/finance';
+  if (type.startsWith('leave.')) return '/people';
+  if (type === 'sales.work_digest') return '/crm/work';
+  if (type.startsWith('agent.credential_')) return '/settings/agents';
+  return null;
+}
+
+function notificationLink(type: string, payload: Record<string, unknown>): string | null {
+  const path = notificationPath(type, payload);
+  return path ? appLink(path) : null;
 }
 
 async function liveSalesDigest(userId: string, localDate: string): Promise<Record<string, unknown> | null> {
@@ -146,6 +197,37 @@ async function liveSalesDigest(userId: string, localDate: string): Promise<Recor
   }, { scope: 'mine', limit: 1 });
   const summary = summarizeSalesWork(work);
   return summary.total ? { userId, localDate, ...summary } : null;
+}
+
+/** Who looks after the client a document belongs to. */
+async function companyOwnerId(companyId: string): Promise<string | null> {
+  const { db } = getDb();
+  const [company] = await db.select({ ownerId: schema.companies.ownerId })
+    .from(schema.companies).where(eq(schema.companies.id, companyId));
+  return company?.ownerId ?? null;
+}
+
+/**
+ * The people a task's updates concern: whoever raised it, whoever is assigned
+ * to it and – for events on the comment thread – whoever has already answered
+ * on it. Read from current state rather than from the event, because the
+ * things that move a task furthest (a webhook, an automation, an agent) know
+ * the task and not its people.
+ */
+async function taskAudience(taskId: string, opts: { commenters?: boolean } = {}): Promise<string[]> {
+  const { db } = getDb();
+  const [task] = await db.select({ createdBy: schema.tasks.createdBy })
+    .from(schema.tasks).where(eq(schema.tasks.id, taskId));
+  const assignees = await db.select({ userId: schema.taskAssignees.userId })
+    .from(schema.taskAssignees).where(eq(schema.taskAssignees.taskId, taskId));
+  const audience = [task?.createdBy, ...assignees.map((a) => a.userId)];
+  if (opts.commenters) {
+    const commenters = await db.selectDistinct({ authorId: schema.comments.authorId })
+      .from(schema.comments)
+      .where(and(eq(schema.comments.taskId, taskId), isNull(schema.comments.deletedAt)));
+    audience.push(...commenters.map((c) => c.authorId));
+  }
+  return audience.filter((id): id is string => Boolean(id));
 }
 
 /**
@@ -191,6 +273,35 @@ async function enrichNotifyPayload(ev: DomainEvent): Promise<Record<string, unkn
       .from(schema.kbPages).where(eq(schema.kbPages.id, p.pageId as string));
     if (page?.title) p.title = page.title;
   }
+  /**
+   * Finance events name the document, never the people: without this an
+   * invoice or quote notification had no recipient at all, and its email said
+   * “Invoice  was paid” with a link to the finance index rather than the
+   * document. Whoever raised it and whoever owns the client both want to know.
+   */
+  if (ev.type === 'invoice.paid' || ev.type === 'payment.recorded') {
+    const invoiceId = (p.invoiceId as string | undefined)
+      ?? (ev.aggregateType === 'invoice' ? ev.aggregateId : undefined);
+    if (invoiceId) {
+      p.invoiceId = invoiceId;
+      const [inv] = await db.select({ number: schema.invoices.number, createdBy: schema.invoices.createdBy, companyId: schema.invoices.companyId })
+        .from(schema.invoices).where(eq(schema.invoices.id, invoiceId));
+      if (inv) {
+        if (!p.ref) p.ref = inv.number;
+        if (!p.createdBy) p.createdBy = inv.createdBy;
+        if (!p.ownerId) p.ownerId = await companyOwnerId(inv.companyId);
+      }
+    }
+  }
+  if (ev.type === 'quote.accepted' || ev.type === 'quote.declined') {
+    const [quote] = await db.select({ number: schema.quotes.number, createdBy: schema.quotes.createdBy, companyId: schema.quotes.companyId })
+      .from(schema.quotes).where(eq(schema.quotes.id, ev.aggregateId));
+    if (quote) {
+      if (!p.ref) p.ref = quote.number;
+      if (!p.createdBy) p.createdBy = quote.createdBy;
+      if (!p.ownerId) p.ownerId = await companyOwnerId(quote.companyId);
+    }
+  }
   if (!p.actorName && ev.actorId && ev.actorType === 'user') {
     const [actor] = await db.select({ name: schema.users.name })
       .from(schema.users).where(eq(schema.users.id, ev.actorId));
@@ -203,50 +314,75 @@ const notifications: Consumer = {
   name: 'notifications',
   async handle(ev) {
     const p = (await enrichNotifyPayload(ev)) as any;
+    // Nobody hears about their own action; every case below passes this on.
+    const self = { actorId: ev.actorId };
     switch (ev.type) {
       case 'task.assigned':
-        await notify(ev.id, p.assigneeIds ?? [], 'task.assigned', p.ref ?? null, p);
+        await notify(ev.id, p.assigneeIds ?? [], 'task.assigned', p.ref ?? null, p, self);
         break;
       case 'comment.mentioned':
-        await notify(ev.id, p.mentions ?? [], 'comment.mentioned', p.ref ?? null, p);
+        await notify(ev.id, p.mentions ?? [], 'comment.mentioned', p.ref ?? null, p, self);
         break;
+      case 'comment.created': {
+        if (!p.taskId) break;
+        // An agent's comments are announced by its run events instead
+        // (agent.needs_input, agent.run_finished): one run must not fill the
+        // bell twice with the same news.
+        if (ev.actorType === 'agent') break;
+        // Everyone with a stake in the thread, not only the @-mentioned: the
+        // author of a task heard nothing when someone answered on it, which is
+        // the whole point of having raised it. The mentioned people are served
+        // by comment.mentioned and would otherwise get the comment twice.
+        const mentioned = new Set<string>(p.mentions ?? []);
+        const audience = (await taskAudience(p.taskId, { commenters: true }))
+          .filter((userId) => !mentioned.has(userId));
+        await notify(ev.id, audience, 'comment.created', p.ref ?? null, p, self);
+        break;
+      }
       case 'task.status_changed':
-        await notify(ev.id, [...(p.assigneeIds ?? []), p.createdBy].filter(Boolean), 'task.status_changed', p.ref ?? null, p);
+        await notify(ev.id, [...(p.assigneeIds ?? []), p.createdBy], 'task.status_changed', p.ref ?? null, p, self);
         break;
       case 'page.mentioned':
-        await notify(ev.id, p.mentions ?? [], 'comment.mentioned', p.ref ?? null, p);
+        await notify(ev.id, p.mentions ?? [], 'page.mentioned', p.ref ?? null, p, self);
         break;
       case 'payment.recorded':
+        await notify(ev.id, [p.createdBy, p.ownerId], 'payment.recorded', p.ref ?? null, p, self);
+        break;
       case 'invoice.paid':
-        await notify(ev.id, [p.createdBy].filter(Boolean), 'invoice.paid', p.ref ?? null, p);
+        await notify(ev.id, [p.createdBy, p.ownerId], 'invoice.paid', p.ref ?? null, p, self);
         break;
       case 'quote.accepted':
-        await notify(ev.id, [p.ownerId, p.createdBy].filter(Boolean), 'quote.accepted', p.ref ?? null, p);
+        await notify(ev.id, [p.ownerId, p.createdBy], 'quote.accepted', p.ref ?? null, p, self);
+        break;
+      // A declined quote is news too: the acceptance was notified and the
+      // refusal went nowhere, so a quote could go quiet without anyone knowing.
+      case 'quote.declined':
+        await notify(ev.id, [p.ownerId, p.createdBy], 'quote.declined', p.ref ?? null, p, self);
         break;
       case 'leave.requested':
-        await notify(ev.id, [p.approverId].filter(Boolean), 'leave.requested', ev.aggregateId, p);
+        await notify(ev.id, [p.approverId], 'leave.requested', ev.aggregateId, p, self);
         break;
       case 'leave.decided':
-        await notify(ev.id, [p.employeeUserId].filter(Boolean), 'leave.decided', ev.aggregateId, p);
+        await notify(ev.id, [p.employeeUserId], 'leave.decided', ev.aggregateId, p, self);
         break;
       case 'git.pr_merged':
-        await notify(ev.id, p.assigneeIds ?? [], 'task.status_changed', p.ref ?? null, p);
+        // The webhook knows the task, not its people – ask the task itself.
+        await notify(ev.id, await taskAudience(p.taskId ?? ev.aggregateId), 'git.pr_merged', p.ref ?? null, p, self);
         break;
       case 'agent.run_finished': {
         // The person who assigned or commented hears how the run ended;
         // a task author who is not the requester gets it too.
         if (p.status === 'succeeded' || p.status === 'failed') {
-          const targets = [p.requestedBy, p.createdBy].filter(Boolean) as string[];
-          await notify(ev.id, targets, 'agent.run_finished', p.ref ?? null, { ...p, outcome: p.status });
+          await notify(ev.id, [p.requestedBy, p.createdBy], 'agent.run_finished', p.ref ?? null, { ...p, outcome: p.status }, self);
         }
         break;
       }
       case 'agent.needs_input':
-        await notify(ev.id, [p.requestedBy, p.createdBy].filter(Boolean) as string[], 'agent.needs_input', p.ref ?? null, p);
+        await notify(ev.id, [p.requestedBy, p.createdBy], 'agent.needs_input', p.ref ?? null, p, self);
         break;
       case 'sales.work_digest_due': {
         const digest = await liveSalesDigest(p.userId, p.localDate);
-        if (digest) await notify(ev.id, [p.userId], 'sales.work_digest', null, digest);
+        if (digest) await notify(ev.id, [p.userId], 'sales.work_digest', null, digest, self);
         break;
       }
       default:
@@ -520,7 +656,14 @@ const agents: Consumer = {
   },
 };
 
-export const consumers: Consumer[] = [sse, notifications, automations, webhooks, slack, agents];
+/**
+ * `notifications` runs before `sse`, so the rows an event produces are
+ * committed before that event reaches any client: whatever a client refreshes
+ * on the event, it reads a bell that is already up to date. The other way
+ * round the bell refetched too early and kept showing nothing until its next
+ * poll a minute later.
+ */
+export const consumers: Consumer[] = [notifications, sse, automations, webhooks, slack, agents];
 
 export function logConsumers(): void {
   logger.info({ consumers: consumers.map((c) => c.name) }, 'event consumers registered');

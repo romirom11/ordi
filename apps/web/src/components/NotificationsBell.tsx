@@ -9,83 +9,22 @@ import { useState, useEffect, useLayoutEffect, useRef, type ReactNode } from 're
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Bell, Inbox, CheckSquare, AtSign, Receipt, CalendarRange, FileCheck2, BookText, CheckCheck,
+  GitPullRequest,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useNavigate } from '../lib/router';
-import { useT, extendDict } from '../lib/i18n';
+import { useT } from '../lib/i18n';
 import { setBadge } from '../lib/desktop';
-import { cn, fmtRelative, Tooltip } from './ui';
+import { notifLink, type Notif } from '../lib/notifications';
+import { cn, fmtRelative } from './ui';
 import { ContextMenu } from './overlays';
-
-extendDict({
-  en: {
-    'notif.task.assigned': 'Task assigned to you',
-    'notif.task.status_changed': 'Task status changed',
-    'notif.comment.mentioned': 'You were mentioned',
-    'notif.page.mentioned': 'You were mentioned on a page',
-    'notif.invoice.paid': 'Invoice paid',
-    'notif.payment.recorded': 'Payment recorded',
-    'notif.quote.accepted': 'Quote accepted',
-    'notif.leave.requested': 'Leave request pending',
-    'notif.leave.decided': 'Leave request decided',
-    'notif.git.pr_merged': 'Pull request merged',
-    'notif.sales.work_digest': 'Your sales work is ready',
-    'notif.agent.run_finished': 'An agent finished your task',
-    'notif.agent.needs_input': 'An agent needs your input',
-    'notif.agent.credential_expiring': 'A Claude credential expires soon',
-    'notif.agent.credential_expired': 'A Claude credential expired',
-  },
-  uk: {
-    'notif.task.assigned': 'Вам призначено задачу',
-    'notif.task.status_changed': 'Змінено статус задачі',
-    'notif.comment.mentioned': 'Вас згадали',
-    'notif.page.mentioned': 'Вас згадали на сторінці',
-    'notif.invoice.paid': 'Рахунок оплачено',
-    'notif.payment.recorded': 'Зафіксовано оплату',
-    'notif.quote.accepted': 'Кошторис прийнято',
-    'notif.leave.requested': 'Запит на відпустку',
-    'notif.leave.decided': 'Рішення щодо відпустки',
-    'notif.git.pr_merged': 'Пулреквест злито',
-    'notif.sales.work_digest': 'Черга продажів готова',
-    'notif.agent.run_finished': 'Агент завершив вашу задачу',
-    'notif.agent.needs_input': 'Агенту потрібна ваша відповідь',
-    'notif.agent.credential_expiring': 'Доступ Claude скоро протермінується',
-    'notif.agent.credential_expired': 'Доступ Claude протерміновано',
-  },
-});
-
-interface Notif { id: string; type: string; entityRef: string | null; payload: Record<string, unknown>; readAt: string | null; createdAt: string }
-
-/** Deep link for a notification, mirroring the server-side email links. */
-function notifLink(n: Notif): string | null {
-  const p = n.payload ?? {};
-  const projectId = p.projectId as string | undefined;
-  const taskId = (p.taskId as string | undefined) ?? (p.id as string | undefined);
-  if (n.type.startsWith('task.') || n.type === 'comment.mentioned') {
-    return projectId && taskId ? `/projects/${projectId}/tasks/${taskId}` : '/my-tasks';
-  }
-  if (n.type === 'page.mentioned' && p.spaceId && p.pageId) return `/kb/${p.spaceId as string}/${p.pageId as string}`;
-  if (n.type === 'invoice.paid' || n.type === 'payment.recorded') {
-    return p.invoiceId ? `/finance/invoices/${p.invoiceId as string}` : '/finance';
-  }
-  if (n.type === 'quote.accepted') return '/finance';
-  // A run notification is about a task; a credential one carries the absolute
-  // link the emails use, and the router navigates by path.
-  if (n.type === 'agent.run_finished' || n.type === 'agent.needs_input') {
-    return projectId && taskId ? `/projects/${projectId}/tasks/${taskId}` : '/my-tasks';
-  }
-  // The server's payload.link always points at Settings → Agents; the route is the stable part.
-  if (n.type.startsWith('agent.credential_')) return '/settings/agents';
-  if (n.type.startsWith('leave.')) return '/people';
-  if (n.type === 'sales.work_digest') return '/crm/work';
-  return null;
-}
 
 /** Icon per notification type family. */
 function notifIcon(type: string): ReactNode {
   if (type.startsWith('task.')) return <CheckSquare size={14} />;
   if (type.startsWith('comment.')) return <AtSign size={14} />;
   if (type.startsWith('page.')) return <BookText size={14} />;
+  if (type.startsWith('git.')) return <GitPullRequest size={14} />;
   if (type.startsWith('invoice.') || type.startsWith('payment.')) return <Receipt size={14} />;
   if (type.startsWith('quote.')) return <FileCheck2 size={14} />;
   if (type.startsWith('leave.')) return <CalendarRange size={14} />;
