@@ -29,3 +29,4 @@ export * from './calc/leave';
 export * from './calc/rbac';
 export * from './calc/redaction';
 export * from './calc/richtext';
+export * from './calc/markdown';

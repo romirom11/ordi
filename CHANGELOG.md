@@ -3,6 +3,45 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.31.0
+
+- **Notifications reach the person they concern**: every row is streamed to
+  its recipient alone as `notification.created` instead of riding a
+  project-wide business event, so "a task was assigned to you" no longer
+  reaches the whole team (and no longer raises an OS notification on every
+  member's desktop). The actor, deactivated accounts and agents are dropped;
+  a comment reaches the task's author, its assignees and the people who
+  answered before, not only the @-mentioned; paid invoices, recorded payments
+  and accepted or declined quotes get the recipients they never had; a merged
+  pull request asks the task for its people; a page mention reads as one and
+  opens the page. Comments, page mentions, merged pull requests, recorded
+  payments and declined quotes each get their own email-preference switch.
+  Labels and deep links move into one shared `lib/notifications`.
+- **Leads export carries every field** (ORD-31): `/export/leads.csv` writes
+  one row per lead with every column, the related names (company, contact,
+  owner, labels, next action, converted deal) and the workspace's lead custom
+  fields, select values as their labels. An Export button beside the lead
+  filters sends the active filters along, for whoever holds `crm.export`; the
+  export is uncapped, and files open with a UTF-8 BOM so Excel stops mangling
+  accents (the importer skips a leading BOM).
+- **Markdown files preview as documents**: a `.md` attachment opened as raw
+  monospace text; a `markdownToDoc` converter in `@ordi/shared` parses a
+  CommonMark/GFM subset (headings, fenced code, blockquotes, lists, pipe
+  tables, rules, inline marks) into a tiptap doc, rendered through the same
+  read-only renderer as notes and KB pages. No raw HTML reaches the page,
+  links are kept only for http/https/mailto, and images become links so a
+  preview never fetches a third-party URL.
+- **"My leave" lists only your own requests**: the self-service card was
+  calling the unscoped `GET /leave-requests`, which returns the whole
+  workspace to anyone with `people.read` – an HR user's own profile showed
+  other employees' absences with a cancel button beside each. New
+  `?scope=mine`. Balances were never affected.
+- **MinIO images come from Quay**: anonymous pulls of `minio/mc` and
+  `minio/minio` on Docker Hub now answer 401, which failed a fresh deploy
+  with the `minio` profile; both are pinned to `quay.io/minio/…` releases.
+- **The site catches up with v1.30**: agent employees, desktop browser
+  sign-in, and no more "timesheet approval", which the product does not have.
+
 ## v1.30.0
 
 - **Leave balances people can see**: `GET /leave-entitlements` reports
