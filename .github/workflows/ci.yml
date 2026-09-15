@@ -83,15 +83,13 @@ jobs:
   # The dev environment always has the whole workspace on disk, so a workspace
   # package missing from a Dockerfile COPY is invisible until the container
   # boots in production (that is exactly how @ordi/mcp broke v1.5.x deploys).
-  # Build both images and boot the API one against Postgres until it answers.
+  # Build the image and boot it against Postgres until it answers.
   docker-images:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Build API image
         run: docker build -f docker/Dockerfile.api -t ordi-api:ci .
-      - name: Build web image
-        run: docker build -f docker/Dockerfile.web -t ordi-web:ci .
       # The Claude runtime is an optional platform dependency of the Agent
       # SDK: it installs silently or not at all, and a missing one only shows
       # up when an agent run tries to start. Prove it resolves in the image.
@@ -111,9 +109,9 @@ jobs:
             sleep 1
           done
           # Deliberately NOT named "api": PaaS platforms (Dokploy, Coolify)
-          # assign their own service names, and the web image must reach the
-          # API through the API_UPSTREAM template variable, not a hardcoded
-          # hostname. Using a different name here proves the override works.
+          # assign their own service names, so nothing in the image may
+          # depend on our compose service name. A different name here proves
+          # the container is reachable under whatever name it is given.
           docker run -d --name ordi-svc-api --network ordi-ci -p 3000:3000 \
             -e DATABASE_URL=postgres://postgres:postgres@pg:5432/ordi \
             -e AUTH_SECRET=ci-only-secret \
@@ -206,33 +204,3 @@ jobs:
           tools=$(mcp '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq '.result.tools | length')
           [ "$tools" -ge 20 ] || { echo "tools/list returned $tools tools"; exit 1; }
           echo "MCP OAuth flow: register -> approve -> token -> initialize -> $tools tools listed"
-
-      # The nginx web image is deprecated but still shipped for deployments
-      # that pin it - keep it booting and routing until it is removed.
-      - name: Boot the deprecated web image and check OAuth discovery through nginx
-        run: |
-          docker run -d --name web --network ordi-ci -p 8080:80 \
-            -e API_UPSTREAM=ordi-svc-api:3000 ordi-web:ci
-          for i in $(seq 1 30); do
-            curl -fsS -o /dev/null http://localhost:8080/ && break
-            if [ "$(docker inspect -f '{{.State.Running}}' web)" != "true" ]; then
-              echo "web container exited (nginx config?):"; docker logs web; exit 1
-            fi
-            sleep 1
-          done
-          # An MCP client registers against whatever discovery advertises. If
-          # nginx drops the Host header, it advertises http://api:3000 and the
-          # client cannot register - the failure this guards against.
-          meta=$(curl -fsS -H 'Host: ordi.example.com' -H 'X-Forwarded-Proto: https' \
-            http://localhost:8080/.well-known/oauth-authorization-server)
-          echo "$meta"
-          for want in \
-            '"issuer":"https://ordi.example.com"' \
-            '"registration_endpoint":"https://ordi.example.com/api/v1/oauth/register"' \
-            '"token_endpoint":"https://ordi.example.com/api/v1/oauth/token"'; do
-            case "$meta" in
-              *"$want"*) ;;
-              *) echo "discovery is missing $want"; docker logs web; exit 1 ;;
-            esac
-          done
-          echo "OAuth discovery advertises the public host through nginx"

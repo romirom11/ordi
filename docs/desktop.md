@@ -22,8 +22,8 @@ export const isTauri = '__TAURI__' in window || '__TAURI_INTERNALS__' in window;
 
 ## 2. Перший запуск: URL інстансу
 
-У браузері SPA ходить на same-origin `/api/v1` (nginx проксіює на API). У
-Tauri same-origin API немає, тому:
+У браузері SPA ходить на same-origin `/api/v1` (той самий контейнер віддає
+і SPA, і API). У Tauri same-origin API немає, тому:
 
 1. `main.tsx` при `isTauri && !getInstanceUrl()` рендерить **InstanceGate** –
    екран «Підключіться до вашого інстансу ordi» (локалізований uk/en).
