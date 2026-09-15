@@ -32,6 +32,7 @@ name: Image
 on:
   push:
     tags: ['v*']
+    branches: ['claude/gallant-keller-l1tja0']  # TEMPORARY: end-to-end check of this workflow, removed before merge
   workflow_dispatch:
 
 permissions:
