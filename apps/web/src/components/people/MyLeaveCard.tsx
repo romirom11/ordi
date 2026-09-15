@@ -1,10 +1,12 @@
 /**
- * Leave self-service on the profile page. Works without people.read: the API
- * scopes GET /leave-requests to the caller's own requests, /leave-entitlements
- * to their own balances, and `?scope=approvals` lists requests waiting on the
- * caller as approver (empty for most people). When the account has no linked
- * employee record the own-requests query fails – we show a hint instead of the
- * list, but still render the approvals section if there is anything to decide.
+ * Leave self-service on the profile page. Works without people.read: every read
+ * here is explicitly about the caller – `?scope=mine` for their own requests
+ * (the bare list is the whole workspace for anyone holding people.read, which
+ * put other people's absences on an HR user's own card), /leave-entitlements
+ * for their own balances, and `?scope=approvals` for requests waiting on them
+ * as approver (empty for most people). When the account has no linked employee
+ * record the own-requests query fails – we show a hint instead of the list, but
+ * still render the approvals section if there is anything to decide.
  *
  * The card shows what is left per type and the form checks a range against it
  * before it is sent, using the same `@ordi/shared` calc the API enforces with –
@@ -167,7 +169,7 @@ export function MyLeaveCard() {
   // 403 when the account has no employee record – surfaced as a hint, not retried.
   const mine = useQuery({
     queryKey: ['my-leave'],
-    queryFn: () => api.get<{ data: LeaveRequest[] }>('/leave-requests').then((r) => r.data),
+    queryFn: () => api.get<{ data: LeaveRequest[] }>('/leave-requests?scope=mine').then((r) => r.data),
     retry: false,
   });
   const entitlements = useLeaveEntitlements();

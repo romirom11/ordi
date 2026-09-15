@@ -99,4 +99,34 @@ describe('leave self-service without people.read', () => {
     const res = await sales.get(`/leave-requests?employeeId=${memberEmpId}`);
     expect(res.status).toBe(403);
   });
+
+  /**
+   * The "My leave" card asks for scope=mine. Without it a caller holding
+   * people.read got the whole workspace, so an HR user's own profile listed
+   * everybody's absences – with a cancel button beside each of them.
+   */
+  it('scope=mine is only my own, even for a caller who may read everyone', async () => {
+    const hr = reqAs(users.hr!.cookie);
+    const hrEmpId = (await json(hr.post('/employees', {
+      firstName: 'Halyna', lastName: 'R', userId: users.hr!.userId,
+    }))).id;
+    const type = await json(hr.post('/leave-types', { name: 'Personal', annualQuota: 10 }));
+    const ownRequest = await json(hr.post('/leave-requests', {
+      leaveTypeId: type.id, fromDate: '2026-10-05', toDate: '2026-10-06',
+    }));
+
+    const mine = (await json(hr.get('/leave-requests?scope=mine'))).data as any[];
+    expect(mine.map((r) => r.id)).toEqual([ownRequest.id]);
+    expect(mine.every((r) => r.employeeId === hrEmpId)).toBe(true);
+
+    // The unscoped list is still everyone's – the team calendar reads that.
+    const all = (await json(hr.get('/leave-requests'))).data as any[];
+    expect(all.length).toBeGreaterThan(mine.length);
+    expect(all.some((r) => r.employeeId === memberEmpId)).toBe(true);
+  });
+
+  it('scope=mine refuses an account with no employee card, so the card hints', async () => {
+    const owner = reqAs(users.owner!.cookie);
+    expect((await owner.get('/leave-requests?scope=mine')).status).toBe(403);
+  });
 });
