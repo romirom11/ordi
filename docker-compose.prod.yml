@@ -82,7 +82,7 @@ services:
 
   # The whole application: REST API, workers, and the built web app – the
   # image every release publishes (.github/workflows/image.yml), so a deploy
-  # never builds anything. ORDI_VERSION pins a release (1.31.0) and is how
+  # never builds anything. ORDI_VERSION pins a release (1.32.0) and is how
   # you roll back; unset, it follows `latest`. Pulled on every `up`, so a
   # redeploy from the panel ships the tag's current image instead of whatever
   # `latest` the host cached last month. To build from a checkout instead
