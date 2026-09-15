@@ -230,6 +230,18 @@ export function peopleRoutes() {
     if (c.req.query('scope') === 'approvals') {
       return c.json({ data: await svc.listLeaveRequests({ approverId: actor.userId, status: c.req.query('status') ?? 'pending' }) });
     }
+    // My own requests, whoever I am. The unscoped list is everyone's once the
+    // caller holds people.read – which is what the team calendar, the People
+    // page and Resourcing want, and exactly wrong for the "My leave" card: it
+    // listed the whole workspace's absences on an HR user's own profile, with a
+    // cancel button next to each (ORD-26).
+    if (c.req.query('scope') === 'mine') {
+      const own = await svc.employeeOfUser(actor.userId);
+      // Same refusal as the no-permission path below, so a card whose account
+      // has no employee record keeps showing its "not linked" hint.
+      if (!own) throw err.forbidden('This account is not linked to an employee record', 'people.read');
+      return c.json({ data: await svc.listLeaveRequests({ employeeId: own.id, status: c.req.query('status') }) });
+    }
     if (actor.access.permissions.has('people.read')) {
       return c.json({ data: await svc.listLeaveRequests({ employeeId: requested, status: c.req.query('status') }) });
     }
