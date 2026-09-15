@@ -85,6 +85,18 @@ In the PR description, say what breaks if the change is wrong, and how you
 verified it. "Tested by clicking through the project page in both themes" is a
 useful sentence; "works" is not.
 
+## Licensing your contribution
+
+ordi is AGPL-3.0 and stays that way. Contributors sign a one-off
+[CLA](CLA.md) so the project has a written licence to distribute their work –
+a bot links it from your first pull request and it takes about thirty seconds.
+It is a licence, not an assignment: you keep the copyright in what you write,
+and the agreement commits the project to staying open source.
+
+The name and logo are covered separately by the
+[trademark policy](TRADEMARK.md). It changes nothing about your rights over the
+code.
+
 ## Reporting bugs
 
 Include the version, how you deployed, what you did, what happened and what you

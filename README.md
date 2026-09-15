@@ -239,7 +239,9 @@ container before it starts serving, so one container owns the schema.
 ## Contributing
 
 Issues and pull requests are welcome – see [CONTRIBUTING.md](CONTRIBUTING.md) for
-the setup, the conventions and what makes a change easy to merge. Security reports
+the setup, the conventions and what makes a change easy to merge. A first pull
+request also signs a short [CLA](CLA.md), which keeps the copyright with you and
+the project open source. Security reports
 go through [SECURITY.md](SECURITY.md), not public issues.
 
 ## Support the project
@@ -264,3 +266,7 @@ tier.
 [AGPL-3.0](LICENSE). You can run ordi for your own company, modify it and
 self-host it freely. If you offer a modified ordi to others over a network, the
 AGPL requires you to publish your changes.
+
+The licence covers the code; the name and logo are covered by the
+[trademark policy](TRADEMARK.md), which asks you to rename a fork before shipping
+it to other people and leaves every other right the AGPL gives you untouched.
