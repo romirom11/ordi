@@ -58,6 +58,16 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   the manifest registered from this instance's `API_URL`, with a copy button:
   an app created from another host keeps that host's URL and every delivery
   answers 404, which is invisible from ordi's side otherwise.
+- **The nginx web image is gone** (breaking for deployments that pinned it):
+  `docker/Dockerfile.web` and `docker/nginx.conf.template` are removed. They
+  were deprecated in v1.6.0, when the API image started serving the SPA,
+  `/assets/*`, SSE and OAuth discovery itself – neither compose file has
+  referenced a `web` service since. If you still run the `ordi-web` image,
+  point your domain at the **`api`** service, **port 3000**, path `/`, then
+  delete the `web` service and any nginx config mount you added for it; no
+  new env vars. CI no longer builds or boots that image – discovery under
+  forwarded `Host`/`X-Forwarded-Proto` is still asserted, now against the API
+  image directly, which is what serves it.
 
 ## v1.30.0
 
