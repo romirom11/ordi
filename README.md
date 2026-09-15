@@ -13,6 +13,8 @@ Projects, CRM, knowledge base, time, finance and people – one app, one databas
 
 [Website](https://romirom11.github.io/ordi/) · [Quick start](#quick-start) · [Why ordi](#why-ordi) · [Features](#features) · [Deploy](#deploy-it-for-real) · [Desktop app](https://github.com/romirom11/ordi/releases/latest) · [Donate](#support-the-project)
 
+[![Support ordi on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/T1H52733T3)
+
 ![Project overview](docs/images/project-overview.png)
 
 </div>
@@ -263,6 +265,10 @@ go through [SECURITY.md](SECURITY.md), not public issues.
 ordi is free and AGPL-licensed, built and maintained in the open. If it saves
 your team a subscription or two and you want to say thanks, donations are
 welcome:
+
+<a href="https://ko-fi.com/T1H52733T3"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support ordi on Ko-fi"></a>
+
+Prefer crypto?
 
 ```
 0x3416baba090f1fb87998f73fe1ae625f38865a64
