@@ -10,7 +10,16 @@
 |---|---|---|---|
 | `db` | postgres:16-alpine | 5432 | том `db_data`; PITR – див. operations.md |
 | `minio` | quay.io/minio/minio | 9000/9001 | опційно – замініть на R2/S3 |
-| `api` | `docker/Dockerfile.api` | 3000 | **весь застосунок**: міграції, API, воркери і зібраний веб |
+| `api` | `ghcr.io/romirom11/ordi` | 3000 | **весь застосунок**: міграції, API, воркери і зібраний веб |
+
+Образ `api` публікується автоматично на кожному релізі
+(`.github/workflows/image.yml`, `linux/amd64`): `docker pull
+ghcr.io/romirom11/ordi:latest` працює без жодної автентифікації в GitHub, а
+кожен реліз має й тег версії (`ghcr.io/romirom11/ordi:1.31.0`) – саме на
+нього закріплюйтесь (`ORDI_VERSION=1.31.0` в env) і на нього відкочуєтесь.
+Сервер нічого не збирає: `pnpm install` і збірка веба відбуваються один раз
+у CI. Збирати образ локально потрібно лише для форка чи зміни
+`docker/Dockerfile.api` – для цього є оверлей `docker-compose.build.yml`.
 
 З v1.6.0 **один контейнер – це весь застосунок**: `api` сам віддає SPA,
 `/api/*`, SSE і OAuth-дискавері для MCP (`/.well-known/*`). Окремого
@@ -21,8 +30,12 @@ nginx-образ `docker/Dockerfile.web` – deprecated з v1.6.0 – видал
 ## 1. Варіант A – Dokploy (рекомендований)
 
 1. **Створіть проєкт → Compose** і вкажіть цей репозиторій та
-   **`docker-compose.prod.yml`** (Dokploy збере Dockerfile сам).
-   `docker-compose.yml` у корені – для локальної розробки: він прибиває
+   **`docker-compose.prod.yml`**. Dokploy нічого не збирає: сервіс `api`
+   тягне опублікований образ `ghcr.io/romirom11/ordi` (`pull_policy:
+   always`, тож кожен Redeploy у панелі ставить актуальний образ тега).
+   Без `ORDI_VERSION` це `latest`; для закріплення на релізі задайте
+   `ORDI_VERSION=1.31.0` в Environment.
+   `docker-compose.yml` у корені – для локального запуску: він прибиває
    значення до `localhost` і публікує порти на хост.
 2. **Environment** (мінімум для прод):
    ```bash
@@ -75,23 +88,33 @@ nginx-образ `docker/Dockerfile.web` – deprecated з v1.6.0 – видал
 ## 2. Варіант B – голий VPS
 
 ```bash
-git clone <repo> && cd ordi
-cp .env.example .env            # AUTH_SECRET, ENCRYPTION_KEY, SMTP_URL, домени
-docker compose up -d --build
-docker compose exec api pnpm --filter @ordi/api seed   # одноразово
+mkdir ordi && cd ordi
+curl -fsSLO https://raw.githubusercontent.com/romirom11/ordi/master/docker-compose.prod.yml
+# .env: POSTGRES_PASSWORD, AUTH_SECRET, ENCRYPTION_KEY, APP_URL, SMTP_URL, S3_*
+docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml exec api pnpm --filter @ordi/api seed   # одноразово
 ```
+Клонувати репозиторій не потрібно – образ уже зібраний. Або без S3 і
+домену, для проби на `localhost:8080`: той самий рецепт з `docker-compose.yml`
+із README.
 Далі поставте перед `api` (хост-порт 8080 або 3000) будь-який TLS-термінатор
 (Caddy/Traefik/nginx) – він проксіює все на один порт, без окремих правил.
 
 <a id="updating"></a>
 ## 3. Оновлення (нові релізи)
 
-Стандартний цикл:
+Стандартний цикл – без збірки на сервері:
 
 ```bash
-git pull
-docker compose up -d --build
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
 ```
+
+На Dokploy те саме робить кнопка **Redeploy** (образ тягнеться при кожному
+`up`). Закріплені на версії (`ORDI_VERSION=1.31.0`)? Змініть значення на
+нову версію і повторіть. Відкат – та сама операція з попередньою версією:
+`ORDI_VERSION=1.30.0 docker compose -f docker-compose.prod.yml up -d`. Теги
+кожного релізу: `1.31.0`, `1.31`, `1`, `latest`.
 
 Міграції **адитивні** і запускаються автоматично в entrypoint API-контейнера
 перед стартом сервера – окремих кроків немає. Rollback безпечний: попередній
@@ -106,7 +129,7 @@ docker compose up -d --build
 - **Десктоп** оновлюється сам через GitHub-релізи, але UI він возить із собою,
   тому важлива і зворотна перевірка: якщо сервер *старіший* за застосунок,
   зʼявляється попередження з посиланням сюди. Побачили його – час зробити
-  `git pull` на сервері.
+  `docker compose pull && docker compose up -d` на сервері.
 - **Settings** показує поточну версію внизу навігації, а адміністраторам – і
   посилання на новіший реліз, щойно він виходить.
 
@@ -268,6 +291,15 @@ CPU/памʼяті. За замовчуванням цього розділен�
 
 ## 5. Десктоп і MCP
 
+- **Образ**: той самий тег запускає `.github/workflows/image.yml` – збірка
+  `docker/Dockerfile.api` (`linux/amd64`), пуш у `ghcr.io/romirom11/ordi` з
+  тегами `<версія>`, `<major>.<minor>`, `<major>`, `latest`, `sha-<коміт>`, і
+  перевірка, що образ тягнеться **без автентифікації** та відповідає на
+  `/healthz` своєю версією. Зелений воркфлоу означає саме «pull працює»:
+  якщо пакет приватний (GitHub створює новий пакет приватним), крок
+  анонімного pull падає з інструкцією, де зробити його публічним. Запуск
+  воркфлоу вручну на гілці публікує лише `sha-<коміт>` – прев’ю-образ, що
+  ніколи не зачіпає `latest`.
 - **Desktop**: пуш тега `v*` у GitHub запускає `.github/workflows/desktop.yml`
   (macOS universal / Windows msi / Linux AppImage+deb через tauri-action).
   Для підписаного апдейтера задайте секрети `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)`.

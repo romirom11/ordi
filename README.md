@@ -160,16 +160,22 @@ and expense posts balanced entries, so the books actually balance.
 
 ## Quick start
 
-Requires **Docker**. Nothing else.
+Requires **Docker**. Nothing else – no clone, no build. Every release publishes
+the whole app (API, workers and web app) as one image,
+[`ghcr.io/romirom11/ordi`](https://github.com/romirom11/ordi/pkgs/container/ordi).
 
 ```bash
-git clone https://github.com/romirom11/ordi.git
-cd ordi
-docker compose up --build
+mkdir ordi && cd ordi
+curl -fsSLO https://raw.githubusercontent.com/romirom11/ordi/master/docker-compose.yml
+docker compose up
 ```
 
 Open <http://localhost:8080> and the setup wizard will create your workspace and
 owner account.
+
+`docker compose pull` moves you to the newest release; `ORDI_VERSION=1.31.0`
+in a `.env` next to the compose file pins one (and is how you roll back). The
+image is `linux/amd64`.
 
 <details>
 <summary><b>Run from source instead</b> (Node 22, pnpm 10, PostgreSQL 16)</summary>
@@ -191,13 +197,22 @@ the product in a minute rather than staring at empty states.
 
 Sign in as `owner@ordi.local` / `password123`.
 
+To build the container image from your checkout instead of pulling the
+published one (a fork, or a change to `docker/Dockerfile.api`):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
+```
+
 </details>
 
 ## Deploy it for real
 
 [`docs/deployment.md`](docs/deployment.md) covers a production deployment with
 docker-compose or Dokploy: TLS, SMTP and DNS records, S3-compatible storage,
-backups and health checks. [`docs/operations.md`](docs/operations.md) covers
+backups and health checks. Production runs the same published image through
+[`docker-compose.prod.yml`](docker-compose.prod.yml), so a server never builds
+anything – updating is `docker compose pull` or a redeploy from the panel. [`docs/operations.md`](docs/operations.md) covers
 backup/PITR targets, monitoring and the restore runbook.
 
 The desktop app connects to your instance – download it from
