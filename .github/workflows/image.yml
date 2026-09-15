@@ -24,15 +24,15 @@ name: Image
 # credentials can pull it and it runs". So after the push the job logs out of
 # the registry, pulls the image the way a fresh server would, boots it
 # against Postgres and checks that /healthz answers with the released
-# version and that the web app is served. The first push ever creates the
-# package PRIVATE (GitHub's default for a personal account, and there is no
-# API to change it): that anonymous pull then fails with instructions to
-# make the package public – once, in the package settings – and re-run.
+# version and that the web app is served. A package can come out PRIVATE
+# (GitHub's default when a first push is not linked to a public repository,
+# and there is no API to change visibility): the anonymous pull then fails
+# with instructions to make it public – once, in the package settings – and
+# re-run.
 
 on:
   push:
     tags: ['v*']
-    branches: ['claude/gallant-keller-l1tja0']  # TEMPORARY: end-to-end check of this workflow, removed before merge
   workflow_dispatch:
 
 permissions:
@@ -127,7 +127,7 @@ jobs:
           if ! docker pull "$REF"; then
             owner="${{ github.repository_owner }}"
             echo "::error::$REF was pushed but cannot be pulled without credentials."
-            echo "::error::The package is private – GitHub's default for a new package. Make it public once:"
+            echo "::error::The package is private. Make it public once:"
             echo "::error::  https://github.com/users/$owner/packages/container/ordi/settings -> Danger Zone -> Change visibility -> Public"
             echo "::error::(for an organization: https://github.com/orgs/$owner/packages/container/ordi/settings), then re-run this workflow."
             exit 1
