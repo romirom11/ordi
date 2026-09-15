@@ -3,6 +3,55 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.32.0
+
+- **Git links, one writer, and a webhook that says why**: the forge's
+  webhook is the one thing that attaches branches, commits and pull requests
+  to tasks, for an agent's push exactly as for a person's – the agent worker
+  no longer copies its pull request into `task_links`, which nothing renders.
+  The webhook's link handling moves into `integrations/git-links.ts`;
+  (task, type, ref) is unique on `git_links` (migration
+  `0038_git_links_unique_ref`, which drops duplicates first), so two
+  deliveries naming the same ref at once leave one row; and a git event now
+  marks a transition (opened, merged, closed) and fires once, however often
+  GitHub's Redeliver repeats a delivery. Every delivery that changes nothing
+  is logged with its reason (signature matched no connection, no connection
+  for the installation, repository not bound to a project, no task ref, ref
+  not found), a processed one with what it linked, and a thrown error is
+  logged instead of swallowed. Settings → Integrations shows the webhook URL
+  the manifest registered from this instance's `API_URL`, with a copy button:
+  an app created from another host keeps that host's URL and every delivery
+  answers 404, which is invisible from ordi's side otherwise.
+- **The image is published, so a server stops building it**: every release
+  pushes `ghcr.io/romirom11/ordi` – API, workers and the built web app in one
+  container, `linux/amd64` – tagged `1.32.0`, `1.32`, `1`, `latest` and
+  `sha-<commit>`. Until now CI built the image and threw it away, so every
+  install ran `pnpm install` and the web build on the server and no hosting
+  panel had anything to pull. `release.yml` dispatches the build for the tag;
+  a tag that disagrees with `package.json` fails rather than publishing a
+  wrong `latest`. A green run means the pull works, not that the build
+  passed: the job logs out of the registry, pulls the tag anonymously, checks
+  the digest is the one it pushed, boots it against Postgres and requires
+  `/healthz` to report this version and the web app to be served from the
+  same port.
+- **The nginx web image is gone** (breaking for deployments that pinned it):
+  `docker/Dockerfile.web` and `docker/nginx.conf.template` are removed. They
+  were deprecated in v1.6.0, when the API image started serving the SPA,
+  `/assets/*`, SSE and OAuth discovery itself – neither compose file has
+  referenced a `web` service since. If you still run the `ordi-web` image,
+  point your domain at the **`api`** service, **port 3000**, path `/`, then
+  delete the `web` service and any nginx config mount you added for it; no
+  new env vars. CI no longer builds or boots that image – discovery under
+  forwarded `Host`/`X-Forwarded-Proto` is still asserted, now against the API
+  image directly, which is what serves it.
+- **The README lists what the product actually does**: the Features section
+  sold about two thirds of ordi – no Slack, no GitHub App, no intake, no CRM
+  analytics or playbooks, no receivables aging, no team calendar, field
+  groups or questionnaire, no files, reactions or setup wizard, all of it
+  shipped. It now mirrors the landing page, every line checked against the
+  API and the schema, and it no longer claims migrations run as a separate
+  deploy step – the `api` container has run them on start since v1.6.0.
+
 ## v1.31.0
 
 - **Notifications reach the person they concern**: every row is streamed to
@@ -41,33 +90,6 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   with the `minio` profile; both are pinned to `quay.io/minio/…` releases.
 - **The site catches up with v1.30**: agent employees, desktop browser
   sign-in, and no more "timesheet approval", which the product does not have.
-- **Git links, one writer, and a webhook that says why**: the forge's
-  webhook is the one thing that attaches branches, commits and pull requests
-  to tasks, for an agent's push exactly as for a person's – the agent worker
-  no longer copies its pull request into `task_links`, which nothing renders.
-  The webhook's link handling moves into `integrations/git-links.ts`;
-  (task, type, ref) is unique on `git_links` (migration
-  `0038_git_links_unique_ref`, which drops duplicates first), so two
-  deliveries naming the same ref at once leave one row; and a git event now
-  marks a transition (opened, merged, closed) and fires once, however often
-  GitHub's Redeliver repeats a delivery. Every delivery that changes nothing
-  is logged with its reason (signature matched no connection, no connection
-  for the installation, repository not bound to a project, no task ref, ref
-  not found), a processed one with what it linked, and a thrown error is
-  logged instead of swallowed. Settings → Integrations shows the webhook URL
-  the manifest registered from this instance's `API_URL`, with a copy button:
-  an app created from another host keeps that host's URL and every delivery
-  answers 404, which is invisible from ordi's side otherwise.
-- **The nginx web image is gone** (breaking for deployments that pinned it):
-  `docker/Dockerfile.web` and `docker/nginx.conf.template` are removed. They
-  were deprecated in v1.6.0, when the API image started serving the SPA,
-  `/assets/*`, SSE and OAuth discovery itself – neither compose file has
-  referenced a `web` service since. If you still run the `ordi-web` image,
-  point your domain at the **`api`** service, **port 3000**, path `/`, then
-  delete the `web` service and any nginx config mount you added for it; no
-  new env vars. CI no longer builds or boots that image – discovery under
-  forwarded `Host`/`X-Forwarded-Proto` is still asserted, now against the API
-  image directly, which is what serves it.
 
 ## v1.30.0
 
