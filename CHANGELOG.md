@@ -24,6 +24,13 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   filters sends the active filters along, for whoever holds `crm.export`; the
   export is uncapped, and files open with a UTF-8 BOM so Excel stops mangling
   accents (the importer skips a leading BOM).
+- **Markdown files preview as documents**: a `.md` attachment opened as raw
+  monospace text; a `markdownToDoc` converter in `@ordi/shared` parses a
+  CommonMark/GFM subset (headings, fenced code, blockquotes, lists, pipe
+  tables, rules, inline marks) into a tiptap doc, rendered through the same
+  read-only renderer as notes and KB pages. No raw HTML reaches the page,
+  links are kept only for http/https/mailto, and images become links so a
+  preview never fetches a third-party URL.
 - **"My leave" lists only your own requests**: the self-service card was
   calling the unscoped `GET /leave-requests`, which returns the whole
   workspace to anyone with `people.read` – an HR user's own profile showed
