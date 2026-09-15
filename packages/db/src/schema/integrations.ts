@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, jsonb, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, jsonb, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { pk, timestamps, createdBy } from './_shared';
 import { tasks } from './projects';
 
@@ -41,7 +41,8 @@ export const gitLinks = pgTable('git_links', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
-  taskIdx: index('git_links_task_idx').on(t.taskId),
+  /** One row per ref on a task: two deliveries naming the same ref can land at the same moment. */
+  taskRefIdx: uniqueIndex('git_links_task_ref_idx').on(t.taskId, t.type, t.externalRef),
   refIdx: index('git_links_ref_idx').on(t.type, t.externalRef),
 }));
 

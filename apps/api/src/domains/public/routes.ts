@@ -8,6 +8,7 @@ import {
 import type { AppEnv } from '../../context';
 import { env } from '../../env';
 import { err } from '../../lib/errors';
+import { logger } from '../../lib/logger';
 import { emit } from '../../core/events';
 import { hmacSha256, encrypt, generateToken } from '../../lib/crypto';
 import { verifyFileToken } from '../../lib/file-tokens';
@@ -18,6 +19,7 @@ import {
   convertManifestCode, githubAppConfigured, getInstallation, listInstallationRepos,
   upsertInstallationConnection, syncInstallationRepos,
 } from '../integrations/github-app';
+import { syncGitLink } from '../integrations/git-links';
 import { storeGithubAppConfig, runtimeConfig } from '../../lib/runtime-config';
 
 /**
@@ -518,23 +520,33 @@ export function publicRoutes() {
   });
 
   // ── Incoming git webhook (PRD §13.1) – always 200 to avoid provider retries. ──
+  // The answer never says why nothing happened (a forge retries on anything
+  // else), so the log does: every delivery that changes nothing is logged with
+  // its reason, and a processed one with what it linked. That is what to read
+  // when a branch or a pull request does not show on its task.
   app.post('/api/v1/integrations/git/:provider/webhook', async (c) => {
+    const provider = c.req.param('provider');
+    const deliveryId = c.req.header('x-github-delivery')
+      ?? c.req.header('x-gitlab-event-uuid')
+      ?? c.req.header('x-gitea-delivery')
+      ?? null;
+    const event = c.req.header('x-github-event') ?? c.req.header('x-gitlab-event') ?? c.req.header('x-gitea-event') ?? null;
+    const delivery = { provider, deliveryId, event };
+    const ignored = (reason: string, extra: Record<string, unknown> = {}) => {
+      logger.info({ ...delivery, ...extra }, `git webhook ignored: ${reason}`);
+      return c.json({ ok: true });
+    };
     try {
-      const provider = c.req.param('provider');
       const raw = await c.req.text();
       const { db } = getDb();
 
       // Idempotency: dedup by provider delivery id.
-      const deliveryId = c.req.header('x-github-delivery')
-        ?? c.req.header('x-gitlab-event-uuid')
-        ?? c.req.header('x-gitea-delivery')
-        ?? null;
       if (deliveryId) {
         const inserted = await db.insert(schema.gitWebhookDeliveries)
           .values({ deliveryId, provider })
           .onConflictDoNothing()
           .returning({ deliveryId: schema.gitWebhookDeliveries.deliveryId });
-        if (inserted.length === 0) return c.json({ ok: true }); // already processed
+        if (inserted.length === 0) return ignored('already processed');
       }
 
       // Best-effort signature verification: find the connection whose secret matches.
@@ -561,13 +573,15 @@ export function publicRoutes() {
 
       // No signature header: fall back to a single configured connection (best-effort).
       if (!matched && !viaApp && !sig && connections.length === 1) matched = connections[0];
-      if (!matched && !viaApp) return c.json({ ok: true });
+      if (!matched && !viaApp) {
+        return ignored(sig ? 'the signature matches no connection and not the GitHub App secret' : 'no signature and not exactly one connection to assume', { connections: connections.length });
+      }
 
       let payload: any;
-      try { payload = JSON.parse(raw); } catch { return c.json({ ok: true }); }
+      try { payload = JSON.parse(raw); } catch { return ignored('the body is not JSON'); }
 
       if (viaApp) {
-        const ghEvent = c.req.header('x-github-event') ?? '';
+        const ghEvent = event ?? '';
         const instId = payload?.installation?.id != null ? String(payload.installation.id) : null;
 
         // Installation lifecycle: connections and their repo lists stay in
@@ -612,19 +626,20 @@ export function publicRoutes() {
         matched = instId
           ? connections.find((conn) => conn.installationId === instId)
           : undefined;
+        if (!matched) return ignored('no connection for this installation – reinstall the app or resync', { installationId: instId });
       }
-      if (!matched) return c.json({ ok: true });
+      if (!matched) return ignored('no connection');
 
       // Resolve the repositories of this connection and the projects they are bound to.
       const repos = await db.select().from(schema.gitRepositories)
         .where(eq(schema.gitRepositories.connectionId, matched.id));
       const connRepoIds = repos.map((r) => r.id);
-      if (connRepoIds.length === 0) return c.json({ ok: true });
+      if (connRepoIds.length === 0) return ignored('the connection has no repositories', { connectionId: matched.id });
 
       const bindings = await db.select().from(schema.projectRepositories)
         .where(inArray(schema.projectRepositories.repositoryId, connRepoIds));
       const boundProjectIds = [...new Set(bindings.map((b) => b.projectId))];
-      if (boundProjectIds.length === 0) return c.json({ ok: true });
+      if (boundProjectIds.length === 0) return ignored('none of the connection\'s repositories is bound to a project', { connectionId: matched.id });
 
       const repoFullName: string | null =
         payload?.repository?.full_name
@@ -717,8 +732,11 @@ export function publicRoutes() {
       }
 
       // Resolve each task reference to a bound task and record the link + event.
+      const linked: string[] = [];
+      const unresolved: string[] = [];
       for (const cand of candidates) {
         for (const r of parseTaskRefs(cand.text, { anyCase: cand.type === 'branch' })) {
+          const ref = `${r.key}-${r.number}`;
           const [project] = await db.select({ id: schema.projects.id })
             .from(schema.projects)
             .where(and(
@@ -726,55 +744,42 @@ export function publicRoutes() {
               inArray(schema.projects.id, boundProjectIds),
               isNull(schema.projects.deletedAt),
             ));
-          if (!project) continue;
-          const [task] = await db.select({ id: schema.tasks.id })
+          const [task] = project ? await db.select({ id: schema.tasks.id })
             .from(schema.tasks)
             .where(and(
               eq(schema.tasks.projectId, project.id),
               eq(schema.tasks.number, r.number),
               isNull(schema.tasks.deletedAt),
-            ));
-          if (!task) continue;
+            )) : [];
+          if (!project || !task) { unresolved.push(`${cand.type} ${ref}`); continue; }
+          linked.push(`${cand.type} ${ref}`);
 
-          const [existing] = await db.select({ id: schema.gitLinks.id })
-            .from(schema.gitLinks)
-            .where(and(
-              eq(schema.gitLinks.taskId, task.id),
-              eq(schema.gitLinks.type, cand.type),
-              eq(schema.gitLinks.externalRef, cand.externalRef),
-            ));
-          if (!existing) {
-            await db.insert(schema.gitLinks).values({
-              id: ulid(),
-              taskId: task.id,
-              repositoryId: linkRepoId,
-              type: cand.type,
-              externalRef: cand.externalRef,
-              title: cand.title,
-              url: cand.url,
-              state: cand.state,
-              author: cand.author,
-            });
-          } else if (cand.type === 'pr') {
-            await db.update(schema.gitLinks)
-              .set({ state: cand.state, title: cand.title, url: cand.url, updatedAt: new Date() })
-              .where(eq(schema.gitLinks.id, existing.id));
-          }
+          const link = await syncGitLink({
+            taskId: task.id, repositoryId: linkRepoId, type: cand.type, externalRef: cand.externalRef,
+            title: cand.title, url: cand.url, state: cand.state, author: cand.author,
+          });
 
-          if (cand.event) {
+          // An event marks a transition – a branch appearing, a pull request
+          // opening, merging or closing – and fires once per transition, not
+          // again for a redelivery (a new delivery id, so not deduplicated
+          // above) that says what the row already says.
+          if (cand.event && (link.created || link.previousState !== cand.state)) {
             await emit({
               type: cand.event, aggregateType: 'task', aggregateId: task.id,
               // No assigneeIds: the webhook does not know them, and claiming an
               // empty list left the merge notification with nobody to reach.
-              payload: { taskId: task.id, projectId: project.id, ref: `${r.key}-${r.number}` },
+              payload: { taskId: task.id, projectId: project.id, ref },
               actorId: null, actorType: 'integration',
             });
           }
         }
       }
 
+      if (linked.length === 0 && unresolved.length === 0) return ignored('no task ref in the branch name, commit messages or pull request', { repository: repoFullName });
+      logger.info({ ...delivery, repository: repoFullName, linked, unresolved }, 'git webhook processed');
       return c.json({ ok: true });
-    } catch {
+    } catch (e) {
+      logger.error({ ...delivery, err: e }, 'git webhook failed');
       return c.json({ ok: true });
     }
   });
