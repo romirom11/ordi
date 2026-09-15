@@ -212,8 +212,9 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 docker-compose or Dokploy: TLS, SMTP and DNS records, S3-compatible storage,
 backups and health checks. Production runs the same published image through
 [`docker-compose.prod.yml`](docker-compose.prod.yml), so a server never builds
-anything – updating is `docker compose pull` or a redeploy from the panel. [`docs/operations.md`](docs/operations.md) covers
-backup/PITR targets, monitoring and the restore runbook.
+anything – updating is `docker compose pull` or a redeploy from the panel.
+[`docs/operations.md`](docs/operations.md) covers backup/PITR targets,
+monitoring and the restore runbook.
 
 The desktop app connects to your instance – download it from
 [Releases](https://github.com/romirom11/ordi/releases/latest) or from inside the web
