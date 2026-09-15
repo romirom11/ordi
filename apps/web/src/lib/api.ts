@@ -89,8 +89,38 @@ async function requestForm<T>(path: string, form: FormData): Promise<T> {
   return data as T;
 }
 
+/**
+ * Fetch a file endpoint and hand the result to the browser as a download.
+ *
+ * An export cannot be a plain <a href> anchor: a navigation carries cookies but
+ * never the Authorization header, so on the desktop build the link would answer
+ * 401 instead of a file. Going through fetch keeps one code path for both.
+ */
+async function download(path: string, filename: string): Promise<void> {
+  const headers: Record<string, string> = {};
+  const token = sessionToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(BASE + path, { headers, credentials: 'include' });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    let body: ApiErrorShape = { error: { code: 'internal_error', message: 'Request failed' } };
+    try { body = JSON.parse(text) as ApiErrorShape; } catch { /* not a JSON error body */ }
+    throw new ApiError(res.status, body);
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  // Revoking in the same tick cancels the download in some browsers.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 export const api = {
   get: <T>(path: string) => request<T>('GET', path),
+  download,
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
   postForm: <T>(path: string, form: FormData) => requestForm<T>(path, form),
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body),

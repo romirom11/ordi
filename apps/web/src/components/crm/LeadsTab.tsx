@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Building2, CircleDot, Copy, ExternalLink, Search, Target, Trash2, UserCircle2, X } from 'lucide-react';
-import { api, appOrigin, ApiError } from '../../lib/api';
+import { Building2, CircleDot, Copy, Download, ExternalLink, Search, Target, Trash2, UserCircle2, X } from 'lucide-react';
+import { api, appOrigin, qs, ApiError } from '../../lib/api';
 import { useOpen } from '../../lib/router';
 import { useTabs } from '../../lib/tabs';
 import { useCan } from '../../lib/auth';
@@ -147,6 +147,17 @@ export function LeadsTab() {
     onError: (error) => toast.error(error instanceof ApiError ? error.message : t('common.saveFailed')),
   });
 
+  /**
+   * One row per lead with every field it holds – the table shows six columns,
+   * and the rest of the record was only readable one lead at a time. The active
+   * filters go with it, so the file matches what the user is looking at; the
+   * server is not capped at the table's 200 rows.
+   */
+  const exportLeads = useMutation({
+    mutationFn: () => api.download(`/export/leads.csv${qs({ q, status, companyId, ownerId })}`, 'leads.csv'),
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t('crm.exportFailed')),
+  });
+
   const columns = canWrite ? LEAD_COLUMNS_SELECTABLE : LEAD_COLUMNS;
 
   const { sort, toggle: toggleSort } = useTableSort<LeadSortKey>({
@@ -207,6 +218,18 @@ export function LeadsTab() {
             })),
           ]}
         />
+        {can('crm.export') && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="ml-auto"
+            disabled={exportLeads.isPending}
+            title={t('crm.exportLeadsHint')}
+            onClick={() => exportLeads.mutate()}
+          >
+            <Download size={14} /> {t('crm.exportLeads')}
+          </Button>
+        )}
       </div>
       {visibleSelected.size > 0 && (
         <div className="flex flex-wrap items-center gap-2 border-b border-border bg-primary/[0.04] px-4 py-2">
