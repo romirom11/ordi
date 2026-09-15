@@ -72,9 +72,11 @@ delivery and finance system that follows the sale.
 <tr><td width="50%">
 
 ### Projects and tasks
-Board, list, calendar, timeline and spreadsheet views. Cycles with burn-up,
-milestones, project updates with health, saved views, filters and display options,
-sub-tasks, dependencies, labels, custom fields.
+Deliberately modelled on Linear: keyboard-first, fast, opinionated. Board, list,
+calendar, timeline and spreadsheet views; cycles with burn-up and a burndown,
+milestones, project updates with health; sub-tasks, dependencies, labels, custom
+fields (workspace-wide or per project); saved views, filters and display options;
+project templates; files with in-app previews on every task.
 
 </td><td width="50%">
 
@@ -84,10 +86,11 @@ sub-tasks, dependencies, labels, custom fields.
 <tr><td width="50%">
 
 ### CRM
-Research leads, companies and contacts, a daily Work queue, first-class sales
-activities, reusable message templates and manual follow-up sequences. Qualified
-opportunities move into a drag-and-drop deal pipeline with weighted forecast, and
-a won deal turns into a project without retyping anything.
+Leads before qualification, deals after: companies, contacts, a daily Work queue,
+first-class sales activities, playbooks, message templates and follow-up sequences,
+CSV import/export and bulk actions. A drag-and-drop deal pipeline with a weighted
+forecast, and an Analytics tab with funnel, conversion, pipeline by stage and win
+rate. A won deal turns into a project without retyping anything.
 
 </td><td width="50%">
 
@@ -98,9 +101,10 @@ a won deal turns into a project without retyping anything.
 
 ### Finance
 Quotes and invoices with tax, discounts, branded localized PDFs and public payment
-pages. Payments, credit notes, recurring invoices and expenses. Underneath sits a
-**double-entry ledger** – every invoice, payment and expense posts balanced entries,
-so the books actually balance.
+pages. Payments, credit notes, recurring invoices and expenses; receivables aging
+and overdue reminders; invoice straight from unbilled time; project profitability
+out of the box. Underneath sits a **double-entry ledger** – every invoice, payment
+and expense posts balanced entries, so the books actually balance.
 
 </td><td width="50%">
 
@@ -112,19 +116,36 @@ so the books actually balance.
 ### And the rest
 
 - **Knowledge base** – Notion-style editor, spaces with per-space permissions, nested
-  pages, versions, backlinks, publishing and Markdown export.
+  pages, versions, backlinks, publishing and Markdown export. A page can be a PDF,
+  so contracts and briefs read inline next to the articles.
 - **Time** – timers and manual entries against tasks, billable rates and cost rates,
   a weekly view and reports, invoice-from-time.
-- **People** – employee records, org structure, leave with balances, versioned
-  compensation with audited access, recruiting with public careers pages.
-- **Resourcing and dashboards** – capacity planning and custom dashboard widgets.
+- **People** – employee records with access-controlled field groups and a
+  questionnaire, org structure, a team calendar of absences, holidays and birthdays,
+  self-service leave with balances and manager approvals, versioned compensation
+  with audited access, recruiting with public careers pages.
+- **Resourcing and dashboards** – capacity planning, team availability and custom
+  dashboard widgets.
+- **Requests come to you** – public intake forms, email intake over IMAP with
+  attachments, and `/ordi` in Slack; a project Intake tab triages each request into
+  a task or a decline, mailing the requester either way.
+- **Slack that sets itself up** – paste one token and ordi creates the Slack app;
+  project events post to a bound channel.
+- **GitHub, wired to tasks** – a GitHub App created from ordi in one click; every
+  task hands you a branch name, and branches, commits and pull requests that
+  mention the task key attach themselves to it, with automation rules that move
+  the task as the PR moves.
 - **Realtime** – assignments and mentions arrive over SSE with a toast and a sound.
   No refresh.
 - **Rich text everywhere** – `@` to mention people, `#` to reference tasks, KB pages,
-  companies and invoices.
+  companies and invoices; comments can be edited and carry emoji reactions.
 - **Modules you can switch off** – run ordi as just a task tracker, or just a CRM.
-- **Built-in MCP server** – point Claude or Cursor at your workspace; the agent gets
-  exactly the permissions of its API token, nothing more.
+  A module turned off disappears from the navigation, the search and the
+  permissions.
+- **Permissions that hold** – enforced on every request, the UI only hides things;
+  audit diffs redact sensitive fields, writes use optimistic locking.
+- **Built-in MCP server** – point Claude or Cursor at your workspace over OAuth with
+  PKCE; the agent gets exactly the permissions of its API token, nothing more.
 - **AI agent employees** – add an agent as a team member, assign it a task like you
   would a person, and it works through the project's repository and opens a pull
   request for a human to review. Runs on your own Claude subscription or API key,
@@ -132,6 +153,9 @@ so the books actually balance.
 - **Desktop app** – macOS, Windows and Linux, with native notifications, a global
   quick-add shortcut, signed auto-updates, and sign-in through your browser
   instead of retyping credentials. Downloadable from inside the web app.
+- **Setup wizard, invites and password reset** – the first run creates the
+  workspace, owner account, currency and modules on one screen; members arrive by
+  invite.
 - **English and Ukrainian**, dark and light.
 
 ## Quick start
@@ -177,8 +201,9 @@ backups and health checks. [`docs/operations.md`](docs/operations.md) covers
 backup/PITR targets, monitoring and the restore runbook.
 
 The desktop app connects to your instance – download it from
-[Releases](https://github.com/romirom11/ordi/releases/latest) and enter your URL on
-first launch.
+[Releases](https://github.com/romirom11/ordi/releases/latest) or from inside the web
+app, enter your URL on first launch and sign in through your browser. How the shell
+works is in [`docs/desktop.md`](docs/desktop.md).
 
 ## How it is built
 
@@ -208,8 +233,8 @@ what's planned, in flight and shipped – is [`docs/features.md`](docs/features.
 
 A few principles the codebase holds to: permissions are enforced on every request
 and the UI only hides things; writes use optimistic locking with a `version` column;
-audit diffs redact sensitive fields; migrations are additive and run as a separate
-deploy step.
+audit diffs redact sensitive fields; migrations are additive and run by the `api`
+container before it starts serving, so one container owns the schema.
 
 ## Contributing
 
