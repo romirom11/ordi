@@ -16,10 +16,17 @@ import { requireAuth, currentActor } from '../../core/auth';
 import { guard } from '../../core/rbac';
 import { accessibleProjectIds } from '../../core/access';
 import { writeActivity } from '../../core/activity';
+import { exportLeads } from '../crm/service';
 
 // ── CSV primitives ──
 
+/** UTF-8 byte-order mark: without it Excel reads an export as Latin-1. */
+const BOM = '\uFEFF';
+
 export function parseCsv(text: string): string[][] {
+  // Spreadsheets save UTF-8 with a byte-order mark; left in place it becomes
+  // part of the first header name, and the file no longer imports.
+  if (text.startsWith(BOM)) text = text.slice(BOM.length);
   const rows: string[][] = [];
   let row: string[] = [];
   let field = '';
@@ -57,7 +64,9 @@ export function toCsv(header: string[], rows: unknown[][]): string {
 function csvResponse(c: Context<AppEnv>, filename: string, csv: string): Response {
   c.header('Content-Type', 'text/csv; charset=utf-8');
   c.header('Content-Disposition', `attachment; filename="${filename}"`);
-  return c.body(csv);
+  // Excel ignores the charset in the header and guesses the encoding; the BOM
+  // is what makes it read the file as UTF-8 instead of mangling every accent.
+  return c.body(BOM + csv);
 }
 
 /** header name (case-insensitive) → column index. */
@@ -110,24 +119,19 @@ export function importExportRoutes() {
     return csvResponse(c, 'contacts.csv', csv);
   });
 
+  /**
+   * The whole lead record per row, not the handful of columns the table shows.
+   * Takes the lead list's own filters so the CRM can export what is on screen;
+   * without them it is every lead in the workspace.
+   */
   app.get('/export/leads.csv', guard('crm.export'), async (c) => {
-    const { db } = getDb();
-    const rows = await db.select({
-      id: schema.leads.id, companyName: schema.companies.name, title: schema.leads.title,
-      product: schema.leads.product, status: schema.leads.status, score: schema.leads.score,
-      signal: schema.leads.signal, sourceUrl: schema.leads.sourceUrl,
-      suggestedChannel: schema.leads.suggestedChannel, owner: schema.users.name,
-      createdAt: schema.leads.createdAt,
-    }).from(schema.leads)
-      .innerJoin(schema.companies, eq(schema.leads.companyId, schema.companies.id))
-      .leftJoin(schema.users, eq(schema.leads.ownerId, schema.users.id))
-      .where(isNull(schema.leads.deletedAt))
-      .orderBy(desc(schema.leads.createdAt));
-    const csv = toCsv(
-      ['id', 'companyName', 'title', 'product', 'status', 'score', 'signal', 'sourceUrl', 'suggestedChannel', 'owner', 'createdAt'],
-      rows.map((r) => [r.id, r.companyName, r.title, r.product, r.status, r.score, r.signal, r.sourceUrl, r.suggestedChannel, r.owner, r.createdAt]),
-    );
-    return csvResponse(c, 'leads.csv', csv);
+    const { header, rows } = await exportLeads({
+      q: c.req.query('q'),
+      status: c.req.query('status'),
+      companyId: c.req.query('companyId'),
+      ownerId: c.req.query('ownerId'),
+    });
+    return csvResponse(c, 'leads.csv', toCsv(header, rows));
   });
 
   app.get('/export/tasks.csv', guard('projects.export'), async (c) => {

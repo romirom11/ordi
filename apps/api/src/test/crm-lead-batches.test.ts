@@ -1,11 +1,13 @@
 /**
  * Working leads in volume: bulk owner/status changes, the truncation flag on
- * the bounded list, CSV import (auto-creating companies) and sales analytics.
+ * the bounded list, CSV import (auto-creating companies), the full spreadsheet
+ * export and sales analytics.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import { getDb, schema, eq } from '@ordi/db';
 import { ulid } from 'ulid';
 import { resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
+import { parseCsv } from '../domains/core/importexport.routes';
 
 let users: Awaited<ReturnType<typeof seedRolesAndUsers>>;
 let companyId: string;
@@ -137,6 +139,90 @@ describe('leads CSV import/export', () => {
     const text = await res.text();
     expect(text.split('\n')[0]).toContain('companyName');
     expect(text).toContain('Imported lead');
+  });
+});
+
+describe('leads spreadsheet export', () => {
+  let leadId: string;
+
+  beforeAll(async () => {
+    const { db } = getDb();
+    const contactId = ulid();
+    await db.insert(schema.contacts).values({
+      id: contactId, companyId, firstName: 'Olena', lastName: 'Kravets',
+      email: 'olena@batch.co', phone: '+380441234567', position: 'CTO',
+      createdBy: users.owner!.userId,
+    });
+    const labelId = ulid();
+    await db.insert(schema.labels).values({ id: labelId, name: 'Hot', scope: 'lead' });
+    await db.insert(schema.customFieldDefinitions).values({
+      id: ulid(), entityType: 'leads', key: 'budget', label: 'Budget', type: 'select',
+      options: [{ value: 'high', label: 'High' }],
+    });
+
+    leadId = await createLead('Spreadsheet lead', {
+      contactId, labelIds: [labelId], status: 'ready', score: 70, product: 'Ordi',
+      painSignal: 'Reporting by hand', whyFit: 'Wants one system',
+      caution: 'Careful: commas, "quotes" and a\nnewline',
+      customFields: { budget: 'high' },
+    });
+    const activity = await reqAs(users.owner!.cookie).post('/sales-activities', {
+      leadId, type: 'outreach', subject: 'Intro DM', dueAt: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    expect(activity.status).toBe(201);
+  });
+
+  /** Reading the file back through the parser also proves it survives a re-import. */
+  async function exported(query = ''): Promise<{ header: string[]; rows: string[][] }> {
+    const res = await reqAs(users.owner!.cookie).get(`/export/leads.csv${query}`);
+    expect(res.status).toBe(200);
+    // Read the bytes, not res.text(): the fetch decoder eats the BOM, and the
+    // BOM is what makes Excel read the file as UTF-8 instead of Latin-1.
+    const bytes = Buffer.from(await res.arrayBuffer());
+    expect([...bytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    const [header, ...rows] = parseCsv(bytes.toString('utf8'));
+    return { header: header!, rows };
+  }
+
+  it('gives every lead field a column of its own', async () => {
+    const { header, rows } = await exported();
+    const row = rows.find((r) => r[header.indexOf('id')] === leadId);
+    expect(row).toBeTruthy();
+    const cell = (column: string) => row![header.indexOf(column)];
+
+    expect(cell('companyName')).toBe('Batch Co');
+    expect(cell('title')).toBe('Spreadsheet lead');
+    expect(cell('status')).toBe('ready');
+    expect(cell('score')).toBe('70');
+    expect(cell('owner')).toBe('Owner');
+    expect(cell('labels')).toBe('Hot');
+    expect(cell('contactName')).toBe('Olena Kravets');
+    expect(cell('contactEmail')).toBe('olena@batch.co');
+    expect(cell('contactPosition')).toBe('CTO');
+    expect(cell('painSignal')).toBe('Reporting by hand');
+    expect(cell('whyFit')).toBe('Wants one system');
+    // Quoting is what keeps a comma or a newline inside its own cell.
+    expect(cell('caution')).toBe('Careful: commas, "quotes" and a\nnewline');
+    expect(cell('nextActionType')).toBe('outreach');
+    expect(cell('nextActionSubject')).toBe('Intro DM');
+    expect(cell('createdBy')).toBe('Owner');
+    expect(cell('createdAt')).toBeTruthy();
+    // Custom fields come in as their own columns, select values as their labels.
+    expect(cell('Budget')).toBe('High');
+  });
+
+  it('applies the list filters so the file matches the table', async () => {
+    const { header, rows } = await exported('?q=Spreadsheet%20lead');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]![header.indexOf('id')]).toBe(leadId);
+
+    const byStatus = await exported('?status=disqualified');
+    expect(byStatus.rows.every((row) => row[byStatus.header.indexOf('id')] !== leadId)).toBe(true);
+  });
+
+  it('refuses a role without crm.export', async () => {
+    const res = await reqAs(users.finance!.cookie).get('/export/leads.csv');
+    expect(res.status).toBe(403);
   });
 });
 
