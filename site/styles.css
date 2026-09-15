@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────
-   ordi.dev landing – hand-written, no build step, no runtime deps.
+   ordi landing – hand-written, no build step, no runtime deps.
    Tokens mirror apps/web/src/index.css so the site and the product
    are recognisably the same thing. Dark only: the app ships dark by
    default and the screenshots are dark, a light landing would lie.
@@ -746,6 +746,54 @@ td {
   margin-top: 1rem;
   font-size: 0.875rem;
   color: var(--faint);
+}
+
+/* Waitlist – one row on desktop, stacked on a phone. */
+.waitlist {
+  margin-top: 2rem;
+  max-width: 34rem;
+}
+
+.waitlist__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.waitlist__input {
+  flex: 1 1 16rem;
+  min-width: 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+
+.waitlist__input::placeholder {
+  color: var(--faint);
+}
+
+.waitlist__input:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-quiet);
+}
+
+.waitlist__note {
+  margin: 0.875rem 0 0;
+  font-size: 0.875rem;
+  color: var(--faint);
+}
+
+.waitlist__note[data-state='ok'] {
+  color: var(--success);
+}
+
+.waitlist__note[data-state='error'] {
+  color: var(--warning);
 }
 
 .callouts {

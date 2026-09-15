@@ -19,3 +19,27 @@ on the repository.
 
 Copy edits live in `index.html`; keep them in step with the README, which makes
 the same argument for people who arrive through GitHub instead.
+
+## Moving to a custom domain
+
+The page still points at `romirom11.github.io/ordi/`. Switching to a bought
+domain is one commit, and the order matters – landing `CNAME` before DNS
+resolves takes the published site down:
+
+1. Buy the domain and point it at GitHub Pages (`A` records to GitHub's four
+   Pages addresses, or `CNAME` to `romirom11.github.io`). Wait for it to
+   resolve.
+2. Add `site/CNAME` containing the bare domain. `scripts/build-site.mjs` copies
+   everything in `site/` except `dist` and this README, so it reaches `dist`
+   with no change to the workflow.
+3. Rewrite the five absolute URLs in `index.html`: `link[rel=canonical]`,
+   `og:url`, `og:image`, `twitter:image` and `url` in the JSON-LD block.
+4. Settings → Pages → Custom domain, then tick **Enforce HTTPS** once the
+   certificate is issued.
+
+## Waitlist form
+
+The `#hosting` form posts to the URL in its own `action` attribute and nowhere
+else – swap that one placeholder for the real form/list endpoint. It degrades
+to a plain POST without JS, and refuses to submit while the placeholder is
+still in place.

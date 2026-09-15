@@ -79,6 +79,7 @@
           <a href="#features">Features</a>
           <a href="#compare">Why ordi</a>
           <a href="#start">Quick start</a>
+          <a href="#hosting">Hosted</a>
           <a href="#stack">How it is built</a>
           <a href="https://github.com/romirom11/ordi/releases/latest">Download</a>
           <a class="btn btn--ghost nav__cta" href="https://github.com/romirom11/ordi">
@@ -120,11 +121,11 @@
               </svg>
               Star on GitHub
             </a>
-            <a class="btn btn--ghost" href="https://github.com/romirom11/ordi/releases/latest">
+            <a class="btn btn--ghost" href="#hosting">
               <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 16 6 10h4V4h4v6h4l-6 6Zm-7 2h14v2H5v-2Z" />
+                <path d="M6.5 19a5 5 0 0 1-.9-9.9 6.5 6.5 0 0 1 12.6-1.2A4.5 4.5 0 0 1 17.5 19h-11Z" />
               </svg>
-              Desktop app
+              Or let us run it
             </a>
           </div>
 
@@ -748,6 +749,107 @@
         </div>
       </section>
 
+      <!-- ── Hosted ───────────────────────────────────────── -->
+      <section class="section section--tint" id="hosting">
+        <div class="container">
+          <div class="section__head">
+            <span class="section__label">Managed hosting</span>
+            <h2>Or let someone else keep it running</h2>
+            <p class="section__lead">
+              The same ordi, from the same AGPL source, on our machines instead of yours. You get
+              a URL and an owner account; we keep the Postgres, the backups and the upgrades.
+              Priced per instance – add the whole team, the number never moves.
+            </p>
+          </div>
+
+          <div class="grid">
+            <article class="card reveal">
+              <div class="card__icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 4h16v6H4V4Zm0 10h16v6H4v-6Zm3-7.5h2v1H7v-1Zm0 10h2v1H7v-1Z" />
+                </svg>
+              </div>
+              <h3>An instance, not a tenant row</h3>
+              <p>
+                Your own container and your own Postgres database on your own subdomain – not a
+                shared table with a workspace column. The isolation is the deployment, the way it
+                is when you self-host.
+              </p>
+            </article>
+
+            <article class="card reveal">
+              <div class="card__icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 5V2L8 6l4 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7Zm.5 3v4.2l3.5 2.1.8-1.3-2.8-1.7V8h-1.5Z" />
+                </svg>
+              </div>
+              <h3>Backups you can restore</h3>
+              <p>
+                Nightly base backups with point-in-time recovery, kept off the machine that holds
+                the database. The restore is rehearsed on a schedule, not improvised the day it
+                is needed.
+              </p>
+            </article>
+
+            <article class="card reveal">
+              <div class="card__icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 2 4 6v6c0 5 3.4 9.4 8 10 4.6-.6 8-5 8-10V6l-8-4Zm-1 14-4-4 1.4-1.4L11 13.2l5.6-5.6L18 9l-7 7Z" />
+                </svg>
+              </div>
+              <h3>TLS, mail and upgrades</h3>
+              <p>
+                Certificates that renew themselves, a mail sender configured and warmed, and new
+                releases applied for you. The release notes stay public, so you always know what
+                changed underneath you.
+              </p>
+            </article>
+
+            <article class="card reveal">
+              <div class="card__icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M10 17v-2H3v-2h7V9l5 4-5 4Zm3-15h6a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2h-6v-2h6V4h-6V2Z" />
+                </svg>
+              </div>
+              <h3>The door stays open</h3>
+              <p>
+                It is AGPL software and the data is yours. Export the workspace, bring it up with
+                <code>docker compose</code> on your own box, and carry on. Hosting you cannot
+                leave is not hosting, it is a hostage situation.
+              </p>
+            </article>
+          </div>
+
+          <!-- Static site: the form posts straight to a form/list provider.
+               Swap the action for the real endpoint once the list exists –
+               it is the only place the URL appears, and the form degrades to
+               a plain POST when JS is unavailable. -->
+          <form
+            class="waitlist reveal"
+            method="POST"
+            action="https://REPLACE-ME.example.com/ordi-waitlist"
+          >
+            <div class="waitlist__row">
+              <label class="sr-only" for="waitlist-email">Email address</label>
+              <input
+                id="waitlist-email"
+                class="waitlist__input"
+                type="email"
+                name="email"
+                required
+                autocomplete="email"
+                placeholder="you@your-agency.com"
+              />
+              <button class="btn btn--primary" type="submit">Join the waitlist</button>
+            </div>
+            <p class="waitlist__note" role="status">
+              Not open yet – leave an address and you will hear from us once it is, with the
+              pricing, before anyone else. No newsletter, no drip sequence.
+            </p>
+          </form>
+        </div>
+      </section>
+
       <!-- ── Stack ────────────────────────────────────────── -->
       <section class="section section--tint" id="stack">
         <div class="container">
@@ -788,7 +890,8 @@
             <h2>Free, and staying that way</h2>
             <p class="section__lead">
               ordi is AGPL-licensed and built in the open. Nothing here is paywalled and nothing
-              will be – donations fund the time, not a tier. If it saves your team a subscription
+              will be: managed hosting is a service, not a tier, and the software is byte for byte
+              the same either way. Donations fund the time. If ordi saves your team a subscription
               or two:
             </p>
           </div>
@@ -907,6 +1010,48 @@
             delete button.dataset.copied;
             label.textContent = original;
           }, 1600);
+        });
+      }
+
+      // Waitlist – post in place so the page does not navigate away. The
+      // endpoint lives in the form's action attribute and nowhere else;
+      // without JS the same form falls back to a plain POST.
+      const waitlist = document.querySelector('.waitlist');
+      if (waitlist) {
+        const note = waitlist.querySelector('.waitlist__note');
+        const submit = waitlist.querySelector('button[type="submit"]');
+        const resting = note.textContent;
+        const say = (text, state) => {
+          note.textContent = text;
+          if (state) note.dataset.state = state;
+          else delete note.dataset.state;
+        };
+
+        waitlist.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          if (waitlist.action.includes('REPLACE-ME')) {
+            say('The list is not wired up yet – check back shortly.', 'error');
+            return;
+          }
+          submit.disabled = true;
+          say('Sending…');
+          try {
+            const response = await fetch(waitlist.action, {
+              method: 'POST',
+              headers: { Accept: 'application/json' },
+              body: new FormData(waitlist),
+            });
+            if (!response.ok) throw new Error(String(response.status));
+            waitlist.reset();
+            say('You are on the list. We will write when hosting opens.', 'ok');
+          } catch {
+            say('That did not go through – try again in a moment.', 'error');
+          } finally {
+            submit.disabled = false;
+            setTimeout(() => {
+              if (note.dataset.state !== 'ok') say(resting);
+            }, 6000);
+          }
         });
       }
 
