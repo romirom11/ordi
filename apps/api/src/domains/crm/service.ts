@@ -5,6 +5,7 @@
  *   companies.ts  – companies, contacts, overview, portal token
  *   deals.ts      – pipeline stages, deals, stage moves
  *   leads.ts      – leads and lead → deal conversion
+ *   lead-export.ts – the full leads spreadsheet
  *   activities.ts – sales activities
  *   work.ts       – the Work queue
  *   analytics.ts  – funnel and pipeline metrics
@@ -48,6 +49,8 @@ export {
   softDeleteLead,
   convertLead,
 } from './leads';
+
+export { exportLeads, type ExportTable } from './lead-export';
 
 export {
   listSalesActivities,

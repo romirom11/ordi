@@ -85,21 +85,20 @@ async function enrichLeads<T extends { id: string; companyId: string; contactId:
   }));
 }
 
-/**
- * Returns `truncated` alongside the rows: the list is bounded, and a table that
- * silently stops at the cap looks complete when it is not – the same lie the
- * pipeline board already refuses to tell.
- */
-export async function listLeads(params: {
+export interface LeadFilters {
   q?: string;
   status?: string;
   companyId?: string;
   ownerId?: string;
-  limit?: number;
-}) {
-  const { db } = getDb();
-  const limit = boundedLimit(params.limit, 100, 200);
-  const rows = await db.select().from(schema.leads).where(and(
+}
+
+/**
+ * The filters the lead table offers. Shared with the spreadsheet export so the
+ * file a user downloads holds the rows they were looking at, not a differently
+ * filtered set.
+ */
+export function leadFilter(params: LeadFilters) {
+  return and(
     isNull(schema.leads.deletedAt),
     params.status ? eq(schema.leads.status, params.status) : undefined,
     params.companyId ? eq(schema.leads.companyId, params.companyId) : undefined,
@@ -107,7 +106,20 @@ export async function listLeads(params: {
     params.q
       ? sql`(${schema.leads.title} ilike ${'%' + params.q + '%'} or ${schema.leads.painSignal} ilike ${'%' + params.q + '%'} or ${schema.leads.evidence} ilike ${'%' + params.q + '%'})`
       : undefined,
-  )).orderBy(desc(schema.leads.createdAt)).limit(limit + 1);
+  );
+}
+
+/**
+ * Returns `truncated` alongside the rows: the list is bounded, and a table that
+ * silently stops at the cap looks complete when it is not – the same lie the
+ * pipeline board already refuses to tell.
+ */
+export async function listLeads(params: LeadFilters & { limit?: number }) {
+  const { db } = getDb();
+  const limit = boundedLimit(params.limit, 100, 200);
+  const rows = await db.select().from(schema.leads)
+    .where(leadFilter(params))
+    .orderBy(desc(schema.leads.createdAt)).limit(limit + 1);
   const truncated = rows.length > limit;
   if (truncated) rows.length = limit;
   const [enriched, activities] = await Promise.all([

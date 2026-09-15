@@ -187,6 +187,7 @@ const ROWS: Row[] = [
   ['/notes', 'post', 'Create CRM note', 'crm.write', 'free', 'crm'],
   ['/export/companies.csv', 'get', 'Export companies as CSV', 'crm.export', undefined, 'crm'],
   ['/export/contacts.csv', 'get', 'Export contacts as CSV', 'crm.export', undefined, 'crm'],
+  ['/export/leads.csv', 'get', 'Export leads as CSV, one row per lead with every field (?q, ?status, ?companyId, ?ownerId)', 'crm.export', undefined, 'crm'],
   ['/import/companies', 'post', 'Import companies from CSV (supports dryRun)', 'crm.write', 'free', 'crm'],
   ['/import/contacts', 'post', 'Import contacts from CSV (supports dryRun)', 'crm.write', 'free', 'crm'],
 
