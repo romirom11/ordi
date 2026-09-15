@@ -28,10 +28,13 @@ services:
     ports:
       - "9001:9001"
 
+  # The whole application – API, workers and the built web app – as the
+  # image every release publishes (.github/workflows/image.yml). Nothing to
+  # build: `docker compose up` pulls it. ORDI_VERSION=1.31.0 pins a release
+  # (and is how you roll back); `docker compose pull` moves `latest` on.
+  # To run the image from this checkout instead, add docker-compose.build.yml.
   api:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.api
+    image: ghcr.io/romirom11/ordi:${ORDI_VERSION:-latest}
     environment:
       NODE_ENV: production
       DATABASE_URL: postgres://postgres:postgres@db:5432/ordi

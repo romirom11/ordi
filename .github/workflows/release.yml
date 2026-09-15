@@ -3,12 +3,13 @@ name: Release
 # Cut a release whenever master's package.json version has no tag yet:
 # create tag v<version> + a DRAFT GitHub release (notes from
 # docs/releases/v<version>.md), then dispatch the desktop builds for that
-# tag. The desktop workflow publishes the release once every platform's
+# tag, and the image build that publishes ghcr.io/romirom11/ordi for it.
+# The desktop workflow publishes the release once every platform's
 # bundle is uploaded – publishing here would flip `releases/latest` (and
 # the desktop updater's latest.json URL) to a version whose binaries do
 # not exist yet, so every running app would offer an update it cannot
-# fetch. The explicit dispatch matters – tags created with GITHUB_TOKEN do
-# not fire the desktop workflow's own `push: tags` trigger.
+# fetch. The explicit dispatches matter – tags created with GITHUB_TOKEN do
+# not fire the other workflows' own `push: tags` triggers.
 on:
   push:
     branches: [master]
@@ -53,3 +54,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run desktop.yml --ref "v${{ steps.v.outputs.version }}"
+      # The server image does not wait for the desktop bundles: a self-hoster
+      # pulling the release should not depend on three platform builds.
+      - name: Dispatch the image build for the tag
+        if: steps.guard.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run image.yml --ref "v${{ steps.v.outputs.version }}"

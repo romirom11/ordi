@@ -1,0 +1,196 @@
+name: Image
+
+# Publishes the ordi image – API, workers and the built web app in ONE
+# container (docker/Dockerfile.api) – to ghcr.io/romirom11/ordi, so a deploy
+# is `docker compose up` and never a local pnpm install + web build.
+#
+# Runs for every release: release.yml dispatches this workflow for the tag
+# right after creating it. The explicit dispatch is not optional – the tag is
+# pushed with GITHUB_TOKEN, which fires no `push: tags` trigger, and the
+# release itself is published by desktop.yml with that same token, so an
+# `on: release` trigger would never fire either. `push: tags` stays for a tag
+# somebody pushes by hand.
+#
+# Tags on a release v1.2.3: 1.2.3 (pin to it, roll back to it), 1.2, 1,
+# latest, and sha-<commit>. A pre-release (1.2.3-rc.1) gets only its exact
+# tag and sha-<commit>. A manual run on a branch pushes sha-<commit> alone: a
+# preview build, never `latest`.
+#
+# linux/amd64 only – deliberate. Building this Dockerfile for arm64 under
+# QEMU takes tens of minutes; if arm64 is ever needed, build it on native
+# arm64 runners and merge the manifests, do not add it to `platforms` here.
+#
+# The deliverable is not "the build passed" but "a machine with no GitHub
+# credentials can pull it and it runs". So after the push the job logs out of
+# the registry, pulls the image the way a fresh server would, boots it
+# against Postgres and checks that /healthz answers with the released
+# version and that the web app is served. A package can come out PRIVATE
+# (GitHub's default when a first push is not linked to a public repository,
+# and there is no API to change visibility): the anonymous pull then fails
+# with instructions to make it public – once, in the package settings – and
+# re-run.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+# Two runs for one ref would race on the same tags; a queued one waits.
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decide the tags
+        id: meta
+        run: |
+          # ghcr.io/<owner>/<repo>, lowercased: registries reject capitals.
+          image=$(echo "ghcr.io/${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          pkg=$(node -p "require('./package.json').version")
+          sha="sha-$(git rev-parse --short=12 HEAD)"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            # The image reports package.json's version on /healthz; a tag
+            # that disagrees with it would publish a lie as `latest`.
+            if [ "$version" != "$pkg" ]; then
+              echo "::error::tag $GITHUB_REF_NAME but package.json says $pkg"
+              exit 1
+            fi
+            tags="$image:$version,$image:$sha"
+            if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              major="${version%%.*}"
+              minor="${version%.*}"
+              tags="$tags,$image:$minor,$image:$major,$image:latest"
+            fi
+          else
+            version="$pkg"
+            tags="$image:$sha"
+          fi
+          {
+            echo "image=$image"
+            echo "version=$version"
+            echo "tags=$tags"
+            echo "check_tag=${tags%%,*}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Publishing $tags"
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.api
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.title=ordi
+            org.opencontainers.image.description=The operations system for small agencies and product teams – API, workers and web app in one container
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=AGPL-3.0-only
+          # A plain single-platform manifest. With provenance on, the push is
+          # an OCI index carrying an extra "unknown/unknown" attestation
+          # entry, which the package page shows as a broken platform.
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Point 1 of the requirement: the pull must work WITHOUT GitHub
+      # credentials. Buildx pushed straight from its builder, so nothing is
+      # in the local daemon – after logging out this is a real pull by a
+      # stranger, and the digest must be the one just pushed.
+      - name: Pull anonymously, as a fresh server would
+        env:
+          REF: ${{ steps.meta.outputs.check_tag }}
+          IMAGE: ${{ steps.meta.outputs.image }}
+          PUSHED: ${{ steps.build.outputs.digest }}
+        run: |
+          docker logout ghcr.io
+          if ! docker pull "$REF"; then
+            owner="${{ github.repository_owner }}"
+            echo "::error::$REF was pushed but cannot be pulled without credentials."
+            echo "::error::The package is private. Make it public once:"
+            echo "::error::  https://github.com/users/$owner/packages/container/ordi/settings -> Danger Zone -> Change visibility -> Public"
+            echo "::error::(for an organization: https://github.com/orgs/$owner/packages/container/ordi/settings), then re-run this workflow."
+            exit 1
+          fi
+          pulled=$(docker inspect --format '{{index .RepoDigests 0}}' "$REF")
+          echo "pulled  $pulled"
+          echo "pushed  $IMAGE@$PUSHED"
+          [ "$pulled" = "$IMAGE@$PUSHED" ] || { echo "::error::pulled digest differs from the pushed one"; exit 1; }
+
+      # Point 4: the pulled image is the whole app. Boot it exactly as a user
+      # does (migrations, API, workers) and check /healthz reports the
+      # released version and the web app is served from the same port.
+      - name: Boot the pulled image and check /healthz
+        env:
+          REF: ${{ steps.meta.outputs.check_tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          docker network create ordi-img
+          docker run -d --name pg --network ordi-img \
+            -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=ordi \
+            postgres:16-alpine
+          for i in $(seq 1 30); do
+            docker exec pg pg_isready -U postgres >/dev/null 2>&1 && break
+            sleep 1
+          done
+          docker run -d --name ordi --network ordi-img -p 3000:3000 \
+            -e DATABASE_URL=postgres://postgres:postgres@pg:5432/ordi \
+            -e AUTH_SECRET=image-check-secret \
+            -e ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000 \
+            "$REF"
+          ok=""
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3000/healthz >/dev/null 2>&1; then ok=1; break; fi
+            if [ "$(docker inspect -f '{{.State.Running}}' ordi)" != "true" ]; then
+              echo "container exited:"; docker logs ordi; exit 1
+            fi
+            sleep 2
+          done
+          [ -n "$ok" ] || { echo "never became healthy:"; docker logs ordi; exit 1; }
+          health=$(curl -fsS http://localhost:3000/healthz)
+          echo "healthz: $health"
+          echo "$health" | jq -e --arg v "$VERSION" '.status == "ok" and .version == $v' >/dev/null \
+            || { echo "::error::/healthz does not report version $VERSION"; exit 1; }
+          case "$(curl -fsS http://localhost:3000/)" in
+            *'<div id="root">'*) echo "web app served from the same container" ;;
+            *) echo "::error::the image does not serve the web app"; exit 1 ;;
+          esac
+          docker rm -f ordi pg >/dev/null
+
+      - name: Summary
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          REF: ${{ steps.meta.outputs.check_tag }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo "## Published"
+            echo
+            echo '```'
+            echo "docker pull $REF"
+            echo '```'
+            echo
+            echo "Digest \`$DIGEST\`, verified by an anonymous pull and a boot to /healthz."
+            echo
+            echo "Tags: $(echo "$TAGS" | tr ',' ' ')"
+          } >> "$GITHUB_STEP_SUMMARY"

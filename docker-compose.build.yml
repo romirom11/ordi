@@ -1,0 +1,17 @@
+# Build the image from this checkout instead of pulling the published one.
+# For a fork, a Dockerfile change, or checking a branch before it is released:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
+#   docker compose -f docker-compose.prod.yml -f docker-compose.build.yml up -d --build
+#
+# Everyone else runs ghcr.io/romirom11/ordi, which every release publishes
+# (.github/workflows/image.yml). The local build gets its own name so it never
+# shadows a registry tag: drop this file again and `docker compose up` is back
+# on the published image.
+services:
+  api:
+    image: ordi:local
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
