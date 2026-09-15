@@ -146,6 +146,7 @@ describe('manifest flow', () => {
       configured: true,
       slug: 'converted-app',
       installUrl: 'https://github.com/apps/converted-app/installations/new',
+      webhookUrl: githubAppWebhookUrl(),
     });
     // Restore the fixture app for the webhook tests below.
     await storeGithubAppConfig(APP);
@@ -216,6 +217,51 @@ describe('installation webhooks', () => {
     const links = await db.select().from(schema.gitLinks).where(eq(schema.gitLinks.taskId, task.id));
     expect(links).toHaveLength(1);
     expect(links[0]!.type).toBe('branch');
+  });
+
+  it('a pull request follows its deliveries: one row, and one event per transition however often GitHub redelivers', async () => {
+    const owner = reqAs(users.owner!.cookie);
+    const type = await json(owner.post('/project-types', { name: 'GH app PR', revenueSource: 'none' }));
+    const project = await json(owner.post('/projects', { name: 'App PR', key: 'GHP', projectTypeId: type.id }));
+    const task = await json(owner.post('/tasks', {
+      projectId: project.id, title: 'Open a PR', priority: 'none', assigneeIds: [], labelIds: [],
+    }));
+    const ref = `GHP-${task.number}`;
+    const { db } = getDb();
+    const [conn] = await db.select().from(schema.gitConnections)
+      .where(eq(schema.gitConnections.installationId, '90001'));
+    const [repo] = await db.select().from(schema.gitRepositories)
+      .where(eq(schema.gitRepositories.connectionId, conn!.id));
+    await owner.post(`/projects/${project.id}/repositories`, { repositoryId: repo!.id });
+
+    const linksOf = () => db.select().from(schema.gitLinks).where(eq(schema.gitLinks.taskId, task.id));
+    const gitEventsOf = async () => (await db.select({ type: schema.events.type }).from(schema.events)
+      .where(eq(schema.events.aggregateId, task.id)).orderBy(schema.events.id)).map((e) => e.type).filter((t) => t.startsWith('git.'));
+    const prUrl = `https://github.com/${repo!.fullName}/pull/7`;
+    const pull = (action: string, title: string, extra: Record<string, unknown> = {}) => ({
+      action,
+      installation: { id: 90001 },
+      repository: { full_name: repo!.fullName },
+      pull_request: { number: 7, title, body: '', html_url: prUrl, state: 'open', merged: false, user: { login: 'dev' }, ...extra },
+    });
+
+    // Opened – and the same opening delivered again under a new delivery id (GitHub's Redeliver button):
+    // the row is refreshed with the edited title, not duplicated, and the opening is announced once.
+    expect((await delivery('pull_request', pull('opened', `${ref}: Open a PR`), 'd-pr-opened-1')).status).toBe(200);
+    expect((await delivery('pull_request', pull('opened', `${ref}: Open a PR (edited)`), 'd-pr-opened-2')).status).toBe(200);
+    let links = await linksOf();
+    expect(links).toHaveLength(1);
+    expect(links[0]).toMatchObject({ type: 'pr', externalRef: '7', state: 'open', title: `${ref}: Open a PR (edited)`, url: prUrl, author: 'dev' });
+    expect(await gitEventsOf()).toEqual(['git.pr_opened']);
+
+    // The merge is a transition: the state moves and the event fires – once, however often it is delivered.
+    for (const id of ['d-pr-merged-1', 'd-pr-merged-2']) {
+      expect((await delivery('pull_request', pull('closed', `${ref}: Open a PR (edited)`, { state: 'closed', merged: true, merged_at: '2026-09-15T10:00:00Z' }), id)).status).toBe(200);
+    }
+    links = await linksOf();
+    expect(links).toHaveLength(1);
+    expect(links[0]!.state).toBe('merged');
+    expect(await gitEventsOf()).toEqual(['git.pr_opened', 'git.pr_merged']);
   });
 
   it('a delivery with a wrong signature changes nothing', async () => {

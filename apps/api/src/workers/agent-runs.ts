@@ -349,9 +349,9 @@ export async function executeRun(claimed: RunRow): Promise<void> {
       await finishRun(runId, { status: 'failed', error: `push failed: ${why}`, summary, sessionId: outcome.sessionId, branch: ws.branch, usage });
       return;
     }
-    if (prUrl) {
-      await tasksSvc.addLink(actor, task.id, { url: prUrl, title: 'Pull request' }).catch(() => {});
-    }
+    // The branch and the pull request reach the task as git links through
+    // the forge's webhook, the same way a person's do; a task link here was
+    // a second copy nothing rendered.
     await postComment(actor, task.id, prUrl ? `${summary}\n\nPull request: ${prUrl}` : summary).catch((e) => logger.warn({ err: e }, 'agent comment failed'));
     if (status) {
       const [fresh] = await getDb().db.select({ version: tasks.version, statusId: tasks.statusId, category: taskStatuses.category })

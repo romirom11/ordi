@@ -41,6 +41,23 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   with the `minio` profile; both are pinned to `quay.io/minio/…` releases.
 - **The site catches up with v1.30**: agent employees, desktop browser
   sign-in, and no more "timesheet approval", which the product does not have.
+- **Git links, one writer, and a webhook that says why**: the forge's
+  webhook is the one thing that attaches branches, commits and pull requests
+  to tasks, for an agent's push exactly as for a person's – the agent worker
+  no longer copies its pull request into `task_links`, which nothing renders.
+  The webhook's link handling moves into `integrations/git-links.ts`;
+  (task, type, ref) is unique on `git_links` (migration
+  `0038_git_links_unique_ref`, which drops duplicates first), so two
+  deliveries naming the same ref at once leave one row; and a git event now
+  marks a transition (opened, merged, closed) and fires once, however often
+  GitHub's Redeliver repeats a delivery. Every delivery that changes nothing
+  is logged with its reason (signature matched no connection, no connection
+  for the installation, repository not bound to a project, no task ref, ref
+  not found), a processed one with what it linked, and a thrown error is
+  logged instead of swallowed. Settings → Integrations shows the webhook URL
+  the manifest registered from this instance's `API_URL`, with a copy button:
+  an app created from another host keeps that host's URL and every delivery
+  answers 404, which is invisible from ordi's side otherwise.
 
 ## v1.30.0
 

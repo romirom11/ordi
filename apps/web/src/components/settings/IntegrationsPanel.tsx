@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { EVENT_TYPES, GIT_PROVIDERS } from '@ordi/shared';
 import {
-  Github, Slack, GitBranch, Plus, Trash2, ChevronRight, ExternalLink, Webhook as WebhookIcon,
+  Github, Slack, GitBranch, Plus, Trash2, ChevronRight, ExternalLink, Copy, Webhook as WebhookIcon,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useCan } from '../../lib/auth';
@@ -51,6 +51,9 @@ extendDict({
     'settings.ghAppBadgeApp': 'app',
     'settings.ghAppAgentPerms': 'AI agents push branches and open pull requests through this app, so it asks for “Contents: write” and “Pull requests: write”. GitHub asks the owner of each installation to accept the new permissions – until they do, agent pushes fail.',
     'settings.ghAppOpenSettings': 'Open the app on GitHub',
+    'settings.ghAppWebhookUrl': 'Webhook URL',
+    'settings.ghAppWebhookHint': 'What this instance expects GitHub to call. If the app’s Webhook URL on GitHub differs (an app created from another host keeps that host), every delivery answers 404 and nothing links to tasks – paste this one there and redeliver.',
+    'settings.ghAppWebhookCopied': 'Webhook URL copied',
     // Slack
     'settings.slackTitle': 'Slack',
     'settings.slackDesc': 'Get notified about events (tasks, deals, invoices) in Slack.',
@@ -114,6 +117,9 @@ extendDict({
     'settings.ghAppBadgeApp': 'app',
     'settings.ghAppAgentPerms': 'AI-агенти пушать гілки та відкривають пулреквести через цей застосунок, тому він просить права «Contents: write» і «Pull requests: write». GitHub попросить власника кожної інсталяції підтвердити нові права – доки цього не зроблять, пуші агентів не проходитимуть.',
     'settings.ghAppOpenSettings': 'Відкрити застосунок на GitHub',
+    'settings.ghAppWebhookUrl': 'Webhook URL',
+    'settings.ghAppWebhookHint': 'Куди цей інстанс чекає доставки від GitHub. Якщо в налаштуваннях застосунку на GitHub інший Webhook URL (застосунок, створений з іншого хоста, зберігає той хост), кожна доставка отримує 404 і нічого не привʼязується до задач – вставте туди цей і зробіть redeliver.',
+    'settings.ghAppWebhookCopied': 'Webhook URL скопійовано',
     // Slack
     'settings.slackTitle': 'Slack',
     'settings.slackDesc': 'Отримуйте сповіщення про події (задачі, угоди, інвойси) у Slack.',
@@ -148,7 +154,7 @@ interface GitConnection {
   id: string; provider?: string | null; status?: string | null; instanceUrl?: string | null;
   kind?: 'app' | 'token'; accountLogin?: string | null; createdAt?: string;
 }
-interface GithubAppStatus { configured: boolean; slug: string | null; htmlUrl: string | null; installUrl: string | null }
+interface GithubAppStatus { configured: boolean; slug: string | null; htmlUrl: string | null; installUrl: string | null; webhookUrl: string }
 
 /**
  * The GitHub manifest flow requires a real form POST (not fetch): the browser
@@ -302,6 +308,21 @@ function GitHubCard() {
             </>
           )}
         </p>
+      )}
+      {/* The manifest registered the webhook URL from this instance's API_URL;
+          GitHub shows its own copy under the app's settings. When the two
+          differ, deliveries 404 silently – so the expected one is shown here. */}
+      {appConfigured && ghApp.data?.webhookUrl && (
+        <div className="mt-3 border-t border-border pt-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">{t('settings.ghAppWebhookUrl')}</div>
+          <div className="mt-1.5 flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded-md border border-border bg-surface px-2.5 py-1.5 font-mono text-[12px]">{ghApp.data.webhookUrl}</code>
+            <Button size="sm" variant="outline" onClick={() => { void navigator.clipboard?.writeText(ghApp.data!.webhookUrl); toast(t('settings.ghAppWebhookCopied')); }}>
+              <Copy size={13} />
+            </Button>
+          </div>
+          <p className="mt-1 text-[11px] text-faint">{t('settings.ghAppWebhookHint')}</p>
+        </div>
       )}
 
       {/* Legacy: the per-user OAuth app. Still works, no longer promoted. */}

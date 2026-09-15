@@ -276,6 +276,9 @@ describe('the worker end to end', () => {
     expect(tok!.scopes).toEqual(expect.arrayContaining(['projects.read', 'projects.write', 'kb.read']));
     expect(tok!.scopes).not.toContain('finance.read');
 
+    // The pull request is not copied into task links – git links, written by the forge's webhook, are where it shows.
+    expect(await db.select().from(schema.taskLinks).where(eq(schema.taskLinks.taskId, task.id))).toHaveLength(0);
+
     // Activity names the agent as the actor.
     const acts = await db.select().from(schema.activityLog).where(and(eq(schema.activityLog.entityId, task.id), eq(schema.activityLog.action, 'agent_run_succeeded')));
     expect(acts[0]!.actorType).toBe('agent');

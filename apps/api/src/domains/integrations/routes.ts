@@ -15,7 +15,7 @@ import {
   slackOAuthConfigured, buildSlackAuthorizeUrl, listSlackChannels,
 } from './oauth';
 import {
-  githubAppConfigured, buildAppManifest, manifestActionUrl, listInstallationRepos,
+  githubAppConfigured, buildAppManifest, manifestActionUrl, listInstallationRepos, githubAppWebhookUrl,
 } from './github-app';
 
 /**
@@ -79,6 +79,10 @@ export function integrationsRoutes() {
       slug: appCfg?.slug ?? null,
       htmlUrl: appCfg?.htmlUrl ?? null,
       installUrl: appCfg ? `${appCfg.htmlUrl}/installations/new` : null,
+      // What the manifest registered on GitHub – from this instance's API_URL.
+      // An app created elsewhere (a staging host, an old URL) keeps that
+      // instance's URL and every delivery 404s; this is the value to compare.
+      webhookUrl: githubAppWebhookUrl(),
     });
   });
 
