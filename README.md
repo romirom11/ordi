@@ -11,7 +11,7 @@ Projects, CRM, knowledge base, time, finance and people – one app, one databas
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/romirom11/ordi)](https://github.com/romirom11/ordi/releases/latest)
 
-[Website](https://romirom11.github.io/ordi/) · [Quick start](#quick-start) · [Why ordi](#why-ordi) · [Features](#features) · [Deploy](#deploy-it-for-real) · [Desktop app](https://github.com/romirom11/ordi/releases/latest) · [Donate](#support-the-project)
+[Website](https://ordi.one) · [Quick start](#quick-start) · [Why ordi](#why-ordi) · [Features](#features) · [Deploy](#deploy-it-for-real) · [Desktop app](https://ordi.one/download) · [Hosted](https://ordi.one/pricing) · [Donate](#support-the-project)
 
 [![Support ordi on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/T1H52733T3)
 
@@ -219,9 +219,19 @@ anything – updating is `docker compose pull` or a redeploy from the panel.
 monitoring and the restore runbook.
 
 The desktop app connects to your instance – download it from
-[Releases](https://github.com/romirom11/ordi/releases/latest) or from inside the web
-app, enter your URL on first launch and sign in through your browser. How the shell
+[ordi.one/download](https://ordi.one/download), from
+[Releases](https://github.com/romirom11/ordi/releases/latest), or from inside the web
+app; enter your URL on first launch and sign in through your browser. How the shell
 works is in [`docs/desktop.md`](docs/desktop.md).
+
+### Or don't run a server
+
+If you would rather not keep a machine alive, [ordi.one](https://ordi.one/pricing) runs
+the same published image for you: your own container, Postgres database, subdomain and
+storage bucket, with nightly backups and upgrades applied. It is one price per instance
+with every person on your team included, and it buys hosting rather than features –
+nothing in this repository is held back for it, and a database dump moves you in or out
+in either direction.
 
 ## How it is built
 
