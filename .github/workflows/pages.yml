@@ -1,8 +1,9 @@
 name: Pages
 
-# Publishes the landing page (site/) to GitHub Pages. The site is plain HTML
-# and CSS – the build step only collects the screenshots out of docs/images,
-# so this needs no pnpm install and no lockfile.
+# Publishes site/ to GitHub Pages: a self-contained redirect to ordi.one,
+# which is where the real landing page lives (in the ordi-cloud repository).
+# Plain HTML with nothing to compile, so this needs no pnpm install and no
+# lockfile.
 #
 # One-time setup in the repository: Settings -> Pages -> Source: GitHub Actions.
 on:
@@ -10,8 +11,6 @@ on:
     branches: [master]
     paths:
       - 'site/**'
-      - 'docs/images/**'
-      - 'mcp-consent.png'
       - 'scripts/build-site.mjs'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
@@ -37,7 +36,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Build the site
+      - name: Build the redirect
         run: node scripts/build-site.mjs
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

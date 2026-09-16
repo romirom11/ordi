@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * Assembles the landing page into site/dist.
+ * Assembles the Pages site into site/dist.
  *
- * The page is hand-written HTML and CSS – there is nothing to compile. The
- * only build step is collecting the screenshots, which live in docs/ because
- * the README uses them too; duplicating ~2 MB of PNGs into site/ so the site
- * can serve them would mean every screenshot update touches two copies.
+ * The site is one self-contained redirect to ordi.one, so there is nothing to
+ * compile and nothing to collect - this copies the directory and stops. It
+ * used to also pull ~2 MB of screenshots out of docs/images for a second copy
+ * of the landing page; that copy is gone, and so is the copying.
  *
  * Output is site/dist (gitignored via the root `dist/` rule). Run it locally
  * to preview, and the Pages workflow runs the same script.
@@ -19,15 +19,11 @@ const out = `${root}site/dist`;
 await rm(out, { recursive: true, force: true });
 await mkdir(out, { recursive: true });
 
-// The page itself – entry by entry, because the output directory lives
-// inside site/ and node's cp refuses to copy a directory into itself.
+// Entry by entry, because the output directory lives inside site/ and node's
+// cp refuses to copy a directory into itself.
 for (const entry of await readdir(`${root}site`)) {
   if (entry === 'dist' || entry === 'README.md') continue;
   await cp(`${root}site/${entry}`, `${out}/${entry}`, { recursive: true });
 }
-
-// Screenshots referenced as images/*.png.
-await cp(`${root}docs/images`, `${out}/images`, { recursive: true });
-await cp(`${root}mcp-consent.png`, `${out}/images/mcp-consent.png`);
 
 console.log(`site built -> ${out}`);
