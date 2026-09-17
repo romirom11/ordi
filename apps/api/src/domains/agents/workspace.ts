@@ -357,6 +357,7 @@ export async function publishWorkspace(ws: Workspace, input: {
     const subject = pullRequestTitle(input.ref, input.title);
     await git(['commit', '-m', openPr ? subject : `WIP ${subject} (run stopped early)`], { cwd: dir });
   }
+  await reconcileWithOrigin(dir, branch, repo);
   const commits = await commitsAhead(dir, repo.defaultBranch, branch);
   if (commits === 0) return { pushed: false, prUrl: input.existingPrUrl, commits: 0 };
   await git(['push', '-u', 'origin', branch], { cwd: dir, repo });
@@ -367,6 +368,37 @@ export async function publishWorkspace(ws: Workspace, input: {
     body: buildPullRequestBody({ summary: input.summary, verification: input.verification ?? null, risks: input.risks ?? null, taskUrl: input.taskUrl ?? null, ref: input.ref }),
   });
   return { pushed: true, prUrl, commits };
+}
+
+/**
+ * The branch on origin can be ahead of the checkout by the time we push: a
+ * previous run's unfinished work went out as a WIP commit, a teammate
+ * pushed, or the agent rewrote a commit that was already pushed (an amend,
+ * a rebase) despite the rules. A plain push is then refused as
+ * non-fast-forward and the run fails with the work stranded on the worker.
+ * The local commits are replayed on top of origin's tip instead, so nothing
+ * on origin leaves the history. Where a hunk conflicts, the local commit
+ * wins (`-X theirs`): the checkout is the agent's latest word on that file,
+ * and a rewritten commit (same file added on both sides) does not replay
+ * otherwise. What the merge strategy cannot settle (a file changed here and
+ * deleted there) is undone and reported: forcing would drop what is on
+ * origin.
+ */
+async function reconcileWithOrigin(dir: string, branch: string, repo: RepoBinding): Promise<void> {
+  const remote = await git(['ls-remote', '--heads', 'origin', branch], { cwd: dir, repo }).catch(() => ({ stdout: '', stderr: '' }));
+  if (!remote.stdout.trim()) return; // nothing on origin yet: a plain push creates the branch
+  await git(['fetch', '--depth', '50', 'origin', branch], { cwd: dir, repo });
+  const tip = (await git(['rev-parse', 'FETCH_HEAD'], { cwd: dir })).stdout.trim();
+  const contained = await git(['merge-base', '--is-ancestor', tip, branch], { cwd: dir }).then(() => true, () => false);
+  if (contained) return;
+  logger.info({ dir, branch, tip }, 'branch diverged from origin; replaying local commits on top');
+  try {
+    await git(['rebase', '-X', 'theirs', tip, branch], { cwd: dir });
+  } catch (e) {
+    await git(['rebase', '--abort'], { cwd: dir }).catch(() => {});
+    await git(['checkout', branch], { cwd: dir }).catch(() => {});
+    throw new Error(`Branch ${branch} has diverged from origin and the local commits do not replay on top of it: ${(e as Error).message}`);
+  }
 }
 
 /**

@@ -55,6 +55,7 @@ export async function buildTaskBrief(ctx: PromptContext): Promise<string> {
     lines.push('');
     lines.push('Your previous run on this task stopped before you could report (a step limit, a timeout or a cancel). This run continues the same session on the same branch.');
     lines.push('Start by checking `git log` and `git status` to see what is already there, finish the remaining work with as few steps as possible, and end with the structured report.');
+    lines.push('If you had uncommitted changes when the run stopped, the platform committed them as `WIP ... (run stopped early)` and pushed the branch: keep that commit as it is and add new commits on top of it. Never amend, rebase or reset commits that are already on the branch.');
     lines.push('');
   } else if (ctx.followUpCommentId && !ctx.sessionLost) {
     lines.push(`# Follow-up on ${ctx.ref}: ${task.title}`);
@@ -67,6 +68,7 @@ export async function buildTaskBrief(ctx: PromptContext): Promise<string> {
     }
     lines.push('');
     lines.push('Continue from where you left off, address the reply, and finish with the same structured report.');
+    lines.push('The commits already on the branch are pushed (if your previous run stopped early, the platform committed your changes as `WIP ... (run stopped early)`): keep them as they are and add new commits on top. Never amend, rebase or reset commits that are already on the branch.');
     lines.push('');
   } else {
     lines.push(`# ${ctx.ref}: ${task.title}`);
@@ -152,7 +154,7 @@ export function buildRulesOfEngagement(ctx: PromptContext): string {
       `- Follow the repository's own commit convention where it has one (commitlint, conventional commits, a CONTRIBUTING file). Whatever the format, mention ${ctx.ref} in every commit message – in the subject where the convention allows it, otherwise as a trailer line \`Refs: ${ctx.ref}\` – ordi links commits to the task by that key.`,
       '- Commit as yourself only: no Co-Authored-By or other trailers naming a model, a tool or a person.',
       '- Do not push, do not open pull requests and do not change remotes: the platform pushes your branch and opens the pull request when you report done.',
-      '- Do not run destructive git commands (reset --hard, force pushes, branch deletion).',
+      '- Do not run destructive git commands (reset --hard, force pushes, branch deletion) and do not rewrite history (commit --amend, rebase, reset to an earlier commit): commits already on the branch may be pushed, and a rewritten one cannot be pushed again. Use `git restore --staged` to unstage.',
       '- Run the project\'s own checks (tests, lint, typecheck) before you report done.',
     ]
     : ['- This task has no linked repository. Work through the ordi tools and the working directory only.'];
@@ -188,8 +190,14 @@ export function allowedToolsFor(mcpServerNames: string[]): string[] {
 
 export const DISALLOWED_TOOLS = [
   'Bash(git push*)',
-  'Bash(git reset --hard*)',
+  // History rewrites: the platform pushes the branch between runs (unfinished
+  // work goes out as a WIP commit), so an amended or rebased commit is a
+  // push refused as non-fast-forward.
+  'Bash(git commit --amend*)',
+  'Bash(git rebase*)',
+  'Bash(git reset*)',
   'Bash(git branch -D*)',
+  'Bash(git branch -f*)',
   'Bash(git remote*)',
   'Bash(sudo*)',
 ];
