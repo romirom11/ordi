@@ -153,6 +153,72 @@ describe('workspace with real git', () => {
     await cleanupWorkspace(ws.taskId);
   }, 30_000);
 
+  it('a branch that moved on origin, or a commit the agent rewrote, is replayed on top and still pushed', async () => {
+    const input = { taskId: ws.taskId, projectId: ws.projectId, projectKey: 'WSG', taskNumber: 3, taskTitle: 'Diverged', agentName: 'Claude', agentEmail: 'claude@test.local' };
+    const w = await prepareWorkspace(input);
+    const branch = w.branch!;
+    await writeFile(join(w.dir, 'a.txt'), 'a\n');
+    // The previous run stopped early: its work went out as a WIP commit.
+    expect(await publishWorkspace(w, { ref: 'WSG-3', title: 'Diverged', summary: '', existingPrUrl: null, openPullRequest: false })).toMatchObject({ pushed: true, commits: 1 });
+    const wipSha = (await git(['rev-parse', branch], bare)).trim();
+
+    // The agent, back in the same checkout, amends that pushed commit (against the rules) and adds another.
+    await writeFile(join(w.dir, 'a.txt'), 'a amended\n');
+    await git(['commit', '-a', '--amend', '-m', 'WSG-3: proper message'], w.dir);
+    await writeFile(join(w.dir, 'b.txt'), 'b\n');
+    await git(['add', 'b.txt'], w.dir);
+    await git(['commit', '-m', 'WSG-3: add b'], w.dir);
+    // Meanwhile a teammate pushed to the branch.
+    const mate = join(root, 'mate');
+    await rm(mate, { recursive: true, force: true });
+    await git(['clone', '--branch', branch, bare, mate], root);
+    await writeFile(join(mate, 'c.txt'), 'c\n');
+    await git(['add', 'c.txt'], mate);
+    await git(['commit', '-m', 'teammate: add c'], mate);
+    await git(['push', 'origin', branch], mate);
+    const mateSha = (await git(['rev-parse', branch], bare)).trim();
+
+    const published = await publishWorkspace(w, { ref: 'WSG-3', title: 'Diverged', summary: 'done', existingPrUrl: null, openPullRequest: false });
+    expect(published.pushed).toBe(true);
+    // Nothing on origin was dropped: the WIP and the teammate's commits are still in the history …
+    const history = (await git(['log', '--format=%H', branch], bare)).trim().split('\n');
+    expect(history).toContain(wipSha);
+    expect(history).toContain(mateSha);
+    expect(history[0]).not.toBe(mateSha);
+    // … and the agent's work landed on top of them.
+    const files = (await git(['ls-tree', '-r', '--name-only', branch], bare)).trim().split('\n').sort();
+    expect(files).toEqual(['.gitignore', 'README.md', 'a.txt', 'b.txt', 'c.txt']);
+    expect(await git(['show', `${branch}:a.txt`], bare)).toBe('a amended\n');
+    expect(await git(['log', '--format=%s', `${mateSha}..${branch}`], bare)).toContain('WSG-3: add b');
+    await cleanupWorkspace(ws.taskId);
+  }, 30_000);
+
+  it('a divergence that does not replay is reported and the checkout is left on the branch', async () => {
+    const input = { taskId: ws.taskId, projectId: ws.projectId, projectKey: 'WSG', taskNumber: 4, taskTitle: 'Conflict', agentName: 'Claude', agentEmail: 'claude@test.local' };
+    const w = await prepareWorkspace(input);
+    const branch = w.branch!;
+    await writeFile(join(w.dir, 'x.txt'), 'one\n');
+    await publishWorkspace(w, { ref: 'WSG-4', title: 'Conflict', summary: '', existingPrUrl: null, openPullRequest: false });
+    const mate = join(root, 'mate2');
+    await git(['clone', '--branch', branch, bare, mate], root);
+    // A teammate deleted the file the agent went on editing: no strategy settles that.
+    await git(['rm', '-q', 'x.txt'], mate);
+    await git(['commit', '-m', 'teammate: drop x'], mate);
+    await git(['push', 'origin', branch], mate);
+    const mateSha = (await git(['rev-parse', branch], bare)).trim();
+    await writeFile(join(w.dir, 'x.txt'), 'three\n');
+    await git(['commit', '-am', 'WSG-4: x three'], w.dir);
+    await expect(publishWorkspace(w, { ref: 'WSG-4', title: 'Conflict', summary: '', existingPrUrl: null, openPullRequest: false }))
+      .rejects.toThrow(/diverged from origin/);
+    // The rebase is undone: the checkout is back on the branch, clean, with the agent's commit intact for a retry.
+    expect((await git(['rev-parse', '--abbrev-ref', 'HEAD'], w.dir)).trim()).toBe(branch);
+    expect(await git(['status', '--porcelain'], w.dir)).toBe('');
+    expect((await git(['log', '-1', '--format=%s'], w.dir)).trim()).toBe('WSG-4: x three');
+    // Origin was not forced.
+    expect((await git(['rev-parse', branch], bare)).trim()).toBe(mateSha);
+    await cleanupWorkspace(ws.taskId);
+  }, 30_000);
+
   it('an existing branch name that never reached origin is replaced by a fresh one', async () => {
     const input = { taskId: ws.taskId, projectId: ws.projectId, projectKey: 'WSG', taskNumber: 26, taskTitle: 'Додати відпустки', agentName: 'Claude', agentEmail: 'claude@test.local' };
     const w = await prepareWorkspace({ ...input, existingBranch: 'feature/wsg-26-', suggestedSlug: 'add-leave-days' });

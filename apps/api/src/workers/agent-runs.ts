@@ -23,7 +23,7 @@ import { forgetRunScope, forgetRunSecrets, recordRunEvent, registerRunScope, reg
 import {
   cancelRequested, claimRuns, finishRun, newestHumanCommentSince, parkRunForQuota, queueRun, recordRunProgress, requeueStaleRuns, startRun, touchRun, type RunRow,
 } from '../domains/agents/runs';
-import { runtimeAdapter, type RuntimeMcpServer, type RuntimeOutcome } from '../domains/agents/runtime';
+import { runtimeAdapter, type RuntimeEvent, type RuntimeMcpServer, type RuntimeOutcome } from '../domains/agents/runtime';
 import { cleanupWorkspace, explainPushError, harnessDir, prepareWorkspace, pruneTaskDirs, publishWorkspace, readPullRequestTemplate, SESSION_RETENTION_DAYS, type Workspace } from '../domains/agents/workspace';
 import * as tasksSvc from '../domains/projects/service';
 
@@ -209,6 +209,20 @@ export async function executeRun(claimed: RunRow): Promise<void> {
     let outcome: RuntimeOutcome | null = null;
     let usedCredentialId: string | null = null;
     let resume = claimed.sessionId ?? null;
+    /** One runtime event into the run log. */
+    const recordEvent = async (event: RuntimeEvent): Promise<void> => {
+      switch (event.type) {
+        case 'init':
+          await recordRunProgress(runId, { sessionId: event.sessionId });
+          await recordRunEvent(runId, 'init', { sessionId: event.sessionId, model: event.model, mcpServers: event.mcpServers });
+          break;
+        case 'assistant': if (event.text || event.toolUses.length) await recordRunEvent(runId, 'assistant', { text: event.text.slice(0, 8000), toolUses: event.toolUses.map((t) => ({ id: t.id, name: t.name })) }); break;
+        case 'tool_use': await recordRunEvent(runId, 'tool_use', { toolUseId: event.toolUseId, name: event.name, input: truncate(event.input) }); break;
+        case 'tool_result': await recordRunEvent(runId, 'tool_result', { toolUseId: event.toolUseId, text: event.text.slice(0, 2000), isError: event.isError }); break;
+        case 'rate_limit': await recordRunEvent(runId, 'rate_limit', { status: event.status, resetsAt: epochToIso(event.resetsAt), limitType: event.limitType }); break;
+        case 'log': await recordRunEvent(runId, 'log', { message: event.message }); break;
+      }
+    };
     /** Try the credential chain once; the last outcome is returned (null when no credential loads). */
     const workspace = ws;
     const runToken = started.token;
@@ -225,20 +239,16 @@ export async function executeRun(claimed: RunRow): Promise<void> {
           model: profile.model, mcpServers, maxTurns: profile.maxTurns,
           maxBudgetUsd: cred.kind === 'api_key' && profile.maxBudgetUsd != null ? Number(profile.maxBudgetUsd) : null,
           resume, allowedTools: allowedToolsFor(Object.keys(mcpServers)), disallowedTools: DISALLOWED_TOOLS,
-          signal: controller.signal,
+          // A failed log write (a DB blip, a payload Postgres rejects) must
+          // not end the agent's session: the line is lost, the run goes on.
           onEvent: async (event) => {
-            switch (event.type) {
-              case 'init':
-                await recordRunProgress(runId, { sessionId: event.sessionId });
-                await recordRunEvent(runId, 'init', { sessionId: event.sessionId, model: event.model, mcpServers: event.mcpServers });
-                break;
-              case 'assistant': if (event.text || event.toolUses.length) await recordRunEvent(runId, 'assistant', { text: event.text.slice(0, 8000), toolUses: event.toolUses.map((t) => ({ id: t.id, name: t.name })) }); break;
-              case 'tool_use': await recordRunEvent(runId, 'tool_use', { toolUseId: event.toolUseId, name: event.name, input: truncate(event.input) }); break;
-              case 'tool_result': await recordRunEvent(runId, 'tool_result', { toolUseId: event.toolUseId, text: event.text.slice(0, 2000), isError: event.isError }); break;
-              case 'rate_limit': await recordRunEvent(runId, 'rate_limit', { status: event.status, resetsAt: epochToIso(event.resetsAt), limitType: event.limitType }); break;
-              case 'log': await recordRunEvent(runId, 'log', { message: event.message }); break;
+            try {
+              await recordEvent(event);
+            } catch (e) {
+              logger.warn({ err: e, runId, eventType: event.type }, 'run event not recorded');
             }
           },
+          signal: controller.signal,
         });
         if (last.sessionId) resume = last.sessionId;
         if (last.status !== 'rate_limited') break;

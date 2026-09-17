@@ -452,6 +452,23 @@ describe('the worker end to end', () => {
     expect(JSON.stringify((detail.comments as unknown[]).at(-1))).not.toContain('No conversation found');
   });
 
+  it('a tool result with NUL bytes is logged without them and does not end the run', async () => {
+    const task = await newTask('Binary output');
+    await assign(task.id, [agentId]);
+    restoreAdapter = setRuntimeAdapter(adapter(async (input) => {
+      // Postgres rejects \u0000 in jsonb; a build log or a binary read can carry it.
+      await input.onEvent({ type: 'tool_result', toolUseId: 'tu-1', text: 'ELF\u0000\u0000\u0001 header\u0000', isError: false });
+      await input.onEvent({ type: 'assistant', text: 'still going', toolUses: [] });
+      return done();
+    }));
+    const run = await runToEnd(task.id);
+    expect(run.status).toBe('succeeded');
+    const events = await eventsForRun(run.id);
+    const result = events.find((e) => e.type === 'tool_result');
+    expect((result!.payload as { text: string }).text).toBe('ELF\u0001 header');
+    expect(events.some((e) => e.type === 'assistant')).toBe(true);
+  });
+
   it('a new branch takes the English slug the runtime suggests, in any task language', async () => {
     const task = await newTask('Додати доступну кількість днів відпустки');
     await assign(task.id, [agentId]);

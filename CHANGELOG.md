@@ -3,6 +3,24 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## Unreleased
+
+- **Agent runs survive their own log, and a moved branch still gets pushed**:
+  a tool result carrying a NUL byte (a binary read, a build log) made
+  Postgres refuse the run event (`unsupported Unicode escape sequence`), and
+  that one failed log write ended the agent's session mid-task. NUL bytes are
+  now stripped from every event payload, and a failed event write is a
+  warning in the worker log rather than the end of the run. The push after a
+  run then assumed the branch on origin had not moved: the previous run's WIP
+  push, a teammate's commit, or a commit the agent amended made it
+  non-fast-forward and the run failed with the work stranded on the worker.
+  `publishWorkspace` now fetches the branch and replays the local commits on
+  top of origin's tip (local wins on a conflicting hunk; a modify/delete it
+  cannot settle is undone and reported, never forced). The agent is told that
+  commits already on the branch are pushed and not to rewrite them, and
+  `git commit --amend`, `git rebase`, `git reset` and `git branch -f` join
+  the blocked commands.
+
 ## v1.32.0
 
 - **Git links, one writer, and a webhook that says why**: the forge's

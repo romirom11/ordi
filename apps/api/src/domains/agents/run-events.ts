@@ -39,6 +39,22 @@ export function scrub(value: unknown, secrets: string[]): unknown {
   return value;
 }
 
+/**
+ * Postgres refuses `\u0000` in jsonb ("unsupported Unicode escape sequence"),
+ * and a tool result – a binary read, a build log – can carry NUL bytes. They
+ * are dropped from every string so a run never dies on its own log line.
+ */
+export function stripNul(value: unknown): unknown {
+  if (typeof value === 'string') return value.includes('\u0000') ? value.replace(/\u0000/g, '') : value;
+  if (Array.isArray(value)) return value.map(stripNul);
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = stripNul(v);
+    return out;
+  }
+  return value;
+}
+
 interface RunScope { projectId: string; taskId: string }
 const scopeByRun = new Map<string, RunScope>();
 
@@ -74,7 +90,7 @@ async function scopeFor(runId: string): Promise<RunScope | null> {
  */
 export async function recordRunEvent(runId: string, type: RunEventType, payload: Record<string, unknown>): Promise<void> {
   const { db } = getDb();
-  const clean = scrub(payload, secretsByRun.get(runId) ?? []) as Record<string, unknown>;
+  const clean = stripNul(scrub(payload, secretsByRun.get(runId) ?? [])) as Record<string, unknown>;
   let row: { seq: number; created_at: string } | undefined;
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
