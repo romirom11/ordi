@@ -197,7 +197,8 @@ describe('reading the calendar and the card', () => {
 
   it('opens the full card: text, date, status, labels, sources, comments, version', async () => {
     const [row] = out(await tool('list_tasks', { project: 'CNT', q: 'Agents' })).data;
-    await tool('comment_on_task', { taskId: row.id, text: 'Tighten the hook' });
+    // Addressed to a person: a real mention node in the body (the chip, the notification), rendered as @Name in the card.
+    await tool('comment_on_task', { taskId: row.id, text: 'Tighten the hook', mentionUserIds: [users.owner!.userId] });
 
     const card = out(await tool('get_task', { taskId: row.id }));
     // The forced re-run above put the generated date back on the card.
@@ -207,7 +208,10 @@ describe('reading the calendar and the card', () => {
     });
     expect(card.text).toBe('Hook line.\n\nWhat we learned shipping agents.\nThree things.');
     expect(card.links).toHaveLength(1);
-    expect(card.comments.map((c: any) => c.text)).toEqual(['Tighten the hook']);
+    const ownerName = ((await json(owner.get('/users/lookup'))).data as { id: string; name: string }[]).find((u) => u.id === users.owner!.userId)!.name;
+    expect(card.comments.map((c: any) => c.text)).toEqual([`@${ownerName} Tighten the hook`]);
+    const stored = (await json(owner.get(`/tasks/${row.id}?include=comments`))).comments as { body: unknown }[];
+    expect(JSON.stringify(stored[0]!.body)).toContain(`"type":"mention","attrs":{"id":"${users.owner!.userId}","label":"${ownerName}"}`);
     expect(typeof card.version).toBe('number');
   });
 });

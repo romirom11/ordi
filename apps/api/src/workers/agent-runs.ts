@@ -27,7 +27,7 @@ import { runtimeAdapter, type RuntimeEvent, type RuntimeMcpServer, type RuntimeO
 import { cleanupWorkspace, explainPushError, harnessDir, prepareWorkspace, pruneTaskDirs, publishWorkspace, readPullRequestTemplate, SESSION_RETENTION_DAYS, type Workspace } from '../domains/agents/workspace';
 import * as tasksSvc from '../domains/projects/service';
 
-const { agentProfiles, agentWorkers, users, tasks, projects, taskStatuses, agentConnectors, mcpConnectors } = schema;
+const { agentProfiles, agentWorkers, users, tasks, projects, taskStatuses, agentConnectors, mcpConnectors, comments } = schema;
 
 const POLL_MS = 3_000;
 const HEARTBEAT_MS = 15_000;
@@ -80,8 +80,33 @@ export async function listWorkers() {
   }));
 }
 
-async function postComment(actor: Actor, taskId: string, text: string): Promise<void> {
-  await tasksSvc.addComment(actor, taskId, { body: textToDoc(text), mentions: [] });
+/** A platform comment on the task, addressed to the person the run answers to when there is one. */
+async function postComment(actor: Actor, taskId: string, text: string, mention: Requester | null = null): Promise<void> {
+  const mentions = mention ? [{ id: mention.id, label: mention.name }] : [];
+  await tasksSvc.addComment(actor, taskId, { body: textToDoc(text, { mentions }), mentions: mentions.map((m) => m.id) });
+}
+
+export interface Requester { id: string; name: string }
+
+/** The person a run answers to: the follow-up's author, or whoever assigned or retried. Another agent is nobody to answer. */
+async function requesterOf(userId: string | null): Promise<Requester | null> {
+  if (!userId) return null;
+  const { db } = getDb();
+  const [u] = await db.select({ id: users.id, name: users.name, actorType: users.actorType }).from(users).where(eq(users.id, userId));
+  return u && u.actorType !== 'agent' ? { id: u.id, name: u.name } : null;
+}
+
+/**
+ * Did the agent comment on the task itself during this run? Then its closing
+ * comment is the report, and the platform's copy of the summary would only
+ * say the same thing twice (in the brief's language, not the thread's).
+ */
+async function agentCommentedSince(taskId: string, agentUserId: string, since: Date): Promise<boolean> {
+  const { db } = getDb();
+  const [row] = await db.select({ id: comments.id }).from(comments)
+    .where(and(eq(comments.taskId, taskId), eq(comments.authorId, agentUserId), sql`${comments.deletedAt} is null`, sql`${comments.createdAt} >= ${since.toISOString()}::timestamptz`))
+    .limit(1);
+  return Boolean(row);
 }
 
 /**
@@ -175,9 +200,11 @@ export async function executeRun(claimed: RunRow): Promise<void> {
     // Written now, not at the end: a worker lost mid-run leaves a row the re-queued run continues from.
     await recordRunProgress(runId, { branch: ws.branch });
 
+    const runStartedAt = new Date();
     const started = await startRun(runId);
     if (!started) return; // cancelled during preparation
     token = started.token;
+    const requester = await requesterOf(claimed.requestedBy);
     const ref = `${project.key}-${task.number}`;
     const status = await completionStatus(project.id, profile.completionCategory);
     const ctx: PromptContext = {
@@ -185,6 +212,7 @@ export async function executeRun(claimed: RunRow): Promise<void> {
       completionCategory: profile.completionCategory, completionStatusName: status?.name ?? null,
       branch: ws.branch, repoFullName: ws.repo?.fullName ?? null, agentName: agent.name, instructions: profile.instructions,
       followUpCommentId: claimed.trigger === 'comment' ? claimed.commentId : null,
+      requester,
       resumedAfterStop: claimed.trigger === 'retry' && Boolean(claimed.sessionId),
       connectorSlugs: setup.connectors.map((c) => c.slug),
       pullRequestTemplate: ws.repo ? await readPullRequestTemplate(ws.dir) : null,
@@ -306,7 +334,7 @@ export async function executeRun(claimed: RunRow): Promise<void> {
       const timedOut = (controller.signal.reason as Error | undefined)?.message === 'timeout';
       const reason = timedOut ? `Stopped after ${profile.maxRunMinutes} minutes` : 'Cancelled';
       const branch = await preserveWork();
-      await postComment(actor, task.id, `Run stopped: ${reason}. ${nextSteps(branch, timedOut ? 'Raise "Max run minutes" in the agent profile if the task needs longer.' : null)}`).catch(() => {});
+      await postComment(actor, task.id, `Run stopped: ${reason}. ${nextSteps(branch, timedOut ? 'Raise "Max run minutes" in the agent profile if the task needs longer.' : null)}`, requester).catch(() => {});
       await finishRun(runId, { status: timedOut ? 'failed' : 'cancelled', error: reason, sessionId: outcome.sessionId, branch, usage });
       return;
     }
@@ -325,14 +353,14 @@ export async function executeRun(claimed: RunRow): Promise<void> {
       const limitHint = /max_turns|maximum number of turns/i.test(error)
         ? `The agent used all ${profile.maxTurns} steps ("Max turns" in its profile) before it could report; raise the limit or split the task.`
         : /max_budget/i.test(error) ? 'The run hit "Max budget" in the agent profile.' : null;
-      await postComment(actor, task.id, `I could not finish this run: ${error.slice(0, 500)}. ${nextSteps(branch, limitHint)}`).catch(() => {});
+      await postComment(actor, task.id, `I could not finish this run: ${error.slice(0, 500)}. ${nextSteps(branch, limitHint)}`, requester).catch(() => {});
       await finishRun(runId, { status: 'failed', error, sessionId: outcome.sessionId, branch, usage });
       return;
     }
 
     if (outcome.status === 'needs_input') {
       const question = outcome.report?.question ?? outcome.report?.summary ?? outcome.message ?? 'I need more information to continue.';
-      await postComment(actor, task.id, `I need input before I can continue:\n\n${question}`).catch(() => {});
+      await postComment(actor, task.id, `I need input before I can continue:\n\n${question}`, requester).catch(() => {});
       await finishRun(runId, { status: 'needs_input', summary: outcome.report?.summary ?? null, sessionId: outcome.sessionId, branch: ws.branch, usage });
       // A reply that arrived while we were still working is the answer.
       await queueFollowUp(agent.id, task.id, project.id, runId, started.run.createdAt, outcome.sessionId, ws.branch);
@@ -355,14 +383,21 @@ export async function executeRun(claimed: RunRow): Promise<void> {
       keepCheckout = true;
       const why = explainPushError((e as Error).message);
       await recordRunEvent(runId, 'error', { message: `Publishing the branch failed: ${why}` });
-      await postComment(actor, task.id, `${summary}\n\nI could not push the branch: ${why.slice(0, 900)}`).catch(() => {});
+      await postComment(actor, task.id, `${summary}\n\nI could not push the branch: ${why.slice(0, 900)}`, requester).catch(() => {});
       await finishRun(runId, { status: 'failed', error: `push failed: ${why}`, summary, sessionId: outcome.sessionId, branch: ws.branch, usage });
       return;
     }
     // The branch and the pull request reach the task as git links through
     // the forge's webhook, the same way a person's do; a task link here was
     // a second copy nothing rendered.
-    await postComment(actor, task.id, prUrl ? `${summary}\n\nPull request: ${prUrl}` : summary).catch((e) => logger.warn({ err: e }, 'agent comment failed'));
+    // The agent's own closing comment is the report for the people on the
+    // task; the platform's copy of the summary is the fallback for a run
+    // that left none (the pull request carries the summary either way).
+    if (await agentCommentedSince(task.id, agent.id, runStartedAt).catch(() => false)) {
+      await recordRunEvent(runId, 'log', { message: 'The agent left its own closing comment; the report summary goes to the pull request only' });
+    } else {
+      await postComment(actor, task.id, prUrl ? `${summary}\n\nPull request: ${prUrl}` : summary, requester).catch((e) => logger.warn({ err: e }, 'agent comment failed'));
+    }
     if (status) {
       const [fresh] = await getDb().db.select({ version: tasks.version, statusId: tasks.statusId, category: taskStatuses.category })
         .from(tasks).leftJoin(taskStatuses, eq(taskStatuses.id, tasks.statusId)).where(eq(tasks.id, task.id));

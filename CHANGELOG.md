@@ -21,6 +21,23 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   `git commit --amend`, `git rebase`, `git reset` and `git branch -f` join
   the blocked commands.
 
+- **One closing comment per run, in the thread's language, addressed to a
+  person**: a finished run left two comments – the agent's own reply to the
+  teammate, and then the platform's copy of the report summary in English on
+  top of it. The platform now posts the summary only when the agent left no
+  comment during the run; the brief asks for one closing comment (what
+  changed and why, what is needed from a person), written in the language of
+  the task and the people in the thread, with mid-run comments reserved for
+  blockers and a change of approach; `verification` and `risks` stay English
+  for the pull request. The brief names the person to answer – the
+  follow-up's author, or whoever assigned or retried – with their user id,
+  and `comment_on_task` takes `mentionUserIds`: `@Name` in the text becomes a
+  real mention (the chip, the notification) instead of plain text, and a
+  mentioned person the text does not name is put at the start. The
+  platform's own comments (summary fallback, needs input, stopped, failed)
+  mention that person too. `textToDoc` in `@ordi/shared` grew the
+  `mentions` option that does this.
+
 ## v1.32.0
 
 - **Git links, one writer, and a webhook that says why**: the forge's

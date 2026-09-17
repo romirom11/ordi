@@ -37,6 +37,12 @@ export function buildServer(client: OrdiClient): McpServer {
   // relative, so stored documents stay domain-independent (see format.ts).
   const toAgent = (text: string): string => absolutizeImageSrcs(text, client.publicUrl);
   const fromAgent = (text: string): string => relativizeImageSrcs(text, client.publicUrl);
+  /** Mention nodes need the display name next to the id; unknown ids are dropped rather than rendered as bare ids. */
+  const mentionsFor = async (userIds: string[]): Promise<{ id: string; label: string }[]> => {
+    if (!userIds.length) return [];
+    const res = await client.get<{ data: { id: string; name: string }[] }>('/users/lookup');
+    return res.data.filter((u) => userIds.includes(u.id)).map((u) => ({ id: u.id, label: u.name }));
+  };
 
 // ── Read tools ──
   server.tool('search', 'Search companies, projects, tasks, CRM notes, invoices and KB pages by name/title/number. Matches titles, note bodies and indexed text, not arbitrary fields; use list_projects / list_companies / list_notes to enumerate instead of guessing names.', { query: z.string() },
@@ -286,8 +292,13 @@ export function buildServer(client: OrdiClient): McpServer {
   server.tool('assign_task', 'Assign users to a task', { taskId: z.string(), assigneeIds: z.array(z.string()) },
   ({ taskId, assigneeIds }) => wrap(() => client.patch(`/tasks/${taskId}`, { assigneeIds })));
 
-  server.tool('comment_on_task', 'Comment on a task (line breaks are preserved)', { taskId: z.string(), text: z.string() },
-  ({ taskId, text: body }) => wrap(() => client.post(`/tasks/${taskId}/comments`, { body: textToDoc(fromAgent(body)), mentions: [] })));
+  server.tool('comment_on_task', 'Comment on a task (line breaks are preserved). To address people, pass their user ids in mentionUserIds (see list_users) and write @Their Name in the text where the mention belongs; a mentioned person the text does not name is put at the start.', {
+    taskId: z.string(), text: z.string(),
+    mentionUserIds: z.array(z.string()).optional().describe('Users to mention and notify, by id'),
+  }, ({ taskId, text: body, mentionUserIds }) => wrap(async () => {
+    const mentions = await mentionsFor(mentionUserIds ?? []);
+    return client.post(`/tasks/${taskId}/comments`, { body: textToDoc(fromAgent(body), { mentions }), mentions: mentions.map((m) => m.id) });
+  }));
 
   server.tool('log_time', 'Log time on a task', { taskId: z.string(), durationSeconds: z.number(), note: z.string().optional(), startedAt: z.string().optional() },
   ({ taskId, durationSeconds, note, startedAt }) => wrap(() => client.post('/time/entries', { taskId, durationSeconds, note: note ?? '', startedAt: startedAt ?? new Date().toISOString() })));
