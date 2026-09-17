@@ -16,7 +16,10 @@ import {
 } from './agents-helpers';
 import { setRuntimeAdapter, type RuntimeAdapter, type RuntimeOutcome, type RuntimeRunInput, type RuntimeUsage } from '../domains/agents/runtime';
 import { setGitRunner, harnessDir, taskDir, pruneTaskDirs, type GitRunner } from '../domains/agents/workspace';
-import { executeRun, completionStatus } from '../workers/agent-runs';
+import { executeRun } from '../workers/agent-runs';
+import { completionStatus, agentActor, localRunBackend, toClaimedRun } from '../domains/agents/run-service';
+import { createHttpRunBackend } from '../domains/agents/run-backend-http';
+import { app } from './helpers';
 import { claimRuns, requeueStaleRuns, listRuns, cancelRun } from '../domains/agents/runs';
 import { env } from '../env';
 
@@ -88,7 +91,7 @@ async function runToEnd(taskId: string) {
   const [run] = await runsForTask(taskId);
   const [claimed] = await claimRuns('test-worker', 1);
   expect(claimed?.id).toBe(run!.id);
-  await executeRun(claimed!);
+  await executeRun(localRunBackend, toClaimedRun(claimed!));
   const { db } = getDb();
   const [after] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, run!.id));
   return after!;
@@ -193,7 +196,6 @@ describe('dispatch', () => {
     const task = await newTask('Hands off');
     await assign(task.id, [agentId]);
     const [run] = await runsForTask(task.id);
-    const { agentActor } = await import('../workers/agent-runs');
     const runsSvc = await import('../domains/agents/runs');
     await expect(cancelRun(await agentActor(agentId), run!.id)).rejects.toMatchObject({ code: 'forbidden' });
     await cancelRun(await agentActor(ws.users.owner!.userId), run!.id);
@@ -286,7 +288,7 @@ describe('the worker end to end', () => {
     expect(acts[0]!.actorType).toBe('agent');
 
     // Runs are readable by task viewers with the agent's name.
-    const list = await listRuns(await import('../workers/agent-runs').then((m) => m.agentActor(ws.users.member!.userId)), { taskId: task.id, limit: 10 });
+    const list = await listRuns(await agentActor(ws.users.member!.userId), { taskId: task.id, limit: 10 });
     expect(list[0]!.agentName).toBe('Claude');
   });
 
@@ -375,7 +377,6 @@ describe('the worker end to end', () => {
     expect(last).toContain('Max turns');
     expect(last).toContain(run.branch);
     // Retry queues a new run that resumes the session; cancel/retry need write on the project.
-    const { agentActor } = await import('../workers/agent-runs');
     const memberActor = await agentActor(ws.users.member!.userId);
     const retried = await (await import('../domains/agents/runs')).retryRun(memberActor, run.id);
     expect(retried.trigger).toBe('retry');
@@ -386,7 +387,7 @@ describe('the worker end to end', () => {
     restoreAdapter();
     restoreAdapter = setRuntimeAdapter(adapter(async (input) => { resumed = input; return done(); }));
     const [claimed] = await claimRuns('w', 1);
-    await executeRun(claimed!);
+    await executeRun(localRunBackend, toClaimedRun(claimed!));
     expect(resumed!.resume).toBe('s3');
     expect(resumed!.prompt).toContain('Continue');
     expect(resumed!.prompt).toContain('git status');
@@ -425,7 +426,6 @@ describe('the worker end to end', () => {
     expect(first.status).toBe('failed');
     expect(first.branch).toMatch(/dsp-\d+-lost-session$/);
 
-    const { agentActor } = await import('../workers/agent-runs');
     await (await import('../domains/agents/runs')).retryRun(await agentActor(ws.users.owner!.userId), first.id);
     const inputs: RuntimeRunInput[] = [];
     restoreAdapter();
@@ -435,7 +435,7 @@ describe('the worker end to end', () => {
       return { ...done(), sessionId: 'fresh-2' };
     }));
     const [claimed] = await claimRuns('w', 1);
-    await executeRun(claimed!);
+    await executeRun(localRunBackend, toClaimedRun(claimed!));
     const { db } = getDb();
     const [after] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, claimed!.id));
     expect(after!.status).toBe('succeeded');
@@ -516,7 +516,6 @@ describe('the worker end to end', () => {
     await assign(task.id, [agentId]);
     const [queued] = await runsForTask(task.id);
     restoreAdapter = setRuntimeAdapter(adapter(async (input) => {
-      const { agentActor } = await import('../workers/agent-runs');
       await cancelRun(await agentActor(ws.users.owner!.userId), queued!.id);
       await new Promise<void>((resolve) => input.signal.addEventListener('abort', () => resolve(), { once: true }));
       return { status: 'failed', sessionId: null, message: '', error: 'aborted', usage, retryAt: null, report: null };
@@ -524,7 +523,7 @@ describe('the worker end to end', () => {
     const [claimed] = await claimRuns('w', 1);
     // The worker polls for cancellation every 5s; shorten the wait by racing the poll.
     const started = Date.now();
-    await executeRun(claimed!);
+    await executeRun(localRunBackend, toClaimedRun(claimed!));
     const { db } = getDb();
     const [after] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, queued!.id));
     expect(after!.status).toBe('cancelled');
@@ -548,7 +547,6 @@ describe('the worker end to end', () => {
     // The follow-up prompt carries the new comment, not the whole brief, and resumes.
     let followUp: RuntimeRunInput | null = null;
     restoreAdapter();
-    const { agentActor } = await import('../workers/agent-runs');
     const tasksSvc = await import('../domains/projects/service');
     restoreAdapter = setRuntimeAdapter(adapter(async (input) => {
       followUp = input;
@@ -557,7 +555,7 @@ describe('the worker end to end', () => {
       return done({ summary: 'Docs updated too.' });
     }));
     const [claimed] = await claimRuns('w', 1);
-    await executeRun(claimed!);
+    await executeRun(localRunBackend, toClaimedRun(claimed!));
     expect(followUp!.resume).toBe('sess-42');
     expect(followUp!.prompt).toContain('Also update the docs');
     expect(followUp!.prompt).toContain('Follow-up');
@@ -596,7 +594,6 @@ describe('the worker end to end', () => {
     const runs = await runsForTask(task.id);
     expect(runs.filter((r) => r.trigger === 'comment' && r.status === 'queued')).toHaveLength(1);
     // The agent's own comments never trigger it.
-    const { agentActor } = await import('../workers/agent-runs');
     const svc = await import('../domains/projects/service');
     await svc.addComment(await agentActor(agentId), task.id, { body: { type: 'doc', content: [] } });
     await drainOutbox();
@@ -634,5 +631,59 @@ describe('the worker end to end', () => {
     expect(run.status).toBe('failed');
     expect(run.error).toMatch(/credential/i);
     expect((await json(owner.get(`/agents/${agentId}`))).dispatchable).toBe(false);
+  });
+});
+
+describe('a worker process without the database', () => {
+  it('runs a task end to end through /api/v1/agent-worker, holding nothing but the shared secret', async () => {
+    const owner = reqAs(ws.users.owner!.cookie);
+    // The scenario before this one revoked every credential: connect one again.
+    await addCredential(ws.users, { label: 'Primary again', secret: 'sk-ant-primary-secret-value', slot: 'primary' });
+    const task = await newTask('Over HTTP');
+    await assign(task.id, [agentId]);
+    env.agentWorkerSecret = 'test-worker-secret';
+    // The app's own handler stands in for the socket; the backend cannot tell the difference.
+    const viaApp = async (url: string, init?: RequestInit) => app.request(url, init);
+    const backend = createHttpRunBackend({ apiUrl: 'http://ordi.internal:3000', secret: 'test-worker-secret', fetch: viaApp });
+    let seen: RuntimeRunInput | null = null;
+    restoreAdapter = setRuntimeAdapter(adapter(async (input) => {
+      seen = input;
+      await input.onEvent({ type: 'assistant', text: 'Using sk-ant-primary-secret-value now', toolUses: [] });
+      await writeFile(`${input.cwd}/fix.txt`, 'fixed');
+      return done();
+    }));
+    const gitLog: string[][] = [];
+    setGitRunner(fakeGit(gitLog));
+
+    await backend.heartbeat({ workerId: 'http-worker', concurrency: 1, running: 0, runtimeAvailable: true, version: 'test' });
+    const [claimed] = await backend.claim('http-worker', 1);
+    expect(claimed?.taskId).toBe(task.id);
+    await executeRun(backend, claimed!);
+
+    const [run] = await runsForTask(task.id);
+    expect(run!.status).toBe('succeeded');
+    expect(run!.workerId).toBe('http-worker');
+    // The runtime was pointed at the API the worker was given, not at localhost.
+    expect(seen!.mcpServers.ordi!.url).toBe('http://ordi.internal:3000/api/v1/mcp');
+    expect(seen!.credential.secret).toBe('sk-ant-primary-secret-value');
+    expect(gitLog.some((a) => a[0] === 'push')).toBe(true);
+    // Scrubbing happens where the log is written, so a remote worker's events are as clean as a local one's.
+    const dump = JSON.stringify(await eventsForRun(run!.id));
+    expect(dump).not.toContain('sk-ant-primary-secret-value');
+    expect(dump).not.toContain('ghp_repo_token_secret');
+    expect(dump).toContain('[redacted]');
+    const detail = await json(owner.get(`/tasks/${task.id}?include=comments`));
+    expect(detail.statusId).toBe(ws.reviewStatusId);
+    const { db } = getDb();
+    const [tok] = await db.select().from(schema.apiTokens).where(eq(schema.apiTokens.id, run!.tokenId!));
+    expect(tok!.revokedAt).not.toBeNull();
+    const [worker] = await db.select().from(schema.agentWorkers).where(eq(schema.agentWorkers.id, 'http-worker'));
+    expect(worker?.version).toBe('test');
+
+    // The wrong secret is refused, and without one configured the router is closed.
+    const wrong = createHttpRunBackend({ apiUrl: 'http://ordi.internal:3000', secret: 'not-it', fetch: viaApp });
+    await expect(wrong.claim('x', 1)).rejects.toThrow(/401/);
+    env.agentWorkerSecret = '';
+    await expect(backend.claim('x', 1)).rejects.toThrow(/503/);
   });
 });

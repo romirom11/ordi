@@ -109,6 +109,10 @@ dead-lettered`, `sales digest failed` and `initial sales digest failed` messages
 
 The agent worker runs inside the API container (`AGENT_WORKER_ENABLED`, default
 on) unless it has been split into its own service – see docs/deployment.md §3b.
+Split out, the worker has no database: it claims runs, writes its log and
+reports through `/api/v1/agent-worker/*` with `AGENT_WORKER_SECRET`, and the
+API does everything that touches a row or a secret. Everything below about
+runs, sessions and the volume applies to whichever container runs the worker.
 
 **Disk.** Every run gets a fresh clone under
 `/data/agent-work/tasks/<taskId>/checkout`, deleted when the run finishes,
@@ -190,7 +194,9 @@ to ship to a log collector.
 **Runs stuck in `queued`.** In order of likelihood:
 
 - no worker: `agent_workers` empty or stale (`AGENT_WORKER_ENABLED=0`
-  everywhere, or the container is down);
+  everywhere, or the container is down; a separate worker whose heartbeat
+  fails logs `agent worker heartbeat failed` with the API's answer – a 401 is
+  a secret that differs between the two services, a 503 an API without one);
 - no usable credential: the workspace Claude credential is missing, revoked or
   expired – the agent shows "credential required" and dispatch is skipped;
 - the agent is not a member of the task's project, or is disabled;

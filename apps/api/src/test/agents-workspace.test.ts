@@ -18,6 +18,7 @@ import {
   pullRequestTitle, buildPullRequestBody, readPullRequestTemplate,
 } from '../domains/agents/workspace';
 import { buildTaskBrief } from '../domains/agents/prompt';
+import { resolveRepository } from '../domains/agents/repository';
 import { encrypt } from '../lib/crypto';
 import { env } from '../env';
 
@@ -68,7 +69,7 @@ afterAll(async () => {
 
 describe('workspace with real git', () => {
   it('clones, stages only real work, pushes the task branch, and a later run continues it', async () => {
-    const input = { taskId: ws.taskId, projectId: ws.projectId, projectKey: 'WSG', taskNumber: 1, taskTitle: 'Real git', agentName: 'Claude', agentEmail: 'claude@test.local' };
+    const input = { taskId: ws.taskId, projectId: ws.projectId, projectKey: 'WSG', taskNumber: 1, taskTitle: 'Real git', agentName: 'Claude', agentEmail: 'claude@test.local', repo: await resolveRepository(ws.projectId) };
     const w = await prepareWorkspace(input);
     expect(w.repo?.fullName).toBe('acme/real');
     const branch = w.branch!;
@@ -115,7 +116,7 @@ describe('workspace with real git', () => {
   }, 30_000);
 
   it('a refused push keeps the checkout, leaks no token, and the next run continues in it', async () => {
-    const input = { taskId: ws.taskId, projectId: ws.projectId, projectKey: 'WSG', taskNumber: 2, taskTitle: 'Refused push', agentName: 'Claude', agentEmail: 'claude@test.local' };
+    const input = { taskId: ws.taskId, projectId: ws.projectId, projectKey: 'WSG', taskNumber: 2, taskTitle: 'Refused push', agentName: 'Claude', agentEmail: 'claude@test.local', repo: await resolveRepository(ws.projectId) };
     const w = await prepareWorkspace(input);
     expect(w.reused).toBeUndefined();
     await writeFile(join(w.dir, 'src.txt'), 'work worth keeping\n');
@@ -154,7 +155,7 @@ describe('workspace with real git', () => {
   }, 30_000);
 
   it('a branch that moved on origin, or a commit the agent rewrote, is replayed on top and still pushed', async () => {
-    const input = { taskId: ws.taskId, projectId: ws.projectId, projectKey: 'WSG', taskNumber: 3, taskTitle: 'Diverged', agentName: 'Claude', agentEmail: 'claude@test.local' };
+    const input = { taskId: ws.taskId, projectId: ws.projectId, projectKey: 'WSG', taskNumber: 3, taskTitle: 'Diverged', agentName: 'Claude', agentEmail: 'claude@test.local', repo: await resolveRepository(ws.projectId) };
     const w = await prepareWorkspace(input);
     const branch = w.branch!;
     await writeFile(join(w.dir, 'a.txt'), 'a\n');
@@ -194,7 +195,7 @@ describe('workspace with real git', () => {
   }, 30_000);
 
   it('a divergence that does not replay is reported and the checkout is left on the branch', async () => {
-    const input = { taskId: ws.taskId, projectId: ws.projectId, projectKey: 'WSG', taskNumber: 4, taskTitle: 'Conflict', agentName: 'Claude', agentEmail: 'claude@test.local' };
+    const input = { taskId: ws.taskId, projectId: ws.projectId, projectKey: 'WSG', taskNumber: 4, taskTitle: 'Conflict', agentName: 'Claude', agentEmail: 'claude@test.local', repo: await resolveRepository(ws.projectId) };
     const w = await prepareWorkspace(input);
     const branch = w.branch!;
     await writeFile(join(w.dir, 'x.txt'), 'one\n');
@@ -220,7 +221,7 @@ describe('workspace with real git', () => {
   }, 30_000);
 
   it('an existing branch name that never reached origin is replaced by a fresh one', async () => {
-    const input = { taskId: ws.taskId, projectId: ws.projectId, projectKey: 'WSG', taskNumber: 26, taskTitle: 'Додати відпустки', agentName: 'Claude', agentEmail: 'claude@test.local' };
+    const input = { taskId: ws.taskId, projectId: ws.projectId, projectKey: 'WSG', taskNumber: 26, taskTitle: 'Додати відпустки', agentName: 'Claude', agentEmail: 'claude@test.local', repo: await resolveRepository(ws.projectId) };
     const w = await prepareWorkspace({ ...input, existingBranch: 'feature/wsg-26-', suggestedSlug: 'add-leave-days' });
     expect(w.branch).toBe('feature/wsg-26-add-leave-days');
     await cleanupWorkspace(ws.taskId);

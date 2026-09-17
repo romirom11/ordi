@@ -42,6 +42,7 @@ import { integrationsRoutes } from './domains/integrations/routes';
 import { publicRoutes } from './domains/public/routes';
 import { agentsRoutes } from './domains/agents/routes';
 import { gatewayRoutes } from './domains/agents/gateway';
+import { agentWorkerRoutes } from './domains/agents/worker-routes';
 import { mountWeb, webDistDir } from './web';
 
 async function readyz(c: Context) {
@@ -108,6 +109,8 @@ export function createApp() {
   app.route('/api/v1/mcp', mcpRoutes());
   // Connector gateway for agent runs: bearer = the per-run token, checked there.
   app.route('/api/v1/mcp-connectors', gatewayRoutes());
+  // The run backend for a worker process without the database: bearer = AGENT_WORKER_SECRET, checked there.
+  app.route('/api/v1/agent-worker', agentWorkerRoutes());
 
   // Public routes (no auth): invoices/quotes/portal/intake/careers/git webhooks.
   // Mounted twice: at the root (direct API access) and under /api/v1, because the

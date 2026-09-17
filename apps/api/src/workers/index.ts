@@ -13,6 +13,7 @@ import { pollIntakeMailboxes } from './imap';
 import { startEmailDeliveryWorker } from './email-delivery';
 import { runSalesWorkDigests } from './sales-digest';
 import { startAgentRunsWorker } from './agent-runs';
+import { localRunBackend } from '../domains/agents/run-service';
 
 let boss: PgBoss | null = null;
 let stopEmailDelivery: (() => void) | null = null;
@@ -22,7 +23,7 @@ export async function startWorkers(): Promise<void> {
   logConsumers();
   startRelay();
   stopEmailDelivery = startEmailDeliveryWorker();
-  if (env.agentWorkerEnabled) stopAgentRuns = startAgentRunsWorker();
+  if (env.agentWorkerEnabled) stopAgentRuns = startAgentRunsWorker(localRunBackend);
 
   try {
     boss = new PgBoss({ connectionString: env.databaseUrl, schema: 'pgboss' });

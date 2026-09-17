@@ -235,14 +235,24 @@ request and the task in review.
 
 - **Execution is platform-hosted, not on user machines.** The run worker
   (`workers/agent-runs.ts`) lives in the API process next to the email worker
-  and claims runs with `FOR UPDATE SKIP LOCKED`, so replicas are safe and the
-  admin configures execution once for everyone. The alternative – a runner each
-  person installs – was rejected: it makes "assign a task to the agent" depend
-  on whose laptop is awake. `AGENT_WORKER_ENABLED` turns claiming off, which is
-  also how the documented production split works: the same image runs a second
-  container with the worker on and the API's own worker off
-  (`docker-compose.prod.yml`, deployment.md §3b). The split is documentation,
-  not the default, because `docker compose up` must produce a working system.
+  by default, and the admin configures execution once for everyone. The
+  alternative – a runner each person installs – was rejected: it makes
+  "assign a task to the agent" depend on whose laptop is awake.
+- **The worker knows the platform only through `RunBackend`.** Everything a
+  run needs that lives in a row or behind a secret – the claim (`FOR UPDATE
+  SKIP LOCKED`, so replicas are safe), the decrypted credential chain, the
+  repository token, the run token and the brief, the event log, and what a
+  finished run means for the task – is `domains/agents/run-service.ts`,
+  reached either directly (`localRunBackend`, the in-process worker) or over
+  `/api/v1/agent-worker/*` with a shared secret (`createHttpRunBackend`, the
+  standalone `agent-worker.ts` process). The worker itself is git, the
+  filesystem and the runtime adapter, and imports nothing that opens the
+  database. That is what makes the production split real rather than
+  cosmetic: the container that executes model-authored code holds no
+  `DATABASE_URL`, `ENCRYPTION_KEY` or `AUTH_SECRET` to lose, only the one
+  run's credential, repository token and revocable run token. The split stays
+  opt-in (`AGENT_WORKER_SECRET` on both services, `AGENT_WORKER_ENABLED=0` on
+  the API) because `docker compose up` must produce a working system.
 - **The Agent SDK, not the `claude` CLI.** `@anthropic-ai/claude-agent-sdk`
   bundles the same runtime as a per-platform optional dependency and yields
   typed messages (session id, tool use, usage, cost) instead of parsed stdout,
@@ -304,4 +314,6 @@ request and the task in review.
   plainly: the container, the agent's ordi role, and repository write through
   the GitHub App installation token (whose manifest now asks for
   `contents: write` and `pull_requests: write`). That is the reason the
-  separate-container split is documented for production.
+  separate-container split exists and is recommended for production: with the
+  worker in its own container the residual is that container and those two
+  scoped tokens, not the API's secrets.
