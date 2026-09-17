@@ -23,15 +23,11 @@ import { runtimeConfig } from '../../lib/runtime-config';
 import { encrypt, generateToken } from '../../lib/crypto';
 import type { ProviderRepo } from './oauth';
 
-/** api.github.com for github.com apps, <host>/api/v3 for GHE ones. */
-export function githubApiBase(htmlUrl: string): string {
-  try {
-    const origin = new URL(htmlUrl).origin;
-    return origin === 'https://github.com' ? 'https://api.github.com' : `${origin}/api/v3`;
-  } catch {
-    return 'https://api.github.com';
-  }
-}
+import { githubApiBase } from '../../lib/github-api';
+
+// Kept here for its callers; the function itself lives with the pure helpers
+// so the agent worker can use it without pulling the database in.
+export { githubApiBase };
 
 /** Where GitHub sends both the manifest conversion code and install redirects. */
 export function githubAppSetupUrl(): string {

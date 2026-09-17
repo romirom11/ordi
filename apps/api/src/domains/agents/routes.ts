@@ -21,7 +21,7 @@ import * as profiles from './profiles';
 import * as connectors from './connectors';
 import { startConnectorOAuth, completeConnectorOAuth, revokeConnectorOAuth, connectorCallbackUrl } from './connector-oauth';
 import * as runs from './runs';
-import { listWorkers } from '../../workers/agent-runs';
+import { listWorkers } from './run-service';
 import { runtimeAdapter } from './runtime';
 
 export function agentsRoutes() {

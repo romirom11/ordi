@@ -122,6 +122,9 @@ services:
       # run the platform with agents configurable but no runs executing here.
       AGENT_WORKER_ENABLED: ${AGENT_WORKER_ENABLED:-1}
       AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:-2}
+      # Set to open /api/v1/agent-worker/* to a worker container of its own
+      # (the agent-worker service below); unset, that router answers 503.
+      AGENT_WORKER_SECRET: ${AGENT_WORKER_SECRET:-}
       # Claude is connected in Settings → Agents (a `claude setup-token`
       # subscription token or an API key). This env var is only a fallback
       # source for API keys, for a PaaS that configures everything by env.
@@ -131,53 +134,45 @@ services:
       # ends – size for AGENT_WORKER_CONCURRENCY × repository size; and
       # tasks/<taskId>/harness: session transcripts kept 30 days so follow-ups
       # resume. Every container that claims runs must mount the same volume
-      # (docs/operations.md).
+      # (docs/operations.md). With the agent-worker service enabled below,
+      # this mount moves there and the api needs none.
       - agent_work:/data/agent-work
     depends_on:
       db:
         condition: service_healthy
 
-  # ── Optional: run agents in their own container ──
+  # ── Recommended for production: run agents in their own container ──
   #
   # An agent run is the only thing in ordi that executes model-authored code.
   # It is already sandboxed (rebuilt child env, per-run token, allow/deny tool
   # lists – see docs/architecture-decisions.md §12), but its blast radius is
-  # still the container it runs in. Moving it out of the container that serves
-  # requests means a runaway run cannot take the site down with it, and the
-  # runs get their own CPU/memory limits.
+  # still the container it runs in – and the api container holds everything.
   #
-  # To enable: uncomment the block below and set `AGENT_WORKER_ENABLED=0` in
-  # the environment, so the `api` service stops claiming runs itself. Both
-  # services need the same DATABASE_URL, ENCRYPTION_KEY (credentials and
-  # connector secrets are encrypted with it) and APP_URL, and both mount
-  # agent_work. Runs are claimed with SKIP LOCKED, so nothing is executed
-  # twice even if you get the flags wrong for a moment.
+  # The worker below has no database. It talks to the api over HTTP with one
+  # shared secret and holds only what the run in front of it needs: the model
+  # credential, the repository token and the run's own API token. It has its
+  # own volume for checkouts and transcripts (the api then needs none), and
+  # can get its own CPU/memory limits.
   #
-  # It runs the same server process, only with no published port: the worker
-  # talks to ordi over its own loopback (the per-run MCP token points at
-  # http://localhost:3000/api/v1), and the connector gateway lives there too.
-  # Migrations stay with `api` – one container writes the schema, not two.
+  # To enable: uncomment the block, set the same AGENT_WORKER_SECRET on both
+  # services, and set AGENT_WORKER_ENABLED=0 on `api` so it stops claiming
+  # runs itself. Runs are claimed with SKIP LOCKED on the api side, so
+  # nothing is executed twice even if you get the flag wrong for a moment.
   #
   # agent-worker:
   #   image: ghcr.io/romirom11/ordi:${ORDI_VERSION:-latest}
   #   pull_policy: always
   #   restart: unless-stopped
-  #   command: ["sh", "-c", "pnpm --filter @ordi/api exec tsx src/server.ts"]
+  #   command: ["sh", "-c", "pnpm --filter @ordi/api exec tsx src/agent-worker.ts"]
   #   environment:
   #     NODE_ENV: production
-  #     DATABASE_URL: postgres://${POSTGRES_USER:-ordi}:${POSTGRES_PASSWORD}@ordi-db:5432/${POSTGRES_DB:-ordi}
-  #     APP_URL: ${APP_URL}
-  #     API_URL: ${API_URL:-${APP_URL}}
-  #     AUTH_SECRET: ${AUTH_SECRET}
-  #     ENCRYPTION_KEY: ${ENCRYPTION_KEY}
-  #     ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-  #     AGENT_WORKER_ENABLED: "1"
+  #     ORDI_API_URL: http://api:3000
+  #     AGENT_WORKER_SECRET: ${AGENT_WORKER_SECRET:?set AGENT_WORKER_SECRET}
   #     AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:-2}
   #   volumes:
   #     - agent_work:/data/agent-work
   #   depends_on:
-  #     db:
-  #       condition: service_healthy
+  #     - api
 
 volumes:
   db_data:

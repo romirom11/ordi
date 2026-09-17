@@ -63,6 +63,15 @@ export const env = {
   agentWorkerConcurrency: Math.max(1, Number(process.env.AGENT_WORKER_CONCURRENCY ?? 2)),
   /** Fresh checkouts per run live here; documented as a volume in deployment.md. */
   agentWorkDir: process.env.AGENT_WORK_DIR ?? '/data/agent-work',
+  /**
+   * Shared secret between the API and a worker process of its own. Set on
+   * both: the API opens /api/v1/agent-worker/* to it, the worker presents
+   * it. Unset, the API has no worker endpoint and only its in-process
+   * worker can run agents.
+   */
+  agentWorkerSecret: process.env.AGENT_WORKER_SECRET ?? '',
+  /** Where a standalone worker reaches the API; an internal address, usually. */
+  agentWorkerApiUrl: normalizeApiUrl(process.env.ORDI_API_URL ?? process.env.API_URL ?? ''),
   /** Env fallback for an API-key credential (PaaS installs without the UI step). */
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',
 };

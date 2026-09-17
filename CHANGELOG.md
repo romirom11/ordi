@@ -5,6 +5,19 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
 ## Unreleased
 
+- **The agent worker can run without the database**: the process that
+  executes model-authored code no longer needs `DATABASE_URL`,
+  `ENCRYPTION_KEY`, `AUTH_SECRET`, S3 or SMTP. Split out, it talks to the API
+  over `/api/v1/agent-worker/*` with one shared secret (`AGENT_WORKER_SECRET`
+  on both services) and holds only what the run in front of it needs – the
+  model credential, the repository token and its own revocable run token.
+  Claiming, the brief, the event log and what a finished run means for the
+  task all moved to the API (`domains/agents/run-service.ts`); the in-process
+  worker calls the same functions directly, so `docker compose up` is
+  unchanged. `docker-compose.prod.yml` carries the ready `agent-worker`
+  service (`pnpm --filter @ordi/api exec tsx src/agent-worker.ts`), and it
+  is the one that mounts the checkout volume now.
+
 - **Agent runs survive their own log, and a moved branch still gets pushed**:
   a tool result carrying a NUL byte (a binary read, a build log) made
   Postgres refuse the run event (`unsupported Unicode escape sequence`), and

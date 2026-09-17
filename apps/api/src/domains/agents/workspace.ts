@@ -9,20 +9,21 @@
  * the previous run's session: `tasks/<taskId>/checkout` is the clone (deleted
  * when the run ends) and `tasks/<taskId>/harness` the runtime's own home with
  * the session transcripts (kept, pruned after SESSION_RETENTION_DAYS).
+ *
+ * Git and the filesystem only. The repository binding - which repository,
+ * with what token - arrives from the run backend (`repository.ts` resolves it
+ * on the API side), so this module runs in a worker that has no database.
  */
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdir, readdir, readFile, rm, stat, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
-import { getDb, schema, eq } from '@ordi/db';
 import { buildBranchName } from '@ordi/shared';
 import { env } from '../../env';
 import { logger } from '../../lib/logger';
-import { decrypt } from '../../lib/crypto';
-import { githubApiBase, githubAppConfigured, installationToken } from '../integrations/github-app';
+import { githubApiBase } from '../../lib/github-api';
 
 const execFileAsync = promisify(execFile);
-const { projectRepositories, gitRepositories, gitConnections } = schema;
 
 export interface RepoBinding {
   repositoryId: string;
@@ -43,48 +44,6 @@ export interface Workspace {
   projectId: string;
   /** The previous run's checkout was kept (its push failed) and is continued. */
   reused?: boolean;
-}
-
-/** The first repository bound to the project, with a usable token, or null. */
-export async function resolveRepository(projectId: string): Promise<RepoBinding | null> {
-  const { db } = getDb();
-  const rows = await db.select({
-    repositoryId: gitRepositories.id, fullName: gitRepositories.fullName, defaultBranch: gitRepositories.defaultBranch,
-    provider: gitConnections.provider, instanceUrl: gitConnections.instanceUrl, installationId: gitConnections.installationId,
-    credentials: gitConnections.credentials, status: gitConnections.status,
-  }).from(projectRepositories)
-    .innerJoin(gitRepositories, eq(gitRepositories.id, projectRepositories.repositoryId))
-    .innerJoin(gitConnections, eq(gitConnections.id, gitRepositories.connectionId))
-    .where(eq(projectRepositories.projectId, projectId));
-  for (const r of rows) {
-    if (r.status !== 'connected') continue;
-    if (r.provider === 'github') {
-      const htmlUrl = r.instanceUrl ?? 'https://github.com';
-      if (r.installationId) {
-        const app = await githubAppConfigured();
-        if (!app) continue;
-        const token = await installationToken(app, r.installationId);
-        return { repositoryId: r.repositoryId, fullName: r.fullName, defaultBranch: r.defaultBranch, provider: 'github', instanceUrl: r.instanceUrl, token, htmlUrl };
-      }
-      const token = legacyToken(r.credentials);
-      if (token) return { repositoryId: r.repositoryId, fullName: r.fullName, defaultBranch: r.defaultBranch, provider: 'github', instanceUrl: r.instanceUrl, token, htmlUrl };
-      continue;
-    }
-    const token = legacyToken(r.credentials);
-    if (token && r.instanceUrl) {
-      return { repositoryId: r.repositoryId, fullName: r.fullName, defaultBranch: r.defaultBranch, provider: r.provider, instanceUrl: r.instanceUrl, token, htmlUrl: r.instanceUrl };
-    }
-  }
-  return null;
-}
-
-function legacyToken(credentials: unknown): string | null {
-  try {
-    const parsed = JSON.parse(decrypt(credentials as string)) as { token?: string };
-    return parsed.token ?? null;
-  } catch {
-    return null;
-  }
 }
 
 function cloneUrl(repo: RepoBinding): string {
@@ -186,6 +145,8 @@ export interface PrepareInput {
   suggestedSlug?: string | null;
   agentName: string;
   agentEmail: string;
+  /** The project's repository with a token that can clone; null for a task without one. */
+  repo: RepoBinding | null;
 }
 
 /**
@@ -211,7 +172,7 @@ async function reuseCheckout(dir: string, branch: string, repo: RepoBinding): Pr
 export async function prepareWorkspace(input: PrepareInput): Promise<Workspace> {
   const dir = checkoutDir(input.taskId);
   await mkdir(harnessDir(input.taskId), { recursive: true });
-  const repo = await resolveRepository(input.projectId);
+  const repo = input.repo;
   const freshName = buildBranchName({ key: input.projectKey, number: input.taskNumber, title: input.suggestedSlug || input.taskTitle });
   if (repo && input.existingBranch && await reuseCheckout(dir, input.existingBranch, repo)) {
     return { dir, repo, branch: input.existingBranch, projectId: input.projectId, reused: true };
@@ -343,12 +304,16 @@ export async function publishWorkspace(ws: Workspace, input: {
   taskUrl?: string | null;
   /** False preserves work from a run that stopped early: push the branch, open no pull request. */
   openPullRequest?: boolean;
+  /**
+   * A fresh binding for the push. Installation tokens live an hour and the
+   * clone may be older than that by now; without this the one from the
+   * clone is used.
+   */
+  refreshRepo?: () => Promise<RepoBinding | null>;
 }): Promise<PublishResult> {
   if (!ws.repo || !ws.branch) return { pushed: false, prUrl: null, commits: 0 };
   const { branch, dir } = ws;
-  // Installation tokens live an hour and the clone may be older than that by
-  // now: take a fresh binding for the push, falling back to the one we have.
-  const fresh = await resolveRepository(ws.projectId).catch(() => null);
+  const fresh = input.refreshRepo ? await input.refreshRepo().catch(() => null) : null;
   const repo = fresh && fresh.repositoryId === ws.repo.repositoryId ? fresh : ws.repo;
   const openPr = input.openPullRequest ?? true;
   const stage = await stageChanges(dir);
