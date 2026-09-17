@@ -3,7 +3,7 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
-## Unreleased
+## v1.33.0
 
 - **The agent worker can run without the database**: the process that
   executes model-authored code no longer needs `DATABASE_URL`,
