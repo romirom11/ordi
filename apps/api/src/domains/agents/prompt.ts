@@ -24,6 +24,8 @@ export interface PromptContext {
   instructions: string;
   /** Follow-up runs: only the new comment goes in the prompt. */
   followUpCommentId: string | null;
+  /** The person the run answers to: the follow-up's author, or whoever assigned or retried. Never another agent. */
+  requester?: { id: string; name: string } | null;
   /** A retry of a run that stopped early, continuing the same session and branch. */
   resumedAfterStop?: boolean;
   /** The session to continue could not be found: the full brief again, plus what is already on the branch. */
@@ -68,6 +70,7 @@ export async function buildTaskBrief(ctx: PromptContext): Promise<string> {
     }
     lines.push('');
     lines.push('Continue from where you left off, address the reply, and finish with the same structured report.');
+    if (ctx.requester) lines.push(`Answer ${ctx.requester.name} in your closing comment and mention them (mentionUserIds: ["${ctx.requester.id}"]).`);
     lines.push('The commits already on the branch are pushed (if your previous run stopped early, the platform committed your changes as `WIP ... (run stopped early)`): keep them as they are and add new commits on top. Never amend, rebase or reset commits that are already on the branch.');
     lines.push('');
   } else {
@@ -166,7 +169,11 @@ export function buildRulesOfEngagement(ctx: PromptContext): string {
     '',
     'Rules:',
     ...codeRules,
-    '- Post a short progress comment with comment_on_task when you start something non-obvious and when you finish; keep comments to a few sentences.',
+    '- When you finish, post one closing comment with comment_on_task: what changed and why, and anything you need from a person – a few sentences, for the people on the task. Comment during the work only when someone should know now (you are blocked, or the approach changed). The platform posts the summary from your report only if you left no comment during this run, so do not post both.',
+    ctx.requester
+      ? `- The person to answer is ${ctx.requester.name} (user id ${ctx.requester.id}): address them in the closing comment and mention them with mentionUserIds.`
+      : '- Mention the person a comment answers with mentionUserIds (their id is in the brief or via list_users).',
+    '- Write comments and the summary in the language the task and the people in the thread use (the title, the description, their comments). verification and risks go into the pull request: write them in English.',
     `- Do not move the task to a done status. The platform moves it to ${status} after you report done; a human reviews and merges.`,
     '- If the task is ambiguous or you lack access or information, stop and report needs_input with one clear question rather than guessing.',
     '- Never print secrets, tokens or credentials in comments, commits or output.',
