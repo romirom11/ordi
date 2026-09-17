@@ -9,7 +9,7 @@
  * API process; the worker routes expose the same functions over HTTP for a
  * worker process that has no database.
  */
-import { getDb, schema, eq, sql } from '@ordi/db';
+import { getDb, schema, eq, and, sql } from '@ordi/db';
 import { docToText, textToDoc } from '@ordi/shared';
 import { env } from '../../env';
 import { logger } from '../../lib/logger';
@@ -29,7 +29,7 @@ import {
 import type { ClaimedRun, ParkInput, RunBackend, RunBundle, RunReport, RunStart, StartInput, WorkerInfo } from './run-backend';
 import * as tasksSvc from '../projects/service';
 
-const { agentProfiles, agentWorkers, users, tasks, projects, taskStatuses, agentConnectors, mcpConnectors } = schema;
+const { agentProfiles, agentWorkers, users, tasks, projects, taskStatuses, agentConnectors, mcpConnectors, comments } = schema;
 
 const HEARTBEAT_MS = 15_000;
 const STALE_RUN_MS = 3 * 60_000;
@@ -100,8 +100,33 @@ export async function completionStatus(projectId: string, category: string): Pro
   return rows.find((s) => s.category === category) ?? null;
 }
 
-async function postComment(actor: Actor, taskId: string, text: string): Promise<void> {
-  await tasksSvc.addComment(actor, taskId, { body: textToDoc(text), mentions: [] });
+/** A platform comment on the task, addressed to the person the run answers to when there is one. */
+async function postComment(actor: Actor, taskId: string, text: string, mention: Requester | null = null): Promise<void> {
+  const mentions = mention ? [{ id: mention.id, label: mention.name }] : [];
+  await tasksSvc.addComment(actor, taskId, { body: textToDoc(text, { mentions }), mentions: mentions.map((m) => m.id) });
+}
+
+export interface Requester { id: string; name: string }
+
+/** The person a run answers to: the follow-up's author, or whoever assigned or retried. Another agent is nobody to answer. */
+async function requesterOf(userId: string | null): Promise<Requester | null> {
+  if (!userId) return null;
+  const { db } = getDb();
+  const [u] = await db.select({ id: users.id, name: users.name, actorType: users.actorType }).from(users).where(eq(users.id, userId));
+  return u && u.actorType !== 'agent' ? { id: u.id, name: u.name } : null;
+}
+
+/**
+ * Did the agent comment on the task itself during this run? Then its closing
+ * comment is the report, and the platform's copy of the summary would only
+ * say the same thing twice (in the brief's language, not the thread's).
+ */
+async function agentCommentedSince(taskId: string, agentUserId: string, since: Date): Promise<boolean> {
+  const { db } = getDb();
+  const [row] = await db.select({ id: comments.id }).from(comments)
+    .where(and(eq(comments.taskId, taskId), eq(comments.authorId, agentUserId), sql`${comments.deletedAt} is null`, sql`${comments.createdAt} >= ${since.toISOString()}::timestamptz`))
+    .limit(1);
+  return Boolean(row);
 }
 
 // ── The run, from the worker's side ──
@@ -199,6 +224,7 @@ export async function start(runId: string, input: StartInput): Promise<RunStart 
     completionCategory: profile.completionCategory, completionStatusName: status?.name ?? null,
     branch: input.branch, repoFullName: input.repoFullName, agentName: agent.name, instructions: profile.instructions,
     followUpCommentId: started.run.trigger === 'comment' ? started.run.commentId : null,
+    requester: await requesterOf(started.run.requestedBy),
     resumedAfterStop: started.run.trigger === 'retry' && Boolean(started.run.sessionId),
     connectorSlugs: connectors.map((c) => c.slug),
     pullRequestTemplate: input.pullRequestTemplate,
@@ -265,6 +291,7 @@ async function finalize(runId: string, report: RunReport): Promise<void> {
     status: outcome.status, report: outcome.report, message: outcome.message?.slice(0, 4000), error: outcome.error, usage: outcome.usage,
   });
   const actor = await agentActor(agent.id);
+  const requester = await requesterOf(run.requestedBy);
   const usage = { ...outcome.usage, credentialId: usedCredentialId };
   // The branch as far as anyone else can see it: pushed, or nothing.
   const pushedBranch = publish?.pushed ? report.branch : null;
@@ -276,7 +303,7 @@ async function finalize(runId: string, report: RunReport): Promise<void> {
   if (aborted) {
     const timedOut = aborted === 'timeout';
     const reason = timedOut ? `Stopped after ${profile.maxRunMinutes} minutes` : 'Cancelled';
-    await postComment(actor, task.id, `Run stopped: ${reason}. ${nextSteps(pushedBranch, timedOut ? 'Raise "Max run minutes" in the agent profile if the task needs longer.' : null)}`).catch(() => {});
+    await postComment(actor, task.id, `Run stopped: ${reason}. ${nextSteps(pushedBranch, timedOut ? 'Raise "Max run minutes" in the agent profile if the task needs longer.' : null)}`, requester).catch(() => {});
     await finishRun(runId, { status: timedOut ? 'failed' : 'cancelled', error: reason, sessionId: outcome.sessionId, branch: pushedBranch, usage });
     return;
   }
@@ -293,14 +320,14 @@ async function finalize(runId: string, report: RunReport): Promise<void> {
     const limitHint = /max_turns|maximum number of turns/i.test(error)
       ? `The agent used all ${profile.maxTurns} steps ("Max turns" in its profile) before it could report; raise the limit or split the task.`
       : /max_budget/i.test(error) ? 'The run hit "Max budget" in the agent profile.' : null;
-    await postComment(actor, task.id, `I could not finish this run: ${error.slice(0, 500)}. ${nextSteps(pushedBranch, limitHint)}`).catch(() => {});
+    await postComment(actor, task.id, `I could not finish this run: ${error.slice(0, 500)}. ${nextSteps(pushedBranch, limitHint)}`, requester).catch(() => {});
     await finishRun(runId, { status: 'failed', error, sessionId: outcome.sessionId, branch: pushedBranch, usage });
     return;
   }
 
   if (outcome.status === 'needs_input') {
     const question = outcome.report?.question ?? outcome.report?.summary ?? outcome.message ?? 'I need more information to continue.';
-    await postComment(actor, task.id, `I need input before I can continue:\n\n${question}`).catch(() => {});
+    await postComment(actor, task.id, `I need input before I can continue:\n\n${question}`, requester).catch(() => {});
     await finishRun(runId, { status: 'needs_input', summary: outcome.report?.summary ?? null, sessionId: outcome.sessionId, branch: report.branch, usage });
     // A reply that arrived while we were still working is the answer.
     await queueFollowUp(agent.id, task.id, project.id, runId, run.createdAt, outcome.sessionId, report.branch);
@@ -310,7 +337,7 @@ async function finalize(runId: string, report: RunReport): Promise<void> {
   // succeeded: the worker has pushed and opened the pull request; comment, move status.
   const summary = outcome.report?.summary?.trim() || outcome.message?.trim() || 'Done.';
   if (publish?.error) {
-    await postComment(actor, task.id, `${summary}\n\nI could not push the branch: ${publish.error.slice(0, 900)}`).catch(() => {});
+    await postComment(actor, task.id, `${summary}\n\nI could not push the branch: ${publish.error.slice(0, 900)}`, requester).catch(() => {});
     await finishRun(runId, { status: 'failed', error: `push failed: ${publish.error}`, summary, sessionId: outcome.sessionId, branch: report.branch, usage });
     return;
   }
@@ -318,7 +345,15 @@ async function finalize(runId: string, report: RunReport): Promise<void> {
   // The branch and the pull request reach the task as git links through the
   // forge's webhook, the same way a person's do; a task link here was a
   // second copy nothing rendered.
-  await postComment(actor, task.id, prUrl ? `${summary}\n\nPull request: ${prUrl}` : summary).catch((e) => logger.warn({ err: e }, 'agent comment failed'));
+  // The agent's own closing comment is the report for the people on the
+  // task; the platform's copy of the summary is the fallback for a run that
+  // left none (the pull request carries the summary either way).
+  const runStartedAt = run.startedAt ?? run.claimedAt ?? run.createdAt;
+  if (await agentCommentedSince(task.id, agent.id, runStartedAt).catch(() => false)) {
+    await recordRunEvent(runId, 'log', { message: 'The agent left its own closing comment; the report summary goes to the pull request only' });
+  } else {
+    await postComment(actor, task.id, prUrl ? `${summary}\n\nPull request: ${prUrl}` : summary, requester).catch((e) => logger.warn({ err: e }, 'agent comment failed'));
+  }
   const status = await completionStatus(project.id, profile.completionCategory);
   if (status) {
     const [fresh] = await getDb().db.select({ version: tasks.version, statusId: tasks.statusId, category: taskStatuses.category })

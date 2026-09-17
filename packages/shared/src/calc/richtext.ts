@@ -12,8 +12,44 @@
  */
 const IMAGE_LINE = /^!\[([^\]]*)\]\((\S+)\)$/;
 
-/** Plain text → tiptap doc. Blank lines separate paragraphs, single newlines are hard breaks. */
-export function textToDoc(text: string): Record<string, unknown> {
+/** A person a text can address: `@label` in the text becomes a mention node carrying the id. */
+export interface DocMention { id: string; label: string }
+
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * One line of text into inline nodes, with every `@label` of a known mention
+ * turned into a mention node (longest label first, so "Roman Kudin" is not
+ * cut into "Roman" + " Kudin"). `used` collects the ids the line addressed.
+ */
+function inlineNodes(line: string, mentions: DocMention[], used: Set<string>): Record<string, unknown>[] {
+  if (!mentions.length) return [{ type: 'text', text: line }];
+  const labels = [...mentions].sort((a, b) => b.label.length - a.label.length).map((m) => escapeRegExp(m.label));
+  // Not inside a word on either side: mail@Roman.example is an address, @Romanov is someone else.
+  const re = new RegExp(`(?<![\\p{L}\\p{N}_])@(${labels.join('|')})(?![\\p{L}\\p{N}_])`, 'gu');
+  const nodes: Record<string, unknown>[] = [];
+  let at = 0;
+  for (const m of line.matchAll(re)) {
+    const mention = mentions.find((x) => x.label === m[1])!;
+    if (m.index! > at) nodes.push({ type: 'text', text: line.slice(at, m.index) });
+    nodes.push({ type: 'mention', attrs: { id: mention.id, label: mention.label } });
+    used.add(mention.id);
+    at = m.index! + m[0].length;
+  }
+  if (at < line.length) nodes.push({ type: 'text', text: line.slice(at) });
+  return nodes;
+}
+
+/**
+ * Plain text → tiptap doc. Blank lines separate paragraphs, single newlines
+ * are hard breaks. With `mentions`, `@label` in the text becomes a real
+ * mention (the chip in the editor, the notification on the server); a
+ * mentioned person the text never names is put at the start, so a caller
+ * that passes an id always addresses them.
+ */
+export function textToDoc(text: string, opts: { mentions?: DocMention[] } = {}): Record<string, unknown> {
+  const mentions = (opts.mentions ?? []).filter((m) => m.id && m.label);
+  const used = new Set<string>();
   const blocks: Record<string, unknown>[] = [];
   for (const chunk of text.replace(/\r\n/g, '\n').split(/\n{2,}/)) {
     let inline: Record<string, unknown>[] = [];
@@ -31,10 +67,17 @@ export function textToDoc(text: string): Record<string, unknown> {
         continue;
       }
       if (open) inline.push({ type: 'hardBreak' });
-      if (line) inline.push({ type: 'text', text: line });
+      if (line) inline.push(...inlineNodes(line, mentions, used));
       open = true;
     }
     if (open) endParagraph();
+  }
+  const unnamed = mentions.filter((m) => !used.has(m.id));
+  if (unnamed.length) {
+    const lead: Record<string, unknown>[] = unnamed.flatMap((m) => [{ type: 'mention', attrs: { id: m.id, label: m.label } }, { type: 'text', text: ' ' }]);
+    const first = blocks.find((b) => b.type === 'paragraph') as { content: Record<string, unknown>[] } | undefined;
+    if (first) first.content.unshift(...lead);
+    else blocks.unshift({ type: 'paragraph', content: lead });
   }
   return { type: 'doc', content: blocks };
 }

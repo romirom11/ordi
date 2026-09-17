@@ -270,6 +270,8 @@ describe('the worker end to end', () => {
     const agentComments = (detail.comments as { authorId: string }[]).filter((c) => c.authorId === agentId);
     expect(agentComments.length).toBeGreaterThanOrEqual(1);
     expect(JSON.stringify(agentComments.at(-1))).toContain('Fixed the retry logic');
+    // Addressed to the person who assigned the task: a real mention, not "@Name" as text.
+    expect(JSON.stringify(agentComments.at(-1))).toContain(`"type":"mention","attrs":{"id":"${ws.users.owner!.userId}"`);
 
     // The per-run token is revoked and was scoped to the agent role.
     const { db } = getDb();
@@ -545,12 +547,25 @@ describe('the worker end to end', () => {
     // The follow-up prompt carries the new comment, not the whole brief, and resumes.
     let followUp: RuntimeRunInput | null = null;
     restoreAdapter();
-    restoreAdapter = setRuntimeAdapter(adapter(async (input) => { followUp = input; return done({ summary: 'Docs updated too.' }); }));
+    const tasksSvc = await import('../domains/projects/service');
+    restoreAdapter = setRuntimeAdapter(adapter(async (input) => {
+      followUp = input;
+      // The agent answers the teammate itself, the way the brief asks.
+      await tasksSvc.addComment(await agentActor(agentId), task.id, { body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Docs updated, see the branch.' }] }] }, mentions: [] });
+      return done({ summary: 'Docs updated too.' });
+    }));
     const [claimed] = await claimRuns('w', 1);
     await executeRun(localRunBackend, toClaimedRun(claimed!));
     expect(followUp!.resume).toBe('sess-42');
     expect(followUp!.prompt).toContain('Also update the docs');
     expect(followUp!.prompt).toContain('Follow-up');
+    // The brief names the person to answer, with the id to mention.
+    expect(followUp!.prompt).toContain(ws.users.owner!.userId);
+    // No second, English copy of the report on top of the agent's own comment.
+    const detail = await json(reqAs(ws.users.owner!.cookie).get(`/tasks/${task.id}?include=comments`));
+    const texts = (detail.comments as { authorId: string; body: unknown }[]).filter((c) => c.authorId === agentId).map((c) => JSON.stringify(c.body));
+    expect(texts.some((t) => t.includes('Docs updated, see the branch.'))).toBe(true);
+    expect(texts.some((t) => t.includes('Docs updated too.'))).toBe(false);
   });
 
   it('a comment written while the run was still queued is not lost', async () => {
