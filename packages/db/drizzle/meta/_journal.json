@@ -274,6 +274,13 @@
       "when": 1789475177151,
       "tag": "0038_git_links_unique_ref",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1789761342934,
+      "tag": "0039_agent_workers_app_version",
+      "breakpoints": true
     }
   ]
 }

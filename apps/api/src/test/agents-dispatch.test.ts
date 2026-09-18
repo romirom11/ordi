@@ -17,7 +17,7 @@ import {
 import { setRuntimeAdapter, type RuntimeAdapter, type RuntimeOutcome, type RuntimeRunInput, type RuntimeUsage } from '../domains/agents/runtime';
 import { setGitRunner, harnessDir, taskDir, pruneTaskDirs, type GitRunner } from '../domains/agents/workspace';
 import { executeRun } from '../workers/agent-runs';
-import { completionStatus, agentActor, localRunBackend, toClaimedRun } from '../domains/agents/run-service';
+import { completionStatus, agentActor, localRunBackend, toClaimedRun, listWorkers } from '../domains/agents/run-service';
 import { createHttpRunBackend } from '../domains/agents/run-backend-http';
 import { app } from './helpers';
 import { claimRuns, requeueStaleRuns, listRuns, cancelRun } from '../domains/agents/runs';
@@ -635,6 +635,20 @@ describe('the worker end to end', () => {
 });
 
 describe('a worker process without the database', () => {
+  it('stays online: the second heartbeat updates the row the first one inserted', async () => {
+    env.agentWorkerSecret = 'test-worker-secret';
+    const viaApp = async (url: string, init?: RequestInit) => app.request(url, init);
+    const backend = createHttpRunBackend({ apiUrl: 'http://ordi.internal:3000', secret: 'test-worker-secret', fetch: viaApp });
+    const info = { workerId: 'beating-worker', concurrency: 2, running: 0, runtimeAvailable: true, version: '1.33.0' };
+    await backend.heartbeat(info);
+    // The first heartbeat inserts; every one after it is an UPDATE, which the
+    // optimistic-locking trigger broke while the version string lived in a
+    // column named `version` (`'1.33.0' + 1`), so the worker went offline 35s in.
+    await backend.heartbeat({ ...info, running: 1, version: '1.33.1' });
+    const mine = (await listWorkers()).find((w) => w.id === 'beating-worker');
+    expect(mine).toMatchObject({ running: 1, concurrency: 2, version: '1.33.1', online: true });
+  });
+
   it('runs a task end to end through /api/v1/agent-worker, holding nothing but the shared secret', async () => {
     const owner = reqAs(ws.users.owner!.cookie);
     // The scenario before this one revoked every credential: connect one again.
@@ -678,7 +692,7 @@ describe('a worker process without the database', () => {
     const [tok] = await db.select().from(schema.apiTokens).where(eq(schema.apiTokens.id, run!.tokenId!));
     expect(tok!.revokedAt).not.toBeNull();
     const [worker] = await db.select().from(schema.agentWorkers).where(eq(schema.agentWorkers.id, 'http-worker'));
-    expect(worker?.version).toBe('test');
+    expect(worker?.appVersion).toBe('test');
 
     // The wrong secret is refused, and without one configured the router is closed.
     const wrong = createHttpRunBackend({ apiUrl: 'http://ordi.internal:3000', secret: 'not-it', fetch: viaApp });

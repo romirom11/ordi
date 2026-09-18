@@ -15,8 +15,8 @@
 Образ `api` публікується автоматично на кожному релізі
 (`.github/workflows/image.yml`, `linux/amd64`): `docker pull
 ghcr.io/romirom11/ordi:latest` працює без жодної автентифікації в GitHub, а
-кожен реліз має й тег версії (`ghcr.io/romirom11/ordi:1.33.0`) – саме на
-нього закріплюйтесь (`ORDI_VERSION=1.33.0` в env) і на нього відкочуєтесь.
+кожен реліз має й тег версії (`ghcr.io/romirom11/ordi:1.33.1`) – саме на
+нього закріплюйтесь (`ORDI_VERSION=1.33.1` в env) і на нього відкочуєтесь.
 Сервер нічого не збирає: `pnpm install` і збірка веба відбуваються один раз
 у CI. Збирати образ локально потрібно лише для форка чи зміни
 `docker/Dockerfile.api` – для цього є оверлей `docker-compose.build.yml`.
@@ -34,7 +34,7 @@ nginx-образ `docker/Dockerfile.web` – deprecated з v1.6.0 – видал
    тягне опублікований образ `ghcr.io/romirom11/ordi` (`pull_policy:
    always`, тож кожен Redeploy у панелі ставить актуальний образ тега).
    Без `ORDI_VERSION` це `latest`; для закріплення на релізі задайте
-   `ORDI_VERSION=1.33.0` в Environment.
+   `ORDI_VERSION=1.33.1` в Environment.
    `docker-compose.yml` у корені – для локального запуску: він прибиває
    значення до `localhost` і публікує порти на хост.
 2. **Environment** (мінімум для прод):
@@ -111,10 +111,10 @@ docker compose -f docker-compose.prod.yml up -d
 ```
 
 На Dokploy те саме робить кнопка **Redeploy** (образ тягнеться при кожному
-`up`). Закріплені на версії (`ORDI_VERSION=1.33.0`)? Змініть значення на
+`up`). Закріплені на версії (`ORDI_VERSION=1.33.1`)? Змініть значення на
 нову версію і повторіть. Відкат – та сама операція з попередньою версією:
 `ORDI_VERSION=1.33.0 docker compose -f docker-compose.prod.yml up -d`. Теги
-кожного релізу: `1.33.0`, `1.33`, `1`, `latest`.
+кожного релізу: `1.33.1`, `1.33`, `1`, `latest`.
 
 Міграції **адитивні** і запускаються автоматично в entrypoint API-контейнера
 перед стартом сервера – окремих кроків немає. Rollback безпечний: попередній

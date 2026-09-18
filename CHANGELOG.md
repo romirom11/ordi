@@ -3,6 +3,19 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.33.1
+
+- **The agent worker stays online**: every heartbeat after a worker's first
+  one failed with `operator does not exist: text + integer`, so Settings →
+  Agents showed the worker offline 35 seconds after it started, and a
+  standalone worker logged `agent worker heartbeat failed` every 15 seconds
+  against a 500 from `/api/v1/agent-worker/heartbeat`. The row's `version`
+  column held the ordi version string, and the optimistic-locking trigger
+  that bumps every column of that name tried to add one to it. The column
+  is now `app_version` (migration `0039_agent_workers_app_version`, which
+  also drops the trigger from that table), and `triggers.sql` attaches the
+  bump trigger only to integer `version` columns.
+
 ## v1.33.0
 
 - **The agent worker can run without the database**: the process that

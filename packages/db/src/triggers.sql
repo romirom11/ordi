@@ -23,14 +23,20 @@ $$ LANGUAGE plpgsql;
 DO $$
 DECLARE r record;
 BEGIN
+  -- Only an integer `version` is the optimistic-locking counter. A text
+  -- column of that name (agent_workers.version once held the ordi version
+  -- string) would make every UPDATE fail with `text + integer`, so such a
+  -- table gets no trigger and loses one it may have.
   FOR r IN
-    SELECT table_name FROM information_schema.columns
+    SELECT table_name, data_type FROM information_schema.columns
     WHERE table_schema = 'public' AND column_name = 'version'
   LOOP
     EXECUTE format('DROP TRIGGER IF EXISTS trg_bump_version ON %I;', r.table_name);
-    EXECUTE format(
-      'CREATE TRIGGER trg_bump_version BEFORE UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION ordi_bump_version();',
-      r.table_name);
+    IF r.data_type IN ('integer', 'bigint', 'smallint') THEN
+      EXECUTE format(
+        'CREATE TRIGGER trg_bump_version BEFORE UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION ordi_bump_version();',
+        r.table_name);
+    END IF;
   END LOOP;
 
   FOR r IN

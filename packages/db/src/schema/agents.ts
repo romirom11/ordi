@@ -171,5 +171,9 @@ export const agentWorkers = pgTable('agent_workers', {
   concurrency: integer('concurrency').notNull().default(1),
   running: integer('running').notNull().default(0),
   runtimeAvailable: boolean('runtime_available').notNull().default(false),
-  version: text('version').notNull().default(''),
+  // The ordi version the worker runs, a string like "1.33.0" - not the
+  // optimistic-locking counter, so it must not be called `version`: the
+  // bump trigger in triggers.sql attaches to every column of that name and
+  // `'1.33.0' + 1` made every heartbeat after the first fail.
+  appVersion: text('app_version').notNull().default(''),
 });

@@ -42,10 +42,10 @@ export async function heartbeat(info: WorkerInfo): Promise<void> {
   // Rows are keyed by host:pid; a restarted process leaves its old row behind.
   await db.delete(agentWorkers).where(sql`${agentWorkers.lastSeenAt} < now() - interval '10 minutes'`);
   await db.insert(agentWorkers).values({
-    id: info.workerId, concurrency: info.concurrency, running: info.running, runtimeAvailable: info.runtimeAvailable, version: info.version,
+    id: info.workerId, concurrency: info.concurrency, running: info.running, runtimeAvailable: info.runtimeAvailable, appVersion: info.version,
   }).onConflictDoUpdate({
     target: agentWorkers.id,
-    set: { lastSeenAt: new Date(), running: info.running, concurrency: info.concurrency, runtimeAvailable: info.runtimeAvailable, version: info.version },
+    set: { lastSeenAt: new Date(), running: info.running, concurrency: info.concurrency, runtimeAvailable: info.runtimeAvailable, appVersion: info.version },
   });
 }
 
@@ -56,7 +56,7 @@ export async function listWorkers() {
   const cutoff = Date.now() - 2 * HEARTBEAT_MS - 5_000;
   return rows.map((w) => ({
     id: w.id, startedAt: w.startedAt.toISOString(), lastSeenAt: w.lastSeenAt.toISOString(),
-    concurrency: w.concurrency, running: w.running, runtimeAvailable: w.runtimeAvailable, version: w.version,
+    concurrency: w.concurrency, running: w.running, runtimeAvailable: w.runtimeAvailable, version: w.appVersion,
     online: w.lastSeenAt.getTime() >= cutoff,
   }));
 }
