@@ -3,7 +3,7 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
-## Unreleased
+## v1.33.1
 
 - **The agent worker stays online**: every heartbeat after a worker's first
   one failed with `operator does not exist: text + integer`, so Settings →
