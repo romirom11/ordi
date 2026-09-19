@@ -23,7 +23,17 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   and any `AGENT_WORKER_ENABLED=1` on `api`; the volume and the session
   transcripts carry over.
 
+- **A question from the agent no longer loses its work**: a run that ended
+  with `needs_input` pushed nothing, and the checkout – with whatever the
+  agent had committed before asking – was deleted when the run ended, so
+  the follow-up after the person's reply resumed a session that remembered
+  files no longer on disk and started a differently named branch. The
+  work so far now goes out as a `WIP` commit on the task's branch, the
+  same way it does for a run stopped by a limit, a timeout or a cancel,
+  and the follow-up continues on it.
+
 ## v1.33.1
+
 
 - **The agent worker stays online**: every heartbeat after a worker's first
   one failed with `operator does not exist: text + integer`, so Settings →
