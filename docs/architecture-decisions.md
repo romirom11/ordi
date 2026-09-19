@@ -234,10 +234,11 @@ of MCP connectors. Assigning it a task queues a run; the run ends with a pull
 request and the task in review.
 
 - **Execution is platform-hosted, not on user machines.** The run worker
-  (`workers/agent-runs.ts`) lives in the API process next to the email worker
-  by default, and the admin configures execution once for everyone. The
-  alternative – a runner each person installs – was rejected: it makes
-  "assign a task to the agent" depend on whose laptop is awake.
+  (`workers/agent-runs.ts`) is a service of the deployment – its own
+  container in both compose files, or the API process itself under
+  `AGENT_WORKER_ENABLED=1` – and the admin configures execution once for
+  everyone. The alternative – a runner each person installs – was rejected:
+  it makes "assign a task to the agent" depend on whose laptop is awake.
 - **The worker knows the platform only through `RunBackend`.** Everything a
   run needs that lives in a row or behind a secret – the claim (`FOR UPDATE
   SKIP LOCKED`, so replicas are safe), the decrypted credential chain, the
@@ -250,9 +251,14 @@ request and the task in review.
   database. That is what makes the production split real rather than
   cosmetic: the container that executes model-authored code holds no
   `DATABASE_URL`, `ENCRYPTION_KEY` or `AUTH_SECRET` to lose, only the one
-  run's credential, repository token and revocable run token. The split stays
-  opt-in (`AGENT_WORKER_SECRET` on both services, `AGENT_WORKER_ENABLED=0` on
-  the API) because `docker compose up` must produce a working system.
+  run's credential, repository token and revocable run token. The split is
+  the default: both compose files run the `agent-worker` service with
+  `AGENT_WORKER_ENABLED=0` on the API, and `docker compose up` still produces
+  a working system because the quick-start file ships a placeholder
+  `AGENT_WORKER_SECRET` the way it ships a placeholder `AUTH_SECRET`
+  (production requires a real one). The in-process worker remains for
+  `pnpm dev` and for whoever chooses one container knowingly.
+
 - **The Agent SDK, not the `claude` CLI.** `@anthropic-ai/claude-agent-sdk`
   bundles the same runtime as a per-platform optional dependency and yields
   typed messages (session id, tool use, usage, cost) instead of parsed stdout,

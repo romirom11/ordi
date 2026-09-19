@@ -154,9 +154,12 @@ export async function executeRun(backend: RunBackend, claimed: ClaimedRun): Prom
     }
 
     const refreshRepo = () => backend.repository(runId);
-    // A run that stops early (limit, timeout, cancel, error) must not lose
-    // what the agent already did: the branch is pushed without a pull
-    // request, and a retry continues on it with the same session.
+    // A run that stops early (limit, timeout, cancel, error) or pauses for
+    // an answer (needs_input) must not lose what the agent already did: the
+    // branch is pushed without a pull request, and the retry or the
+    // follow-up continues on it with the same session. The checkout itself
+    // is deleted when the run ends, so an unpushed commit would be gone by
+    // the time the person replies.
     const preserveWork = async (): Promise<PublishOutcome> => {
       try {
         const kept = await publishWorkspace(workspace, { ref, title: task.title, summary: '', existingPrUrl: claimed.prUrl ?? null, openPullRequest: false, refreshRepo });
@@ -174,9 +177,9 @@ export async function executeRun(backend: RunBackend, claimed: ClaimedRun): Prom
       : null;
 
     let publish: PublishOutcome | null = null;
-    if (aborted || outcome.status === 'failed' || outcome.status === 'rate_limited') {
+    if (aborted || outcome.status !== 'succeeded') {
       publish = await preserveWork();
-    } else if (outcome.status === 'succeeded') {
+    } else {
       const summary = outcome.report?.summary?.trim() || outcome.message?.trim() || 'Done.';
       try {
         const published = await publishWorkspace(workspace, {

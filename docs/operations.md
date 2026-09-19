@@ -107,12 +107,14 @@ dead-lettered`, `sales digest failed` and `initial sales digest failed` messages
 
 ## 6. Agent runs
 
-The agent worker runs inside the API container (`AGENT_WORKER_ENABLED`, default
-on) unless it has been split into its own service – see docs/deployment.md §3b.
-Split out, the worker has no database: it claims runs, writes its log and
-reports through `/api/v1/agent-worker/*` with `AGENT_WORKER_SECRET`, and the
-API does everything that touches a row or a secret. Everything below about
-runs, sessions and the volume applies to whichever container runs the worker.
+The agent worker is its own container in both compose files (the
+`agent-worker` service; docs/deployment.md §3b). It has no database: it
+claims runs, writes its log and reports through `/api/v1/agent-worker/*`
+with `AGENT_WORKER_SECRET`, and the API does everything that touches a row or
+a secret. The API's own in-process worker (`AGENT_WORKER_ENABLED`) is off in
+compose and exists for `pnpm dev` and single-container installs. Everything
+below about runs, sessions and the volume applies to whichever container runs
+the worker.
 
 **Disk.** Every run gets a fresh clone under
 `/data/agent-work/tasks/<taskId>/checkout`, deleted when the run finishes,

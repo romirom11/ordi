@@ -8,9 +8,12 @@
 # Everything is configured through env vars; nothing is published to the host,
 # because the router reaches the containers over the compose network.
 #
-# Required: POSTGRES_PASSWORD, AUTH_SECRET, ENCRYPTION_KEY, APP_URL.
+# Required: POSTGRES_PASSWORD, AUTH_SECRET, ENCRYPTION_KEY, APP_URL,
+# AGENT_WORKER_SECRET.
 # APP_URL must be the public https address, e.g. https://ordi.example.com – it
 # is what emails, PDF links and the OAuth discovery documents are built from.
+# AGENT_WORKER_SECRET is what the agent-worker container presents to the api;
+# any random string (openssl rand -hex 32).
 
 services:
   # Generic service names are a trap on a PaaS: the router attaches `api` to a
@@ -93,6 +96,22 @@ services:
     restart: unless-stopped
     expose:
       - "3000"
+    networks:
+      default:
+        # The agent-worker reaches the api by this name, for the same reason
+        # the database is ordi-db: on a shared PaaS network a generic `api`
+        # can resolve to another project's container.
+        aliases: [ordi-api]
+    healthcheck:
+      # /healthz answers once migrations have run and the server listens; the
+      # agent-worker waits for it instead of logging "API unreachable" while
+      # the api boots. Docker does not restart an unhealthy container, so a
+      # slow migration only delays the worker, it never kills the api.
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/healthz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
     environment:
       NODE_ENV: production
       # Migrations run on boot (see the image's CMD), so a fresh volume and an
@@ -117,62 +136,60 @@ services:
       SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-}
       SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
-      # AI agent employees: the run worker lives in this container unless you
-      # split it out (see agent-worker below). Set AGENT_WORKER_ENABLED=0 to
-      # run the platform with agents configurable but no runs executing here.
-      AGENT_WORKER_ENABLED: ${AGENT_WORKER_ENABLED:-1}
+      # AI agent employees: runs execute in the agent-worker container below,
+      # never here. The api's own in-process worker stays off; the secret
+      # opens /api/v1/agent-worker/* to the worker container. To run
+      # everything in this one container instead (not recommended: the
+      # process that executes model-authored code then sits next to every
+      # secret above), set AGENT_WORKER_ENABLED=1, mount agent_work here as
+      # the worker does, and start with --scale agent-worker=0.
+      AGENT_WORKER_ENABLED: ${AGENT_WORKER_ENABLED:-0}
       AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:-2}
-      # Set to open /api/v1/agent-worker/* to a worker container of its own
-      # (the agent-worker service below); unset, that router answers 503.
-      AGENT_WORKER_SECRET: ${AGENT_WORKER_SECRET:-}
+      AGENT_WORKER_SECRET: ${AGENT_WORKER_SECRET:?set AGENT_WORKER_SECRET (any random string, shared with agent-worker)}
       # Claude is connected in Settings → Agents (a `claude setup-token`
       # subscription token or an API key). This env var is only a fallback
       # source for API keys, for a PaaS that configures everything by env.
+      # It stays on the api: the worker receives the credential per run.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-    volumes:
-      # tasks/<taskId>/checkout: one fresh clone per run, deleted when it
-      # ends – size for AGENT_WORKER_CONCURRENCY × repository size; and
-      # tasks/<taskId>/harness: session transcripts kept 30 days so follow-ups
-      # resume. Every container that claims runs must mount the same volume
-      # (docs/operations.md). With the agent-worker service enabled below,
-      # this mount moves there and the api needs none.
-      - agent_work:/data/agent-work
     depends_on:
       db:
         condition: service_healthy
 
-  # ── Recommended for production: run agents in their own container ──
+  # ── Agent runs: their own container ──
   #
   # An agent run is the only thing in ordi that executes model-authored code.
-  # It is already sandboxed (rebuilt child env, per-run token, allow/deny tool
-  # lists – see docs/architecture-decisions.md §12), but its blast radius is
-  # still the container it runs in – and the api container holds everything.
+  # It is sandboxed (rebuilt child env, per-run token, allow/deny tool lists –
+  # see docs/architecture-decisions.md §12), but the blast radius of an escape
+  # is still the container it runs in – and the api container holds
+  # everything. So runs execute here, in a container that has no database:
+  # it talks to the api over HTTP with one shared secret and holds only what
+  # the run in front of it needs – the model credential, the repository token
+  # and the run's own revocable API token. It owns the volume for checkouts
+  # and transcripts, and can get its own CPU/memory limits and network policy.
   #
-  # The worker below has no database. It talks to the api over HTTP with one
-  # shared secret and holds only what the run in front of it needs: the model
-  # credential, the repository token and the run's own API token. It has its
-  # own volume for checkouts and transcripts (the api then needs none), and
-  # can get its own CPU/memory limits.
-  #
-  # To enable: uncomment the block, set the same AGENT_WORKER_SECRET on both
-  # services, and set AGENT_WORKER_ENABLED=0 on `api` so it stops claiming
-  # runs itself. Runs are claimed with SKIP LOCKED on the api side, so
-  # nothing is executed twice even if you get the flag wrong for a moment.
-  #
-  # agent-worker:
-  #   image: ghcr.io/romirom11/ordi:${ORDI_VERSION:-latest}
-  #   pull_policy: always
-  #   restart: unless-stopped
-  #   command: ["sh", "-c", "pnpm --filter @ordi/api exec tsx src/agent-worker.ts"]
-  #   environment:
-  #     NODE_ENV: production
-  #     ORDI_API_URL: http://api:3000
-  #     AGENT_WORKER_SECRET: ${AGENT_WORKER_SECRET:?set AGENT_WORKER_SECRET}
-  #     AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:-2}
-  #   volumes:
-  #     - agent_work:/data/agent-work
-  #   depends_on:
-  #     - api
+  # Runs are claimed with SKIP LOCKED on the api side, so nothing executes
+  # twice even with AGENT_WORKER_ENABLED=1 on the api by mistake. Without a
+  # Claude credential (Settings → Agents) the worker just idles.
+  agent-worker:
+    image: ghcr.io/romirom11/ordi:${ORDI_VERSION:-latest}
+    pull_policy: always
+    restart: unless-stopped
+    command: ["sh", "-c", "pnpm --filter @ordi/api exec tsx src/agent-worker.ts"]
+    environment:
+      NODE_ENV: production
+      ORDI_API_URL: http://ordi-api:3000
+      AGENT_WORKER_SECRET: ${AGENT_WORKER_SECRET:?set AGENT_WORKER_SECRET (any random string, shared with api)}
+      AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:-2}
+    volumes:
+      # tasks/<taskId>/checkout: one fresh clone per run, deleted when it
+      # ends – size for AGENT_WORKER_CONCURRENCY × repository size; and
+      # tasks/<taskId>/harness: session transcripts kept 30 days so follow-ups
+      # resume. Every container that runs agents must mount the same volume
+      # (docs/operations.md).
+      - agent_work:/data/agent-work
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   db_data:

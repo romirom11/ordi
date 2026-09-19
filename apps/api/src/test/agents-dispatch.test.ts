@@ -292,16 +292,25 @@ describe('the worker end to end', () => {
     expect(list[0]!.agentName).toBe('Claude');
   });
 
-  it('a needs_input report posts the question and ends the run as needs_input', async () => {
+  it('a needs_input report posts the question, ends the run as needs_input, and pushes the work so far without a pull request', async () => {
     const owner = reqAs(ws.users.owner!.cookie);
     const task = await newTask('Ambiguous');
     await assign(task.id, [agentId]);
+    const gitLog: string[][] = [];
+    setGitRunner(fakeGit(gitLog));
     restoreAdapter = setRuntimeAdapter(adapter(async () => ({
       status: 'needs_input', sessionId: 's2', message: '', error: null, usage, retryAt: null,
       report: { status: 'needs_input', summary: 'Need the target API version', verification: null, risks: null, prUrl: null, branch: null, question: 'Should this target v1 or v2?' },
     })));
     const run = await runToEnd(task.id);
     expect(run.status).toBe('needs_input');
+    // The checkout is deleted when the run ends; the commits made before the
+    // question have to be on origin for the follow-up to find them.
+    expect(gitLog.some((a) => a[0] === 'push')).toBe(true);
+    expect(run.branch).toBeTruthy();
+    expect(run.prUrl).toBeNull();
+
+
     const detail = await json(owner.get(`/tasks/${task.id}?include=comments`));
     expect(JSON.stringify(detail.comments)).toContain('v1 or v2');
     expect(detail.statusId).toBe(ws.todoStatusId);
