@@ -15,3 +15,8 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.api
+  # Same image, second container: the build above produces it, so the worker
+  # only has to stop pulling the registry tag.
+  agent-worker:
+    image: ordi:local
+    pull_policy: never

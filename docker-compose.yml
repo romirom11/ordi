@@ -49,25 +49,49 @@ services:
       S3_SECRET_KEY: ordi-secret
       # Local development: SMTP_URL: smtp://mailpit:1025
       SMTP_URL: ${SMTP_URL:-}
-      # AI agent employees: the run worker lives in this same container.
-      # Set AGENT_WORKER_ENABLED=0 to keep the API without ever starting a run.
-      AGENT_WORKER_ENABLED: ${AGENT_WORKER_ENABLED:-1}
+      # AI agent employees: runs execute in the agent-worker container below,
+      # the same way as in production; the api's own worker stays off. The
+      # secret only has to match between the two services.
+      AGENT_WORKER_ENABLED: ${AGENT_WORKER_ENABLED:-0}
       AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:-2}
+      AGENT_WORKER_SECRET: ${AGENT_WORKER_SECRET:-change-me}
       # Claude is normally connected in Settings → Agents (a `claude
       # setup-token` subscription token or an API key). This env var is only a
       # fallback for API keys, handy when developing without touching the UI:
       # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-    volumes:
-      # tasks/<taskId>/checkout: one fresh clone per run, deleted when it
-      # ends; tasks/<taskId>/harness: session transcripts, kept 30 days so a
-      # follow-up resumes the conversation. Must survive container rebuilds.
-      - agent_work:/data/agent-work
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/healthz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
     depends_on:
       db:
         condition: service_healthy
     ports:
       - "3000:3000"
       - "8080:3000"
+
+  # Agent runs execute here, not in the api container: this is the one
+  # process that runs code the model wrote, so it gets no database and no
+  # keys – only the api's address and the shared secret (docker-compose.prod.yml
+  # explains the split). Idle until a Claude credential is connected.
+  agent-worker:
+    image: ghcr.io/romirom11/ordi:${ORDI_VERSION:-latest}
+    command: ["sh", "-c", "pnpm --filter @ordi/api exec tsx src/agent-worker.ts"]
+    environment:
+      NODE_ENV: production
+      ORDI_API_URL: http://api:3000
+      AGENT_WORKER_SECRET: ${AGENT_WORKER_SECRET:-change-me}
+      AGENT_WORKER_CONCURRENCY: ${AGENT_WORKER_CONCURRENCY:-2}
+    volumes:
+      # tasks/<taskId>/checkout: one fresh clone per run, deleted when it
+      # ends; tasks/<taskId>/harness: session transcripts, kept 30 days so a
+      # follow-up resumes the conversation. Must survive container rebuilds.
+      - agent_work:/data/agent-work
+    depends_on:
+      api:
+        condition: service_healthy
 
   # Local mail catcher – point SMTP_URL at it to see real rendered email
   # without sending anything outside. UI: http://localhost:8025

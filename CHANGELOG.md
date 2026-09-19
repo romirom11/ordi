@@ -3,6 +3,26 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## Unreleased
+
+- **Agent runs execute in their own container out of the box**: the
+  `agent-worker` service is no longer a commented-out option in
+  `docker-compose.prod.yml` but part of both compose files, and the API's
+  in-process worker is off there (`AGENT_WORKER_ENABLED=0`). The container
+  that runs model-authored code therefore never holds `DATABASE_URL`,
+  `ENCRYPTION_KEY` or `AUTH_SECRET`, on a fresh install as much as on a
+  hardened one. `AGENT_WORKER_SECRET` is now required by
+  `docker-compose.prod.yml` (any random string; the quick-start file ships a
+  placeholder like it does for `AUTH_SECRET`), the `agent_work` volume is
+  mounted on the worker only, the api gets a `/healthz` healthcheck the
+  worker waits for, and it is reached as `ordi-api` on the compose network
+  for the same reason the database is `ordi-db`. Settings → Agents warns
+  about a missing worker only when none is online, rather than whenever the
+  API's own one is off. Upgrading: add `AGENT_WORKER_SECRET` to the
+  environment, drop any `agent-worker` block you had uncommented yourself
+  and any `AGENT_WORKER_ENABLED=1` on `api`; the volume and the session
+  transcripts carry over.
+
 ## v1.33.1
 
 - **The agent worker stays online**: every heartbeat after a worker's first

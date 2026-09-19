@@ -129,7 +129,7 @@ extendDict({
     // Workers
     'agents.workers': 'Workers',
     'agents.workersDesc': 'The processes that execute runs, and whether the runtime is installed next to them.',
-    'agents.workerDisabled': 'The agent worker is off in this deployment – set AGENT_WORKER_ENABLED=true to run agents.',
+    'agents.workerDisabled': 'No agent worker is running: the API\'s own worker is off (AGENT_WORKER_ENABLED) and no separate agent-worker container has reported in. Start the agent-worker service, or set AGENT_WORKER_ENABLED=true on the API.',
     'agents.noWorkers': 'No worker has reported in yet.',
     'agents.runtimeInstalled': 'Installed',
     'agents.runtimeMissing': 'Not installed',
@@ -242,7 +242,7 @@ extendDict({
     // Workers
     'agents.workers': 'Виконавці',
     'agents.workersDesc': 'Процеси, які виконують запуски, та наявність середовища поруч із ними.',
-    'agents.workerDisabled': 'Виконавець агентів вимкнений у цьому розгортанні – встановіть AGENT_WORKER_ENABLED=true.',
+    'agents.workerDisabled': 'Жоден воркер агентів не працює: вбудований воркер API вимкнений (AGENT_WORKER_ENABLED), а окремий контейнер agent-worker не виходив на звʼязок. Запустіть сервіс agent-worker або поставте AGENT_WORKER_ENABLED=true на API.',
     'agents.noWorkers': 'Жоден виконавець ще не звітував.',
     'agents.runtimeInstalled': 'Встановлено',
     'agents.runtimeMissing': 'Не встановлено',
@@ -926,7 +926,10 @@ export function AgentsPanel() {
         <Skeleton className="h-24 w-full" />
       ) : overview ? (
         <Card className="p-4">
-          {!overview.workerEnabled && (
+          {/* The api's own worker being off is the normal shape of a deployment
+              with a separate agent-worker container; it is only a problem when
+              no worker at all is online. */}
+          {!overview.workerEnabled && !overview.workers.some((w) => w.online) && (
             <p className="mb-3 rounded-md border border-warning/40 bg-warning/5 p-2.5 text-xs text-warning">{t('agents.workerDisabled')}</p>
           )}
           <div className="flex flex-wrap gap-2">
