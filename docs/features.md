@@ -471,8 +471,8 @@
   відкриваються в десктопі.
 - Лендинг на [romirom11.github.io/ordi](https://romirom11.github.io/ordi)
   ([PR #42](https://github.com/romirom11/ordi/pull/42)). Відтоді сайт переїхав
-  на [ordi.one](https://ordi.one) (репозиторій `ordi-cloud`), а `site/` у цьому
-  репозиторії лишився редиректом туди.
+  на [ordi.one](https://ordi.one) (репозиторій `ordi-cloud`); у цьому
+  репозиторії його більше немає.
 
 ### v1.16.0
 
