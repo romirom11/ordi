@@ -3,7 +3,7 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
-## Unreleased
+## v1.34.0
 
 - **Agent runs execute in their own container out of the box**: the
   `agent-worker` service is no longer a commented-out option in
