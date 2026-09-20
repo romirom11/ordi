@@ -175,7 +175,7 @@ docker compose up
 Open <http://localhost:8080> and the setup wizard will create your workspace and
 owner account.
 
-`docker compose pull` moves you to the newest release; `ORDI_VERSION=1.33.1`
+`docker compose pull` moves you to the newest release; `ORDI_VERSION=1.34.0`
 in a `.env` next to the compose file pins one (and is how you roll back). The
 image is `linux/amd64`.
 

@@ -9,6 +9,7 @@ list the repository already uses:
   (`feature/agent-worker-own-container`, `feature/ord-31-add-crm-leads-export`)
 - `fix/` – a bug fix (`fix/minio-images-quay`)
 - `docs/` – documentation only (`docs/readme-features-catch-up`)
+- `release/` – the version bump that cuts a release (`release/v1.34.0`)
 
 Put the task key first when there is one (`feature/ord-31-...`). The rest
 says what the change does, not what part of the code it touches.
