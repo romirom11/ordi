@@ -3,6 +3,14 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## Unreleased
+
+- **A comment is edited by its author, and by nobody else**: v1.30.0 also
+  handed project admins a pencil on other people's comments; an edit changes
+  what a person is on record as having said, so it is now the author's alone
+  and `PATCH /comments/:id` answers 403 to anyone else. Moderation is
+  unchanged: an admin still deletes any comment in their project.
+
 ## v1.34.0
 
 - **Agent runs execute in their own container out of the box**: the

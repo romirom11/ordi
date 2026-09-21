@@ -936,16 +936,20 @@ export async function addComment(actor: Actor, taskId: string, input: any) {
 }
 
 /**
- * Rewrites one comment: its author may fix it as a member, anyone else needs
- * project admin – the same rule delete follows. `editedAt` is what tells the
- * reader the text they see is not the text that was posted.
+ * Rewrites one comment – only its author, whatever role anyone else holds. An
+ * edit changes what a person is on record as having said, so moderation stays
+ * with delete, which a project admin may still use on any comment. `editedAt`
+ * is what tells the reader the text they see is not the text that was posted.
  */
 export async function editComment(actor: Actor, commentId: string, body: unknown) {
   const { db } = getDb();
   const [comment] = await db.select().from(schema.comments).where(and(eq(schema.comments.id, commentId), isNull(schema.comments.deletedAt)));
   if (!comment) throw err.notFound('Comment not found');
   const task = await loadTask(comment.taskId);
-  await assertProject(actor, task.projectId, comment.authorId === actor.userId ? 'member' : 'admin');
+  // Project access first: someone outside the project learns nothing about who
+  // wrote what, they are simply not in it.
+  await assertProject(actor, task.projectId, 'member');
+  if (comment.authorId !== actor.userId) throw err.forbidden('Only the author can edit a comment');
   await db.update(schema.comments).set({ body: body ?? {}, editedAt: new Date() }).where(eq(schema.comments.id, commentId));
   // A mention added by the edit notifies like a fresh one; the mentions that
   // were already in the comment stay quiet instead of pinging twice.
