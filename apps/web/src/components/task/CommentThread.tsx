@@ -172,13 +172,13 @@ function ComposerActions({ submitLabel, canSubmit, onSubmit, onCancel }: {
 }
 
 /**
- * Who may rewrite a comment – the rule the API enforces: its author edits it as
- * a project member, anyone else needs project admin. Resolved here so the
- * pencil never shows on a comment the server would refuse to save.
+ * Who may rewrite a comment – the rule the API enforces: its own author, and
+ * nobody else, however senior. Resolved here so the pencil never shows on a
+ * comment the server would refuse to save.
  */
 function canEditComment(comment: TaskComment, role: ProjectRole, myId?: string): boolean {
-  if (role === 'admin') return true;
-  return role === 'member' && !!myId && comment.authorId === myId;
+  if (role !== 'member' && role !== 'admin') return false;
+  return !!myId && comment.authorId === myId;
 }
 
 /**

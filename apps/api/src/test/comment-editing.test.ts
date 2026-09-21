@@ -1,7 +1,7 @@
 /**
- * Editing a comment (ORD-29): the author rewrites their own as a project
- * member, anyone else needs project admin, the rewrite is stamped with
- * `editedAt`, and a mention the edit introduces notifies once.
+ * Editing a comment (ORD-29): only its author rewrites it – a project admin
+ * moderates with delete, not by putting words in someone's mouth – the rewrite
+ * is stamped with `editedAt`, and a mention the edit introduces notifies once.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import { getDb, schema, and, eq } from '@ordi/db';
@@ -56,14 +56,16 @@ describe('comment editing', () => {
     expect(await comments(users.member!.cookie)).toHaveLength(1);
   });
 
-  it('refuses another member and allows a project admin', async () => {
+  it('refuses everyone but the author, the workspace owner included', async () => {
     const commentId = await addComment(users.member!.cookie, doc('Mine'));
 
-    expect((await reqAs(users.sales!.cookie).patch(`/comments/${commentId}`, { body: doc('Not mine') })).status).toBe(403);
+    for (const key of ['sales', 'owner']) {
+      expect((await reqAs(users[key]!.cookie).patch(`/comments/${commentId}`, { body: doc('Not mine') })).status).toBe(403);
+    }
     expect(JSON.stringify((await comments(users.member!.cookie)).find((c) => c.id === commentId).body)).toContain('Mine');
 
-    expect((await reqAs(users.owner!.cookie).patch(`/comments/${commentId}`, { body: doc('Moderated') })).status).toBe(200);
-    expect(JSON.stringify((await comments(users.member!.cookie)).find((c) => c.id === commentId).body)).toContain('Moderated');
+    // What an admin does have on someone else's comment is delete.
+    expect((await reqAs(users.owner!.cookie).del(`/comments/${commentId}`)).status).toBe(200);
   });
 
   it('rejects a patch without a body instead of blanking the comment', async () => {
