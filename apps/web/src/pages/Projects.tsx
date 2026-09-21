@@ -255,7 +255,10 @@ export function ProjectsPage() {
                   onAuxClick={(e) => open(`/projects/${p.id}`, e)}
                   style={{ ['--i' as string]: Math.min(i, 10) }}
                   className={cn(
-                    'row-enter group flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors duration-150 hover:bg-muted/60',
+                    // whitespace-nowrap: every cell right of the name is a short
+                    // label – a date, a key, a status – and none of them may
+                    // break over two lines when the column is a few pixels short.
+                    'row-enter group flex w-full items-center gap-3 whitespace-nowrap px-4 py-2.5 text-left transition-colors duration-150 hover:bg-muted/60',
                     i > 0 && 'border-t border-border',
                   )}
                 >
@@ -275,7 +278,10 @@ export function ProjectsPage() {
                   <Badge className="hidden shrink-0 bg-muted font-mono text-[11px] text-muted-foreground sm:inline-flex">{p.key}</Badge>
                   <div className="hidden shrink-0 md:block"><StatusPill status={p.status} /></div>
                   <div className="hidden w-20 shrink-0 justify-end sm:flex"><ProjectProgress counts={countsById.get(p.id)} /></div>
-                  <div className="hidden w-20 shrink-0 items-center justify-end gap-1 text-xs text-muted-foreground lg:flex">
+                  {/* min-w so short dates still line the column up, but a long
+                      one ("31 Aug 2026") widens it instead of wrapping onto a
+                      second line – the name column beside it has room to give. */}
+                  <div className="hidden min-w-20 shrink-0 items-center justify-end gap-1 text-xs text-muted-foreground lg:flex">
                     {p.targetDate ? (<><Target size={12} className="text-faint" /><span className="tabular-nums">{fmtDate(p.targetDate)}</span></>) : null}
                   </div>
                   <div className="flex w-6 shrink-0 justify-end">
