@@ -3,7 +3,7 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
-## Unreleased
+## v1.35.1
 
 - **The bundled object storage is RustFS, and the API creates its own
   bucket**: MinIO stopped serving its images anonymously – Docker Hub
