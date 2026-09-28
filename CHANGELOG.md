@@ -3,6 +3,26 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## Unreleased
+
+- **The bundled object storage is RustFS, and the API creates its own
+  bucket**: MinIO stopped serving its images anonymously – Docker Hub
+  first (v1.31.0 moved to quay.io), now quay.io too – so a deploy with the
+  `minio` profile failed at `quay.io/minio/mc` with "unauthorized", and a
+  fresh host could not pull `minio/minio` either. The `minio` and
+  `minio-init` services are replaced by one `s3` service running RustFS
+  (Apache-2.0, S3-compatible, published on Docker Hub, `RUSTFS_ACCESS_KEY`
+  / `RUSTFS_SECRET_KEY` from the same `S3_*` pair). The bucket is created
+  by the API on boot – `HeadBucket`, then `CreateBucket` when missing,
+  retried while the storage container is still starting – against whatever
+  S3 it is pointed at, so no client image is needed for that step and R2/S3
+  installs gain the same convenience where the key is allowed to create
+  buckets. `COMPOSE_PROFILES=minio` and `S3_ENDPOINT=http://ordi-minio:9000`
+  keep working (profile and network alias kept); the recommended names are
+  `s3` and `http://ordi-s3:9000`. Files in the old `minio_data` volume are
+  in MinIO's own on-disk format: `docs/deployment.md` §4 has the one-off
+  `rclone sync` that copies them across while the old container still runs.
+
 ## v1.35.0
 
 - **Sending an invoice sends it, or says why not**: "Send" used to flip the

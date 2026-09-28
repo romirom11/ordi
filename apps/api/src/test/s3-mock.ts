@@ -8,6 +8,14 @@ export function isStorageConfigured(): boolean {
   return true;
 }
 
+export async function ensureBucket(): Promise<'exists'> {
+  return 'exists';
+}
+
+export async function ensureBucketAtBoot(): Promise<'exists'> {
+  return 'exists';
+}
+
 export async function putObject(key: string, body: Uint8Array, mime: string): Promise<boolean> {
   store.set(key, { body, mime });
   return true;

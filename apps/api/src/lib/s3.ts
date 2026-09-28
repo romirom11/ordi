@@ -5,9 +5,10 @@
  * so an internal MinIO on a docker network needs no public endpoint, no CORS
  * and no second https vhost – and an external S3/R2 stays private too.
  */
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, HeadBucketCommand, CreateBucketCommand } from '@aws-sdk/client-s3';
 import { env } from '../env';
 import { err } from './errors';
+import { logger } from './logger';
 
 /**
  * A storage refusal is an operator problem, not a server crash: wrong
@@ -45,6 +46,63 @@ function getClient(): S3Client | null {
 
 export function isStorageConfigured(): boolean {
   return !!env.s3.endpoint;
+}
+
+export type BucketState = 'unconfigured' | 'exists' | 'created' | 'unavailable';
+
+/**
+ * Make sure the bucket exists, creating it when it does not. This is what
+ * the `minio-init` sidecar (a `minio/mc` container) used to do; MinIO no
+ * longer publishes images anonymously, so the API does it itself against
+ * whatever S3 it is pointed at – the bundled server, R2, S3. Credentials
+ * without CreateBucket rights (a locked-down cloud key) are fine: the bucket
+ * then has to exist already, and a missing one still surfaces as the
+ * NoSuchBucket domain error on the first upload.
+ */
+export async function ensureBucket(): Promise<BucketState> {
+  const c = getClient();
+  if (!c) return 'unconfigured';
+  try {
+    await c.send(new HeadBucketCommand({ Bucket: env.s3.bucket }));
+    return 'exists';
+  } catch (cause) {
+    const e = cause as { name?: string; $metadata?: { httpStatusCode?: number } };
+    const missing = e?.name === 'NotFound' || e?.name === 'NoSuchBucket' || e?.$metadata?.httpStatusCode === 404;
+    if (!missing) throw cause;
+  }
+  await c.send(new CreateBucketCommand({ Bucket: env.s3.bucket }));
+  return 'created';
+}
+
+/**
+ * Boot-time bucket check with patience: the bundled storage container is
+ * usually still starting when the API comes up, so a refused connection is
+ * retried for a while before it is logged as a problem. Never throws – a
+ * storage outage must not take the API down with it.
+ */
+export async function ensureBucketAtBoot(opts: { attempts?: number; delayMs?: number } = {}): Promise<BucketState> {
+  const attempts = opts.attempts ?? 20;
+  const delayMs = opts.delayMs ?? 3_000;
+  if (!isStorageConfigured()) return 'unconfigured';
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      const state = await ensureBucket();
+      if (state === 'created') logger.info({ bucket: env.s3.bucket, endpoint: env.s3.endpoint }, 'storage bucket created');
+      else logger.info({ bucket: env.s3.bucket, endpoint: env.s3.endpoint }, 'storage bucket ready');
+      return state;
+    } catch (cause) {
+      const e = cause as { name?: string; message?: string };
+      const transient = i < attempts && /ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNRESET|socket hang up/i.test(`${e?.name} ${e?.message}`);
+      if (transient) {
+        if (i === 1 || i % 5 === 0) logger.info({ attempt: i, endpoint: env.s3.endpoint }, 'storage not reachable yet, retrying');
+        await new Promise((r) => setTimeout(r, delayMs));
+        continue;
+      }
+      logger.error({ err: cause, bucket: env.s3.bucket, endpoint: env.s3.endpoint }, 'storage bucket check failed - uploads will fail until this is fixed');
+      return 'unavailable';
+    }
+  }
+  return 'unavailable';
 }
 
 /** False when storage is not configured – the caller says so to the user. */
