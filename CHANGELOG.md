@@ -5,6 +5,20 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
 ## Unreleased
 
+- **Sending an invoice sends it, or says why not**: "Send" used to flip the
+  status to sent and toast success even when no mail went out – with no
+  SMTP configured the API only logged a line, and with no billing email on
+  the company it skipped the email entirely. Now the button is disabled
+  (with the reason) until outgoing mail is configured, a confirmation
+  dialog shows from whom, to whom (editable, prefilled with the company's
+  billing email), the subject, the message and the attachment before
+  anything goes out, the API refuses a send without a recipient or a mail
+  server and reports a transport failure verbatim instead of marking the
+  invoice sent, and every send is recorded with its address: the invoice
+  page's timeline lists "Sent to …" per send and the response carries the
+  delivery. `GET /invoices/:id/send-preview` backs the dialog; quotes get
+  the same refusals.
+
 - **Invoices that look like invoices, and a public page that opens**: the
   invoice link in every email and PDF (`/i/<token>`) answered with the raw
   JSON the page fetches, because the public API mounted at the root won over

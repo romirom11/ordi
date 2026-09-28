@@ -4,6 +4,7 @@ import { ulid } from 'ulid';
 import { ALL_ROLE_SEEDS, resolveRolePermissions } from '@ordi/shared';
 import { createApp } from '../app';
 import { hashPassword, generateToken } from '../lib/crypto';
+import { invalidateRuntimeConfig } from '../lib/runtime-config';
 
 export const app = createApp();
 
@@ -57,6 +58,24 @@ export async function seedRolesAndUsers(): Promise<Record<string, { userId: stri
     users[seed.key] = { userId, cookie: `ordi_session=${token}`, token };
   }
   return users;
+}
+
+/**
+ * Outgoing mail on or off for a test file. workspace_settings survives
+ * resetDb() on purpose, so a file that turns SMTP on must turn it off again
+ * (afterAll), or the next file's "not configured" expectations meet a
+ * configured instance. Pair with `vi.mock('nodemailer', …)` in the file:
+ * the host here never exists, a real transport would just time out.
+ */
+export async function setTestSmtp(on: boolean): Promise<void> {
+  const { db } = getDb();
+  const [ws] = await db.select().from(schema.workspaceSettings).where(eq(schema.workspaceSettings.id, 'workspace'));
+  const integrations = { ...((ws?.integrations as Record<string, unknown>) ?? {}) };
+  if (on) integrations.smtp = { host: 'smtp.test.local', port: 587, secure: false, user: '', from: 'ordi <test@ordi.local>' };
+  else delete integrations.smtp;
+  if (ws) await db.update(schema.workspaceSettings).set({ integrations }).where(eq(schema.workspaceSettings.id, 'workspace'));
+  else await db.insert(schema.workspaceSettings).values({ id: 'workspace', integrations });
+  invalidateRuntimeConfig();
 }
 
 export function reqAs(cookie: string) {

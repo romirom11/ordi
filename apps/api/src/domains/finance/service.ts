@@ -18,7 +18,8 @@ import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { emit } from '../../core/events';
 import { assertVersion } from '../../core/locking';
-import { sendEmailNow } from '../../lib/email';
+import { sendEmailNow, emailConfigured } from '../../lib/email';
+import { runtimeConfig } from '../../lib/runtime-config';
 import { asLocale, loadBranding, renderEmail, tr, type EmailLocale } from '../../lib/email-templates';
 import { nextNumber } from '../../workers/scheduled';
 import { env } from '../../env';
@@ -167,13 +168,23 @@ export async function getInvoiceRow(id: string) {
 export async function getInvoice(id: string) {
   const { db } = getDb();
   const inv = await getInvoiceRow(id);
-  const [items, pays, credits, company] = await Promise.all([
+  const [items, pays, credits, company, sendRows] = await Promise.all([
     db.select().from(schema.invoiceItems).where(eq(schema.invoiceItems.invoiceId, id)).orderBy(schema.invoiceItems.position),
     db.select().from(schema.payments).where(eq(schema.payments.invoiceId, id)).orderBy(desc(schema.payments.date)),
     db.select().from(schema.creditNotes).where(eq(schema.creditNotes.invoiceId, id)).orderBy(desc(schema.creditNotes.date)),
     db.select({ name: schema.companies.name, billingEmail: schema.companies.billingEmail, address: schema.companies.address })
       .from(schema.companies).where(eq(schema.companies.id, inv.companyId)),
+    // Every send, from the activity log: who was mailed and when. The page
+    // shows these instead of a bare "sent" flag, so a wrong address is visible.
+    db.select({ createdAt: schema.activityLog.createdAt, diff: schema.activityLog.diff, actorId: schema.activityLog.actorId })
+      .from(schema.activityLog)
+      .where(and(eq(schema.activityLog.entityType, 'invoice'), eq(schema.activityLog.entityId, id), eq(schema.activityLog.action, 'sent')))
+      .orderBy(desc(schema.activityLog.createdAt)),
   ]);
+  const sends = sendRows.map((r) => {
+    const diff = (r.diff ?? {}) as { to?: { to?: unknown } };
+    return { at: r.createdAt, to: typeof diff.to?.to === 'string' ? diff.to.to : null, actorId: r.actorId };
+  });
   // companyName mirrors the list endpoint so the detail header can name the
   // client; `company` carries its billing requisites for the "Bill to" block,
   // so the finance page needs no CRM permission to show them.
@@ -181,7 +192,7 @@ export async function getInvoice(id: string) {
   return {
     ...withOverdue(inv), companyName: company[0]?.name ?? null,
     company: company[0] ? { name: company[0].name, billingEmail: company[0].billingEmail, legalName: billing.legalName ?? null, taxId: billing.taxId ?? null, address: billing.address ?? null } : null,
-    items, payments: pays, creditNotes: credits,
+    items, payments: pays, creditNotes: credits, sends,
   };
 }
 
@@ -254,56 +265,104 @@ export async function updateInvoice(actor: Actor, id: string, input: any) {
   return getInvoice(id);
 }
 
+/**
+ * The email an invoice goes out as: recipient (an explicit address, else the
+ * company's billing email), subject and body in the invoice's language, the
+ * public link and the PDF name. Shared by the send itself and the preview the
+ * confirmation dialog shows, so what the user confirms is what is sent.
+ */
+async function invoiceMail(inv: typeof schema.invoices.$inferSelect, company: { billingEmail: string | null }, opts: { to?: string; subject?: string; body?: string }) {
+  const branding = await loadBranding();
+  const locale = asLocale(inv.language);
+  const vars = {
+    number: inv.number, workspace: branding.workspaceName,
+    amount: formatMoney(inv.total, inv.currency),
+    dueDate: inv.dueDate ? formatDate(inv.dueDate, locale) : '',
+  };
+  const link = `${env.appUrl}/i/${inv.publicToken}`;
+  const paragraph = opts.body?.trim() || tr(locale, inv.dueDate ? 'invoice.body' : 'invoice.bodyNoDue', vars);
+  const subject = opts.subject?.trim() || tr(locale, 'invoice.subject', vars);
+  const rendered = renderEmail({
+    locale,
+    branding,
+    heading: tr(locale, 'invoice.heading', vars),
+    paragraphs: [paragraph],
+    cta: { label: tr(locale, 'invoice.cta'), url: link },
+    note: tr(locale, 'invoice.attached'),
+  });
+  return { to: (opts.to ?? company.billingEmail ?? '').trim(), subject, paragraph, link, rendered, attachment: `${inv.number}.pdf` };
+}
+
+/** What the Send dialog shows before anything goes out: is mail configured, from whom, to whom, with which subject and body. */
+export async function invoiceSendPreview(id: string) {
+  const inv = await getInvoiceRow(id);
+  const company = await getCompanyRow(inv.companyId);
+  const mail = await invoiceMail(inv, company, {});
+  const { smtp } = await runtimeConfig();
+  return {
+    mailConfigured: !!smtp?.host,
+    from: smtp?.host ? smtp.from : null,
+    to: mail.to || null,
+    subject: mail.subject,
+    body: mail.paragraph,
+    link: mail.link,
+    attachment: mail.attachment,
+    language: inv.language,
+    canSend: inv.status !== 'paid' && inv.status !== 'canceled',
+  };
+}
+
+/** Turn a transport failure into the domain error the UI shows verbatim, never a 500. */
+function deliveryError(e: unknown): never {
+  const error = e instanceof Error ? e : new Error(String(e));
+  const code = (error as NodeJS.ErrnoException).code;
+  throw err.domain(`Email delivery failed: ${code ? `${code} – ` : ''}${error.message}`, { code: code ?? null });
+}
+
 export async function sendInvoice(actor: Actor, id: string, opts: { to?: string; subject?: string; body?: string }) {
   const { db } = getDb();
   const inv = await getInvoiceRow(id);
   if (inv.status === 'paid' || inv.status === 'canceled') throw err.domain(`Cannot send a ${inv.status} invoice`);
   const company = await getCompanyRow(inv.companyId);
   const workspace = await getWorkspace();
+
+  // Sending is the action: without an address or a mail server there is
+  // nothing to do, and marking the invoice "sent" would be a lie the client
+  // never receives. Both are refused before anything changes.
+  const mail = await invoiceMail(inv, company, opts);
+  if (!mail.to) throw err.validation('No recipient: set the company\'s billing email or enter an address', { field: 'to' });
+  if (!(await emailConfigured())) throw err.domain('Outgoing email is not configured – set up SMTP in Settings → Integrations first', { code: 'email_not_configured' });
+
   const items = await db.select().from(schema.invoiceItems).where(eq(schema.invoiceItems.invoiceId, id)).orderBy(schema.invoiceItems.position);
   const pdf = await renderInvoicePdf(inv, items, company, workspace);
 
   const isFirstSend = inv.status === 'draft';
   if (isFirstSend) assertTransition(INVOICE_TRANSITIONS, inv.status, 'sent');
 
-  const to = opts.to ?? company.billingEmail;
-  const link = `${env.appUrl}/i/${inv.publicToken}`;
   // Send first: marking the invoice "sent" before delivery succeeds would leave
   // the status lying about reality whenever SMTP fails.
-  if (to) {
-    const branding = await loadBranding();
-    const locale = asLocale(inv.language);
-    const vars = {
-      number: inv.number, workspace: branding.workspaceName,
-      amount: formatMoney(inv.total, inv.currency),
-      dueDate: inv.dueDate ? formatDate(inv.dueDate, locale) : '',
-    };
-    const rendered = renderEmail({
-      locale,
-      branding,
-      heading: tr(locale, 'invoice.heading', vars),
-      paragraphs: [opts.body ?? tr(locale, inv.dueDate ? 'invoice.body' : 'invoice.bodyNoDue', vars)],
-      cta: { label: tr(locale, 'invoice.cta'), url: link },
-      note: tr(locale, 'invoice.attached'),
-    });
+  try {
     await sendEmailNow({
-      to,
-      subject: opts.subject ?? tr(locale, 'invoice.subject', vars),
-      body: rendered.text,
-      html: rendered.html,
-      attachments: [{ filename: `${inv.number}.pdf`, content: pdf, contentType: 'application/pdf' }],
+      to: mail.to,
+      subject: mail.subject,
+      body: mail.rendered.text,
+      html: mail.rendered.html,
+      attachments: [{ filename: mail.attachment, content: pdf, contentType: 'application/pdf' }],
     });
+  } catch (e) {
+    deliveryError(e);
   }
+  const sentAt = new Date();
 
   if (isFirstSend) {
-    await db.update(schema.invoices).set({ status: 'sent', sentAt: new Date() })
+    await db.update(schema.invoices).set({ status: 'sent', sentAt })
       .where(and(eq(schema.invoices.id, id), eq(schema.invoices.version, inv.version)));
     // Ledger mirror (accrual-light): first send books AR against Client billing.
     await ledger.postInvoiceSent(actor, inv);
   }
-  await writeActivity(db, { entityType: 'invoice', entityId: id, action: 'sent', before: { status: inv.status }, after: { status: 'sent', to }, actorId: actor.userId, actorType: actor.actorType });
-  await emit({ type: 'invoice.sent', aggregateType: 'invoice', aggregateId: id, payload: { number: inv.number, companyId: inv.companyId, to }, actorId: actor.userId, actorType: actor.actorType });
-  return getInvoice(id);
+  await writeActivity(db, { entityType: 'invoice', entityId: id, action: 'sent', before: { status: inv.status }, after: { status: 'sent', to: mail.to }, actorId: actor.userId, actorType: actor.actorType });
+  await emit({ type: 'invoice.sent', aggregateType: 'invoice', aggregateId: id, payload: { number: inv.number, companyId: inv.companyId, to: mail.to }, actorId: actor.userId, actorType: actor.actorType });
+  return { ...(await getInvoice(id)), delivery: { to: mail.to, subject: mail.subject, sentAt } };
 }
 
 export async function cancelInvoice(actor: Actor, id: string) {
@@ -623,27 +682,32 @@ export async function sendQuote(actor: Actor, id: string, opts: { to?: string; s
   const isFirstSend = q.status === 'draft';
   if (isFirstSend) assertTransition(QUOTE_TRANSITIONS, q.status, 'sent');
 
-  const to = opts.to ?? company.billingEmail;
+  const to = (opts.to ?? company.billingEmail ?? '').trim();
+  if (!to) throw err.validation('No recipient: set the company\'s billing email or enter an address', { field: 'to' });
+  if (!(await emailConfigured())) throw err.domain('Outgoing email is not configured – set up SMTP in Settings → Integrations first', { code: 'email_not_configured' });
   const link = `${env.appUrl}/q/${q.publicToken}`;
-  if (to) {
-    const branding = await loadBranding();
-    const locale = asLocale(q.language);
-    const vars = { number: q.number, workspace: branding.workspaceName, amount: formatMoney(q.total, q.currency) };
-    const rendered = renderEmail({
-      locale,
-      branding,
-      heading: tr(locale, 'quote.heading', vars),
-      paragraphs: [opts.body ?? tr(locale, 'quote.body', vars)],
-      cta: { label: tr(locale, 'quote.cta'), url: link },
-      note: tr(locale, 'quote.attached'),
-    });
+  const branding = await loadBranding();
+  const locale = asLocale(q.language);
+  const vars = { number: q.number, workspace: branding.workspaceName, amount: formatMoney(q.total, q.currency) };
+  const rendered = renderEmail({
+    locale,
+    branding,
+    heading: tr(locale, 'quote.heading', vars),
+    paragraphs: [opts.body?.trim() || tr(locale, 'quote.body', vars)],
+    cta: { label: tr(locale, 'quote.cta'), url: link },
+    note: tr(locale, 'quote.attached'),
+  });
+  const subject = opts.subject?.trim() || tr(locale, 'quote.subject', vars);
+  try {
     await sendEmailNow({
       to,
-      subject: opts.subject ?? tr(locale, 'quote.subject', vars),
+      subject,
       body: rendered.text,
       html: rendered.html,
       attachments: [{ filename: `${q.number}.pdf`, content: pdf, contentType: 'application/pdf' }],
     });
+  } catch (e) {
+    deliveryError(e);
   }
 
   if (isFirstSend) {
