@@ -3,7 +3,7 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
-## Unreleased
+## v1.35.0
 
 - **Invoices that look like invoices, and a public page that opens**: the
   invoice link in every email and PDF (`/i/<token>`) answered with the raw
