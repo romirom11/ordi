@@ -3,7 +3,7 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
-## Unreleased
+## v1.35.0
 
 - **Sending an invoice sends it, or says why not**: "Send" used to flip the
   status to sent and toast success even when no mail went out – with no
