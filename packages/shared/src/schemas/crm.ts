@@ -2,13 +2,24 @@ import { z } from 'zod';
 import { idSchema, customFieldsSchema, richTextSchema } from './common';
 import { COMPANY_STATUSES } from '../constants';
 
+/**
+ * A client's billing requisites (companies.address): the "Bill to" block of
+ * its invoices. Legal name defaults to the company name when empty.
+ */
+export const companyBillingDetailsSchema = z.object({
+  legalName: z.string().max(300).nullable().optional(),
+  taxId: z.string().max(100).nullable().optional(),
+  address: z.string().max(1000).nullable().optional(),
+});
+export type CompanyBillingDetails = z.infer<typeof companyBillingDetailsSchema>;
+
 export const companyInputSchema = z.object({
   name: z.string().min(1),
   domain: z.string().nullable().optional(),
   status: z.enum(COMPANY_STATUSES).default('lead'),
   ownerId: idSchema.nullable().optional(),
   billingEmail: z.string().email().nullable().optional(),
-  address: z.record(z.string(), z.unknown()).nullable().optional(),
+  address: companyBillingDetailsSchema.nullable().optional(),
   defaultCurrency: z.string().length(3).default('USD'),
   paymentTermsDays: z.number().int().min(0).default(14),
   customFields: customFieldsSchema.optional(),

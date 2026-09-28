@@ -54,6 +54,10 @@ export function financeRoutes() {
     return c.json(await svc.updateInvoice(currentActor(c), c.req.param('id'), body));
   });
 
+  // What the Send dialog confirms: mail configured?, from, to, subject, body.
+  app.get('/invoices/:id/send-preview', guard('finance.send'), async (c) =>
+    c.json(await svc.invoiceSendPreview(c.req.param('id'))));
+
   app.post('/invoices/:id/send', guard('finance.send'), async (c) => {
     const body = sendDocumentSchema.parse(await c.req.json().catch(() => ({})));
     return c.json(await svc.sendInvoice(currentActor(c), c.req.param('id'), body));

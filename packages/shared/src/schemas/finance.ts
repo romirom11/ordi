@@ -19,8 +19,9 @@ export const quoteInputSchema = z.object({
   language: z.enum(DOC_LANGUAGES).default('en'),
   discountType: z.enum(DISCOUNT_TYPES).default('none'),
   discountValue: z.number().min(0).default(0),
-  notes: z.string().default(''),
-  terms: z.string().default(''),
+  /** Omitted → the workspace's default notes/terms (Settings → Invoices). */
+  notes: z.string().optional(),
+  terms: z.string().optional(),
   items: z.array(lineItemInputSchema).default([]),
   customFields: customFieldsSchema.optional(),
 });
@@ -37,8 +38,9 @@ export const invoiceInputSchema = z.object({
   discountType: z.enum(DISCOUNT_TYPES).default('none'),
   discountValue: z.number().min(0).default(0),
   discountBeforeTax: z.boolean().default(true),
-  notes: z.string().default(''),
-  terms: z.string().default(''),
+  /** Omitted → the workspace's default notes/terms (Settings → Invoices). */
+  notes: z.string().optional(),
+  terms: z.string().optional(),
   items: z.array(lineItemInputSchema).default([]),
   customFields: customFieldsSchema.optional(),
 });

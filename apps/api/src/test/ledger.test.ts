@@ -2,11 +2,17 @@
  * Double-entry ledger core: balance invariant, document → posting hooks,
  * reversals, manual income and expense-category account mapping.
  */
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { getDb } from '@ordi/db';
-import { resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
+import { resetDb, seedRolesAndUsers, reqAs, json, setTestSmtp } from './helpers';
 import { seedChartOfAccounts } from '../seed-baseline';
 import { runRecurringPayments } from '../workers/scheduled';
+
+// Sending an invoice really mails it (or refuses), so the AR posting on first
+// send needs a mail server: a configured one with a fake transport.
+vi.mock('nodemailer', () => ({
+  default: { createTransport: () => ({ sendMail: async () => ({ messageId: '<ledger@ordi.test>' }), verify: async () => true }) },
+}));
 
 let users: Awaited<ReturnType<typeof seedRolesAndUsers>>;
 let owner: ReturnType<typeof reqAs>;
@@ -16,7 +22,10 @@ beforeAll(async () => {
   await seedChartOfAccounts(getDb().db);
   users = await seedRolesAndUsers();
   owner = reqAs(users.owner!.cookie);
+  await setTestSmtp(true);
 });
+
+afterAll(async () => { await setTestSmtp(false); });
 
 async function accountByCode(code: string): Promise<any> {
   const list = await json(owner.get('/ledger/accounts'));
@@ -82,7 +91,7 @@ describe('documents mirror into the ledger', () => {
   let invoiceId: string;
 
   beforeAll(async () => {
-    const company = await json(owner.post('/companies', { name: 'LedgerCo', defaultCurrency: 'USD' }));
+    const company = await json(owner.post('/companies', { name: 'LedgerCo', defaultCurrency: 'USD', billingEmail: 'ap@ledgerco.test' }));
     companyId = company.id;
     const inv = await json(owner.post('/invoices', {
       companyId, currency: 'USD', issueDate: '2026-02-01', dueDate: '2026-03-01',

@@ -18,20 +18,40 @@ export const integrationsSchema = z.object({
   slackWebhookUrl: z.string().url().nullable().optional(),
 });
 
-/** Invoice branding rendered on the public invoice page and PDF. */
+/**
+ * Invoice branding rendered on the public invoice page and PDF, plus the text
+ * every new invoice/quote starts with (defaultNotes/defaultTerms) so the
+ * same payment terms are not retyped per document.
+ */
 export const invoiceSettingsSchema = z.object({
   accentColor: z.string().max(32).nullable().optional(),
   footerNote: z.string().max(2000).nullable().optional(),
   paymentDetails: z.string().max(4000).nullable().optional(),
   showLogo: z.boolean().optional(),
+  defaultNotes: z.string().max(4000).nullable().optional(),
+  defaultTerms: z.string().max(4000).nullable().optional(),
 });
 export type InvoiceSettings = z.infer<typeof invoiceSettingsSchema>;
+
+/**
+ * The issuer's own requisites (workspace_settings.legal_details): printed in
+ * the "From" block of every invoice and quote. All free text – a legal name,
+ * a tax id (ЄДРПОУ / VAT), a multi-line address, contact email and phone.
+ */
+export const legalDetailsSchema = z.object({
+  legalName: z.string().max(300).nullable().optional(),
+  taxId: z.string().max(100).nullable().optional(),
+  address: z.string().max(1000).nullable().optional(),
+  email: z.string().max(200).nullable().optional(),
+  phone: z.string().max(100).nullable().optional(),
+});
+export type LegalDetails = z.infer<typeof legalDetailsSchema>;
 
 /** PATCH /settings/workspace – all fields optional. */
 export const workspaceSettingsUpdateSchema = z.object({
   name: z.string().min(1).optional(),
   logo: z.string().nullable().optional(),
-  legalDetails: z.record(z.string(), z.unknown()).optional(),
+  legalDetails: legalDetailsSchema.optional(),
   workingDays: z.array(z.number().int()).optional(),
   defaultCurrency: z.string().optional(),
   defaultBillable: z.boolean().optional(),

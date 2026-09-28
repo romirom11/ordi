@@ -43,7 +43,7 @@ import { publicRoutes } from './domains/public/routes';
 import { agentsRoutes } from './domains/agents/routes';
 import { gatewayRoutes } from './domains/agents/gateway';
 import { agentWorkerRoutes } from './domains/agents/worker-routes';
-import { mountWeb, webDistDir } from './web';
+import { mountWeb, mountPublicPages, webDistDir } from './web';
 
 async function readyz(c: Context) {
   try {
@@ -116,6 +116,12 @@ export function createApp() {
   // Mounted twice: at the root (direct API access) and under /api/v1, because the
   // Vite dev proxy forwards only /api/* to this service and the SPA's
   // public pages fetch their data through that prefix.
+  //
+  // With the SPA bundled, a browser navigating to /i/<token> (the link in
+  // every invoice email and PDF) must get the page, not the JSON the page
+  // fetches – so those navigations are answered first (see web.ts).
+  const dist = webDistDir();
+  if (dist) mountPublicPages(app, dist);
   app.route('/', publicRoutes());
   app.route('/api/v1', publicRoutes());
 
@@ -160,7 +166,6 @@ export function createApp() {
   // The built SPA, when present (the Docker image bundles it; `pnpm dev`
   // does not, Vite serves the app there). Registered last so every API
   // route above wins first, and the SPA fallback answers everything else.
-  const dist = webDistDir();
   if (dist) mountWeb(app, dist);
 
   return app;

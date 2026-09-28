@@ -23,6 +23,20 @@ extendDict({
     'settings.invoicePreviewNumber': 'INV-0001',
     'settings.invoicePreviewFrom': 'From',
     'settings.invoicePreviewTotal': 'Total due',
+    'settings.invoiceLogoWebp': 'This logo is stored as WebP, which the PDF cannot embed – upload it again in Settings → Workspace to get it on the PDF.',
+    'settings.invoiceIssuer': 'Your details',
+    'settings.invoiceIssuerHint': 'Printed in the “From” block of every invoice and quote.',
+    'settings.invoiceLegalName': 'Legal name',
+    'settings.invoiceTaxId': 'Tax ID',
+    'settings.invoiceAddress': 'Address',
+    'settings.invoiceEmail': 'Email',
+    'settings.invoicePhone': 'Phone',
+    'settings.invoiceDefaults': 'Defaults for new documents',
+    'settings.invoiceDefaultsHint': 'Every new invoice and quote starts with this text; edit it per document when needed.',
+    'settings.invoiceDefaultNotes': 'Notes',
+    'settings.invoiceDefaultTerms': 'Terms',
+    'settings.invoiceDefaultNotesPlaceholder': 'Thank you for your business!',
+    'settings.invoiceDefaultTermsPlaceholder': 'Payment within 14 days of the issue date. Bank fees are on the payer.',
   },
   uk: {
     'settings.invoicesDesc': 'Оформлення, що застосовується до кожного інвойсу та його публічної сторінки.',
@@ -39,6 +53,20 @@ extendDict({
     'settings.invoicePreviewNumber': 'INV-0001',
     'settings.invoicePreviewFrom': 'Від',
     'settings.invoicePreviewTotal': 'До сплати',
+    'settings.invoiceLogoWebp': 'Логотип збережено у WebP, який PDF не вміє вбудовувати – завантажте його ще раз у Налаштування → Робочий простір, і він з’явиться в PDF.',
+    'settings.invoiceIssuer': 'Ваші реквізити',
+    'settings.invoiceIssuerHint': 'Друкуються в блоці «Постачальник» кожного рахунку та комерційної пропозиції.',
+    'settings.invoiceLegalName': 'Юридична назва',
+    'settings.invoiceTaxId': 'ЄДРПОУ / ІПН',
+    'settings.invoiceAddress': 'Адреса',
+    'settings.invoiceEmail': 'Email',
+    'settings.invoicePhone': 'Телефон',
+    'settings.invoiceDefaults': 'Типовий текст нових документів',
+    'settings.invoiceDefaultsHint': 'Кожен новий рахунок і пропозиція починаються з цього тексту; за потреби його можна змінити в конкретному документі.',
+    'settings.invoiceDefaultNotes': 'Примітки',
+    'settings.invoiceDefaultTerms': 'Умови',
+    'settings.invoiceDefaultNotesPlaceholder': 'Дякуємо за співпрацю!',
+    'settings.invoiceDefaultTermsPlaceholder': 'Оплата протягом 14 днів з дати виставлення. Банківські комісії – за рахунок платника.',
   },
 });
 
@@ -47,11 +75,27 @@ interface InvoiceSettings {
   accentColor?: string | null;
   footerNote?: string | null;
   paymentDetails?: string | null;
+  defaultNotes?: string | null;
+  defaultTerms?: string | null;
+}
+interface LegalDetails {
+  legalName?: string | null;
+  taxId?: string | null;
+  address?: string | null;
+  email?: string | null;
+  phone?: string | null;
 }
 interface WorkspaceData {
   name?: string;
   logo?: string | null;
+  legalDetails?: LegalDetails | null;
   invoiceSettings?: InvoiceSettings;
+}
+
+const ISSUER_KEYS: (keyof LegalDetails)[] = ['legalName', 'taxId', 'address', 'email', 'phone'];
+function issuerOf(ws?: WorkspaceData): Record<keyof LegalDetails, string> {
+  const raw = ws?.legalDetails ?? {};
+  return Object.fromEntries(ISSUER_KEYS.map((k) => [k, typeof raw[k] === 'string' ? (raw[k] as string) : ''])) as Record<keyof LegalDetails, string>;
 }
 
 const DEFAULT_ACCENT = '#6366f1';
@@ -67,8 +111,11 @@ export function InvoicesPanel() {
   const [accent, setAccent] = useState(DEFAULT_ACCENT);
   const [footer, setFooter] = useState('');
   const [payment, setPayment] = useState('');
+  const [defaultNotes, setDefaultNotes] = useState('');
+  const [defaultTerms, setDefaultTerms] = useState('');
+  const [issuer, setIssuer] = useState<Record<keyof LegalDetails, string>>(issuerOf());
   /** The preview highlights whichever region is being edited. */
-  const [focus, setFocus] = useState<'accent' | 'footer' | 'payment' | 'logo' | null>(null);
+  const [focus, setFocus] = useState<'accent' | 'footer' | 'payment' | 'logo' | 'issuer' | null>(null);
 
   useEffect(() => {
     if (ws.data) {
@@ -77,11 +124,14 @@ export function InvoicesPanel() {
       setAccent(inv.accentColor ?? DEFAULT_ACCENT);
       setFooter(inv.footerNote ?? '');
       setPayment(inv.paymentDetails ?? '');
+      setDefaultNotes(inv.defaultNotes ?? '');
+      setDefaultTerms(inv.defaultTerms ?? '');
+      setIssuer(issuerOf(ws.data));
     }
   }, [ws.data]);
 
   const patch = useMutation({
-    mutationFn: (body: InvoiceSettings) => api.patch('/settings/workspace', { invoiceSettings: body }),
+    mutationFn: (body: { invoiceSettings: InvoiceSettings; legalDetails: LegalDetails }) => api.patch('/settings/workspace', body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['workspace-settings'] });
       qc.invalidateQueries({ queryKey: ['workspace'] });
@@ -96,22 +146,33 @@ export function InvoicesPanel() {
   const name = ws.data?.name ?? 'ordi';
 
   const stored = ws.data?.invoiceSettings ?? {};
+  const storedIssuer = issuerOf(ws.data);
   const dirty = !!ws.data && (
     showLogo !== (stored.showLogo ?? true) ||
     accent !== (stored.accentColor ?? DEFAULT_ACCENT) ||
     footer !== (stored.footerNote ?? '') ||
-    payment !== (stored.paymentDetails ?? '')
+    payment !== (stored.paymentDetails ?? '') ||
+    defaultNotes !== (stored.defaultNotes ?? '') ||
+    defaultTerms !== (stored.defaultTerms ?? '') ||
+    ISSUER_KEYS.some((k) => issuer[k] !== storedIssuer[k])
   );
+  const logoIsWebp = !!logo && logo.startsWith('data:image/webp');
 
   const save = () => {
     if (!validHex) return;
     patch.mutate({
-      showLogo,
-      accentColor: accent,
-      footerNote: footer.trim() || null,
-      paymentDetails: payment.trim() || null,
+      invoiceSettings: {
+        showLogo,
+        accentColor: accent,
+        footerNote: footer.trim() || null,
+        paymentDetails: payment.trim() || null,
+        defaultNotes: defaultNotes.trim() || null,
+        defaultTerms: defaultTerms.trim() || null,
+      },
+      legalDetails: Object.fromEntries(ISSUER_KEYS.map((k) => [k, issuer[k].trim() || null])) as LegalDetails,
     });
   };
+  const setIssuerField = (k: keyof LegalDetails) => (e: { target: { value: string } }) => setIssuer((cur) => ({ ...cur, [k]: e.target.value }));
 
   if (ws.isLoading) {
     return <div className="space-y-4"><Skeleton className="h-6 w-40" /><Skeleton className="h-40 w-full" /><Skeleton className="h-56 w-full" /></div>;
@@ -134,6 +195,24 @@ export function InvoicesPanel() {
               <div className="mt-0.5 text-xs text-muted-foreground">{t('settings.invoiceShowLogoHint')}</div>
             </div>
             <Switch checked={showLogo} onChange={setShowLogo} />
+          </div>
+          {showLogo && logoIsWebp && (
+            <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-foreground/80">{t('settings.invoiceLogoWebp')}</p>
+          )}
+
+          {/* Issuer requisites: the "From" block of every document. */}
+          <div onFocus={() => setFocus('issuer')} onBlur={() => setFocus(null)}>
+            <div className="text-[13px] font-medium">{t('settings.invoiceIssuer')}</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">{t('settings.invoiceIssuerHint')}</div>
+            <div className="mt-2.5 space-y-2">
+              <Input value={issuer.legalName} onChange={setIssuerField('legalName')} placeholder={t('settings.invoiceLegalName')} aria-label={t('settings.invoiceLegalName')} />
+              <Input value={issuer.taxId} onChange={setIssuerField('taxId')} placeholder={t('settings.invoiceTaxId')} aria-label={t('settings.invoiceTaxId')} />
+              <Textarea value={issuer.address} onChange={setIssuerField('address')} placeholder={t('settings.invoiceAddress')} aria-label={t('settings.invoiceAddress')} rows={2} className="w-full" />
+              <div className="grid grid-cols-2 gap-2">
+                <Input value={issuer.email} onChange={setIssuerField('email')} placeholder={t('settings.invoiceEmail')} aria-label={t('settings.invoiceEmail')} type="email" />
+                <Input value={issuer.phone} onChange={setIssuerField('phone')} placeholder={t('settings.invoicePhone')} aria-label={t('settings.invoicePhone')} />
+              </div>
+            </div>
           </div>
 
           <div onMouseEnter={() => setFocus('accent')} onMouseLeave={() => setFocus(null)}>
@@ -197,6 +276,16 @@ export function InvoicesPanel() {
             />
           </div>
 
+          {/* Defaults: what every new invoice/quote starts with. */}
+          <div>
+            <div className="text-[13px] font-medium">{t('settings.invoiceDefaults')}</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">{t('settings.invoiceDefaultsHint')}</div>
+            <label className="mt-2.5 block text-xs font-medium text-muted-foreground">{t('settings.invoiceDefaultNotes')}</label>
+            <Textarea value={defaultNotes} onChange={(e) => setDefaultNotes(e.target.value)} placeholder={t('settings.invoiceDefaultNotesPlaceholder')} rows={2} className="mt-1 w-full" />
+            <label className="mt-2.5 block text-xs font-medium text-muted-foreground">{t('settings.invoiceDefaultTerms')}</label>
+            <Textarea value={defaultTerms} onChange={(e) => setDefaultTerms(e.target.value)} placeholder={t('settings.invoiceDefaultTermsPlaceholder')} rows={3} className="mt-1 w-full" />
+          </div>
+
           <div className="flex h-8 items-center gap-3">
             {dirty && (
               <Button size="sm" onClick={save} disabled={patch.isPending || !validHex}>
@@ -216,6 +305,7 @@ export function InvoicesPanel() {
               showLogo={showLogo}
               logo={logo}
               name={name}
+              issuer={issuer}
               footer={footer}
               payment={payment}
               focus={focus}
@@ -227,9 +317,9 @@ export function InvoicesPanel() {
   );
 }
 
-function InvoicePreview({ accent, showLogo, logo, name, footer, payment, focus }: {
-  accent: string; showLogo: boolean; logo: string | null; name: string; footer: string; payment: string;
-  focus?: 'accent' | 'footer' | 'payment' | 'logo' | null;
+function InvoicePreview({ accent, showLogo, logo, name, issuer, footer, payment, focus }: {
+  accent: string; showLogo: boolean; logo: string | null; name: string; issuer: Record<keyof LegalDetails, string>; footer: string; payment: string;
+  focus?: 'accent' | 'footer' | 'payment' | 'logo' | 'issuer' | null;
 }) {
   const t = useT();
   const hi = (key: string) =>
@@ -250,13 +340,15 @@ function InvoicePreview({ accent, showLogo, logo, name, footer, payment, focus }
                 </div>
               )
             )}
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold">{name}</div>
-              <div className="text-[11px] text-faint">{t('settings.invoicePreviewFrom')}</div>
+            <div className={cn('min-w-0', hi('issuer'))}>
+              <div className="break-words text-sm font-semibold leading-tight">{issuer.legalName.trim() || name}</div>
+              {[issuer.taxId, issuer.address, issuer.email, issuer.phone].filter((v) => v.trim()).length
+                ? [issuer.taxId, issuer.address, issuer.email, issuer.phone].filter((v) => v.trim()).map((v, i) => <div key={i} className="truncate text-[11px] text-muted-foreground">{v}</div>)
+                : <div className="text-[11px] text-faint">{t('settings.invoicePreviewFrom')}</div>}
             </div>
           </div>
-          <div className="text-right">
-            <div className="text-[17px] font-bold tabular-nums" style={{ color: accent }}>{t('settings.invoicePreviewNumber')}</div>
+          <div className="shrink-0 text-right">
+            <div className="whitespace-nowrap text-[17px] font-bold tabular-nums" style={{ color: accent }}>{t('settings.invoicePreviewNumber')}</div>
             <div className="text-[11px] text-faint">2026</div>
           </div>
         </div>

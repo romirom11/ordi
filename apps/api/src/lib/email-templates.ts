@@ -172,7 +172,7 @@ const UK: Dict = {
 
   'invoice.subject': 'Рахунок {number} від {workspace}',
   'invoice.heading': 'Рахунок {number}',
-  'invoice.body': 'Надсилаємо рахунок {number} на суму {amount}. Термін оплати – {dueDate}.',
+  'invoice.body': 'Надсилаємо рахунок {number} на суму {amount}. Термін оплати – {dueDate}',
   'invoice.bodyNoDue': 'Надсилаємо рахунок {number} на суму {amount}.',
   'invoice.cta': 'Переглянути рахунок онлайн',
   'invoice.attached': 'PDF-копію додано до цього листа.',
@@ -186,7 +186,7 @@ const UK: Dict = {
   'reminder.subject': 'Нагадування: рахунок {number} до оплати',
   'reminder.subjectOverdue': 'Прострочено: рахунок {number}',
   'reminder.heading': 'Нагадування про оплату',
-  'reminder.body': 'Рахунок {number} на суму {amount} потрібно сплатити до {dueDate}.',
+  'reminder.body': 'Рахунок {number} на суму {amount} потрібно сплатити до {dueDate}',
   'reminder.bodyOverdue': 'Рахунок {number} на суму {amount} мав бути сплачений до {dueDate} і досі не оплачений.',
   'reminder.cta': 'Переглянути рахунок',
   'reminder.thanks': 'Якщо оплата вже в дорозі – просто проігноруйте цей лист.',

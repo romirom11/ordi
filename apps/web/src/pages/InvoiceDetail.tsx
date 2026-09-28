@@ -4,11 +4,12 @@ import { Link } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import { api, appOrigin, ApiError } from '../lib/api';
-import { Button, Input, Select, Card, Breadcrumbs, Skeleton, fmtMoney, fmtDate, cn } from '../components/ui';
+import { Button, Input, Select, Textarea, Card, Breadcrumbs, Skeleton, Tooltip, Spinner, fmtMoney, fmtDate, cn } from '../components/ui';
 import { Dialog, ConfirmDialog, toast } from '../components/overlays';
-import { Send, Download, Ban, Plus, ExternalLink, FilePlus2, Eye, Banknote, Landmark } from 'lucide-react';
+import { Send, Download, Ban, Plus, ExternalLink, FilePlus2, Eye, Banknote, Landmark, Mail, Paperclip, AlertTriangle } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
 import { openExternal } from '../lib/desktop';
+import { InlineEdit } from '../components/crm/detail';
 
 /**
  * The PDF endpoint authenticates with the browser cookie. Inside the desktop
@@ -36,6 +37,21 @@ extendDict({
     'finance.cancelFailed': 'Could not cancel the invoice',
     'finance.sendFailed': 'Could not send the invoice',
     'finance.sent': 'Invoice sent',
+    'finance.sentTo': 'Sent to {to}',
+    'finance.sendTitle': 'Send invoice {number}',
+    'finance.sendFrom': 'From',
+    'finance.sendTo': 'To',
+    'finance.sendSubject': 'Subject',
+    'finance.sendMessage': 'Message',
+    'finance.sendAttached': '{file} attached, plus a link to the public invoice page.',
+    'finance.sendConfirm': 'Send to {to}',
+    'finance.sendNoRecipient': 'This company has no billing email. Enter an address here or set it on the company page.',
+    'finance.sendInvalidEmail': 'Enter a valid email address.',
+    'finance.mailNotConfigured': 'Outgoing email is not configured. Set up SMTP in Settings → Integrations to send invoices.',
+    'finance.mailNotConfiguredShort': 'Email is not configured (Settings → Integrations)',
+    'finance.mailSettings': 'Open email settings',
+    'finance.resend': 'Send again',
+    'finance.sending': 'Sending…',
     'finance.paymentRecorded': 'Payment recorded',
     'finance.status.draft': 'Draft',
     'finance.status.sent': 'Sent',
@@ -45,6 +61,14 @@ extendDict({
     'finance.status.canceled': 'Canceled',
     'finance.paymentDetails': 'Payment details',
     'finance.notes': 'Notes',
+    'finance.terms': 'Terms',
+    'finance.from': 'From',
+    'finance.billTo': 'Bill to',
+    'finance.taxId': 'Tax ID',
+    'finance.noRequisites': 'No requisites yet – add them on the company page.',
+    'finance.noIssuerRequisites': 'Add your requisites in Settings → Invoices.',
+    'finance.addNotes': 'Add notes…',
+    'finance.addTerms': 'Add terms…',
     'finance.method.bank': 'Bank transfer',
     'finance.method.card': 'Card',
     'finance.method.cash': 'Cash',
@@ -61,6 +85,21 @@ extendDict({
     'finance.cancelFailed': 'Не вдалося скасувати рахунок',
     'finance.sendFailed': 'Не вдалося надіслати рахунок',
     'finance.sent': 'Рахунок надіслано',
+    'finance.sentTo': 'Надіслано на {to}',
+    'finance.sendTitle': 'Надіслати рахунок {number}',
+    'finance.sendFrom': 'Від',
+    'finance.sendTo': 'Кому',
+    'finance.sendSubject': 'Тема',
+    'finance.sendMessage': 'Текст листа',
+    'finance.sendAttached': 'Додається {file} і посилання на публічну сторінку рахунку.',
+    'finance.sendConfirm': 'Надіслати на {to}',
+    'finance.sendNoRecipient': 'У компанії немає email для рахунків. Введіть адресу тут або задайте її на сторінці компанії.',
+    'finance.sendInvalidEmail': 'Введіть коректну email-адресу.',
+    'finance.mailNotConfigured': 'Вихідна пошта не налаштована. Налаштуйте SMTP у Налаштування → Інтеграції, щоб надсилати рахунки.',
+    'finance.mailNotConfiguredShort': 'Пошта не налаштована (Налаштування → Інтеграції)',
+    'finance.mailSettings': 'Відкрити налаштування пошти',
+    'finance.resend': 'Надіслати ще раз',
+    'finance.sending': 'Надсилаємо…',
     'finance.paymentRecorded': 'Оплату зафіксовано',
     'finance.status.draft': 'Чернетка',
     'finance.status.sent': 'Надіслано',
@@ -70,6 +109,14 @@ extendDict({
     'finance.status.canceled': 'Скасовано',
     'finance.paymentDetails': 'Реквізити для оплати',
     'finance.notes': 'Примітки',
+    'finance.terms': 'Умови',
+    'finance.from': 'Постачальник',
+    'finance.billTo': 'Платник',
+    'finance.taxId': 'Код',
+    'finance.noRequisites': 'Реквізитів ще немає – додайте їх на сторінці компанії.',
+    'finance.noIssuerRequisites': 'Додайте свої реквізити в Налаштування → Рахунки.',
+    'finance.addNotes': 'Додати примітки…',
+    'finance.addTerms': 'Додати умови…',
     'finance.method.bank': 'Банківський переказ',
     'finance.method.card': 'Картка',
     'finance.method.cash': 'Готівка',
@@ -94,6 +141,7 @@ interface Invoice {
   status?: string | null;
   companyName?: string | null;
   companyId?: string | null;
+  company?: { name?: string | null; billingEmail?: string | null; legalName?: string | null; taxId?: string | null; address?: string | null } | null;
   currency?: string | null;
   issueDate?: string | null;
   dueDate?: string | null;
@@ -109,9 +157,25 @@ interface Invoice {
   createdAt?: string | null;
   sentAt?: string | null;
   viewedAt?: string | null;
+  /** Every send, newest first: who was mailed and when (from the activity log). */
+  sends?: { at: string; to: string | null; actorId?: string | null }[];
   version?: number;
   customFields?: Record<string, unknown>;
 }
+
+/** GET /invoices/:id/send-preview – what the Send dialog confirms before anything goes out. */
+interface SendPreview {
+  mailConfigured: boolean;
+  from: string | null;
+  to: string | null;
+  subject: string;
+  body: string;
+  link: string;
+  attachment: string;
+  canSend: boolean;
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Today as YYYY-MM-DD (local); the API requires a payment date even when the field is left blank. */
 function todayIso(): string {
@@ -125,7 +189,15 @@ export function InvoiceDetailPage({ id }: { id: string }) {
   const can = useCan();
   const [showPayment, setShowPayment] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
+  const [showSend, setShowSend] = useState(false);
+  const [mail, setMail] = useState({ to: '', subject: '', body: '' });
   const invoice = useQuery({ queryKey: ['invoice', id], queryFn: () => api.get<Invoice>(`/invoices/${id}`) });
+  // Loaded up front, so the Send button already knows whether mail can go out at all.
+  const preview = useQuery({
+    queryKey: ['invoice-send-preview', id],
+    queryFn: () => api.get<SendPreview>(`/invoices/${id}/send-preview`),
+    enabled: can('finance.send'),
+  });
   const wsQ = useWorkspaceSettings();
   // Tab title shows the invoice number, not a generic "Finance".
   usePageTitle(invoice.data?.number ?? undefined);
@@ -140,12 +212,35 @@ export function InvoiceDetailPage({ id }: { id: string }) {
     onSuccess: invalidate,
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
   });
+  // Notes/terms stay editable after sending: they are wording, not amounts.
+  const saveText = useMutation({
+    mutationFn: (patch: { notes?: string; terms?: string }) =>
+      api.patch(`/invoices/${id}`, { ...patch, version: invoice.data?.version }),
+    onSuccess: invalidate,
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
+  });
 
   const send = useMutation({
-    mutationFn: () => api.post(`/invoices/${id}/send`),
-    onSuccess: () => { toast(t('finance.sent')); invalidate(); },
+    mutationFn: () => api.post<Invoice & { delivery?: { to: string } }>(`/invoices/${id}/send`, {
+      to: mail.to.trim(),
+      subject: mail.subject.trim() || undefined,
+      body: mail.body.trim() || undefined,
+    }),
+    onSuccess: (r) => {
+      setShowSend(false);
+      toast(t('finance.sentTo').replace('{to}', r?.delivery?.to ?? mail.to.trim()));
+      invalidate();
+    },
+    // The API's message names the real cause (no SMTP, a rejected address,
+    // a connection refused) – show it rather than a generic failure.
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('finance.sendFailed')),
   });
+  const openSend = () => {
+    send.reset();
+    const p = preview.data;
+    setMail({ to: p?.to ?? '', subject: p?.subject ?? '', body: p?.body ?? '' });
+    setShowSend(true);
+  };
   const cancel = useMutation({
     mutationFn: () => api.post(`/invoices/${id}/cancel`),
     onSuccess: () => { setShowCancel(false); toast(t('finance.invoiceCanceled')); invalidate(); },
@@ -194,6 +289,11 @@ export function InvoiceDetailPage({ id }: { id: string }) {
   const accent = settings.accentColor || undefined;
   const showLogo = settings.showLogo !== false && !!brand?.logo;
   const accentText = accent ? { color: accent } : undefined;
+  const from = brand?.legalDetails ?? {};
+  const fromLines = [from.taxId ? `${t('finance.taxId')}: ${from.taxId}` : null, from.address, from.email, from.phone].filter((v): v is string => !!v && !!v.trim());
+  const client = iv.company;
+  const clientLines = [client?.taxId ? `${t('finance.taxId')}: ${client.taxId}` : null, client?.address, client?.billingEmail].filter((v): v is string => !!v && !!v.trim());
+  const canEditText = can('finance.write') && iv.status !== 'canceled';
 
   const timeline = buildTimeline(iv, payments, t);
 
@@ -227,7 +327,19 @@ export function InvoiceDetailPage({ id }: { id: string }) {
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {can('finance.send') && <Button size="sm" variant="outline" onClick={() => send.mutate()} disabled={send.isPending}><Send size={14} /> {t('common.send')}</Button>}
+          {can('finance.send') && cancelable && (
+            preview.data && !preview.data.mailConfigured ? (
+              <Tooltip label={t('finance.mailNotConfiguredShort')}>
+                <span className="inline-flex">
+                  <Button size="sm" variant="outline" disabled><Send size={14} /> {t('common.send')}</Button>
+                </span>
+              </Tooltip>
+            ) : (
+              <Button size="sm" variant="outline" onClick={openSend} disabled={preview.isLoading || send.isPending}>
+                <Send size={14} /> {(iv.sends?.length ?? 0) > 0 || iv.sentAt ? t('finance.resend') : t('common.send')}
+              </Button>
+            )
+          )}
           <Button size="sm" variant="outline" onClick={() => openPdf(id)}><Download size={14} /> PDF</Button>
           {can('finance.payments') && outstanding > 0 && (
             <Button
@@ -245,14 +357,52 @@ export function InvoiceDetailPage({ id }: { id: string }) {
         </div>
       </div>
 
+      {can('finance.send') && preview.data && !preview.data.mailConfigured && cancelable && (
+        <div className="mb-6 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-[13px]">
+          <AlertTriangle size={15} className="mt-0.5 shrink-0 text-warning" />
+          <div>
+            {t('finance.mailNotConfigured')}
+            {can('settings.manage') && <> <Link to="/settings/integrations" className="text-primary hover:underline">{t('finance.mailSettings')}</Link></>}
+          </div>
+        </div>
+      )}
+
       {iv.publicToken && (
-        <Card className="mb-6 flex items-center justify-between px-4 py-2.5 text-[13px]">
+        <Card className="mb-6 flex items-center justify-between gap-3 px-4 py-2.5 text-[13px]">
           <span className="text-muted-foreground">{t('finance.publicLink')}</span>
-          <a href={`/i/${iv.publicToken}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
-            /i/{iv.publicToken} <ExternalLink size={13} />
+          {/* Absolute: inside the desktop shell a relative link points at tauri://localhost. */}
+          <a
+            href={`${appOrigin()}/i/${iv.publicToken}`}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => { e.preventDefault(); openExternal(`${appOrigin()}/i/${iv.publicToken}`); }}
+            className="inline-flex min-w-0 items-center gap-1 text-primary hover:underline"
+          >
+            <span className="truncate">{appOrigin()}/i/{iv.publicToken}</span> <ExternalLink size={13} className="shrink-0" />
           </a>
         </Card>
       )}
+
+      {/* Parties: the issuer's requisites (Settings → Invoices) and the client's (company page). */}
+      <div className="mb-6 grid gap-4 text-[13px] sm:grid-cols-2">
+        <Card className="p-4">
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('finance.from')}</div>
+          <div className="font-medium">{from.legalName || brand?.name || 'ordi'}</div>
+          {fromLines.length
+            ? <div className="mt-0.5 whitespace-pre-line text-xs leading-relaxed text-muted-foreground">{fromLines.join('\n')}</div>
+            : <Link to="/settings/invoices" className="mt-0.5 block text-xs text-muted-foreground hover:text-foreground hover:underline">{t('finance.noIssuerRequisites')}</Link>}
+        </Card>
+        <Card className="p-4">
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('finance.billTo')}</div>
+          <div className="font-medium">{client?.legalName || client?.name || iv.companyName || t('public.client')}</div>
+          {client?.legalName && client.legalName !== client.name && <div className="text-xs text-muted-foreground">{client.name}</div>}
+          {clientLines.length
+            ? <div className="mt-0.5 whitespace-pre-line text-xs leading-relaxed text-muted-foreground">{clientLines.join('\n')}</div>
+            : iv.companyId
+              ? <Link to={`/companies/${iv.companyId}`} className="mt-0.5 block text-xs text-muted-foreground hover:text-foreground hover:underline">{t('finance.noRequisites')}</Link>
+              : null}
+        </Card>
+      </div>
 
       <Card className="mb-6 overflow-hidden">
         <table className="w-full text-[13px]">
@@ -317,13 +467,32 @@ export function InvoiceDetailPage({ id }: { id: string }) {
         </Card>
       </div>
 
-      {/* Branding: notes / footer + payment details */}
-      {(iv.notes || settings.footerNote) && (
-        <div className="mt-6 text-[13px] text-muted-foreground">
-          {iv.notes && <p className="mb-1">{iv.notes}</p>}
-          {settings.footerNote && <p className="whitespace-pre-line">{settings.footerNote}</p>}
-        </div>
-      )}
+      {/* Notes and terms: printed on the PDF and the public page, editable inline. */}
+      <div className="mt-6 grid gap-4 text-[13px] sm:grid-cols-2">
+        <Card className="p-4">
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('finance.notes')}</div>
+          <InlineEdit
+            value={iv.notes}
+            editable={canEditText}
+            multiline
+            rows={3}
+            placeholder={canEditText ? t('finance.addNotes') : '–'}
+            onSave={(v) => saveText.mutate({ notes: v ?? '' })}
+          />
+        </Card>
+        <Card className="p-4">
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('finance.terms')}</div>
+          <InlineEdit
+            value={iv.terms}
+            editable={canEditText}
+            multiline
+            rows={3}
+            placeholder={canEditText ? t('finance.addTerms') : '–'}
+            onSave={(v) => saveText.mutate({ terms: v ?? '' })}
+          />
+        </Card>
+      </div>
+      {settings.footerNote && <p className="mt-4 whitespace-pre-line text-center text-[13px] italic text-muted-foreground">{settings.footerNote}</p>}
 
       {settings.paymentDetails && (
         <Card className="mt-6 p-4">
@@ -343,6 +512,57 @@ export function InvoiceDetailPage({ id }: { id: string }) {
           onSave={(customFields) => saveCustomFields.mutate(customFields)}
         />
       </div>
+
+      <Dialog open={showSend} onClose={() => setShowSend(false)} title={t('finance.sendTitle').replace('{number}', iv.number ?? '')} width={520}>
+        <form
+          className="space-y-3 px-4 pb-4 pt-1"
+          onSubmit={(e) => { e.preventDefault(); if (EMAIL_RE.test(mail.to.trim())) send.mutate(); }}
+        >
+          <div className="grid grid-cols-[64px,1fr] items-center gap-x-3 gap-y-2 text-[13px]">
+            <span className="text-xs font-medium text-muted-foreground">{t('finance.sendFrom')}</span>
+            <span className="truncate text-muted-foreground">{preview.data?.from ?? '–'}</span>
+            <label className="text-xs font-medium text-muted-foreground" htmlFor="send-to">{t('finance.sendTo')}</label>
+            <Input
+              id="send-to"
+              autoFocus
+              type="email"
+              value={mail.to}
+              onChange={(e) => setMail((m) => ({ ...m, to: e.target.value }))}
+              placeholder="client@example.com"
+              className={cn(mail.to.trim() && !EMAIL_RE.test(mail.to.trim()) && 'border-destructive')}
+            />
+            <label className="text-xs font-medium text-muted-foreground" htmlFor="send-subject">{t('finance.sendSubject')}</label>
+            <Input id="send-subject" value={mail.subject} onChange={(e) => setMail((m) => ({ ...m, subject: e.target.value }))} />
+          </div>
+          {!preview.data?.to && !mail.to.trim() && (
+            <p className="text-xs text-warning">{t('finance.sendNoRecipient')}</p>
+          )}
+          {mail.to.trim() && !EMAIL_RE.test(mail.to.trim()) && (
+            <p className="text-xs text-destructive">{t('finance.sendInvalidEmail')}</p>
+          )}
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground" htmlFor="send-body">{t('finance.sendMessage')}</label>
+            <Textarea id="send-body" rows={4} value={mail.body} onChange={(e) => setMail((m) => ({ ...m, body: e.target.value }))} className="w-full" />
+          </div>
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Paperclip size={12} /> {t('finance.sendAttached').replace('{file}', preview.data?.attachment ?? `${iv.number ?? 'invoice'}.pdf`)}
+          </p>
+          {/* The failure stays on screen until the next attempt: a toast is
+              gone by the time a 10-second SMTP timeout has been read. */}
+          {send.isError && (
+            <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <span>{send.error instanceof ApiError ? send.error.message : t('finance.sendFailed')}</span>
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setShowSend(false)} disabled={send.isPending}>{t('common.cancel')}</Button>
+            <Button type="submit" size="sm" disabled={send.isPending || !EMAIL_RE.test(mail.to.trim())}>
+              {send.isPending ? <><Spinner /> {t('finance.sending')}</> : <><Mail size={14} /> {EMAIL_RE.test(mail.to.trim()) ? t('finance.sendConfirm').replace('{to}', mail.to.trim()) : t('common.send')}</>}
+            </Button>
+          </div>
+        </form>
+      </Dialog>
 
       <Dialog open={showPayment} onClose={() => setShowPayment(false)} title={t('finance.recordPayment')} width={400}>
         <form
@@ -391,7 +611,13 @@ interface TimelineEvent { label: string; date?: string | null; icon: ReactNode; 
 function buildTimeline(iv: Invoice, payments: Payment[], t: (k: string, f?: string) => string): TimelineEvent[] {
   const events: TimelineEvent[] = [];
   events.push({ label: t('finance.timelineCreated'), date: iv.issueDate ?? iv.createdAt, icon: <FilePlus2 size={13} /> });
-  if (iv.sentAt) events.push({ label: t('finance.timelineSent'), date: iv.sentAt, icon: <Send size={13} /> });
+  if (iv.sends?.length) {
+    for (const snd of iv.sends) {
+      events.push({ label: snd.to ? `${t('finance.timelineSent')} · ${snd.to}` : t('finance.timelineSent'), date: snd.at, icon: <Send size={13} /> });
+    }
+  } else if (iv.sentAt) {
+    events.push({ label: t('finance.timelineSent'), date: iv.sentAt, icon: <Send size={13} /> });
+  }
   if (iv.viewedAt) events.push({ label: t('finance.timelineViewed'), date: iv.viewedAt, icon: <Eye size={13} /> });
   for (const p of payments) {
     events.push({ label: `${t('finance.timelinePayment')} · ${fmtMoney(p.amount ?? 0, iv.currency ?? 'USD')}`, date: p.date, icon: <Banknote size={13} />, tone: 'success' });
