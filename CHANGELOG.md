@@ -3,7 +3,7 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
-## Unreleased
+## v1.36.0
 
 - **Invoices can be edited, a due date is optional, and the tax row means
   something**: the invoice page had no way to change anything but notes,
