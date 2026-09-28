@@ -112,7 +112,7 @@ describe('public invoice page and PDF', () => {
   it('the public JSON names both parties with their requisites and the branding', async () => {
     const res = await owner.get(`/i/${token}`);
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await json(res);
     expect(body.invoice.number).toMatch(/^INV-/);
     expect(body.company).toMatchObject({ name: 'Appricotsoft', legalName: 'ТОВ «Апрікотсофт»', taxId: '12345678' });
     expect(body.workspace.name).toBe('kdn.agency');
@@ -155,7 +155,7 @@ describe('public invoice page and PDF', () => {
     const q = await json(owner.get(`/quotes/${id}`));
     const page = await owner.get(`/q/${q.publicToken}`);
     expect(page.status).toBe(200);
-    const body = await page.json();
+    const body = await json(page);
     expect(body.quote.number).toBe(q.number);
     expect(body.workspace.name).toBe('kdn.agency');
     const pdf = await owner.get(`/q/${q.publicToken}/pdf`);
@@ -178,7 +178,7 @@ describe('public invoice page and PDF', () => {
 
       const fetchJson = await app.request(`/api/v1/i/${token}`, { headers: { accept: 'application/json' } });
       expect(fetchJson.headers.get('content-type')).toContain('application/json');
-      expect((await fetchJson.json()).invoice.number).toMatch(/^INV-/);
+      expect((await json(fetchJson)).invoice.number).toMatch(/^INV-/);
 
       // Direct API access at the root keeps working for non-browser clients.
       const rootJson = await app.request(`/i/${token}`, { headers: { accept: 'application/json' } });
