@@ -21,6 +21,37 @@ import {
 } from '../integrations/github-app';
 import { syncGitLink } from '../integrations/git-links';
 import { storeGithubAppConfig, runtimeConfig } from '../../lib/runtime-config';
+import { renderInvoicePdf, renderQuotePdf } from '../finance/pdf';
+
+/**
+ * What a public invoice/quote page (and its PDF) may know about the parties:
+ * the issuer's name, logo, requisites and invoice branding, and the client's
+ * name plus its own billing requisites. Nothing else on either row leaves.
+ */
+async function documentParties(companyId: string) {
+  const { db } = getDb();
+  const [company] = await db.select({
+    name: schema.companies.name, billingEmail: schema.companies.billingEmail, address: schema.companies.address,
+  }).from(schema.companies).where(eq(schema.companies.id, companyId));
+  const [ws] = await db.select({
+    name: schema.workspaceSettings.name,
+    logo: schema.workspaceSettings.logo,
+    legalDetails: schema.workspaceSettings.legalDetails,
+    invoiceSettings: schema.workspaceSettings.invoiceSettings,
+  }).from(schema.workspaceSettings).where(eq(schema.workspaceSettings.id, 'workspace'));
+  const billing = (company?.address ?? {}) as { legalName?: string | null; taxId?: string | null; address?: string | null };
+  return {
+    companyRow: { name: company?.name ?? '', billingEmail: company?.billingEmail ?? null, address: company?.address ?? null },
+    workspaceRow: ws ?? null,
+    company: {
+      name: company?.name ?? null,
+      legalName: billing.legalName ?? null, taxId: billing.taxId ?? null, address: billing.address ?? null,
+      logo: null as string | null,
+    },
+    workspace: { name: ws?.name ?? 'ordi', logo: ws?.logo ?? null, legalDetails: ws?.legalDetails ?? {} },
+    invoiceSettings: ws?.invoiceSettings ?? {},
+  };
+}
 
 /**
  * Public (unauthenticated) surface (PRD §11.2/11.3/11.8, §8.6, §12.3, §13.1).
@@ -133,14 +164,7 @@ export function publicRoutes() {
       .where(eq(schema.invoiceItems.invoiceId, inv.id))
       .orderBy(asc(schema.invoiceItems.position));
 
-    const [company] = await db.select({ name: schema.companies.name })
-      .from(schema.companies).where(eq(schema.companies.id, inv.companyId));
-
-    const [ws] = await db.select({
-      name: schema.workspaceSettings.name,
-      logo: schema.workspaceSettings.logo,
-      invoiceSettings: schema.workspaceSettings.invoiceSettings,
-    }).from(schema.workspaceSettings).where(eq(schema.workspaceSettings.id, 'workspace'));
+    const parties = await documentParties(inv.companyId);
 
     const outstanding = Number(inv.total) - Number(inv.amountPaid);
     return c.json({
@@ -152,17 +176,28 @@ export function publicRoutes() {
         notes: inv.notes, terms: inv.terms, viewedAt,
       },
       items,
-      company: { name: company?.name ?? null, logo: null },
-      workspace: { name: ws?.name ?? 'ordi', logo: ws?.logo ?? null },
-      invoiceSettings: ws?.invoiceSettings ?? {},
+      company: parties.company,
+      workspace: parties.workspace,
+      invoiceSettings: parties.invoiceSettings,
       amountPaid: Number(inv.amountPaid),
       outstanding,
     });
   });
 
-  // ── Invoice PDF (stub – the app downloads the real artifact) ──
+  // ── Invoice PDF: the same document the email carries, reachable from the public page ──
   app.get('/i/:token/pdf', async (c) => {
-    return c.json({ message: 'Use the app to download PDF' }, 501);
+    const { db } = getDb();
+    const [inv] = await db.select().from(schema.invoices)
+      .where(and(eq(schema.invoices.publicToken, c.req.param('token')), isNull(schema.invoices.deletedAt)));
+    if (!inv) throw err.notFound();
+    const items = await db.select().from(schema.invoiceItems)
+      .where(eq(schema.invoiceItems.invoiceId, inv.id)).orderBy(asc(schema.invoiceItems.position));
+    const parties = await documentParties(inv.companyId);
+    const pdf = await renderInvoicePdf(inv, items, parties.companyRow, parties.workspaceRow);
+    c.header('Content-Type', 'application/pdf');
+    c.header('Content-Disposition', `inline; filename="${inv.number}.pdf"`);
+    c.header('Cache-Control', 'private, no-store');
+    return c.body(new Uint8Array(pdf));
   });
 
   // ── Public quote page (PRD §11.2) ──
@@ -189,8 +224,7 @@ export function publicRoutes() {
       .where(eq(schema.quoteItems.quoteId, q.id))
       .orderBy(asc(schema.quoteItems.position));
 
-    const [company] = await db.select({ name: schema.companies.name })
-      .from(schema.companies).where(eq(schema.companies.id, q.companyId));
+    const parties = await documentParties(q.companyId);
 
     return c.json({
       quote: {
@@ -201,8 +235,26 @@ export function publicRoutes() {
         notes: q.notes, terms: q.terms, acceptedAt: q.acceptedAt,
       },
       items,
-      company: { name: company?.name ?? null, logo: null },
+      company: parties.company,
+      workspace: parties.workspace,
+      invoiceSettings: parties.invoiceSettings,
     });
+  });
+
+  // ── Quote PDF (public, by token) ──
+  app.get('/q/:token/pdf', async (c) => {
+    const { db } = getDb();
+    const [q] = await db.select().from(schema.quotes)
+      .where(and(eq(schema.quotes.publicToken, c.req.param('token')), isNull(schema.quotes.deletedAt)));
+    if (!q) throw err.notFound();
+    const items = await db.select().from(schema.quoteItems)
+      .where(eq(schema.quoteItems.quoteId, q.id)).orderBy(asc(schema.quoteItems.position));
+    const parties = await documentParties(q.companyId);
+    const pdf = await renderQuotePdf(q, items, parties.companyRow, parties.workspaceRow);
+    c.header('Content-Type', 'application/pdf');
+    c.header('Content-Disposition', `inline; filename="${q.number}.pdf"`);
+    c.header('Cache-Control', 'private, no-store');
+    return c.body(new Uint8Array(pdf));
   });
 
   // ── Quote accept/decline (PRD §11.2) ──

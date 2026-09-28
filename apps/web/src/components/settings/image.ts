@@ -40,12 +40,10 @@ export async function downscaleImage(file: File): Promise<DownscaleResult> {
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(img, 0, 0, w, h);
 
-  // Prefer webp (smaller); fall back to png where unsupported.
-  let type = 'image/webp';
-  let dataUrl = canvas.toDataURL(type, 0.9);
-  if (!dataUrl.startsWith('data:image/webp')) {
-    type = 'image/png';
-    dataUrl = canvas.toDataURL(type);
-  }
+  // PNG, not WebP: the logo is also embedded in invoice PDFs, and the PDF
+  // renderer (pdfkit) decodes PNG and JPEG only. At 128px the difference in
+  // size is a few kilobytes.
+  const type = 'image/png';
+  const dataUrl = canvas.toDataURL(type);
   return { dataUrl, bytes: estimateBytes(dataUrl), type };
 }

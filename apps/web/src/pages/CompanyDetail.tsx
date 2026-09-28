@@ -532,6 +532,8 @@ function CompanyRail({ company, loading, editable, users, onPatch }: {
   }
 
   const href = domainHref(company.domain);
+  const billing = company.address ?? {};
+  const patchBilling = (patch: Partial<NonNullable<Company['address']>>) => onPatch({ address: { ...billing, ...patch } });
 
   return (
     <div>
@@ -630,6 +632,40 @@ function CompanyRail({ company, loading, editable, users, onPatch }: {
         </RailField>
         <RailField label={t('crm.created')}>
           <RailChip disabled><span className="tabular-nums">{fmtDate(company.createdAt)}</span></RailChip>
+        </RailField>
+      </div>
+
+      {/* Billing requisites: what the "Bill to" block of this company's
+        * invoices and quotes prints. Kept on the company, so an invoice never
+        * asks for them again. */}
+      <h2 className="mb-2 mt-6 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('crm.billingDetails')}</h2>
+      <p className="mb-2 text-xs text-muted-foreground">{t('crm.billingDetailsHint')}</p>
+      <div className="space-y-0.5">
+        <RailField label={t('crm.legalName')}>
+          <InlineEdit
+            value={billing.legalName}
+            editable={editable}
+            placeholder={company.name}
+            onSave={(v) => patchBilling({ legalName: v || null })}
+          />
+        </RailField>
+        <RailField label={t('crm.taxId')}>
+          <InlineEdit
+            value={billing.taxId}
+            editable={editable}
+            placeholder="–"
+            onSave={(v) => patchBilling({ taxId: v || null })}
+          />
+        </RailField>
+        <RailField label={t('crm.billingAddress')}>
+          <InlineEdit
+            value={billing.address}
+            editable={editable}
+            multiline
+            rows={3}
+            placeholder="–"
+            onSave={(v) => patchBilling({ address: v || null })}
+          />
         </RailField>
       </div>
     </div>

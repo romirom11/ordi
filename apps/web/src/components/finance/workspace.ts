@@ -13,12 +13,25 @@ export interface InvoiceSettings {
   footerNote?: string | null;
   paymentDetails?: string | null;
   showLogo?: boolean;
+  /** Text every new invoice/quote starts with (Settings → Invoices). */
+  defaultNotes?: string | null;
+  defaultTerms?: string | null;
+}
+
+/** The issuer's requisites, printed in the "From" block of every document. */
+export interface LegalDetails {
+  legalName?: string | null;
+  taxId?: string | null;
+  address?: string | null;
+  email?: string | null;
+  phone?: string | null;
 }
 
 export interface WorkspaceSettings {
   id?: string;
   name?: string | null;
   logo?: string | null;
+  legalDetails?: LegalDetails | null;
   defaultCurrency?: string | null;
   modules?: Record<string, boolean>;
   invoiceSettings?: InvoiceSettings;

@@ -10,7 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { Skeleton, fmtMoney, fmtDate, cn } from '../../components/ui';
 import { Download, Landmark, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { useT, extendDict } from '../../lib/i18n';
+import { useT, extendDict, I18nProvider, guessLocale } from '../../lib/i18n';
 
 extendDict({
   en: {
@@ -18,12 +18,18 @@ extendDict({
     'public.overdueBanner': 'Overdue',
     'public.thankYou': 'Thank you for your business',
     'public.paymentDetails': 'Payment details',
+    'public.taxId': 'Tax ID',
+    'public.notes': 'Notes',
+    'public.terms': 'Terms',
   },
   uk: {
     'public.paidInFull': 'Оплачено повністю',
     'public.overdueBanner': 'Прострочено',
     'public.thankYou': 'Дякуємо за співпрацю',
     'public.paymentDetails': 'Реквізити для оплати',
+    'public.taxId': 'Код',
+    'public.notes': 'Примітки',
+    'public.terms': 'Умови',
   },
 });
 
@@ -31,16 +37,18 @@ const DEFAULT_ACCENT = '#5E6AD2';
 
 interface PubItem { description?: string | null; quantity?: number | string; unitPrice?: number | string; amount?: number | string }
 interface InvoiceSettings { accentColor?: string | null; footerNote?: string | null; paymentDetails?: string | null; showLogo?: boolean }
+interface Requisites { legalName?: string | null; taxId?: string | null; address?: string | null; email?: string | null; phone?: string | null }
 interface PublicPayload {
   invoice: {
     number?: string | null; status?: string | null; currency?: string | null;
+    language?: string | null;
     issueDate?: string | null; dueDate?: string | null;
     subtotal?: number | string | null; taxTotal?: number | string | null; total?: number | string | null;
     notes?: string | null; terms?: string | null;
   };
   items?: PubItem[];
-  company?: { name?: string | null } | null;
-  workspace?: { name?: string | null; logo?: string | null } | null;
+  company?: { name?: string | null; legalName?: string | null; taxId?: string | null; address?: string | null } | null;
+  workspace?: { name?: string | null; logo?: string | null; legalDetails?: Requisites | null } | null;
   invoiceSettings?: InvoiceSettings | null;
   amountPaid?: number | string;
   outstanding?: number | string;
@@ -61,15 +69,27 @@ export function PublicInvoicePage({ token }: { token: string }) {
     );
   }
 
-  const { invoice: iv, items = [], company, workspace, invoiceSettings } = q.data;
+  // The document is labelled in the language it was issued in (the same one
+  // its PDF uses); the browser's locale only decides the error page above.
+  return (
+    <I18nProvider locale={q.data.invoice.language ?? guessLocale()}>
+      <InvoiceDocument token={token} data={q.data} />
+    </I18nProvider>
+  );
+}
+
+function InvoiceDocument({ token, data }: { token: string; data: PublicPayload }) {
+  const t = useT();
+  const { invoice: iv, items = [], company, workspace, invoiceSettings } = data;
   const cur = iv.currency ?? 'USD';
   const total = Number(iv.total ?? 0);
-  const paid = Number(q.data.amountPaid ?? 0);
-  const outstanding = Number(q.data.outstanding ?? total - paid);
+  const paid = Number(data.amountPaid ?? 0);
+  const outstanding = Number(data.outstanding ?? total - paid);
   const accent = invoiceSettings?.accentColor || DEFAULT_ACCENT;
   const showLogo = invoiceSettings?.showLogo !== false && !!workspace?.logo;
   const client = company?.name ?? t('public.client');
   const issuer = workspace?.name ?? 'ordi';
+  const from = workspace?.legalDetails ?? {};
 
   const isPaid = iv.status === 'paid' || (paid > 0 && outstanding <= 0);
   const isOverdue = !isPaid && iv.status !== 'canceled' && !!iv.dueDate && new Date(iv.dueDate) < new Date() && outstanding > 0;
@@ -110,12 +130,19 @@ export function PublicInvoicePage({ token }: { token: string }) {
             )}
 
             {/* Parties + dates */}
-            <div className="mt-8 grid grid-cols-2 gap-6 text-sm">
+            <div className="mt-8 grid grid-cols-2 gap-6 text-sm sm:grid-cols-3">
+              <div>
+                <div className="text-xs font-medium uppercase tracking-wide text-slate-400">{t('public.from')}</div>
+                <div className="mt-1 font-medium text-slate-900">{from.legalName || issuer}</div>
+                <Requisites taxId={from.taxId} address={from.address} extra={[from.email, from.phone]} taxLabel={t('public.taxId')} />
+              </div>
               <div>
                 <div className="text-xs font-medium uppercase tracking-wide text-slate-400">{t('public.billedTo')}</div>
-                <div className="mt-1 font-medium text-slate-900">{client}</div>
+                <div className="mt-1 font-medium text-slate-900">{company?.legalName || client}</div>
+                {company?.legalName && company.legalName !== client && <div className="text-slate-500">{client}</div>}
+                <Requisites taxId={company?.taxId} address={company?.address} taxLabel={t('public.taxId')} />
               </div>
-              <div className="space-y-0.5 text-right">
+              <div className="col-span-2 space-y-0.5 sm:col-span-1 sm:text-right">
                 <div className="text-slate-500">{t('public.issued')} <span className="font-medium text-slate-700">{fmtDate(iv.issueDate)}</span></div>
                 <div className="text-slate-500">{t('public.due')} <span className="font-medium text-slate-700">{fmtDate(iv.dueDate)}</span></div>
               </div>
@@ -171,12 +198,12 @@ export function PublicInvoicePage({ token }: { token: string }) {
               </div>
             )}
 
-            {/* Notes / footer */}
+            {/* Notes / terms / footer */}
             {(iv.notes || iv.terms || invoiceSettings?.footerNote) && (
-              <div className="mt-8 border-t border-slate-100 pt-4 text-xs leading-relaxed text-slate-500">
-                {iv.notes && <p className="mb-1">{iv.notes}</p>}
-                {iv.terms && <p className="mb-1">{iv.terms}</p>}
-                {invoiceSettings?.footerNote && <p className="whitespace-pre-line">{invoiceSettings.footerNote}</p>}
+              <div className="mt-8 space-y-3 border-t border-slate-100 pt-4 text-xs leading-relaxed text-slate-500">
+                {iv.notes && <div><div className="mb-0.5 font-semibold uppercase tracking-wide text-slate-400">{t('public.notes')}</div><p className="whitespace-pre-line text-slate-600">{iv.notes}</p></div>}
+                {iv.terms && <div><div className="mb-0.5 font-semibold uppercase tracking-wide text-slate-400">{t('public.terms')}</div><p className="whitespace-pre-line text-slate-600">{iv.terms}</p></div>}
+                {invoiceSettings?.footerNote && <p className="whitespace-pre-line text-center italic">{invoiceSettings.footerNote}</p>}
               </div>
             )}
 
@@ -200,6 +227,13 @@ export function PublicInvoicePage({ token }: { token: string }) {
 
 function Frame({ children }: { children: ReactNode }) {
   return <div className="min-h-screen bg-slate-100 px-4 py-10 print:bg-white print:py-0">{children}</div>;
+}
+
+/** The requisite lines under a party's name; renders nothing when the party has none. */
+function Requisites({ taxId, address, extra = [], taxLabel }: { taxId?: string | null; address?: string | null; extra?: (string | null | undefined)[]; taxLabel: string }) {
+  const lines = [taxId ? `${taxLabel}: ${taxId}` : null, address, ...extra].filter((v): v is string => !!v && !!v.trim());
+  if (!lines.length) return null;
+  return <div className="mt-0.5 whitespace-pre-line text-xs leading-relaxed text-slate-500">{lines.join('\n')}</div>;
 }
 
 function SumRow({ label, value, bold }: { label: string; value: string; bold?: boolean }) {

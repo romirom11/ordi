@@ -9,6 +9,7 @@ import { Dialog, ConfirmDialog, toast } from '../components/overlays';
 import { Send, Download, Ban, Plus, ExternalLink, FilePlus2, Eye, Banknote, Landmark } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
 import { openExternal } from '../lib/desktop';
+import { InlineEdit } from '../components/crm/detail';
 
 /**
  * The PDF endpoint authenticates with the browser cookie. Inside the desktop
@@ -45,6 +46,14 @@ extendDict({
     'finance.status.canceled': 'Canceled',
     'finance.paymentDetails': 'Payment details',
     'finance.notes': 'Notes',
+    'finance.terms': 'Terms',
+    'finance.from': 'From',
+    'finance.billTo': 'Bill to',
+    'finance.taxId': 'Tax ID',
+    'finance.noRequisites': 'No requisites yet – add them on the company page.',
+    'finance.noIssuerRequisites': 'Add your requisites in Settings → Invoices.',
+    'finance.addNotes': 'Add notes…',
+    'finance.addTerms': 'Add terms…',
     'finance.method.bank': 'Bank transfer',
     'finance.method.card': 'Card',
     'finance.method.cash': 'Cash',
@@ -70,6 +79,14 @@ extendDict({
     'finance.status.canceled': 'Скасовано',
     'finance.paymentDetails': 'Реквізити для оплати',
     'finance.notes': 'Примітки',
+    'finance.terms': 'Умови',
+    'finance.from': 'Постачальник',
+    'finance.billTo': 'Платник',
+    'finance.taxId': 'Код',
+    'finance.noRequisites': 'Реквізитів ще немає – додайте їх на сторінці компанії.',
+    'finance.noIssuerRequisites': 'Додайте свої реквізити в Налаштування → Рахунки.',
+    'finance.addNotes': 'Додати примітки…',
+    'finance.addTerms': 'Додати умови…',
     'finance.method.bank': 'Банківський переказ',
     'finance.method.card': 'Картка',
     'finance.method.cash': 'Готівка',
@@ -94,6 +111,7 @@ interface Invoice {
   status?: string | null;
   companyName?: string | null;
   companyId?: string | null;
+  company?: { name?: string | null; billingEmail?: string | null; legalName?: string | null; taxId?: string | null; address?: string | null } | null;
   currency?: string | null;
   issueDate?: string | null;
   dueDate?: string | null;
@@ -137,6 +155,13 @@ export function InvoiceDetailPage({ id }: { id: string }) {
   const saveCustomFields = useMutation({
     mutationFn: (customFields: Record<string, unknown>) =>
       api.patch(`/invoices/${id}`, { customFields, version: invoice.data?.version }),
+    onSuccess: invalidate,
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
+  });
+  // Notes/terms stay editable after sending: they are wording, not amounts.
+  const saveText = useMutation({
+    mutationFn: (patch: { notes?: string; terms?: string }) =>
+      api.patch(`/invoices/${id}`, { ...patch, version: invoice.data?.version }),
     onSuccess: invalidate,
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
   });
@@ -194,6 +219,11 @@ export function InvoiceDetailPage({ id }: { id: string }) {
   const accent = settings.accentColor || undefined;
   const showLogo = settings.showLogo !== false && !!brand?.logo;
   const accentText = accent ? { color: accent } : undefined;
+  const from = brand?.legalDetails ?? {};
+  const fromLines = [from.taxId ? `${t('finance.taxId')}: ${from.taxId}` : null, from.address, from.email, from.phone].filter((v): v is string => !!v && !!v.trim());
+  const client = iv.company;
+  const clientLines = [client?.taxId ? `${t('finance.taxId')}: ${client.taxId}` : null, client?.address, client?.billingEmail].filter((v): v is string => !!v && !!v.trim());
+  const canEditText = can('finance.write') && iv.status !== 'canceled';
 
   const timeline = buildTimeline(iv, payments, t);
 
@@ -246,13 +276,41 @@ export function InvoiceDetailPage({ id }: { id: string }) {
       </div>
 
       {iv.publicToken && (
-        <Card className="mb-6 flex items-center justify-between px-4 py-2.5 text-[13px]">
+        <Card className="mb-6 flex items-center justify-between gap-3 px-4 py-2.5 text-[13px]">
           <span className="text-muted-foreground">{t('finance.publicLink')}</span>
-          <a href={`/i/${iv.publicToken}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
-            /i/{iv.publicToken} <ExternalLink size={13} />
+          {/* Absolute: inside the desktop shell a relative link points at tauri://localhost. */}
+          <a
+            href={`${appOrigin()}/i/${iv.publicToken}`}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => { e.preventDefault(); openExternal(`${appOrigin()}/i/${iv.publicToken}`); }}
+            className="inline-flex min-w-0 items-center gap-1 text-primary hover:underline"
+          >
+            <span className="truncate">{appOrigin()}/i/{iv.publicToken}</span> <ExternalLink size={13} className="shrink-0" />
           </a>
         </Card>
       )}
+
+      {/* Parties: the issuer's requisites (Settings → Invoices) and the client's (company page). */}
+      <div className="mb-6 grid gap-4 text-[13px] sm:grid-cols-2">
+        <Card className="p-4">
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('finance.from')}</div>
+          <div className="font-medium">{from.legalName || brand?.name || 'ordi'}</div>
+          {fromLines.length
+            ? <div className="mt-0.5 whitespace-pre-line text-xs leading-relaxed text-muted-foreground">{fromLines.join('\n')}</div>
+            : <Link to="/settings/invoices" className="mt-0.5 block text-xs text-muted-foreground hover:text-foreground hover:underline">{t('finance.noIssuerRequisites')}</Link>}
+        </Card>
+        <Card className="p-4">
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('finance.billTo')}</div>
+          <div className="font-medium">{client?.legalName || client?.name || iv.companyName || t('public.client')}</div>
+          {client?.legalName && client.legalName !== client.name && <div className="text-xs text-muted-foreground">{client.name}</div>}
+          {clientLines.length
+            ? <div className="mt-0.5 whitespace-pre-line text-xs leading-relaxed text-muted-foreground">{clientLines.join('\n')}</div>
+            : iv.companyId
+              ? <Link to={`/companies/${iv.companyId}`} className="mt-0.5 block text-xs text-muted-foreground hover:text-foreground hover:underline">{t('finance.noRequisites')}</Link>
+              : null}
+        </Card>
+      </div>
 
       <Card className="mb-6 overflow-hidden">
         <table className="w-full text-[13px]">
@@ -317,13 +375,32 @@ export function InvoiceDetailPage({ id }: { id: string }) {
         </Card>
       </div>
 
-      {/* Branding: notes / footer + payment details */}
-      {(iv.notes || settings.footerNote) && (
-        <div className="mt-6 text-[13px] text-muted-foreground">
-          {iv.notes && <p className="mb-1">{iv.notes}</p>}
-          {settings.footerNote && <p className="whitespace-pre-line">{settings.footerNote}</p>}
-        </div>
-      )}
+      {/* Notes and terms: printed on the PDF and the public page, editable inline. */}
+      <div className="mt-6 grid gap-4 text-[13px] sm:grid-cols-2">
+        <Card className="p-4">
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('finance.notes')}</div>
+          <InlineEdit
+            value={iv.notes}
+            editable={canEditText}
+            multiline
+            rows={3}
+            placeholder={canEditText ? t('finance.addNotes') : '–'}
+            onSave={(v) => saveText.mutate({ notes: v ?? '' })}
+          />
+        </Card>
+        <Card className="p-4">
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('finance.terms')}</div>
+          <InlineEdit
+            value={iv.terms}
+            editable={canEditText}
+            multiline
+            rows={3}
+            placeholder={canEditText ? t('finance.addTerms') : '–'}
+            onSave={(v) => saveText.mutate({ terms: v ?? '' })}
+          />
+        </Card>
+      </div>
+      {settings.footerNote && <p className="mt-4 whitespace-pre-line text-center text-[13px] italic text-muted-foreground">{settings.footerNote}</p>}
 
       {settings.paymentDetails && (
         <Card className="mt-6 p-4">

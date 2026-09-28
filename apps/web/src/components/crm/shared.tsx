@@ -90,11 +90,18 @@ export interface Company {
   status: string;
   ownerId?: string | null;
   billingEmail?: string | null;
+  /** Billing requisites printed in the "Bill to" block of the company's invoices. */
+  address?: CompanyBillingDetails | null;
   defaultCurrency?: string | null;
   paymentTermsDays?: number | null;
   createdAt?: string | null;
   version?: number;
   customFields?: Record<string, unknown>;
+}
+export interface CompanyBillingDetails {
+  legalName?: string | null;
+  taxId?: string | null;
+  address?: string | null;
 }
 export interface Stage {
   id: string; name: string; position: number; probability: number; isWon: boolean; isLost: boolean;

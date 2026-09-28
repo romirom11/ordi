@@ -5,6 +5,29 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
 ## Unreleased
 
+- **Invoices that look like invoices, and a public page that opens**: the
+  invoice link in every email and PDF (`/i/<token>`) answered with the raw
+  JSON the page fetches, because the public API mounted at the root won over
+  the bundled SPA – a browser navigation to `/i/`, `/q/`, `/portal/`,
+  `/intake/` and `/careers/` now gets the page, fetches still get the JSON.
+  The PDF is rendered by pdfkit in-process (the Typst path never ran on a
+  real deploy, so every invoice was the monospace fallback with no logo, no
+  colour, no payment details and broken Cyrillic): accent colour, logo,
+  requisites of both parties, wrapped line items with page breaks, payment
+  details, notes/terms and the footer note, in Liberation Sans. The public
+  `/i/:token/pdf` and new `/q/:token/pdf` return that document instead of a
+  501. Where the requisites live: yours in Settings → Invoices (legal name,
+  tax id, address, email, phone – `legalDetails`), the client's on its
+  company page (legal name, tax id, address – `companies.address`, now a
+  fixed shape); both print on the PDF, the public page and the invoice page.
+  Settings → Invoices also holds default notes and terms that every new
+  invoice and quote starts with (an explicit empty string still opts out),
+  and notes/terms are editable on the invoice page. The public quote page
+  read a flat payload the API never sent and rendered empty; it now shows
+  the quote, the branding and a PDF link. Logos upload as PNG from now on
+  (pdfkit cannot embed WebP); re-upload an existing WebP logo to get it on
+  the PDF – Settings → Invoices says so when that applies.
+
 - **A comment is edited by its author, and by nobody else**: v1.30.0 also
   handed project admins a pencil on other people's comments; an edit changes
   what a person is on record as having said, so it is now the author's alone

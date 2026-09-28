@@ -117,9 +117,14 @@ makes the invariants directly testable.
 - All monetary math flows through `@ordi/shared/calc/money`. Numeric columns are
   Postgres `NUMERIC(14,2)` and surface as strings through Drizzle; services cast
   explicitly.
-- **PDF** (`lib/pdf.ts`): renders via the **Typst** CLI when present (branded
-  template), else a dependency-free minimal PDF writer, so the endpoint always
-  returns a valid PDF even without Typst installed.
+- **PDF** (`domains/finance/pdf.ts`): one pdfkit renderer, no optional
+  binaries. It draws the same document the public page shows – accent bar,
+  workspace logo (PNG/JPEG), both parties' requisites, wrapped line items with
+  page breaks, totals, the workspace's payment details, notes/terms and the
+  footer note – in Liberation Sans bundled under `apps/api/assets/fonts`
+  (SIL OFL), so Cyrillic renders where the built-in WinAnsi fonts could not.
+  The earlier Typst-or-fallback pair produced an unbranded monospace document
+  on every real deploy, because no image shipped Typst.
 - **Email** (`lib/email.ts`): Nodemailer + SMTP; without SMTP configured it logs
   (dev) instead of sending. User-initiated document sends stay synchronous because
   the user needs an immediate result; event-driven notifications and reminders
@@ -183,7 +188,7 @@ After the initial full implementation, the remaining PRD deltas were closed:
   `T` stop timer, `G`-chords (`G D/P/C/F/K/T/M`) for navigation.
 - **i18n**: key-based uk/en dictionaries (`lib/i18n.tsx`); locale from the user
   profile, Intl for dates/money; public pages guess locale pre-auth. PDF
-  labels are localized per document (uk/en) in the Typst template and fallback.
+  labels are localized per document (uk/en) in the PDF renderer.
 - **OpenAPI**: a static OpenAPI 3.1 doc generated from the shared Zod schemas
   (zod-to-json-schema) served at `/api/docs` – chosen over migrating every route
   to hono-openapi (invasive) while still giving a typed public contract.

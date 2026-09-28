@@ -117,6 +117,21 @@ async function getWorkspace() {
   return ws ?? null;
 }
 
+/**
+ * The notes/terms a new document starts with when the caller sent none
+ * (Settings → Invoices → defaults). An explicit empty string still wins: it
+ * is the caller saying "this one has no terms".
+ */
+async function documentText(input: { notes?: string; terms?: string }): Promise<{ notes: string; terms: string }> {
+  if (input.notes !== undefined && input.terms !== undefined) return { notes: input.notes, terms: input.terms };
+  const ws = await getWorkspace();
+  const settings = (ws?.invoiceSettings ?? {}) as { defaultNotes?: string | null; defaultTerms?: string | null };
+  return {
+    notes: input.notes ?? settings.defaultNotes ?? '',
+    terms: input.terms ?? settings.defaultTerms ?? '',
+  };
+}
+
 async function getCompanyRow(id: string) {
   const { db } = getDb();
   const [company] = await db.select().from(schema.companies).where(eq(schema.companies.id, id));
@@ -156,10 +171,18 @@ export async function getInvoice(id: string) {
     db.select().from(schema.invoiceItems).where(eq(schema.invoiceItems.invoiceId, id)).orderBy(schema.invoiceItems.position),
     db.select().from(schema.payments).where(eq(schema.payments.invoiceId, id)).orderBy(desc(schema.payments.date)),
     db.select().from(schema.creditNotes).where(eq(schema.creditNotes.invoiceId, id)).orderBy(desc(schema.creditNotes.date)),
-    db.select({ name: schema.companies.name }).from(schema.companies).where(eq(schema.companies.id, inv.companyId)),
+    db.select({ name: schema.companies.name, billingEmail: schema.companies.billingEmail, address: schema.companies.address })
+      .from(schema.companies).where(eq(schema.companies.id, inv.companyId)),
   ]);
-  // companyName mirrors the list endpoint so the detail header can name the client.
-  return { ...withOverdue(inv), companyName: company[0]?.name ?? null, items, payments: pays, creditNotes: credits };
+  // companyName mirrors the list endpoint so the detail header can name the
+  // client; `company` carries its billing requisites for the "Bill to" block,
+  // so the finance page needs no CRM permission to show them.
+  const billing = (company[0]?.address ?? {}) as { legalName?: string | null; taxId?: string | null; address?: string | null };
+  return {
+    ...withOverdue(inv), companyName: company[0]?.name ?? null,
+    company: company[0] ? { name: company[0].name, billingEmail: company[0].billingEmail, legalName: billing.legalName ?? null, taxId: billing.taxId ?? null, address: billing.address ?? null } : null,
+    items, payments: pays, creditNotes: credits,
+  };
 }
 
 export async function createInvoice(actor: Actor, input: any) {
@@ -171,12 +194,13 @@ export async function createInvoice(actor: Actor, input: any) {
   const totals = docTotals(items, rateMap, input.discountType, input.discountValue, input.discountBeforeTax);
   const id = ulid();
   const number = await nextNumber('invoice');
+  const text = await documentText(input);
   await db.insert(schema.invoices).values({
     id, companyId: input.companyId, projectId: input.projectId ?? null, quoteId: input.quoteId ?? null,
     number, status: 'draft', currency: input.currency, issueDate: input.issueDate, dueDate: input.dueDate,
     language: input.language, discountType: input.discountType, discountValue: String(input.discountValue ?? 0),
     discountBeforeTax: input.discountBeforeTax ?? true, subtotal: String(totals.subtotal),
-    taxTotal: String(totals.taxTotal), total: String(totals.total), notes: input.notes ?? '', terms: input.terms ?? '',
+    taxTotal: String(totals.taxTotal), total: String(totals.total), notes: text.notes, terms: text.terms,
     publicToken: ulid(), source: 'manual', customFields: input.customFields ?? {}, createdBy: actor.userId,
   });
   await insertInvoiceItems(id, items);
@@ -237,7 +261,7 @@ export async function sendInvoice(actor: Actor, id: string, opts: { to?: string;
   const company = await getCompanyRow(inv.companyId);
   const workspace = await getWorkspace();
   const items = await db.select().from(schema.invoiceItems).where(eq(schema.invoiceItems.invoiceId, id)).orderBy(schema.invoiceItems.position);
-  const pdf = renderInvoicePdf(inv as any, items as any, company as any, workspace as any);
+  const pdf = await renderInvoicePdf(inv, items, company, workspace);
 
   const isFirstSend = inv.status === 'draft';
   if (isFirstSend) assertTransition(INVOICE_TRANSITIONS, inv.status, 'sent');
@@ -326,7 +350,7 @@ export async function getInvoicePdfBuffer(id: string): Promise<{ buffer: Buffer;
   const company = await getCompanyRow(inv.companyId);
   const workspace = await getWorkspace();
   const items = await db.select().from(schema.invoiceItems).where(eq(schema.invoiceItems.invoiceId, id)).orderBy(schema.invoiceItems.position);
-  return { buffer: renderInvoicePdf(inv as any, items as any, company as any, workspace as any), number: inv.number };
+  return { buffer: await renderInvoicePdf(inv, items, company, workspace), number: inv.number };
 }
 
 export async function softDeleteInvoice(actor: Actor, id: string) {
@@ -388,10 +412,12 @@ export async function invoiceFromTime(actor: Actor, input: any) {
   const number = await nextNumber('invoice');
   const company = await getCompanyRow(input.companyId);
   const dueDate = addDays(today(), company.paymentTermsDays ?? 14);
+  const text = await documentText({});
   await db.insert(schema.invoices).values({
     id, companyId: input.companyId, projectId: projectIds.length === 1 ? projectIds[0] : null, number,
     status: 'draft', currency: company.defaultCurrency ?? 'USD', issueDate: today(), dueDate,
     subtotal: String(totals.subtotal), taxTotal: String(totals.taxTotal), total: String(totals.total),
+    notes: text.notes, terms: text.terms,
     publicToken: ulid(), source: 'time', createdBy: actor.userId,
   });
   const itemIds = await insertInvoiceItems(id, items);
@@ -534,11 +560,12 @@ export async function createQuote(actor: Actor, input: any) {
   const totals = docTotals(items, rateMap, input.discountType, input.discountValue, input.discountBeforeTax);
   const id = ulid();
   const number = await nextNumber('quote');
+  const text = await documentText(input);
   await db.insert(schema.quotes).values({
     id, companyId: input.companyId, projectId: input.projectId ?? null, number, status: 'draft',
     currency: input.currency, issueDate: input.issueDate, validUntil: input.validUntil ?? null, language: input.language,
     discountType: input.discountType, discountValue: String(input.discountValue ?? 0), subtotal: String(totals.subtotal),
-    taxTotal: String(totals.taxTotal), total: String(totals.total), notes: input.notes ?? '', terms: input.terms ?? '',
+    taxTotal: String(totals.taxTotal), total: String(totals.total), notes: text.notes, terms: text.terms,
     publicToken: ulid(), customFields: input.customFields ?? {}, createdBy: actor.userId,
   });
   await insertQuoteItems(id, items);
@@ -591,7 +618,7 @@ export async function sendQuote(actor: Actor, id: string, opts: { to?: string; s
   const company = await getCompanyRow(q.companyId);
   const workspace = await getWorkspace();
   const items = await db.select().from(schema.quoteItems).where(eq(schema.quoteItems.quoteId, id)).orderBy(schema.quoteItems.position);
-  const pdf = renderQuotePdf(q as any, items as any, company as any, workspace as any);
+  const pdf = await renderQuotePdf(q, items, company, workspace);
 
   const isFirstSend = q.status === 'draft';
   if (isFirstSend) assertTransition(QUOTE_TRANSITIONS, q.status, 'sent');
@@ -656,7 +683,7 @@ export async function getQuotePdfBuffer(id: string): Promise<{ buffer: Buffer; n
   const company = await getCompanyRow(q.companyId);
   const workspace = await getWorkspace();
   const items = await db.select().from(schema.quoteItems).where(eq(schema.quoteItems.quoteId, id)).orderBy(schema.quoteItems.position);
-  return { buffer: renderQuotePdf(q as any, items as any, company as any, workspace as any), number: q.number };
+  return { buffer: await renderQuotePdf(q, items, company, workspace), number: q.number };
 }
 
 export async function softDeleteQuote(actor: Actor, id: string) {

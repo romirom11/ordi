@@ -40,6 +40,39 @@ export function webDistDir(): string | null {
   return candidates.find((c) => existsSync(path.join(c, 'index.html'))) ?? null;
 }
 
+/**
+ * Public pages that share a path with a public API route: `/i/:token` is
+ * both the client's invoice page (the SPA, what emails and PDFs link to) and
+ * the JSON that page fetches. With the SPA bundled, the API mounted at the
+ * root used to win and a browser opening the invoice link got raw JSON. So a
+ * navigation (a GET whose Accept prefers text/html) on one of these paths is
+ * answered with the SPA before the public router sees it; fetches, which ask
+ * for JSON, still reach the API. The prefixes mirror apps/web/src/main.tsx.
+ */
+export const PUBLIC_PAGE_PREFIXES = ['/i/', '/q/', '/portal/', '/intake/', '/careers/'];
+
+export function isPublicPagePath(p: string): boolean {
+  return PUBLIC_PAGE_PREFIXES.some((prefix) => p.startsWith(prefix));
+}
+
+export function wantsHtml(accept: string | undefined): boolean {
+  if (!accept) return false;
+  const html = accept.indexOf('text/html');
+  if (html < 0) return false;
+  const json = accept.indexOf('application/json');
+  return json < 0 || html < json;
+}
+
+export function mountPublicPages(app: Hono<AppEnv>, dist: string): void {
+  const indexHtml = readFileSync(path.join(dist, 'index.html'), 'utf8');
+  app.use('*', (c, next) => {
+    if (c.req.method === 'GET' && isPublicPagePath(c.req.path) && wantsHtml(c.req.header('accept'))) {
+      return Promise.resolve(c.html(indexHtml, 200, { 'Cache-Control': 'no-cache' }));
+    }
+    return next();
+  });
+}
+
 export function mountWeb(app: Hono<AppEnv>, dist: string): void {
   // serveStatic resolves root against cwd (documented Hono behaviour), so
   // hand it a cwd-relative path however WEB_DIST was spelled.
