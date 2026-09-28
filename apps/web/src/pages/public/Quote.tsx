@@ -6,8 +6,8 @@ import { Check, X, Download } from 'lucide-react';
 import { useT, extendDict, I18nProvider, guessLocale } from '../../lib/i18n';
 
 extendDict({
-  en: { 'public.taxId': 'Tax ID' },
-  uk: { 'public.taxId': 'Код' },
+  en: { 'public.taxId': 'Tax ID', 'public.discount': 'Discount' },
+  uk: { 'public.taxId': 'Код', 'public.discount': 'Знижка' },
 });
 
 const STATUS_COLORS: Record<string, string> = {
@@ -28,6 +28,9 @@ interface PubQuotePayload {
     subtotal?: number | string | null;
     taxTotal?: number | string | null;
     total?: number | string | null;
+    discountType?: string | null;
+    discountValue?: number | string | null;
+    taxRateLabel?: string | null;
     notes?: string | null;
     terms?: string | null;
   };
@@ -101,7 +104,7 @@ function QuoteDocument({ token, data }: { token: string; data: PubQuotePayload }
           </div>
           <div className="col-span-2 sm:col-span-1 sm:text-right">
             <div className="text-muted-foreground">{t('public.issued')} {fmtDate(q.issueDate)}</div>
-            <div className="text-muted-foreground">{t('public.validUntil')} {fmtDate(q.validUntil)}</div>
+            {q.validUntil && <div className="text-muted-foreground">{t('public.validUntil')} {fmtDate(q.validUntil)}</div>}
           </div>
         </div>
 
@@ -128,7 +131,12 @@ function QuoteDocument({ token, data }: { token: string; data: PubQuotePayload }
 
         <div className="ml-auto max-w-xs space-y-1.5 text-sm">
           <SumRow label={t('public.subtotal')} value={fmtMoney(q.subtotal ?? 0, cur)} />
-          <SumRow label={t('public.tax')} value={fmtMoney(q.taxTotal ?? 0, cur)} />
+          {q.discountType && q.discountType !== 'none' && Number(q.discountValue ?? 0) > 0 && (
+            <SumRow label={t('public.discount')} value={q.discountType === 'percent' ? `${Number(q.discountValue)}%` : fmtMoney(q.discountValue ?? 0, cur)} />
+          )}
+          {Number(q.taxTotal ?? 0) > 0 && (
+            <SumRow label={q.taxRateLabel ? `${t('public.tax')} (${q.taxRateLabel})` : t('public.tax')} value={fmtMoney(q.taxTotal ?? 0, cur)} />
+          )}
           <SumRow label={t('common.total')} value={fmtMoney(q.total ?? 0, cur)} bold />
         </div>
 

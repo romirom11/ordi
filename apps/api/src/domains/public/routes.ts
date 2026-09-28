@@ -22,6 +22,7 @@ import {
 import { syncGitLink } from '../integrations/git-links';
 import { storeGithubAppConfig, runtimeConfig } from '../../lib/runtime-config';
 import { renderInvoicePdf, renderQuotePdf } from '../finance/pdf';
+import { taxRateLabel } from '../finance/service';
 
 /**
  * What a public invoice/quote page (and its PDF) may know about the parties:
@@ -160,6 +161,7 @@ export function publicRoutes() {
       unitPrice: schema.invoiceItems.unitPrice,
       amount: schema.invoiceItems.amount,
       position: schema.invoiceItems.position,
+      taxRateId: schema.invoiceItems.taxRateId,
     }).from(schema.invoiceItems)
       .where(eq(schema.invoiceItems.invoiceId, inv.id))
       .orderBy(asc(schema.invoiceItems.position));
@@ -173,9 +175,10 @@ export function publicRoutes() {
         issueDate: inv.issueDate, dueDate: inv.dueDate, language: inv.language,
         discountType: inv.discountType, discountValue: inv.discountValue,
         subtotal: inv.subtotal, taxTotal: inv.taxTotal, total: inv.total,
+        taxRateLabel: await taxRateLabel(items),
         notes: inv.notes, terms: inv.terms, viewedAt,
       },
-      items,
+      items: items.map(({ taxRateId: _taxRateId, ...it }) => it),
       company: parties.company,
       workspace: parties.workspace,
       invoiceSettings: parties.invoiceSettings,
@@ -193,7 +196,7 @@ export function publicRoutes() {
     const items = await db.select().from(schema.invoiceItems)
       .where(eq(schema.invoiceItems.invoiceId, inv.id)).orderBy(asc(schema.invoiceItems.position));
     const parties = await documentParties(inv.companyId);
-    const pdf = await renderInvoicePdf(inv, items, parties.companyRow, parties.workspaceRow);
+    const pdf = await renderInvoicePdf({ ...inv, taxRateName: await taxRateLabel(items) }, items, parties.companyRow, parties.workspaceRow);
     c.header('Content-Type', 'application/pdf');
     c.header('Content-Disposition', `inline; filename="${inv.number}.pdf"`);
     c.header('Cache-Control', 'private, no-store');
@@ -220,6 +223,7 @@ export function publicRoutes() {
       unitPrice: schema.quoteItems.unitPrice,
       amount: schema.quoteItems.amount,
       position: schema.quoteItems.position,
+      taxRateId: schema.quoteItems.taxRateId,
     }).from(schema.quoteItems)
       .where(eq(schema.quoteItems.quoteId, q.id))
       .orderBy(asc(schema.quoteItems.position));
@@ -232,9 +236,10 @@ export function publicRoutes() {
         issueDate: q.issueDate, validUntil: q.validUntil, language: q.language,
         discountType: q.discountType, discountValue: q.discountValue,
         subtotal: q.subtotal, taxTotal: q.taxTotal, total: q.total,
+        taxRateLabel: await taxRateLabel(items),
         notes: q.notes, terms: q.terms, acceptedAt: q.acceptedAt,
       },
-      items,
+      items: items.map(({ taxRateId: _taxRateId, ...it }) => it),
       company: parties.company,
       workspace: parties.workspace,
       invoiceSettings: parties.invoiceSettings,
@@ -250,7 +255,7 @@ export function publicRoutes() {
     const items = await db.select().from(schema.quoteItems)
       .where(eq(schema.quoteItems.quoteId, q.id)).orderBy(asc(schema.quoteItems.position));
     const parties = await documentParties(q.companyId);
-    const pdf = await renderQuotePdf(q, items, parties.companyRow, parties.workspaceRow);
+    const pdf = await renderQuotePdf({ ...q, taxRateName: await taxRateLabel(items) }, items, parties.companyRow, parties.workspaceRow);
     c.header('Content-Type', 'application/pdf');
     c.header('Content-Disposition', `inline; filename="${q.number}.pdf"`);
     c.header('Cache-Control', 'private, no-store');

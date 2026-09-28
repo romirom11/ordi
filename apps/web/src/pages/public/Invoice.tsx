@@ -21,6 +21,7 @@ extendDict({
     'public.taxId': 'Tax ID',
     'public.notes': 'Notes',
     'public.terms': 'Terms',
+    'public.discount': 'Discount',
   },
   uk: {
     'public.paidInFull': 'Оплачено повністю',
@@ -30,6 +31,7 @@ extendDict({
     'public.taxId': 'Код',
     'public.notes': 'Примітки',
     'public.terms': 'Умови',
+    'public.discount': 'Знижка',
   },
 });
 
@@ -44,6 +46,7 @@ interface PublicPayload {
     language?: string | null;
     issueDate?: string | null; dueDate?: string | null;
     subtotal?: number | string | null; taxTotal?: number | string | null; total?: number | string | null;
+    discountType?: string | null; discountValue?: number | string | null; taxRateLabel?: string | null;
     notes?: string | null; terms?: string | null;
   };
   items?: PubItem[];
@@ -144,7 +147,7 @@ function InvoiceDocument({ token, data }: { token: string; data: PublicPayload }
               </div>
               <div className="col-span-2 space-y-0.5 sm:col-span-1 sm:text-right">
                 <div className="text-slate-500">{t('public.issued')} <span className="font-medium text-slate-700">{fmtDate(iv.issueDate)}</span></div>
-                <div className="text-slate-500">{t('public.due')} <span className="font-medium text-slate-700">{fmtDate(iv.dueDate)}</span></div>
+                {iv.dueDate && <div className="text-slate-500">{t('public.due')} <span className="font-medium text-slate-700">{fmtDate(iv.dueDate)}</span></div>}
               </div>
             </div>
 
@@ -174,7 +177,12 @@ function InvoiceDocument({ token, data }: { token: string; data: PublicPayload }
             <div className="mt-6 flex justify-end">
               <div className="w-full max-w-xs space-y-1.5 text-sm">
                 <SumRow label={t('public.subtotal')} value={fmtMoney(iv.subtotal ?? 0, cur)} />
-                <SumRow label={t('public.tax')} value={fmtMoney(iv.taxTotal ?? 0, cur)} />
+                {iv.discountType && iv.discountType !== 'none' && Number(iv.discountValue ?? 0) > 0 && (
+                  <SumRow label={t('public.discount')} value={iv.discountType === 'percent' ? `${Number(iv.discountValue)}%` : fmtMoney(iv.discountValue ?? 0, cur)} />
+                )}
+                {Number(iv.taxTotal ?? 0) > 0 && (
+                  <SumRow label={iv.taxRateLabel ? `${t('public.tax')} (${iv.taxRateLabel})` : t('public.tax')} value={fmtMoney(iv.taxTotal ?? 0, cur)} />
+                )}
                 <div className="my-1 border-t border-slate-200" />
                 <SumRow label={t('common.total')} value={fmtMoney(total, cur)} bold />
                 {paid > 0 && <SumRow label={t('public.paid')} value={fmtMoney(paid, cur)} />}

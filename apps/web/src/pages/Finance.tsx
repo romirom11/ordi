@@ -6,7 +6,7 @@ import { useCan } from '../lib/auth';
 import { useTabs } from '../lib/tabs';
 import { Button, Input, Select, Card, PageHeader, EmptyState, Reveal, Skeleton, SegmentedControl, fmtMoney, fmtDate, cn } from '../components/ui';
 import { Dialog, ContextMenu, toast, type ContextMenuEntry } from '../components/overlays';
-import { Plus, Trash2, Wallet, AlertTriangle, CheckCircle2, Receipt, FileStack, Copy, ExternalLink, Link2 } from 'lucide-react';
+import { Plus, Wallet, AlertTriangle, CheckCircle2, Receipt, FileStack, Copy, ExternalLink, Link2 } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
 import { usePersistedState, oneOfPref, stringPref } from '../lib/prefs';
 import { byName } from '../lib/queries';
@@ -16,6 +16,7 @@ import { RecurringExpensesSection } from '../components/finance/subscriptions';
 import { SortHeader, sortRows, useStatusRank, useTableSort } from '../components/tableSort';
 import { TransactionsTab, AddIncomeDialog } from '../components/finance/ledger';
 import { DateField } from '../components/DatePicker';
+import { DocumentForm, type DocumentFormValues } from '../components/finance/DocumentForm';
 
 extendDict({
   en: {
@@ -90,11 +91,6 @@ function StatusPill({ status, overdue }: { status?: string | null; overdue?: boo
   );
 }
 
-/** Today as YYYY-MM-DD (local); the API requires issueDate on invoices/quotes, which the compact create form doesn't collect explicitly. */
-function todayIso(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
 
 interface Company { id: string; name: string; defaultCurrency?: string }
 interface DocRow {
@@ -344,64 +340,6 @@ function ProfitabilityView() {
   );
 }
 
-interface LineItem { description: string; quantity: string; unitPrice: string }
-const emptyLine: LineItem = { description: '', quantity: '1', unitPrice: '' };
-
-function DocForm({ kind, companies, onSubmit, pending }: { kind: 'invoice' | 'quote'; companies: Company[]; onSubmit: (v: { companyId: string; date: string; items: LineItem[] }) => void; pending: boolean }) {
-  const t = useT();
-  const [companyId, setCompanyId] = useState('');
-  const [date, setDate] = useState('');
-  const [items, setItems] = useState<LineItem[]>([{ ...emptyLine }]);
-  const setItem = (idx: number, patch: Partial<LineItem>) => setItems((arr) => arr.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
-  const total = items.reduce((a, it) => a + Number(it.quantity || 0) * Number(it.unitPrice || 0), 0);
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (companyId) onSubmit({ companyId, date, items });
-      }}
-      className="space-y-3 px-4 pb-4 pt-1"
-    >
-      <div className="flex flex-wrap gap-3">
-        <div className="min-w-48 flex-1 space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">{t('common.company')}</label>
-          <Select value={companyId} onChange={(e) => setCompanyId(e.target.value)} className="block w-full">
-            <option value="">{t('common.select')}</option>
-            {byName(companies).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </Select>
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">{kind === 'invoice' ? t('finance.dueDate') : t('public.validUntil')}</label>
-          <DateField value={date} onChange={(v) => setDate(v ?? '')} />
-        </div>
-      </div>
-      <div className="space-y-2">
-        {items.map((it, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <div className="min-w-0 flex-1">
-              <Input placeholder={t('public.description')} value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} />
-            </div>
-            <div className="w-16 shrink-0">
-              <Input type="number" min={0} placeholder={t('public.qty')} value={it.quantity} onChange={(e) => setItem(i, { quantity: e.target.value })} />
-            </div>
-            <div className="w-24 shrink-0">
-              <Input type="number" min={0} step="0.01" placeholder={t('public.price')} value={it.unitPrice} onChange={(e) => setItem(i, { unitPrice: e.target.value })} />
-            </div>
-            <button type="button" className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive" onClick={() => setItems((arr) => arr.filter((_, j) => j !== i))} disabled={items.length === 1}>
-              <Trash2 size={14} />
-            </button>
-          </div>
-        ))}
-        <Button type="button" variant="outline" size="sm" onClick={() => setItems((arr) => [...arr, { ...emptyLine }])}><Plus size={13} /> {t('finance.addLine')}</Button>
-      </div>
-      <div className="flex items-center justify-between border-t border-border pt-3">
-        <span className="text-[13px] text-muted-foreground">{t('common.total')} <span className="font-semibold text-foreground tabular-nums">{fmtMoney(total)}</span></span>
-        <Button type="submit" size="sm" disabled={pending || !companyId}>{t('finance.createDraft')}</Button>
-      </div>
-    </form>
-  );
-}
-
 function InvoicesView() {
   const t = useT();
   const qc = useQueryClient();
@@ -412,13 +350,18 @@ function InvoicesView() {
   const [showForm, setShowForm] = useState(false);
   const companies = useCompanies();
   const invoices = useQuery({ queryKey: ['invoices', status], queryFn: () => api.get<{ data: DocRow[] }>('/invoices' + qs({ status })) });
+  const defaultCurrency = useDefaultCurrency();
   const create = useMutation({
-    mutationFn: (v: { companyId: string; date: string; items: LineItem[] }) =>
+    mutationFn: (v: DocumentFormValues) =>
       api.post<{ id: string }>('/invoices', {
         companyId: v.companyId,
-        issueDate: todayIso(),
-        dueDate: v.date || todayIso(),
-        items: v.items.map((it) => ({ description: it.description, quantity: Number(it.quantity), unitPrice: Number(it.unitPrice) })),
+        issueDate: v.issueDate,
+        dueDate: v.endDate,
+        currency: v.currency,
+        language: v.language,
+        discountType: v.discountType,
+        discountValue: v.discountValue,
+        items: v.items,
       }),
     onSuccess: (r) => {
       setShowForm(false);
@@ -443,7 +386,9 @@ function InvoicesView() {
 
       {can('finance.write') && (
         <Dialog open={showForm} onClose={() => setShowForm(false)} title={t('finance.newInvoice')} width={560}>
-          <DocForm kind="invoice" companies={companies.data?.data ?? []} onSubmit={(v) => create.mutate(v)} pending={create.isPending} />
+          {showForm && (
+            <DocumentForm kind="invoice" mode="create" companies={companies.data?.data ?? []} defaultCurrency={defaultCurrency} onSubmit={(v) => create.mutate(v)} onCancel={() => setShowForm(false)} pending={create.isPending} submitLabel={t('finance.createDraft')} />
+          )}
         </Dialog>
       )}
     </div>
@@ -458,13 +403,18 @@ function QuotesView() {
   const [showForm, setShowForm] = useState(false);
   const companies = useCompanies();
   const quotes = useQuery({ queryKey: ['quotes', status], queryFn: () => api.get<{ data: DocRow[] }>('/quotes' + qs({ status })) });
+  const defaultCurrency = useDefaultCurrency();
   const create = useMutation({
-    mutationFn: (v: { companyId: string; date: string; items: LineItem[] }) =>
+    mutationFn: (v: DocumentFormValues) =>
       api.post('/quotes', {
         companyId: v.companyId,
-        issueDate: todayIso(),
-        validUntil: v.date || undefined,
-        items: v.items.map((it) => ({ description: it.description, quantity: Number(it.quantity), unitPrice: Number(it.unitPrice) })),
+        issueDate: v.issueDate,
+        validUntil: v.endDate,
+        currency: v.currency,
+        language: v.language,
+        discountType: v.discountType,
+        discountValue: v.discountValue,
+        items: v.items,
       }),
     onSuccess: () => {
       setShowForm(false);
@@ -488,7 +438,9 @@ function QuotesView() {
 
       {can('finance.write') && (
         <Dialog open={showForm} onClose={() => setShowForm(false)} title={t('finance.newQuote')} width={560}>
-          <DocForm kind="quote" companies={companies.data?.data ?? []} onSubmit={(v) => create.mutate(v)} pending={create.isPending} />
+          {showForm && (
+            <DocumentForm kind="quote" mode="create" companies={companies.data?.data ?? []} defaultCurrency={defaultCurrency} onSubmit={(v) => create.mutate(v)} onCancel={() => setShowForm(false)} pending={create.isPending} submitLabel={t('finance.createDraft')} />
+          )}
         </Dialog>
       )}
     </div>

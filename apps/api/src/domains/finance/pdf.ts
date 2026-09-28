@@ -33,6 +33,8 @@ export interface PdfDoc {
   publicToken: string;
   /** Per-document language (PRD §11.3): 'uk' | 'en'. */
   language?: string;
+  /** "VAT 20%" when every taxed line shares one rate; null → a plain "Tax" row. */
+  taxRateName?: string | null;
 }
 
 export interface PdfLine {
@@ -141,11 +143,13 @@ function fmtQty(n: string | number): string {
   return Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100);
 }
 
+/** A readable date in the document's language: "28 вересня 2026 р." / "28 September 2026". */
 function fmtDate(iso: string | null | undefined, language: string | undefined): string {
   if (!iso) return '';
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
   if (!m) return iso;
-  return language === 'uk' ? `${m[3]}.${m[2]}.${m[1]}` : `${m[1]}-${m[2]}-${m[3]}`;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return new Intl.DateTimeFormat(language === 'uk' ? 'uk-UA' : 'en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(d);
 }
 
 function str(v: unknown): string {
@@ -202,11 +206,6 @@ function logoBytes(ws: PdfWorkspace | null | undefined, settings: InvoiceSetting
   try { bytes = Buffer.from(m[2]!, 'base64'); } catch { return null; }
   const ok = m[1]!.toLowerCase() === 'png' ? isCompletePng(bytes) : isCompleteJpeg(bytes);
   return ok ? bytes : null;
-}
-
-function statusLabel(L: Labels, status: string): string {
-  const key = `status_${status}` as keyof Labels;
-  return (L[key] as string | undefined) ?? status;
 }
 
 /* ───────────────────────── Renderer ───────────────────────── */
@@ -344,20 +343,22 @@ function render(
     { text: client.address || '', color: MUTED },
     { text: str(company.billingEmail), color: MUTED },
   ];
+  // Dates only: the internal status (draft/sent/viewed) is not something a
+  // client's document should carry. A missing due date or validity leaves no row.
   const metaRows: [string, string][] = [
     [L.issue, fmtDate(doc.issueDate, doc.language)],
     kind === 'invoice' ? [L.due, fmtDate(doc.dueDate, doc.language)] : [L.validUntil, fmtDate(doc.validUntil, doc.language)],
-    [L.status, statusLabel(L, doc.status)],
   ];
   const fromH = w.block(fromLines, MARGIN.x, w.y, colW);
   const toH = w.block(toLines, MARGIN.x + colW + 12, w.y, colW);
+  // Label above value, right-aligned: a long-month date needs the whole column.
   let metaH = 0;
   for (const [k, v] of metaRows) {
     if (!v) continue;
     const mx = MARGIN.x + (colW + 12) * 2;
-    w.text(k, mx, w.y + metaH, colW * 0.5, { size: 8.5, color: MUTED });
-    w.text(v, mx + colW * 0.5, w.y + metaH, colW * 0.5, { size: 9.5, bold: true, align: 'right' });
-    metaH += 14;
+    w.text(k.toUpperCase(), mx, w.y + metaH, colW, { size: 7.5, color: MUTED, align: 'right' });
+    w.text(v, mx, w.y + metaH + 11, colW, { size: 10, bold: true, align: 'right' });
+    metaH += 30;
   }
   w.y += Math.max(fromH, toH, metaH) + 20;
 
@@ -399,7 +400,10 @@ function render(
   if (doc.discountType && doc.discountType !== 'none' && Number(doc.discountValue ?? 0) > 0) {
     totals.push({ label: L.discount, value: doc.discountType === 'percent' ? `${Number(doc.discountValue)}%` : fmtMoney(doc.discountValue, cur) });
   }
-  totals.push({ label: L.tax, value: fmtMoney(doc.taxTotal, cur) });
+  // Only a taxed document carries a tax row; it names the rate when there is one.
+  if (Number(doc.taxTotal ?? 0) > 0) {
+    totals.push({ label: doc.taxRateName ? `${L.tax} (${doc.taxRateName})` : L.tax, value: fmtMoney(doc.taxTotal, cur) });
+  }
   totals.push({ label: L.total, value: fmtMoney(doc.total, cur), bold: true });
   if (kind === 'invoice') {
     const paid = Number(doc.amountPaid ?? 0);
