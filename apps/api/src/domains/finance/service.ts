@@ -31,7 +31,7 @@ function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-interface InvoiceRow { dueDate: string; status: string }
+interface InvoiceRow { dueDate: string | null; status: string }
 export function isOverdue(inv: InvoiceRow): boolean {
   return !!inv.dueDate && inv.dueDate < today() && inv.status !== 'paid' && inv.status !== 'canceled';
 }
@@ -52,6 +52,23 @@ async function resolveTaxRates(items: ItemInput[]): Promise<Map<string, number>>
   if (!ids.length) return new Map();
   const rows = await db.select().from(schema.taxRates).where(inArray(schema.taxRates.id, ids));
   return new Map(rows.map((r) => [r.id, Number(r.ratePercent)]));
+}
+
+/**
+ * How the tax row is labelled on a document: the rate's name and percentage
+ * when every taxed line uses the same rate ("VAT 20%"), a plain "Tax" (null)
+ * when rates are mixed, and nothing to label when no line is taxed.
+ */
+export async function taxRateLabel(items: { taxRateId: string | null }[]): Promise<string | null> {
+  const ids = [...new Set(items.map((i) => i.taxRateId).filter((x): x is string => !!x))];
+  if (ids.length !== 1) return null;
+  const { db } = getDb();
+  const [rate] = await db.select().from(schema.taxRates).where(eq(schema.taxRates.id, ids[0]!));
+  if (!rate) return null;
+  const pct = Number(rate.ratePercent);
+  const pctText = `${Number.isInteger(pct) ? pct : pct.toFixed(2)}%`;
+  // A rate named "VAT 20%" already says its percentage.
+  return rate.name.includes(pctText) ? rate.name : `${rate.name} ${pctText}`;
 }
 
 function docTotals(items: ItemInput[], rateMap: Map<string, number>, discountType?: string, discountValue?: number, discountBeforeTax?: boolean) {
@@ -191,6 +208,7 @@ export async function getInvoice(id: string) {
   const billing = (company[0]?.address ?? {}) as { legalName?: string | null; taxId?: string | null; address?: string | null };
   return {
     ...withOverdue(inv), companyName: company[0]?.name ?? null,
+    taxRateLabel: await taxRateLabel(items),
     company: company[0] ? { name: company[0].name, billingEmail: company[0].billingEmail, legalName: billing.legalName ?? null, taxId: billing.taxId ?? null, address: billing.address ?? null } : null,
     items, payments: pays, creditNotes: credits, sends,
   };
@@ -208,7 +226,7 @@ export async function createInvoice(actor: Actor, input: any) {
   const text = await documentText(input);
   await db.insert(schema.invoices).values({
     id, companyId: input.companyId, projectId: input.projectId ?? null, quoteId: input.quoteId ?? null,
-    number, status: 'draft', currency: input.currency, issueDate: input.issueDate, dueDate: input.dueDate,
+    number, status: 'draft', currency: input.currency, issueDate: input.issueDate, dueDate: input.dueDate ?? null,
     language: input.language, discountType: input.discountType, discountValue: String(input.discountValue ?? 0),
     discountBeforeTax: input.discountBeforeTax ?? true, subtotal: String(totals.subtotal),
     taxTotal: String(totals.taxTotal), total: String(totals.total), notes: text.notes, terms: text.terms,
@@ -334,7 +352,7 @@ export async function sendInvoice(actor: Actor, id: string, opts: { to?: string;
   if (!(await emailConfigured())) throw err.domain('Outgoing email is not configured – set up SMTP in Settings → Integrations first', { code: 'email_not_configured' });
 
   const items = await db.select().from(schema.invoiceItems).where(eq(schema.invoiceItems.invoiceId, id)).orderBy(schema.invoiceItems.position);
-  const pdf = await renderInvoicePdf(inv, items, company, workspace);
+  const pdf = await renderInvoicePdf({ ...inv, taxRateName: await taxRateLabel(items) }, items, company, workspace);
 
   const isFirstSend = inv.status === 'draft';
   if (isFirstSend) assertTransition(INVOICE_TRANSITIONS, inv.status, 'sent');
@@ -409,7 +427,7 @@ export async function getInvoicePdfBuffer(id: string): Promise<{ buffer: Buffer;
   const company = await getCompanyRow(inv.companyId);
   const workspace = await getWorkspace();
   const items = await db.select().from(schema.invoiceItems).where(eq(schema.invoiceItems.invoiceId, id)).orderBy(schema.invoiceItems.position);
-  return { buffer: await renderInvoicePdf(inv, items, company, workspace), number: inv.number };
+  return { buffer: await renderInvoicePdf({ ...inv, taxRateName: await taxRateLabel(items) }, items, company, workspace), number: inv.number };
 }
 
 export async function softDeleteInvoice(actor: Actor, id: string) {
@@ -677,7 +695,7 @@ export async function sendQuote(actor: Actor, id: string, opts: { to?: string; s
   const company = await getCompanyRow(q.companyId);
   const workspace = await getWorkspace();
   const items = await db.select().from(schema.quoteItems).where(eq(schema.quoteItems.quoteId, id)).orderBy(schema.quoteItems.position);
-  const pdf = await renderQuotePdf(q, items, company, workspace);
+  const pdf = await renderQuotePdf({ ...q, taxRateName: await taxRateLabel(items) }, items, company, workspace);
 
   const isFirstSend = q.status === 'draft';
   if (isFirstSend) assertTransition(QUOTE_TRANSITIONS, q.status, 'sent');
@@ -747,7 +765,7 @@ export async function getQuotePdfBuffer(id: string): Promise<{ buffer: Buffer; n
   const company = await getCompanyRow(q.companyId);
   const workspace = await getWorkspace();
   const items = await db.select().from(schema.quoteItems).where(eq(schema.quoteItems.quoteId, id)).orderBy(schema.quoteItems.position);
-  return { buffer: await renderQuotePdf(q, items, company, workspace), number: q.number };
+  return { buffer: await renderQuotePdf({ ...q, taxRateName: await taxRateLabel(items) }, items, company, workspace), number: q.number };
 }
 
 export async function softDeleteQuote(actor: Actor, id: string) {
@@ -1091,7 +1109,10 @@ export async function financeDashboard(params: { from?: string; to?: string }) {
   const receivablesTotal: Record<string, number> = {};
   for (const r of open) receivablesTotal[r.currency] = round2((receivablesTotal[r.currency] ?? 0) + r.outstanding);
 
-  const aging = computeAging(open.map((r) => ({ currency: r.currency, outstanding: r.outstanding, dueDate: r.dueDate })), asOf);
+  // An invoice without a due date is open but never overdue: it counts in the
+  // receivables total, sits in the current bucket and has no expected-payment day.
+  const dated = open.filter((r): r is typeof r & { dueDate: string } => !!r.dueDate);
+  const aging = computeAging(open.map((r) => ({ currency: r.currency, outstanding: r.outstanding, dueDate: r.dueDate ?? asOf })), asOf);
 
   // Invoiced / paid within the period (by issue date).
   const period = await db.execute(sql`
@@ -1099,11 +1120,11 @@ export async function financeDashboard(params: { from?: string; to?: string }) {
     from invoices where deleted_at is null and status <> 'canceled' and issue_date >= ${from} and issue_date <= ${to}
     group by currency`) as any[];
 
-  const overdue = open.filter((r) => r.dueDate < asOf).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const overdue = dated.filter((r) => r.dueDate < asOf).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
   // Expected payments grouped by due date.
   const expectedMap = new Map<string, Record<string, number>>();
-  for (const r of open) {
+  for (const r of dated) {
     const bucket: Record<string, number> = expectedMap.get(r.dueDate) ?? {};
     bucket[r.currency] = round2((bucket[r.currency] ?? 0) + r.outstanding);
     expectedMap.set(r.dueDate, bucket);

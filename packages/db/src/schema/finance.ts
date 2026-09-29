@@ -74,7 +74,8 @@ export const invoices = pgTable('invoices', {
   status: text('status').notNull().default('draft'),
   currency: text('currency').notNull().default('USD'),
   issueDate: text('issue_date').notNull(),
-  dueDate: text('due_date').notNull(),
+  /** Optional: an invoice without a payment deadline is never overdue and prints no due date. */
+  dueDate: text('due_date'),
   language: text('language').notNull().default('en'),
   discountType: text('discount_type').notNull().default('none'),
   discountValue: money('discount_value').notNull().default('0'),

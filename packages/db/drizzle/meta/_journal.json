@@ -281,6 +281,13 @@
       "when": 1789761342934,
       "tag": "0039_agent_workers_app_version",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1790636478450,
+      "tag": "0040_invoices_due_date_nullable",
+      "breakpoints": true
     }
   ]
 }

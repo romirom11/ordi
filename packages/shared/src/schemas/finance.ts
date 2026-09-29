@@ -33,7 +33,8 @@ export const invoiceInputSchema = z.object({
   quoteId: idSchema.nullable().optional(),
   currency: z.string().length(3).default('USD'),
   issueDate: z.string(),
-  dueDate: z.string(),
+  /** Optional: without a deadline the invoice is never overdue and prints no due date. */
+  dueDate: z.string().nullable().optional(),
   language: z.enum(DOC_LANGUAGES).default('en'),
   discountType: z.enum(DISCOUNT_TYPES).default('none'),
   discountValue: z.number().min(0).default(0),

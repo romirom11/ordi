@@ -6,7 +6,7 @@ import { usePageTitle } from '../lib/tabs';
 import { api, appOrigin, ApiError } from '../lib/api';
 import { Button, Input, Select, Textarea, Card, Breadcrumbs, Skeleton, Tooltip, Spinner, fmtMoney, fmtDate, cn } from '../components/ui';
 import { Dialog, ConfirmDialog, toast } from '../components/overlays';
-import { Send, Download, Ban, Plus, ExternalLink, FilePlus2, Eye, Banknote, Landmark, Mail, Paperclip, AlertTriangle } from 'lucide-react';
+import { Send, Download, Ban, Plus, ExternalLink, FilePlus2, Eye, Banknote, Landmark, Mail, Paperclip, AlertTriangle, Pencil } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
 import { openExternal } from '../lib/desktop';
 import { InlineEdit } from '../components/crm/detail';
@@ -24,6 +24,7 @@ function openPdf(id: string): void {
 import { useWorkspaceSettings } from '../components/finance/workspace';
 import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
 import { DateField } from '../components/DatePicker';
+import { DocumentForm } from '../components/finance/DocumentForm';
 
 extendDict({
   en: {
@@ -69,6 +70,8 @@ extendDict({
     'finance.noIssuerRequisites': 'Add your requisites in Settings → Invoices.',
     'finance.addNotes': 'Add notes…',
     'finance.addTerms': 'Add terms…',
+    'finance.invoiceUpdated': 'Invoice updated',
+    'finance.noDueDate': 'No due date',
     'finance.method.bank': 'Bank transfer',
     'finance.method.card': 'Card',
     'finance.method.cash': 'Cash',
@@ -117,6 +120,8 @@ extendDict({
     'finance.noIssuerRequisites': 'Додайте свої реквізити в Налаштування → Рахунки.',
     'finance.addNotes': 'Додати примітки…',
     'finance.addTerms': 'Додати умови…',
+    'finance.invoiceUpdated': 'Рахунок оновлено',
+    'finance.noDueDate': 'Без терміну оплати',
     'finance.method.bank': 'Банківський переказ',
     'finance.method.card': 'Картка',
     'finance.method.cash': 'Готівка',
@@ -133,7 +138,7 @@ const STATUS_TONE: Record<string, string> = {
   canceled: 'bg-muted text-muted-foreground',
 };
 
-interface InvoiceItem { id?: string; description?: string | null; quantity?: number | string; unitPrice?: number | string; amount?: number | string }
+interface InvoiceItem { id?: string; description?: string | null; quantity?: number | string; unitPrice?: number | string; amount?: number | string; taxRateId?: string | null }
 interface Payment { id: string; amount?: number | string; date?: string | null; method?: string | null; reference?: string | null }
 interface Invoice {
   id: string;
@@ -143,8 +148,13 @@ interface Invoice {
   companyId?: string | null;
   company?: { name?: string | null; billingEmail?: string | null; legalName?: string | null; taxId?: string | null; address?: string | null } | null;
   currency?: string | null;
+  language?: string | null;
   issueDate?: string | null;
   dueDate?: string | null;
+  discountType?: string | null;
+  discountValue?: number | string | null;
+  /** "VAT 20%" when every taxed line shares one rate. */
+  taxRateLabel?: string | null;
   subtotal?: number | string | null;
   taxTotal?: number | string | null;
   total?: number | string | null;
@@ -190,6 +200,7 @@ export function InvoiceDetailPage({ id }: { id: string }) {
   const [showPayment, setShowPayment] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
   const [showSend, setShowSend] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
   const [mail, setMail] = useState({ to: '', subject: '', body: '' });
   const invoice = useQuery({ queryKey: ['invoice', id], queryFn: () => api.get<Invoice>(`/invoices/${id}`) });
   // Loaded up front, so the Send button already knows whether mail can go out at all.
@@ -210,6 +221,13 @@ export function InvoiceDetailPage({ id }: { id: string }) {
     mutationFn: (customFields: Record<string, unknown>) =>
       api.patch(`/invoices/${id}`, { customFields, version: invoice.data?.version }),
     onSuccess: invalidate,
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
+  });
+  // Dates, currency, language, tax and discount stay editable at any status;
+  // the API refuses item changes once the invoice has been sent.
+  const edit = useMutation({
+    mutationFn: (body: Record<string, unknown>) => api.patch(`/invoices/${id}`, { ...body, version: invoice.data?.version }),
+    onSuccess: () => { setShowEdit(false); toast(t('finance.invoiceUpdated')); invalidate(); },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
   });
   // Notes/terms stay editable after sending: they are wording, not amounts.
@@ -323,10 +341,13 @@ export function InvoiceDetailPage({ id }: { id: string }) {
           <p className="mt-1.5 text-[13px] text-muted-foreground">
             {iv.companyId ? <Link to={`/companies/${iv.companyId}`} className="hover:text-foreground hover:underline">{iv.companyName ?? t('public.client')}</Link> : iv.companyName ?? t('public.client')}
             {iv.issueDate && <> · {t('public.issued')} {fmtDate(iv.issueDate)}</>}
-            {iv.dueDate && <> · {t('public.due')} {fmtDate(iv.dueDate)}</>}
+            {iv.dueDate ? <> · {t('public.due')} {fmtDate(iv.dueDate)}</> : <> · {t('finance.noDueDate')}</>}
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
+          {can('finance.write') && cancelable && (
+            <Button size="sm" variant="outline" onClick={() => setShowEdit(true)}><Pencil size={14} /> {t('common.edit')}</Button>
+          )}
           {can('finance.send') && cancelable && (
             preview.data && !preview.data.mailConfigured ? (
               <Tooltip label={t('finance.mailNotConfiguredShort')}>
@@ -455,7 +476,12 @@ export function InvoiceDetailPage({ id }: { id: string }) {
         <Card className="p-4">
           <dl className="space-y-2 text-[13px]">
             <Row label={t('public.subtotal')} value={fmtMoney(iv.subtotal ?? 0, cur)} />
-            <Row label={t('public.tax')} value={fmtMoney(iv.taxTotal ?? 0, cur)} />
+            {iv.discountType && iv.discountType !== 'none' && Number(iv.discountValue ?? 0) > 0 && (
+              <Row label={t('finance.discount')} value={iv.discountType === 'percent' ? `${Number(iv.discountValue)}%` : fmtMoney(iv.discountValue ?? 0, cur)} />
+            )}
+            {Number(iv.taxTotal ?? 0) > 0 && (
+              <Row label={iv.taxRateLabel ? `${t('public.tax')} (${iv.taxRateLabel})` : t('public.tax')} value={fmtMoney(iv.taxTotal ?? 0, cur)} />
+            )}
             <div className="border-t border-border pt-2">
               <Row label={t('common.total')} value={fmtMoney(total, cur)} bold />
             </div>
@@ -512,6 +538,30 @@ export function InvoiceDetailPage({ id }: { id: string }) {
           onSave={(customFields) => saveCustomFields.mutate(customFields)}
         />
       </div>
+
+      <Dialog open={showEdit} onClose={() => setShowEdit(false)} title={`${t('finance.editInvoice')} ${iv.number ?? ''}`} width={620}>
+        {showEdit && (
+          <DocumentForm
+            kind="invoice"
+            mode="edit"
+            itemsEditable={iv.status === 'draft'}
+            initial={{
+              companyId: iv.companyId, issueDate: iv.issueDate, endDate: iv.dueDate, currency: iv.currency, language: iv.language,
+              taxRateId: items.find((it) => it.taxRateId)?.taxRateId ?? null,
+              discountType: iv.discountType, discountValue: iv.discountValue, items,
+            }}
+            pending={edit.isPending}
+            submitLabel={t('finance.saveChanges')}
+            onCancel={() => setShowEdit(false)}
+            onSubmit={(v) => edit.mutate({
+              issueDate: v.issueDate, dueDate: v.endDate, currency: v.currency, language: v.language,
+              discountType: v.discountType, discountValue: v.discountValue,
+              // Items travel only while they may change; the API rejects them afterwards.
+              ...(iv.status === 'draft' ? { items: v.items } : {}),
+            })}
+          />
+        )}
+      </Dialog>
 
       <Dialog open={showSend} onClose={() => setShowSend(false)} title={t('finance.sendTitle').replace('{number}', iv.number ?? '')} width={520}>
         <form

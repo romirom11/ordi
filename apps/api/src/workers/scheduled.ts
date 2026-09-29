@@ -151,6 +151,8 @@ export async function runReminders(): Promise<void> {
   const openInvoices = await db.select().from(schema.invoices)
     .where(and(inArray(schema.invoices.status, ['sent', 'viewed', 'partially_paid']), eq(schema.invoices.remindersPaused, false)));
   for (const inv of openInvoices) {
+    // No payment deadline: nothing to remind about, and never overdue.
+    if (!inv.dueDate) continue;
     for (const rule of rules) {
       const triggerDate = addDays(inv.dueDate, rule.offsetDays);
       if (triggerDate > today()) continue;

@@ -3,6 +3,27 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## Unreleased
+
+- **Invoices can be edited, a due date is optional, and the tax row means
+  something**: the invoice page had no way to change anything but notes,
+  every invoice got a due date whether one was chosen or not (the form
+  quietly set today's date), the PDF printed dates as `2026-09-28` and the
+  internal status ("Sent") next to them, and a `Tax 0.00` row sat on every
+  document while the rates in Settings → Finance were unreachable from an
+  invoice. Now: an **Edit** dialog on the invoice page (and the same form
+  when creating one) covers issue date, due date, currency, language, the
+  tax rate applied to the lines, a discount and the line items, which lock
+  once the invoice has been sent as the API always required; **the due date
+  is optional** (`invoices.due_date` nullable, migration 0040): an undated
+  invoice prints no deadline, is never overdue, gets no reminders and sits
+  outside the expected-payments calendar; **dates read as dates** in the
+  document's language ("28 September 2026" / "28 вересня 2026 р."); the
+  status row is gone from the PDF; **the tax row appears only when there is
+  tax**, named after the rate ("Tax (VAT 20%)") on the PDF, the public page
+  and the invoice page, with a discount row alongside when one applies.
+  `taxRateLabel` joins the invoice and public payloads.
+
 ## v1.35.1
 
 - **The bundled object storage is RustFS, and the API creates its own
