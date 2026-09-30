@@ -3,7 +3,7 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
-## Unreleased
+## v1.36.1
 
 - **No more three rows saying 187.00**: an untaxed, unpaid invoice printed
   Subtotal, Total and Balance due with the same number. The totals block
