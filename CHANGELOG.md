@@ -3,6 +3,15 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## Unreleased
+
+- **No more three rows saying 187.00**: an untaxed, unpaid invoice printed
+  Subtotal, Total and Balance due with the same number. The totals block
+  now shows only rows that add information: the subtotal only next to a
+  discount or tax, the total only next to a payment, and otherwise a single
+  "Balance due" band ("Paid in full" once it is). Same on the PDF, the
+  public invoice and quote pages, and the invoice page in the app.
+
 ## v1.36.0
 
 - **Invoices can be edited, a due date is optional, and the tax row means

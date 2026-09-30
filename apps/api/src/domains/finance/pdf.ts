@@ -71,7 +71,7 @@ const LABELS = {
     due: 'Due date', validUntil: 'Valid until', status: 'Status',
     description: 'Description', qty: 'Qty', unit: 'Unit price', amount: 'Amount',
     subtotal: 'Subtotal', discount: 'Discount', tax: 'Tax', total: 'Total',
-    paid: 'Amount paid', balance: 'Balance due', notes: 'Notes', terms: 'Terms',
+    paid: 'Amount paid', balance: 'Balance due', paidInFull: 'Paid in full', notes: 'Notes', terms: 'Terms',
     paymentDetails: 'Payment details', taxId: 'Tax ID', viewOnline: 'View online', page: 'Page',
     status_draft: 'Draft', status_sent: 'Sent', status_viewed: 'Viewed', status_partially_paid: 'Partially paid',
     status_paid: 'Paid', status_overdue: 'Overdue', status_canceled: 'Canceled', status_accepted: 'Accepted',
@@ -82,7 +82,7 @@ const LABELS = {
     due: 'Термін оплати', validUntil: 'Дійсна до', status: 'Статус',
     description: 'Опис', qty: 'К-сть', unit: 'Ціна', amount: 'Сума',
     subtotal: 'Проміжна сума', discount: 'Знижка', tax: 'Податок', total: 'Разом',
-    paid: 'Сплачено', balance: 'До сплати', notes: 'Примітки', terms: 'Умови',
+    paid: 'Сплачено', balance: 'До сплати', paidInFull: 'Оплачено повністю', notes: 'Примітки', terms: 'Умови',
     paymentDetails: 'Реквізити для оплати', taxId: 'Код', viewOnline: 'Переглянути онлайн', page: 'Сторінка',
     status_draft: 'Чернетка', status_sent: 'Надіслано', status_viewed: 'Переглянуто', status_partially_paid: 'Частково оплачено',
     status_paid: 'Оплачено', status_overdue: 'Прострочено', status_canceled: 'Скасовано', status_accepted: 'Прийнято',
@@ -394,38 +394,43 @@ function render(
   w.y += 12;
 
   /* ── Totals ── */
-  const totals: { label: string; value: string; bold?: boolean; highlight?: boolean }[] = [
-    { label: L.subtotal, value: fmtMoney(doc.subtotal, cur) },
-  ];
-  if (doc.discountType && doc.discountType !== 'none' && Number(doc.discountValue ?? 0) > 0) {
+  // Every row must say something the previous one did not: the subtotal
+  // appears only when a discount or tax separates it from the total, the
+  // total only when a payment separates it from the balance, so an untaxed,
+  // unpaid invoice ends in one "Balance due" row and nothing else. The final
+  // row is plain bold text over a rule, in the accent colour: no filled band.
+  const totals: { label: string; value: string; bold?: boolean; final?: boolean }[] = [];
+  const hasDiscount = !!doc.discountType && doc.discountType !== 'none' && Number(doc.discountValue ?? 0) > 0;
+  const hasTax = Number(doc.taxTotal ?? 0) > 0;
+  if (hasDiscount || hasTax) totals.push({ label: L.subtotal, value: fmtMoney(doc.subtotal, cur) });
+  if (hasDiscount) {
     totals.push({ label: L.discount, value: doc.discountType === 'percent' ? `${Number(doc.discountValue)}%` : fmtMoney(doc.discountValue, cur) });
   }
   // Only a taxed document carries a tax row; it names the rate when there is one.
-  if (Number(doc.taxTotal ?? 0) > 0) {
+  if (hasTax) {
     totals.push({ label: doc.taxRateName ? `${L.tax} (${doc.taxRateName})` : L.tax, value: fmtMoney(doc.taxTotal, cur) });
   }
-  totals.push({ label: L.total, value: fmtMoney(doc.total, cur), bold: true });
-  if (kind === 'invoice') {
+  if (kind === 'quote') {
+    totals.push({ label: L.total, value: fmtMoney(doc.total, cur), bold: true });
+  } else {
     const paid = Number(doc.amountPaid ?? 0);
-    if (paid > 0) totals.push({ label: L.paid, value: fmtMoney(paid, cur) });
-    totals.push({ label: L.balance, value: fmtMoney(Number(doc.total) - paid, cur), bold: true, highlight: true });
+    const balance = Number(doc.total) - paid;
+    if (paid > 0) {
+      totals.push({ label: L.total, value: fmtMoney(doc.total, cur), bold: true });
+      totals.push({ label: L.paid, value: fmtMoney(paid, cur) });
+    }
+    totals.push({ label: balance <= 0 && paid > 0 ? L.paidInFull : L.balance, value: fmtMoney(Math.max(0, balance), cur), bold: true, final: true });
   }
   const totalsW = 230;
   const totalsX = PAGE.width - MARGIN.x - totalsW;
   w.ensure(totals.length * 18 + 10);
   for (const row of totals) {
-    const rowH = row.highlight ? 24 : 17;
-    if (row.highlight) {
-      pdf.roundedRect(totalsX, w.y, totalsW, rowH, 4).fill(accent);
-      const ty = w.y + 7;
-      w.text(row.label, totalsX + 10, ty, totalsW / 2, { size: 10, bold: true, color: '#ffffff' });
-      w.text(row.value, totalsX + totalsW / 2, ty, totalsW / 2 - 10, { size: 10.5, bold: true, color: '#ffffff', align: 'right' });
-    } else {
-      const ty = w.y + 3;
-      w.text(row.label, totalsX + 10, ty, totalsW / 2, { size: 9.5, bold: row.bold, color: row.bold ? INK : MUTED });
-      w.text(row.value, totalsX + totalsW / 2, ty, totalsW / 2 - 10, { size: row.bold ? 10.5 : 9.5, bold: row.bold, align: 'right' });
-      if (row.bold) w.doc.moveTo(totalsX + 10, w.y).lineTo(totalsX + totalsW - 10, w.y).lineWidth(0.6).strokeColor(RULE).stroke();
-    }
+    const rowH = row.final ? 20 : 17;
+    if (row.bold) w.doc.moveTo(totalsX + 10, w.y).lineTo(totalsX + totalsW - 10, w.y).lineWidth(row.final ? 1 : 0.6).strokeColor(row.final ? accent : RULE).stroke();
+    const ty = w.y + (row.final ? 5 : 3);
+    const size = row.final ? 11 : row.bold ? 10.5 : 9.5;
+    w.text(row.label, totalsX + 10, ty, totalsW / 2, { size: row.final ? 10 : 9.5, bold: row.bold, color: row.bold ? INK : MUTED });
+    w.text(row.value, totalsX + totalsW / 2, ty, totalsW / 2 - 10, { size, bold: row.bold, color: row.final ? accent : INK, align: 'right' });
     w.y += rowH + 2;
   }
   w.y += 14;

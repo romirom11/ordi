@@ -312,6 +312,8 @@ export function InvoiceDetailPage({ id }: { id: string }) {
   const client = iv.company;
   const clientLines = [client?.taxId ? `${t('finance.taxId')}: ${client.taxId}` : null, client?.address, client?.billingEmail].filter((v): v is string => !!v && !!v.trim());
   const canEditText = can('finance.write') && iv.status !== 'canceled';
+  const hasDiscount = !!iv.discountType && iv.discountType !== 'none' && Number(iv.discountValue ?? 0) > 0;
+  const hasTax = Number(iv.taxTotal ?? 0) > 0;
 
   const timeline = buildTimeline(iv, payments, t);
 
@@ -475,20 +477,28 @@ export function InvoiceDetailPage({ id }: { id: string }) {
         </Card>
         <Card className="p-4">
           <dl className="space-y-2 text-[13px]">
-            <Row label={t('public.subtotal')} value={fmtMoney(iv.subtotal ?? 0, cur)} />
-            {iv.discountType && iv.discountType !== 'none' && Number(iv.discountValue ?? 0) > 0 && (
+            {(hasDiscount || hasTax) && <Row label={t('public.subtotal')} value={fmtMoney(iv.subtotal ?? 0, cur)} />}
+            {hasDiscount && (
               <Row label={t('finance.discount')} value={iv.discountType === 'percent' ? `${Number(iv.discountValue)}%` : fmtMoney(iv.discountValue ?? 0, cur)} />
             )}
-            {Number(iv.taxTotal ?? 0) > 0 && (
+            {hasTax && (
               <Row label={iv.taxRateLabel ? `${t('public.tax')} (${iv.taxRateLabel})` : t('public.tax')} value={fmtMoney(iv.taxTotal ?? 0, cur)} />
             )}
-            <div className="border-t border-border pt-2">
-              <Row label={t('common.total')} value={fmtMoney(total, cur)} bold />
-            </div>
-            <Row label={t('public.paid')} value={fmtMoney(paid, cur)} />
-            <div className="border-t border-border pt-2">
-              <Row label={t('finance.outstanding')} value={fmtMoney(outstanding, cur)} bold accent={outstanding > 0} />
-            </div>
+            {paid > 0 ? (
+              <>
+                <div className={cn((hasDiscount || hasTax) && 'border-t border-border pt-2')}>
+                  <Row label={t('common.total')} value={fmtMoney(total, cur)} bold />
+                </div>
+                <Row label={t('public.paid')} value={fmtMoney(paid, cur)} />
+                <div className="border-t border-border pt-2">
+                  <Row label={t('finance.outstanding')} value={fmtMoney(Math.max(0, outstanding), cur)} bold accent={outstanding > 0} />
+                </div>
+              </>
+            ) : (
+              <div className={cn((hasDiscount || hasTax) && 'border-t border-border pt-2')}>
+                <Row label={t('finance.outstanding')} value={fmtMoney(outstanding, cur)} bold accent={outstanding > 0} />
+              </div>
+            )}
           </dl>
         </Card>
       </div>
