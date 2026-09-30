@@ -195,12 +195,9 @@ function InvoiceDocument({ token, data }: { token: string; data: PublicPayload }
                     <SumRow label={t('public.paid')} value={fmtMoney(paid, cur)} />
                   </>
                 )}
-                <div
-                  className="mt-1 flex items-center justify-between rounded-lg px-3 py-2 text-[15px] font-semibold"
-                  style={{ backgroundColor: accent + '14', color: accent }}
-                >
+                <div className="mt-1 flex items-center justify-between border-t-2 px-3 pt-2 text-[15px] font-semibold text-slate-900" style={{ borderColor: accent }}>
                   <span>{isPaid ? t('public.paidInFull') : t('public.amountDue')}</span>
-                  <span className="tabular-nums">{fmtMoney(Math.max(0, outstanding), cur)}</span>
+                  <span className="tabular-nums" style={{ color: accent }}>{fmtMoney(Math.max(0, outstanding), cur)}</span>
                 </div>
               </div>
             </div>
