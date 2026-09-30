@@ -21,6 +21,7 @@ import { assertVersion } from '../../core/locking';
 import { sendEmailNow, emailConfigured } from '../../lib/email';
 import { runtimeConfig } from '../../lib/runtime-config';
 import { asLocale, loadBranding, renderEmail, tr, type EmailLocale } from '../../lib/email-templates';
+import { formatMoney } from '../../lib/money';
 import { nextNumber } from '../../workers/scheduled';
 import { env } from '../../env';
 import { renderInvoicePdf, renderQuotePdf } from './pdf';
@@ -1297,17 +1298,6 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-
-/** Money for email copy – Intl with a plain fallback for odd currency codes. */
-function formatMoney(amount: string | number | null, currency: string | null): string {
-  const value = Number(amount ?? 0);
-  const code = currency || 'USD';
-  try {
-    return new Intl.NumberFormat('en', { style: 'currency', currency: code }).format(value);
-  } catch {
-    return `${value.toFixed(2)} ${code}`;
-  }
-}
 
 function formatDate(date: string, locale: EmailLocale): string {
   const d = new Date(date);
