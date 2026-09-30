@@ -397,8 +397,9 @@ function render(
   // Every row must say something the previous one did not: the subtotal
   // appears only when a discount or tax separates it from the total, the
   // total only when a payment separates it from the balance, so an untaxed,
-  // unpaid invoice ends in one "Balance due" band and nothing else.
-  const totals: { label: string; value: string; bold?: boolean; highlight?: boolean }[] = [];
+  // unpaid invoice ends in one "Balance due" row and nothing else. The final
+  // row is plain bold text over a rule, in the accent colour: no filled band.
+  const totals: { label: string; value: string; bold?: boolean; final?: boolean }[] = [];
   const hasDiscount = !!doc.discountType && doc.discountType !== 'none' && Number(doc.discountValue ?? 0) > 0;
   const hasTax = Number(doc.taxTotal ?? 0) > 0;
   if (hasDiscount || hasTax) totals.push({ label: L.subtotal, value: fmtMoney(doc.subtotal, cur) });
@@ -418,24 +419,18 @@ function render(
       totals.push({ label: L.total, value: fmtMoney(doc.total, cur), bold: true });
       totals.push({ label: L.paid, value: fmtMoney(paid, cur) });
     }
-    totals.push({ label: balance <= 0 && paid > 0 ? L.paidInFull : L.balance, value: fmtMoney(Math.max(0, balance), cur), bold: true, highlight: true });
+    totals.push({ label: balance <= 0 && paid > 0 ? L.paidInFull : L.balance, value: fmtMoney(Math.max(0, balance), cur), bold: true, final: true });
   }
   const totalsW = 230;
   const totalsX = PAGE.width - MARGIN.x - totalsW;
   w.ensure(totals.length * 18 + 10);
   for (const row of totals) {
-    const rowH = row.highlight ? 24 : 17;
-    if (row.highlight) {
-      pdf.roundedRect(totalsX, w.y, totalsW, rowH, 4).fill(accent);
-      const ty = w.y + 7;
-      w.text(row.label, totalsX + 10, ty, totalsW / 2, { size: 10, bold: true, color: '#ffffff' });
-      w.text(row.value, totalsX + totalsW / 2, ty, totalsW / 2 - 10, { size: 10.5, bold: true, color: '#ffffff', align: 'right' });
-    } else {
-      const ty = w.y + 3;
-      w.text(row.label, totalsX + 10, ty, totalsW / 2, { size: 9.5, bold: row.bold, color: row.bold ? INK : MUTED });
-      w.text(row.value, totalsX + totalsW / 2, ty, totalsW / 2 - 10, { size: row.bold ? 10.5 : 9.5, bold: row.bold, align: 'right' });
-      if (row.bold) w.doc.moveTo(totalsX + 10, w.y).lineTo(totalsX + totalsW - 10, w.y).lineWidth(0.6).strokeColor(RULE).stroke();
-    }
+    const rowH = row.final ? 20 : 17;
+    if (row.bold) w.doc.moveTo(totalsX + 10, w.y).lineTo(totalsX + totalsW - 10, w.y).lineWidth(row.final ? 1 : 0.6).strokeColor(row.final ? accent : RULE).stroke();
+    const ty = w.y + (row.final ? 5 : 3);
+    const size = row.final ? 11 : row.bold ? 10.5 : 9.5;
+    w.text(row.label, totalsX + 10, ty, totalsW / 2, { size: row.final ? 10 : 9.5, bold: row.bold, color: row.bold ? INK : MUTED });
+    w.text(row.value, totalsX + totalsW / 2, ty, totalsW / 2 - 10, { size, bold: row.bold, color: row.final ? accent : INK, align: 'right' });
     w.y += rowH + 2;
   }
   w.y += 14;
