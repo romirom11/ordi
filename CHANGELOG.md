@@ -9,8 +9,11 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   Subtotal, Total and Balance due with the same number. The totals block
   now shows only rows that add information: the subtotal only next to a
   discount or tax, the total only next to a payment, and otherwise a single
-  "Balance due" band ("Paid in full" once it is). Same on the PDF, the
+  "Balance due" row ("Paid in full" once it is). Same on the PDF, the
   public invoice and quote pages, and the invoice page in the app.
+- **No filled block behind the balance**: the final totals row on the PDF
+  and the public invoice page is plain bold text over an accent rule
+  instead of white text on a coloured band.
 
 ## v1.36.0
 
