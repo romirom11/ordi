@@ -95,6 +95,8 @@ function InvoiceDocument({ token, data }: { token: string; data: PublicPayload }
   const from = workspace?.legalDetails ?? {};
 
   const isPaid = iv.status === 'paid' || (paid > 0 && outstanding <= 0);
+  const hasDiscount = !!iv.discountType && iv.discountType !== 'none' && Number(iv.discountValue ?? 0) > 0;
+  const hasTax = Number(iv.taxTotal ?? 0) > 0;
   const isOverdue = !isPaid && iv.status !== 'canceled' && !!iv.dueDate && new Date(iv.dueDate) < new Date() && outstanding > 0;
 
   return (
@@ -176,22 +178,29 @@ function InvoiceDocument({ token, data }: { token: string; data: PublicPayload }
             {/* Totals */}
             <div className="mt-6 flex justify-end">
               <div className="w-full max-w-xs space-y-1.5 text-sm">
-                <SumRow label={t('public.subtotal')} value={fmtMoney(iv.subtotal ?? 0, cur)} />
-                {iv.discountType && iv.discountType !== 'none' && Number(iv.discountValue ?? 0) > 0 && (
+                {/* Rows that repeat the number above them are left out: the
+                    subtotal only next to a discount or tax, the total only
+                    next to a payment, else the amount due stands alone. */}
+                {(hasDiscount || hasTax) && <SumRow label={t('public.subtotal')} value={fmtMoney(iv.subtotal ?? 0, cur)} />}
+                {hasDiscount && (
                   <SumRow label={t('public.discount')} value={iv.discountType === 'percent' ? `${Number(iv.discountValue)}%` : fmtMoney(iv.discountValue ?? 0, cur)} />
                 )}
-                {Number(iv.taxTotal ?? 0) > 0 && (
+                {hasTax && (
                   <SumRow label={iv.taxRateLabel ? `${t('public.tax')} (${iv.taxRateLabel})` : t('public.tax')} value={fmtMoney(iv.taxTotal ?? 0, cur)} />
                 )}
-                <div className="my-1 border-t border-slate-200" />
-                <SumRow label={t('common.total')} value={fmtMoney(total, cur)} bold />
-                {paid > 0 && <SumRow label={t('public.paid')} value={fmtMoney(paid, cur)} />}
+                {paid > 0 && (
+                  <>
+                    {(hasDiscount || hasTax) && <div className="my-1 border-t border-slate-200" />}
+                    <SumRow label={t('common.total')} value={fmtMoney(total, cur)} bold />
+                    <SumRow label={t('public.paid')} value={fmtMoney(paid, cur)} />
+                  </>
+                )}
                 <div
                   className="mt-1 flex items-center justify-between rounded-lg px-3 py-2 text-[15px] font-semibold"
                   style={{ backgroundColor: accent + '14', color: accent }}
                 >
-                  <span>{t('public.amountDue')}</span>
-                  <span className="tabular-nums">{fmtMoney(outstanding, cur)}</span>
+                  <span>{isPaid ? t('public.paidInFull') : t('public.amountDue')}</span>
+                  <span className="tabular-nums">{fmtMoney(Math.max(0, outstanding), cur)}</span>
                 </div>
               </div>
             </div>

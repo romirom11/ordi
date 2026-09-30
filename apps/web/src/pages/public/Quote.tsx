@@ -72,6 +72,8 @@ function QuoteDocument({ token, data }: { token: string; data: PubQuotePayload }
   const from = workspace?.legalDetails ?? {};
   const accent = invoiceSettings?.accentColor || undefined;
   const showLogo = invoiceSettings?.showLogo !== false && !!workspace?.logo;
+  const hasDiscount = !!q.discountType && q.discountType !== 'none' && Number(q.discountValue ?? 0) > 0;
+  const hasTax = Number(q.taxTotal ?? 0) > 0;
   const decided = q.status === 'accepted' || q.status === 'declined';
   const canDecide = q.status === 'sent' || q.status === 'viewed';
   const requisites = (r: { taxId?: string | null; address?: string | null; email?: string | null; phone?: string | null } | null | undefined) =>
@@ -130,11 +132,11 @@ function QuoteDocument({ token, data }: { token: string; data: PubQuotePayload }
         </table>
 
         <div className="ml-auto max-w-xs space-y-1.5 text-sm">
-          <SumRow label={t('public.subtotal')} value={fmtMoney(q.subtotal ?? 0, cur)} />
-          {q.discountType && q.discountType !== 'none' && Number(q.discountValue ?? 0) > 0 && (
+          {(hasDiscount || hasTax) && <SumRow label={t('public.subtotal')} value={fmtMoney(q.subtotal ?? 0, cur)} />}
+          {hasDiscount && (
             <SumRow label={t('public.discount')} value={q.discountType === 'percent' ? `${Number(q.discountValue)}%` : fmtMoney(q.discountValue ?? 0, cur)} />
           )}
-          {Number(q.taxTotal ?? 0) > 0 && (
+          {hasTax && (
             <SumRow label={q.taxRateLabel ? `${t('public.tax')} (${q.taxRateLabel})` : t('public.tax')} value={fmtMoney(q.taxTotal ?? 0, cur)} />
           )}
           <SumRow label={t('common.total')} value={fmtMoney(q.total ?? 0, cur)} bold />
