@@ -33,9 +33,10 @@ describe('creating agents', () => {
     expect(role!.key).toBe('agent');
   });
 
-  it('rejects the codex runtime and the owner role', async () => {
+  it('creates a codex agent and rejects the owner role', async () => {
     const owner = reqAs(ws.users.owner!.cookie);
-    expect((await owner.post('/agents', { name: 'Codex', runtime: 'codex' })).status).toBe(400);
+    const created = await createAgent(ws.users, { name: 'Codex', runtime: 'codex' });
+    expect((created as { runtime?: string }).runtime ?? (await (await reqAs(ws.users.owner!.cookie).get(`/agents/${created.id}`)).json() as { runtime: string }).runtime).toBe('codex');
     const { db } = getDb();
     const [ownerRole] = await db.select().from(schema.roles).where(eq(schema.roles.key, 'owner'));
     expect((await owner.post('/agents', { name: 'Boss', roleId: ownerRole!.id })).status).toBe(422);

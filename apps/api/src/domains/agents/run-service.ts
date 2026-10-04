@@ -182,7 +182,7 @@ export async function prepare(runId: string): Promise<RunBundle> {
   const credentials: RunBundle['credentials'] = [];
   for (const id of await resolveCredentialChain(profile)) {
     const cred = await loadRuntimeCredential(id);
-    if (cred) credentials.push({ id, kind: cred.kind, secret: cred.secret });
+    if (cred) credentials.push({ id, kind: cred.kind, secret: cred.secret, provider: cred.provider, baseUrl: cred.baseUrl ?? null });
   }
   const repo = await resolveRepository(project.id);
   secretsPending.set(runId, [

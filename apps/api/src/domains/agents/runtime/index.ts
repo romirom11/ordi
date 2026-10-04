@@ -1,6 +1,6 @@
 /**
- * Runtime registry. Tests swap the Claude adapter for one driven by a fake
- * `query`, so nothing here ever spawns a model in CI.
+ * Runtime registry. Tests swap adapters for fakes so nothing here spawns a
+ * model in CI.
  */
 import type { AgentRuntime } from '@ordi/shared';
 import { createClaudeCodeAdapter } from './claude-code';

@@ -58,6 +58,13 @@ if (typeof sdk.query !== 'function') throw new Error('claude-agent-sdk did not e
 const require = createRequire(import.meta.resolve('@anthropic-ai/claude-agent-sdk')); \
 const bin = require.resolve('@anthropic-ai/claude-agent-sdk-' + process.platform + '-' + process.arch + '/claude'); \
 console.log('claude runtime: ' + bin);"
+# Codex CLI (feature/codex-custom-provider): used when the agent runtime is
+# `codex`. Install globally so `codex --version` and `codex exec --json` work
+# in the worker's PATH. Verify the binary resolves, but do not hard-fail the
+# build if the registry is unreachable (the adapter's available() will report it).
+RUN npm i -g @openai/codex 2>&1 | tail -5; \
+  if command -v codex >/dev/null 2>&1; then echo "codex runtime: $(command -v codex) $(codex --version 2>&1 | head -1)"; \
+  else echo "warning: codex binary not found – codex runs will report unavailable until the image is rebuilt with registry access"; fi
 WORKDIR /app
 
 # Agent work lives here (AGENT_WORK_DIR): tasks/<taskId>/checkout is the

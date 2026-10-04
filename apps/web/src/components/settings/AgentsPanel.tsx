@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  AGENT_ASSIGN_POLICIES, AGENT_CREDENTIAL_KINDS, AGENT_CREDENTIAL_SLOTS, AGENT_RUNTIMES,
+  AGENT_ASSIGN_POLICIES, AGENT_CREDENTIAL_KINDS, AGENT_CREDENTIAL_PROVIDERS, AGENT_CREDENTIAL_SLOTS, AGENT_RUNTIMES,
   EXECUTABLE_AGENT_RUNTIMES,
 } from '@ordi/shared';
 import {
@@ -73,6 +73,15 @@ extendDict({
     'agents.subscriptionHelp': 'Run “claude setup-token” on your own machine and paste the token it prints here. It is valid for a year.',
     'agents.apiKeyHelp': 'An Anthropic API key from the console. Usage is billed to that account.',
     'agents.credentialAdded': 'Credential added',
+    'agents.provider': 'Provider',
+    'agents.provider.anthropic': 'Anthropic (Claude)',
+    'agents.provider.openai': 'OpenAI (Codex)',
+    'agents.baseUrl': 'Base URL (optional)',
+    'agents.baseUrlPlaceholder': 'https://proxy.example.com/v1',
+    'agents.baseUrlHint': 'Leave empty for native OpenAI. Set for a custom OpenAI-compatible gateway (LiteLLM, Ollama, corp proxy).',
+    'agents.baseUrlHelp': 'Custom base URL is only for OpenAI API keys, not for subscriptions.',
+    'agents.codexAuthHint': 'Run “codex login” locally, then paste the content of ~/.codex/auth.json here.',
+    'agents.openaiApiKeyHelp': 'An OpenAI API key from platform.openai.com. For a custom gateway, add its Base URL below.',
     // Agents
     'agents.list': 'Agents',
     'agents.listDesc': 'Each agent is a workspace member with a role, a project list and its own limits.',
@@ -186,6 +195,15 @@ extendDict({
     'agents.subscriptionHelp': 'Виконайте «claude setup-token» на своєму комп’ютері та вставте сюди токен, який він виведе. Він дійсний рік.',
     'agents.apiKeyHelp': 'API-ключ Anthropic із консолі. Використання оплачує той акаунт.',
     'agents.credentialAdded': 'Доступ додано',
+    'agents.provider': 'Провайдер',
+    'agents.provider.anthropic': 'Anthropic (Claude)',
+    'agents.provider.openai': 'OpenAI (Codex)',
+    'agents.baseUrl': 'Базова URL (необовʼязково)',
+    'agents.baseUrlPlaceholder': 'https://proxy.example.com/v1',
+    'agents.baseUrlHint': 'Порожньо — нативний OpenAI. Вкажіть для кастомного OpenAI-сумісного гейтвею (LiteLLM, Ollama, corp proxy).',
+    'agents.baseUrlHelp': 'Кастомна базова URL лише для API-ключів OpenAI, не для підписки.',
+    'agents.codexAuthHint': 'Виконайте «codex login» локально та вставте сюди вміст ~/.codex/auth.json.',
+    'agents.openaiApiKeyHelp': 'API-ключ OpenAI з platform.openai.com. Для кастомного гейтвею додайте Base URL нижче.',
     // Agents
     'agents.list': 'Агенти',
     'agents.listDesc': 'Кожен агент – це учасник воркспейсу з роллю, переліком проєктів і власними лімітами.',
@@ -268,6 +286,7 @@ interface CredentialView {
   connectedAt: string;
   revokedAt: string | null;
   version: number;
+  baseUrl: string | null;
   fromEnv?: boolean;
 }
 
@@ -359,6 +378,8 @@ function CredentialCard({ cred, users }: { cred: CredentialView; users: { id: st
           <div className="flex flex-wrap items-center gap-2">
             <span className={cn('text-[13px] font-semibold', dead && 'text-muted-foreground line-through')}>{cred.label}</span>
             <Badge>{t(`agents.kind.${cred.kind}`)}</Badge>
+            <Badge className="bg-muted text-muted-foreground">{t(`agents.provider.${cred.provider}`, cred.provider)}</Badge>
+            {cred.baseUrl && <span className="truncate text-[11px] text-faint" title={cred.baseUrl}>{cred.baseUrl}</span>}
             {cred.slot && <Badge className="bg-primary/10 text-primary">{t(`agents.slot.${cred.slot}`)}</Badge>}
           </div>
           <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
@@ -467,9 +488,11 @@ function AddCredentialDialog({ open, onClose, credentials }: {
 }) {
   const t = useT();
   const qc = useQueryClient();
+  const [provider, setProvider] = useState<string>('anthropic');
   const [kind, setKind] = useState<'subscription' | 'api_key'>('subscription');
   const [label, setLabel] = useState('');
   const [secret, setSecret] = useState('');
+  const [baseUrl, setBaseUrl] = useState('');
   const [slot, setSlot] = useState<CredentialSlot>(null);
   const [expires, setExpires] = useState('');
 
@@ -480,16 +503,22 @@ function AddCredentialDialog({ open, onClose, credentials }: {
   const defaultSlot: CredentialSlot = taken('primary') ? null : 'primary';
 
   useEffect(() => {
-    if (open) { setKind('subscription'); setLabel(''); setSecret(''); setSlot(defaultSlot); setExpires(''); }
+    if (open) { setProvider('anthropic'); setKind('subscription'); setLabel(''); setSecret(''); setBaseUrl(''); setSlot(defaultSlot); setExpires(''); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  const showBaseUrl = provider === 'openai' && kind === 'api_key';
+  const helpText = provider === 'openai'
+    ? kind === 'subscription' ? t('agents.codexAuthHint') : t('agents.openaiApiKeyHelp')
+    : kind === 'subscription' ? t('agents.subscriptionHelp') : t('agents.apiKeyHelp');
+
   const create = useMutation({
     mutationFn: () => api.post('/agent-credentials', {
-      provider: 'anthropic',
+      provider,
       kind,
       label: label.trim(),
       secret: secret.trim(),
+      baseUrl: showBaseUrl && baseUrl.trim() ? baseUrl.trim() : null,
       slot,
       expiresAt: expires ? dayToIso(expires) : null,
     }),
@@ -502,25 +531,39 @@ function AddCredentialDialog({ open, onClose, credentials }: {
     onError: (e) => toast.error(errMessage(e, t('settings.saveFailed'))),
   });
 
-  const valid = label.trim().length > 0 && secret.trim().length >= 8;
+  const valid = label.trim().length > 0 && secret.trim().length >= 8 && (!showBaseUrl || !baseUrl.trim() || /^https?:\/\//.test(baseUrl.trim()));
 
   return (
-    <Dialog open={open} onClose={onClose} title={t('agents.addCredential')} width={460}>
+    <Dialog open={open} onClose={onClose} title={t('agents.addCredential')} width={480}>
       <form className="space-y-3 p-4" onSubmit={(e) => { e.preventDefault(); if (valid && !create.isPending) create.mutate(); }}>
+        <Field label={t('agents.provider')}>
+          <Select value={provider} onChange={(e) => { const v = e.target.value; setProvider(v); if (v === 'openai' && kind === 'subscription') { /* keep subscription for codex login */ } }} className="w-full">
+            {AGENT_CREDENTIAL_PROVIDERS.map((p) => <option key={p} value={p}>{t(`agents.provider.${p}`, p)}</option>)}
+          </Select>
+        </Field>
+
         <SegmentedControl
           className="w-full"
           value={kind}
           onChange={setKind}
           options={AGENT_CREDENTIAL_KINDS.map((k) => ({ key: k, label: t(`agents.kind.${k}`) }))}
         />
-        <p className="text-xs text-muted-foreground">{kind === 'subscription' ? t('agents.subscriptionHelp') : t('agents.apiKeyHelp')}</p>
+        <p className="text-xs text-muted-foreground">{helpText}</p>
 
         <Field label={t('agents.credLabel')}>
           <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t('agents.credLabelPlaceholder')} autoFocus />
         </Field>
         <Field label={t('agents.secret')}>
-          <Input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" placeholder={kind === 'api_key' ? 'sk-ant-…' : 'sk-ant-oat…'} />
+          <Input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" placeholder={kind === 'api_key' ? (provider === 'openai' ? 'sk-proj-…' : 'sk-ant-…') : (provider === 'openai' ? '{...auth.json}' : 'sk-ant-oat…')} />
         </Field>
+        {showBaseUrl && (
+          <>
+            <Field label={t('agents.baseUrl')}>
+              <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={t('agents.baseUrlPlaceholder')} />
+            </Field>
+            <p className="text-[11px] text-faint">{t('agents.baseUrlHint')}</p>
+          </>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <Field label={t('agents.slotLabel')}>

@@ -13,7 +13,6 @@ import {
 
 // ── Agents ──
 
-/** Only executable runtimes are accepted; `codex` is reserved and shown as coming soon. */
 export const agentRuntimeSchema = z.enum(EXECUTABLE_AGENT_RUNTIMES);
 
 export const agentProfileFieldsSchema = z.object({
@@ -62,7 +61,16 @@ export const agentCredentialInputSchema = z.object({
   slot: z.enum(AGENT_CREDENTIAL_SLOTS).nullable().optional(),
   /** Subscription tokens live a year; the owner may record the exact date. */
   expiresAt: z.string().datetime().nullable().optional(),
-}).refine((v) => v.provider === 'anthropic', { message: 'Only Anthropic credentials are supported yet', path: ['provider'] });
+  /** Custom OpenAI-compatible base URL for Codex (e.g. https://proxy.example.com/v1). Null = native provider. */
+  baseUrl: z.string().trim().url().max(500).nullable().optional(),
+}).superRefine((v, ctx) => {
+  if (v.provider === 'anthropic' && v.baseUrl) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['baseUrl'], message: 'baseUrl is only for OpenAI credentials' });
+  }
+  if (v.kind === 'subscription' && v.baseUrl) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['baseUrl'], message: 'Subscription credentials do not use a custom base URL' });
+  }
+});
 export type AgentCredentialInput = z.infer<typeof agentCredentialInputSchema>;
 
 export const updateAgentCredentialSchema = z.object({
@@ -70,6 +78,7 @@ export const updateAgentCredentialSchema = z.object({
   slot: z.enum(AGENT_CREDENTIAL_SLOTS).nullable().optional(),
   /** Rotate: a new secret replaces the old one; status returns to active. */
   secret: z.string().trim().min(8).max(4096).optional(),
+  baseUrl: z.string().trim().url().max(500).nullable().optional(),
   expiresAt: z.string().datetime().nullable().optional(),
   version: z.number().int().min(1),
 });
@@ -135,7 +144,7 @@ export const listAgentRunsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-/** Public shape of the workspace's Claude connection – secrets never included. */
+/** Public shape of the workspace's Claude/Codex connection – secrets never included. */
 export const agentCredentialViewSchema = z.object({
   id: idSchema,
   provider: z.enum(AGENT_CREDENTIAL_PROVIDERS),
@@ -149,4 +158,5 @@ export const agentCredentialViewSchema = z.object({
   connectedBy: z.string().nullable(),
   connectedAt: z.string(),
   version: z.number(),
+  baseUrl: z.string().nullable().optional(),
 });

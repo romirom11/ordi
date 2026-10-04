@@ -14,13 +14,15 @@ import { pk, timestamps, version, createdBy } from './_shared';
 import { users } from './core';
 import { tasks, projects } from './projects';
 
-/** Workspace-level provider credentials: the owner connects Claude once. */
+/** Workspace-level provider credentials: the owner connects Claude or Codex once. */
 export const agentCredentials = pgTable('agent_credentials', {
   id: pk(),
   provider: text('provider').notNull(), // anthropic | openai
   kind: text('kind').notNull(), // api_key | subscription
   label: text('label').notNull(),
   secret: text('secret').notNull(), // AES-GCM encrypted, never returned
+  /** Custom OpenAI-compatible base URL (Codex) – null means native provider. */
+  baseUrl: text('base_url'),
   /** primary | fallback | null – at most one of each per workspace. */
   slot: text('slot'),
   status: text('status').notNull().default('active'), // active | expired | revoked

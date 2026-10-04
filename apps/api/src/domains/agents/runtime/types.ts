@@ -3,11 +3,14 @@
  * model harness is driven: Claude Code through the Agent SDK today, Codex
  * later. The worker only ever sees events and an outcome.
  */
-import type { AgentRuntime } from '@ordi/shared';
+import type { AgentCredentialProvider, AgentRuntime } from '@ordi/shared';
 
 export interface RuntimeCredential {
+  provider?: AgentCredentialProvider;
   kind: 'api_key' | 'subscription';
   secret: string;
+  /** Custom OpenAI-compatible base URL (Codex). Null/undefined = native provider. */
+  baseUrl?: string | null;
 }
 
 /** An MCP server the runtime may load – always ordi or the connector gateway. */

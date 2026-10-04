@@ -13,7 +13,7 @@ import { env } from '../env';
 import { logger } from '../lib/logger';
 import { SERVER_VERSION } from '../version';
 import type { ClaimedRun, PublishOutcome, RunBackend } from '../domains/agents/run-backend';
-import { runtimeAdapter, type RuntimeEvent, type RuntimeMcpServer, type RuntimeOutcome } from '../domains/agents/runtime';
+import { runtimeAdapter, type RuntimeCredential, type RuntimeEvent, type RuntimeMcpServer, type RuntimeOutcome } from '../domains/agents/runtime';
 import { allowedToolsFor, DISALLOWED_TOOLS } from '../domains/agents/runtime/tools';
 import {
   cleanupWorkspace, explainPushError, harnessDir, prepareWorkspace, pruneTaskDirs, publishWorkspace, readPullRequestTemplate,
@@ -57,9 +57,10 @@ export async function executeRun(backend: RunBackend, claimed: ClaimedRun): Prom
     let suggestedSlug: string | null = null;
     if (!claimed.branch) {
       await mkdir(configDir, { recursive: true });
+      const firstCred = credentials[0]!;
       suggestedSlug = await runtime.suggestBranchSlug({
         title: task.title, description: task.description.slice(0, 1500),
-        credential: { kind: credentials[0]!.kind, secret: credentials[0]!.secret }, configDir,
+        credential: { provider: (firstCred as { provider?: string }).provider as RuntimeCredential['provider'], kind: firstCred.kind, secret: firstCred.secret, baseUrl: (firstCred as { baseUrl?: string | null }).baseUrl ?? null }, configDir,
       }).catch(() => null);
     }
     ws = await prepareWorkspace({
@@ -116,7 +117,7 @@ export async function executeRun(backend: RunBackend, claimed: ClaimedRun): Prom
         usedCredentialId = cred.id;
         await log(`Starting ${bundle.runtime} with credential ${cred.id === credentials[0]!.id ? '(primary)' : '(fallback)'}`);
         last = await runtime.run({
-          prompt, systemAppend: started.systemAppend, cwd: workspace.dir, configDir, credential: { kind: cred.kind, secret: cred.secret },
+          prompt, systemAppend: started.systemAppend, cwd: workspace.dir, configDir, credential: { provider: (cred as { provider?: string }).provider as RuntimeCredential['provider'], kind: cred.kind, secret: cred.secret, baseUrl: (cred as { baseUrl?: string | null }).baseUrl ?? null },
           model: profile.model, mcpServers, maxTurns: profile.maxTurns,
           maxBudgetUsd: cred.kind === 'api_key' && profile.maxBudgetUsd != null ? profile.maxBudgetUsd : null,
           resume, allowedTools: allowedToolsFor(Object.keys(mcpServers)), disallowedTools: DISALLOWED_TOOLS,
@@ -250,7 +251,11 @@ export function startAgentRunsWorker(backend: RunBackend): () => void {
   const beat = () => backend.heartbeat({
     workerId, concurrency: env.agentWorkerConcurrency, running: inFlight.size, runtimeAvailable, version: SERVER_VERSION,
   });
-  void runtimeAdapter('claude_code').available().then((a) => { runtimeAvailable = a.ok; if (!a.ok) logger.warn({ error: a.error }, 'claude runtime unavailable'); });
+  void Promise.all([runtimeAdapter('claude_code').available(), runtimeAdapter('codex').available()]).then(([a, b]) => {
+    runtimeAvailable = a.ok || b.ok;
+    if (!a.ok) logger.warn({ error: a.error }, 'claude runtime unavailable');
+    if (!b.ok) logger.warn({ error: b.error }, 'codex runtime unavailable');
+  });
   void mkdir(env.agentWorkDir, { recursive: true }).catch((e) => logger.warn({ err: e, dir: env.agentWorkDir }, 'agent work dir unavailable'));
   const poll = setInterval(() => { if (!stopped) pollOnce(backend).catch((e) => logger.error({ err: e }, 'agent worker poll failed')); }, POLL_MS);
   const heartbeat = setInterval(() => { if (!stopped) beat().catch((e) => logger.warn({ err: e }, 'agent worker heartbeat failed')); }, HEARTBEAT_MS);
