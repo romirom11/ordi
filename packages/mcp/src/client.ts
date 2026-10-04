@@ -67,4 +67,27 @@ export class OrdiClient {
   get<T>(path: string) { return this.request<T>('GET', path); }
   post<T>(path: string, body?: unknown) { return this.request<T>('POST', path, body); }
   patch<T>(path: string, body?: unknown) { return this.request<T>('PATCH', path, body); }
+
+  /** Multipart upload for /attachments – FormData with a File/Blob, no JSON Content-Type. */
+  async postForm<T>(path: string, form: FormData): Promise<T> {
+    const res = await fetch(`${this.cfg.baseUrl}/api/v1${path}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.cfg.token}`,
+      },
+      body: form as unknown as any,
+    });
+    const text = await res.text();
+    const data = text ? JSON.parse(text) : {};
+    if (!res.ok) {
+      const error = ((data as any)?.error ?? {}) as { code?: unknown; message?: unknown; details?: unknown };
+      throw new OrdiApiError(
+        res.status,
+        typeof error.code === 'string' ? error.code : 'http_error',
+        typeof error.message === 'string' ? error.message : `HTTP ${res.status}`,
+        error.details,
+      );
+    }
+    return data as T;
+  }
 }
