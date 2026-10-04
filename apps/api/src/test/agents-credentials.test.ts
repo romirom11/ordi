@@ -77,9 +77,12 @@ describe('credentials', () => {
     expect(after.slot).toBeNull();
   });
 
-  it('rejects other providers and short secrets, and hides everything from a manager', async () => {
+  it('accepts openai provider, rejects short secrets and mismatched baseUrl, and hides everything from a manager', async () => {
     const owner = reqAs(users.owner!.cookie);
-    expect((await owner.post('/agent-credentials', { provider: 'openai', kind: 'api_key', label: 'x', secret: 'sk-1234567890' })).status).toBe(400);
+    expect((await owner.post('/agent-credentials', { provider: 'openai', kind: 'api_key', label: 'OpenAI', secret: 'sk-1234567890-openai-key' })).status).toBe(201);
+    expect((await owner.post('/agent-credentials', { provider: 'openai', kind: 'api_key', label: 'Custom', secret: 'sk-1234567890-custom-key', baseUrl: 'https://proxy.example.com/v1' })).status).toBe(201);
+    expect((await owner.post('/agent-credentials', { provider: 'anthropic', kind: 'api_key', label: 'x', secret: 'sk-1234567890', baseUrl: 'https://proxy.example.com/v1' })).status).toBe(400);
+    expect((await owner.post('/agent-credentials', { provider: 'openai', kind: 'subscription', label: 'x', secret: '{"tokens":{}}', baseUrl: 'https://proxy.example.com/v1' })).status).toBe(400);
     expect((await owner.post('/agent-credentials', { provider: 'anthropic', kind: 'api_key', label: 'x', secret: 'short' })).status).toBe(400);
     const manager = reqAs(users.manager!.cookie);
     expect((await manager.post('/agent-credentials', { provider: 'anthropic', kind: 'api_key', label: 'x', secret: 'sk-1234567890' })).status).toBe(403);

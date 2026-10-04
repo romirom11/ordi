@@ -59,7 +59,7 @@ export interface RunBundle {
   /** Slugs only: the connectors' secrets stay on the API, behind the gateway. */
   connectors: string[];
   /** The credential chain in order, decrypted for this run. Empty means the run cannot start. */
-  credentials: { id: string; kind: 'api_key' | 'subscription'; secret: string }[];
+  credentials: { id: string; kind: 'api_key' | 'subscription'; secret: string; provider: string; baseUrl: string | null }[];
   repo: RepoBinding | null;
   /** The task in ordi, for the pull request description. */
   taskUrl: string;

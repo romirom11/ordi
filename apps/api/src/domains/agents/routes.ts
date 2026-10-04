@@ -30,9 +30,10 @@ export function agentsRoutes() {
 
   // ── Workspace overview (runtimes, workers) ──
   app.get('/agents/overview', guard('agents.manage'), async (c) => {
-    const claude = await runtimeAdapter('claude_code').available();
+    const [claude, codex] = await Promise.all([runtimeAdapter('claude_code').available(), runtimeAdapter('codex').available()]);
+    const installed: Record<string, boolean> = { claude_code: claude.ok, codex: codex.ok };
     return c.json({
-      runtimes: AGENT_RUNTIMES.map((r) => ({ key: r, available: (EXECUTABLE_AGENT_RUNTIMES as readonly string[]).includes(r), installed: r === 'claude_code' ? claude.ok : false })),
+      runtimes: AGENT_RUNTIMES.map((r) => ({ key: r, available: (EXECUTABLE_AGENT_RUNTIMES as readonly string[]).includes(r), installed: installed[r] ?? false })),
       workers: await listWorkers(),
       workerEnabled: env.agentWorkerEnabled,
       connectorCallbackUrl: connectorCallbackUrl(),

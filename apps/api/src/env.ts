@@ -74,4 +74,6 @@ export const env = {
   agentWorkerApiUrl: normalizeApiUrl(process.env.ORDI_API_URL ?? process.env.API_URL ?? ''),
   /** Env fallback for an API-key credential (PaaS installs without the UI step). */
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',
+  /** Env fallback for Codex (native OpenAI provider). */
+  openaiApiKey: process.env.OPENAI_API_KEY ?? '',
 };

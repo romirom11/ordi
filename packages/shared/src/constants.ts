@@ -101,7 +101,7 @@ export type ActorType = (typeof ACTOR_TYPES)[number];
 export const AGENT_RUNTIMES = ['claude_code', 'codex'] as const;
 export type AgentRuntime = (typeof AGENT_RUNTIMES)[number];
 /** Runtimes with a working adapter; the rest are shown as coming soon. */
-export const EXECUTABLE_AGENT_RUNTIMES = ['claude_code'] as const satisfies readonly AgentRuntime[];
+export const EXECUTABLE_AGENT_RUNTIMES = ['claude_code', 'codex'] as const satisfies readonly AgentRuntime[];
 
 export const AGENT_CREDENTIAL_PROVIDERS = ['anthropic', 'openai'] as const;
 export type AgentCredentialProvider = (typeof AGENT_CREDENTIAL_PROVIDERS)[number];

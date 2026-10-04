@@ -288,6 +288,13 @@
       "when": 1790636478450,
       "tag": "0040_invoices_due_date_nullable",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1791146530611,
+      "tag": "0041_codex_base_url",
+      "breakpoints": true
     }
   ]
 }
