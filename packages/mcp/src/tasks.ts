@@ -289,7 +289,11 @@ async function writeBody(args: WriteArgs, vocab: () => Promise<Vocab>): Promise<
 }
 
 const writeSchema = {
-  text: z.string().optional().describe('Full body as plain text; blank line = new paragraph. Replaces the whole body. An `![name](url)` line read from get_task stays an embedded image – keep such lines when rewriting.'),
+  text: z.string().optional().describe(
+    'Full body as plain text; blank line = new paragraph, single newline = hard break. Replaces the whole body. '
+    + 'An `![alt](url)` line on its own is an embedded image block (one per line, not inline). '
+    + 'To embed new images at arbitrary positions among paragraphs, upload each image first with upload_attachment {filename, data} → {src/url}, then interleave the returned `![alt](url)` lines exactly where you want them inside text (e.g. "Intro\\n\\n![a](SRC1)\\n\\nBetween\\n\\n![b](SRC2)\\n\\nOutro"). '
+    + 'Lines read from get_task already contain the fetchable image urls – keep those lines when rewriting or the image is removed.'),
   status: z.string().optional().describe('Status id, name ("Scheduled") or category (backlog|todo|in_progress|done|canceled)'),
   type: z.string().optional().describe('Task type id or name (see get_project_schema)'),
   priority: z.enum(TASK_PRIORITIES).optional(),
@@ -388,7 +392,9 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
     };
   }, VERSIONED));
 
-  server.tool('create_task', 'Create a task with everything a planned item needs: title, body text, calendar date, status, type, labels, custom fields (platform, rubric …) and source links. Pass externalKey to keep re-runs identifiable – the tool then refuses to file a second task under the same key. Use upsert_task when the run is meant to be repeatable.', {
+  server.tool('create_task', 'Create a task with everything a planned item needs: title, body text, calendar date, status, type, labels, custom fields and source links. '
+    + 'For rich descriptions with images at specific positions, upload each image first with upload_attachment → src, then interleave `![alt](src)` lines inside text at the exact spots you want (images are block-level, one per line). '
+    + 'Pass externalKey to keep re-runs identifiable – the tool then refuses to file a second task under the same key. Use upsert_task when the run is meant to be repeatable.', {
     projectId: z.string().describe('Project id or key (see list_projects)'),
     title: z.string(),
     ...writeSchema,
@@ -433,7 +439,9 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
     return { action: 'created', task: await readBack(client, created.id, vocab), links: added };
   }, VERSIONED));
 
-  server.tool('update_task', 'Rewrite a task: text, calendar date, status, type, labels, priority, custom fields, plus links to append. Send the version you read with get_task as expectedVersion and the call refuses instead of overwriting an edit someone made in ordi meanwhile.', {
+  server.tool('update_task', 'Rewrite a task: text, calendar date, status, type, labels, priority, custom fields, plus links to append. '
+    + 'For images, text fully replaces the body – read the current text with get_task, keep existing `![…](…)` lines you want, insert new ones (from upload_attachment) at the positions you want, then write back with expectedVersion. '
+    + 'Send the version you read with get_task as expectedVersion and the call refuses instead of overwriting an edit someone made in ordi meanwhile.', {
     taskId: z.string(),
     title: z.string().optional(),
     ...writeSchema,
@@ -469,7 +477,9 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
     };
   }));
 
-  server.tool('upsert_task', 'Create or update a task by your own unique key – the repeatable write. The key is stored in a custom field, so running the same generation twice updates the one task instead of filing a duplicate. If the title, text, date or status changed in ordi since the last upsert, the call refuses (pass force to overwrite) so a person’s edit is never replaced with stale generated content.', {
+  server.tool('upsert_task', 'Create or update a task by your own unique key – the repeatable write. The key is stored in a custom field, so running the same generation twice updates the one task instead of filing a duplicate. '
+    + 'For images, upload with upload_attachment first and interleave `![alt](src)` lines inside text. '
+    + 'If the title, text, date or status changed in ordi since the last upsert, the call refuses (pass force to overwrite) so a person’s edit is never replaced with stale generated content.', {
     project: z.string().describe('Project key or id'),
     key: z.string().describe('Your unique id for this item, e.g. 2026-08-03-linkedin-ai-agents'),
     title: z.string(),

@@ -12,6 +12,7 @@ import {
 } from '@ordi/shared';
 import { OrdiClient } from './client';
 import { absolutizeImageSrcs, decodeEntities, relativizeImageSrcs, scrub, text, wrap } from './format';
+import { registerAttachmentTools } from './attachments';
 import { registerTaskTools } from './tasks';
 
 export { decodeEntities, scrub };
@@ -592,9 +593,8 @@ export function buildServer(client: OrdiClient): McpServer {
   server.tool('move_applicant', 'Move an applicant to a stage', { applicantId: z.string(), stageId: z.string(), rejectedReason: z.string().optional() },
   ({ applicantId, stageId, rejectedReason }) => wrap(() => client.post(`/applicants/${applicantId}/move`, { stageId, rejectedReason })));
 
-  // Project structure, task cards and the repeatable key-based write, which
-  // need enough of their own machinery (name resolution, fingerprints) to live
-  // beside the catalog rather than in it.
+  // Upload + project/task cards need their own machinery (multipart, name resolution, fingerprints).
+  registerAttachmentTools(server, client);
   registerTaskTools(server, client);
 
   return server;
