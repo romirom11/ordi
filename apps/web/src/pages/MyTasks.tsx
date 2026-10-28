@@ -8,18 +8,22 @@
  * Items come from GET /me/tasks in snake_case.
  */
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle, CalendarClock, CalendarRange, CheckSquare, Inbox, UserRoundPlus, UserRound,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { api } from '../lib/api';
-import { useNavigate, useOpen } from '../lib/router';
+import { api, ApiError } from '../lib/api';
+import { useOpen } from '../lib/router';
+import { useProjectRole } from '../lib/auth';
 import {
-  Badge, EmptyState, PageHeader, PriorityIcon, SegmentedControl, Skeleton, StatusIcon, cn, fmtDate,
+  Badge, EmptyState, PageHeader, PriorityIcon, SegmentedControl, Skeleton, cn, fmtDate,
 } from '../components/ui';
+import { toast } from '../components/overlays';
+import { TaskStatusPicker } from '../components/task/StatusPicker';
 import { useT, extendDict } from '../lib/i18n';
 import { usePersistedState, oneOfPref } from '../lib/prefs';
+import type { TaskStatusLookup } from '../lib/queries';
 
 extendDict({
   en: {
@@ -54,9 +58,13 @@ interface MeTask {
   number: number;
   project_id: string;
   key: string;
+  status_id: string;
   category: string;
   status_name: string;
   status_color: string;
+  /** Of the project – decides whether this row may change its own status. */
+  visibility?: 'workspace' | 'private';
+  version: number;
   ref: string;
   /** created tab only */
   has_assignee?: boolean;
@@ -69,6 +77,8 @@ interface MeTasksResponse {
   later: MeTask[];
   created: MeTask[];
 }
+
+const BUCKETS: (keyof MeTasksResponse)[] = ['overdue', 'today', 'week', 'later', 'created'];
 
 type Tab = 'assigned' | 'created';
 interface Section { key: string; labelKey: string; icon: ReactNode; accent?: boolean; tasks: MeTask[] }
@@ -100,15 +110,98 @@ function LoadingRows() {
   );
 }
 
+/**
+ * One row. It is its own component because the status picker needs the role
+ * this person holds in *that* row's project, and My tasks spans all of them –
+ * the list has no single `canWrite` the way a project page does.
+ */
+function TaskRow({ task, index, overdue, onPickStatus }: {
+  task: MeTask; index: number; overdue: boolean;
+  onPickStatus: (task: MeTask, status: TaskStatusLookup) => void;
+}) {
+  const open = useOpen();
+  const role = useProjectRole(task.project_id, task.visibility);
+  const href = `/projects/${task.project_id}/tasks/${task.id}`;
+  return (
+    <button
+      onClick={(e) => open(href, e)}
+      onAuxClick={(e) => open(href, e)}
+      className="row-enter flex h-9 w-full cursor-pointer items-center gap-3 border-b border-border px-6 text-left transition-colors duration-150 hover:bg-muted"
+      style={{ ['--i' as string]: Math.min(index, 10) }}
+    >
+      <PriorityIcon priority={task.priority} />
+      <span className="w-14 shrink-0 font-mono text-[11px] text-faint">{task.ref}</span>
+      <TaskStatusPicker
+        projectId={task.project_id}
+        statusId={task.status_id}
+        category={task.category}
+        color={task.status_color}
+        statusName={task.status_name}
+        canWrite={role === 'admin' || role === 'member'}
+        onPick={(status) => onPickStatus(task, status)}
+      />
+      <span className="min-w-0 flex-1 truncate text-[13px]">{task.title}</span>
+      <Badge>{task.key}</Badge>
+      <span
+        className={cn(
+          // Fixed-width kept the column aligned but wrapped "17 Sep 2026" onto a
+          // second line, which spilled out of the row: a floor plus nowrap keeps
+          // both the alignment and the single line.
+          'min-w-[64px] shrink-0 whitespace-nowrap text-right text-xs tabular-nums',
+          overdue ? 'font-medium text-destructive' : 'text-muted-foreground',
+        )}
+      >
+        {task.due_date ? fmtDate(task.due_date) : ''}
+      </span>
+    </button>
+  );
+}
+
 export function MyTasksPage() {
   const t = useT();
-  const navigate = useNavigate();
-  const open = useOpen();
+  const qc = useQueryClient();
   const [tab, setTab] = usePersistedState<Tab>('ordi:view:myTasks.tab', 'assigned', oneOfPref(['assigned', 'created'], 'assigned'));
 
   const { data, isLoading } = useQuery<MeTasksResponse>({
     queryKey: ['me-tasks'],
     queryFn: () => api.get('/me/tasks'),
+  });
+
+  /**
+   * Quick status change from the row (ORD-36). The optimistic write only
+   * repaints the circle – a task moved to done or canceled leaves the list
+   * entirely, and that is what the refetch on settle decides.
+   */
+  const setStatus = useMutation({
+    mutationFn: (vars: { task: MeTask; status: TaskStatusLookup }) =>
+      api.patch(`/tasks/${vars.task.id}`, { statusId: vars.status.id, version: vars.task.version }),
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: ['me-tasks'] });
+      const prev = qc.getQueryData<MeTasksResponse>(['me-tasks']);
+      const picked = {
+        status_id: vars.status.id,
+        category: vars.status.category,
+        status_name: vars.status.name,
+        status_color: vars.status.color,
+      };
+      qc.setQueryData<MeTasksResponse>(['me-tasks'], (old) => {
+        if (!old) return old;
+        const next = { ...old };
+        for (const bucket of BUCKETS) {
+          next[bucket] = old[bucket].map((x) => x.id === vars.task.id ? { ...x, ...picked } : x);
+        }
+        return next;
+      });
+      return { prev };
+    },
+    onError: (e, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(['me-tasks'], ctx.prev);
+      toast.error(e instanceof ApiError ? e.message : t('common.saveFailed'));
+    },
+    onSettled: (_d, _e, vars) => {
+      qc.invalidateQueries({ queryKey: ['me-tasks'] });
+      qc.invalidateQueries({ queryKey: ['tasks', vars.task.project_id] });
+    },
   });
 
   const assignedCount = ASSIGNED_SECTIONS.reduce((n, s) => n + (data?.[s.key]?.length ?? 0), 0);
@@ -173,33 +266,15 @@ export function MyTasksPage() {
                 <span className="font-normal tabular-nums text-faint">{s.tasks.length}</span>
               </header>
 
-              {s.tasks.map((task) => {
-                const i = rowIndex++;
-                const overdue = s.key === 'overdue' || isOverdue(task.due_date);
-                return (
-                  <button
-                    key={task.id}
-                    onClick={(e) => open(`/projects/${task.project_id}/tasks/${task.id}`, e)}
-                    onAuxClick={(e) => open(`/projects/${task.project_id}/tasks/${task.id}`, e)}
-                    className="row-enter flex h-9 w-full cursor-pointer items-center gap-3 border-b border-border px-6 text-left transition-colors duration-150 hover:bg-muted"
-                    style={{ ['--i' as string]: Math.min(i, 10) }}
-                  >
-                    <PriorityIcon priority={task.priority} />
-                    <span className="w-14 shrink-0 font-mono text-[11px] text-faint">{task.ref}</span>
-                    <StatusIcon category={task.category} color={task.status_color} />
-                    <span className="min-w-0 flex-1 truncate text-[13px]">{task.title}</span>
-                    <Badge>{task.key}</Badge>
-                    <span
-                      className={cn(
-                        'w-16 shrink-0 text-right text-xs tabular-nums',
-                        overdue ? 'font-medium text-destructive' : 'text-muted-foreground',
-                      )}
-                    >
-                      {task.due_date ? fmtDate(task.due_date) : ''}
-                    </span>
-                  </button>
-                );
-              })}
+              {s.tasks.map((task) => (
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  index={rowIndex++}
+                  overdue={s.key === 'overdue' || isOverdue(task.due_date)}
+                  onPickStatus={(x, status) => setStatus.mutate({ task: x, status })}
+                />
+              ))}
             </section>
           ))}
         </div>
