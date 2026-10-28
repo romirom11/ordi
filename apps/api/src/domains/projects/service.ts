@@ -387,20 +387,49 @@ async function assertMilestoneInProject(milestoneId: string, projectId: string):
   if (!ms) throw err.validation('milestoneId must be a milestone of the same project');
 }
 
-async function assertSubtaskDepth(parentId: string | null | undefined) {
-  if (!parentId) return;
+/**
+ * A parent is a live task of the same project that sits above the task, not
+ * inside its own subtree: a parent from elsewhere puts a subtask on a board
+ * that does not show it, and a parent below the task closes a loop that hides
+ * the whole branch from every tree view. The task's own subtree moves with it,
+ * so its height counts towards MAX_SUBTASK_DEPTH as much as the parent's
+ * ancestors do. `taskId` is absent on create, where there is no subtree yet.
+ */
+async function assertParent(parentId: string, projectId: string, taskId?: string) {
+  if (parentId === taskId) throw err.validation('A task cannot be its own parent');
   const { db } = getDb();
-  let ancestors = 0;
-  let current: string | null = parentId;
-  const seen = new Set<string>();
-  while (current) {
-    if (seen.has(current)) break;
+  const [parent] = await db.select({ projectId: tasks.projectId, parentId: tasks.parentId }).from(tasks)
+    .where(and(eq(tasks.id, parentId), isNull(tasks.deletedAt)));
+  if (!parent || parent.projectId !== projectId) throw err.validation('parentId must be a task of the same project');
+
+  let ancestors = 1;
+  let current = parent.parentId;
+  const seen = new Set([parentId]);
+  while (current && !seen.has(current)) {
+    if (current === taskId) throw err.validation('parentId cannot be a subtask of the task itself');
     seen.add(current);
     ancestors++;
-    if (ancestors + 1 > MAX_SUBTASK_DEPTH) throw err.domain(`Max subtask depth (${MAX_SUBTASK_DEPTH}) exceeded`);
     const [row] = await db.select({ parentId: tasks.parentId }).from(tasks).where(eq(tasks.id, current));
     current = row?.parentId ?? null;
   }
+
+  let height = 1;
+  let frontier = taskId ? [taskId] : [];
+  while (frontier.length && ancestors + height <= MAX_SUBTASK_DEPTH) {
+    const children = await db.select({ id: tasks.id }).from(tasks)
+      .where(and(inArray(tasks.parentId, frontier), isNull(tasks.deletedAt)));
+    frontier = children.map((c) => c.id);
+    if (frontier.length) height++;
+  }
+  if (ancestors + height > MAX_SUBTASK_DEPTH) throw err.domain(`Max subtask depth (${MAX_SUBTASK_DEPTH}) exceeded`);
+}
+
+/** A cycle plans one project's work, so a task can only join a cycle of its own project. */
+async function assertCycleInProject(cycleId: string, projectId: string): Promise<void> {
+  const { db } = getDb();
+  const [cycle] = await db.select({ id: cycles.id }).from(cycles)
+    .where(and(eq(cycles.id, cycleId), eq(cycles.projectId, projectId)));
+  if (!cycle) throw err.validation('cycleId must be a cycle of the same project');
 }
 
 /** Cursor-paged on `id desc`; see `idPage` in lib/http for why the key is the id. */
@@ -491,7 +520,8 @@ export async function listTasks(actor: Actor, params: {
 
 export async function createTask(actor: Actor, input: any) {
   const project = await assertProject(actor, input.projectId, 'member');
-  await assertSubtaskDepth(input.parentId);
+  if (input.parentId) await assertParent(input.parentId, input.projectId);
+  if (input.cycleId) await assertCycleInProject(input.cycleId, input.projectId);
   const assigneeIds: string[] = input.assigneeIds ?? [];
   if (assigneeIds.length) await assertCanAssignAgents(actor, project.id, assigneeIds, effectiveProjectRole(actor, project));
   const labelIds: string[] = input.labelIds ?? [];
@@ -586,7 +616,8 @@ export async function updateTask(actor: Actor, id: string, input: any) {
   if (input.milestoneId) await assertMilestoneInProject(input.milestoneId, before.projectId);
   if (input.customFields !== undefined) patch.customFields = mergeCustomFields(before.customFields, input.customFields);
   if (input.estimate !== undefined) patch.estimate = input.estimate != null ? String(input.estimate) : null;
-  if (input.parentId !== undefined && input.parentId) await assertSubtaskDepth(input.parentId);
+  if (input.parentId) await assertParent(input.parentId, before.projectId, id);
+  if (input.cycleId) await assertCycleInProject(input.cycleId, before.projectId);
   if (Object.keys(patch).length) {
     await db.update(tasks).set(patch).where(and(eq(tasks.id, id), eq(tasks.version, before.version)));
   }
@@ -1004,6 +1035,17 @@ export async function bulkUpdateTasks(actor: Actor, input: any) {
   const { db } = getDb();
   if (input.labelIds !== undefined) await assertLabelScope(input.labelIds as string[], 'task');
   const rows = await db.select().from(tasks).where(and(inArray(tasks.id, input.taskIds), isNull(tasks.deletedAt)));
+  const canEdit = (projectId: string) => {
+    const role = actor.access.projectMemberships.get(projectId);
+    return role === 'admin' || role === 'member';
+  };
+  // Before any row is written: a selection spanning projects must not land
+  // half of itself in a cycle the other half cannot belong to.
+  if (input.cycleId) {
+    for (const projectId of new Set(rows.map((t) => t.projectId).filter(canEdit))) {
+      await assertCycleInProject(input.cycleId, projectId);
+    }
+  }
   let updated = 0;
   for (const t of rows) {
     const role = actor.access.projectMemberships.get(t.projectId);
