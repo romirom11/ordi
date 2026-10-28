@@ -22,7 +22,7 @@
 import { createHash } from 'node:crypto';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { TASK_PRIORITIES, docToText, textToDoc } from '@ordi/shared';
+import { MAX_SUBTASK_DEPTH, TASK_PRIORITIES, docToText, textToDoc } from '@ordi/shared';
 import { OrdiApiError, type OrdiClient } from './client';
 import { absolutizeImageSrcs, relativizeImageSrcs, wrap } from './format';
 
@@ -126,6 +126,50 @@ function resolveLabels(vocab: Vocab, refs: string[]): string[] {
   return ids;
 }
 
+// ── Hierarchy and cycles: checked here, because the API stores them as given ──
+
+/**
+ * A parent the API would accept but the board could not show: a task from
+ * another project, the task itself, or one of its own subtasks (which would
+ * close a loop the API's depth check walks around instead of refusing).
+ */
+async function resolveParent(client: OrdiClient, projectId: string, ref: string, selfId?: string): Promise<string> {
+  const wanted = ref.trim();
+  if (selfId && wanted === selfId) throw new Error('A task cannot be its own parent.');
+  let parent: Row;
+  try {
+    parent = await client.get<Row>(`/tasks/${wanted}`);
+  } catch (e) {
+    if (e instanceof OrdiApiError && e.status === 404) {
+      throw new Error(`Parent task "${ref}" not found, or this token cannot see it. Pass the task id from list_tasks or get_task.`);
+    }
+    throw e;
+  }
+  if (parent.projectId !== projectId) {
+    throw new Error(`Parent task ${parent.ref ?? parent.id} is in another project; a subtask lives in its parent's project.`);
+  }
+  if (selfId) {
+    let ancestor: string | null = parent.parentId ?? null;
+    for (let hops = 0; ancestor && hops < MAX_SUBTASK_DEPTH; hops++) {
+      if (ancestor === selfId) throw new Error(`Task ${parent.ref ?? parent.id} is a subtask of this task, so it cannot be its parent.`);
+      ancestor = (await client.get<Row>(`/tasks/${ancestor}`)).parentId ?? null;
+    }
+  }
+  return parent.id;
+}
+
+async function resolveCycle(client: OrdiClient, projectId: string, ref: string): Promise<string> {
+  const wanted = ref.trim();
+  const cycles = (await client.get<{ data: Row[] }>(`/projects/${projectId}/cycles`)).data;
+  const hit = cycles.find((c) => c.id === wanted)
+    ?? cycles.find((c) => String(c.name).toLowerCase() === wanted.toLowerCase());
+  if (!hit) {
+    const known = cycles.map((c) => `${c.name} (${c.status})`).join(', ');
+    throw new Error(`Unknown cycle "${ref}". This project has: ${known || '(none)'} – see get_project_schema.`);
+  }
+  return hit.id;
+}
+
 // ── Shapes ──
 
 function nameOf(rows: Row[], id: unknown): string | null {
@@ -144,6 +188,8 @@ function compact(task: Row, vocab: Vocab | null, labelIds?: string[]) {
     status: vocab ? nameOf(vocab.statuses, task.statusId) : undefined,
     typeId: task.typeId ?? null,
     type: vocab && task.typeId ? nameOf(vocab.types, task.typeId) : undefined,
+    parentId: task.parentId ?? null,
+    cycleId: task.cycleId ?? null,
     priority: task.priority,
     dueDate: task.dueDate ?? null,
     startDate: task.startDate ?? null,
@@ -270,10 +316,15 @@ interface WriteArgs {
   labels?: string[];
   assigneeIds?: string[];
   customFields?: Record<string, unknown>;
+  parentId?: string | null;
+  cycle?: string | null;
 }
 
+/** Where a write lands: the project names resolve in, and the task itself once it exists. */
+interface WriteTarget { client: OrdiClient; projectId: string; taskId?: string }
+
 /** Shared translation of the friendly write arguments into an API body. */
-async function writeBody(args: WriteArgs, vocab: () => Promise<Vocab>): Promise<Record<string, unknown>> {
+async function writeBody(args: WriteArgs, vocab: () => Promise<Vocab>, target: WriteTarget): Promise<Record<string, unknown>> {
   const body: Record<string, unknown> = {};
   if (args.title !== undefined) body.title = args.title;
   if (args.text !== undefined) body.description = textToDoc(args.text);
@@ -285,6 +336,12 @@ async function writeBody(args: WriteArgs, vocab: () => Promise<Vocab>): Promise<
   if (args.status !== undefined) body.statusId = resolveStatus(await vocab(), args.status);
   if (args.type !== undefined) body.typeId = resolveType(await vocab(), args.type);
   if (args.labels !== undefined) body.labelIds = resolveLabels(await vocab(), args.labels);
+  if (args.parentId !== undefined) {
+    body.parentId = args.parentId === null ? null : await resolveParent(target.client, target.projectId, args.parentId, target.taskId);
+  }
+  if (args.cycle !== undefined) {
+    body.cycleId = args.cycle === null ? null : await resolveCycle(target.client, target.projectId, args.cycle);
+  }
   return body;
 }
 
@@ -302,6 +359,8 @@ const writeSchema = {
   labels: z.array(z.string()).optional().describe('Label ids or names; replaces the label set'),
   assigneeIds: z.array(z.string()).optional().describe('User ids (see list_users)'),
   customFields: z.record(z.string(), z.unknown()).optional().describe('Keyed by custom field key, e.g. { platform: "linkedin", rubric: "case-study" } (see list_custom_fields); merged by key on update, null clears one'),
+  parentId: z.string().nullable().optional().describe('Id of the parent task (see list_tasks / get_task) – makes this a subtask; the parent must be in the same project. null makes it a top-level task again'),
+  cycle: z.string().nullable().optional().describe('Cycle id or name (see get_project_schema) to put the task in; null takes it out of its cycle'),
 };
 
 export function registerTaskTools(server: McpServer, client: OrdiClient): void {
@@ -311,34 +370,38 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
   const toAgent = (text: string): string => absolutizeImageSrcs(text, client.publicUrl);
   const fromAgent = (text: string): string => relativizeImageSrcs(text, client.publicUrl);
 
-  server.tool('get_project_schema', 'The writable structure of one project: its statuses, task types, task labels and task custom fields – everything create_task / update_task / list_tasks accept as a name. Takes a project key ("CONTENT") or id, so this is also how a project is looked up by key.', {
+  server.tool('get_project_schema', 'The writable structure of one project: its statuses, task types, task labels, cycles and task custom fields – everything create_task / update_task / list_tasks accept as a name. Takes a project key ("CONTENT") or id, so this is also how a project is looked up by key.', {
     project: z.string().describe('Project key (e.g. CONTENT) or id'),
   }, ({ project }) => wrap(async () => {
     const p = await resolveProject(client, project);
     const vocab = await vocabLoader(client, p.id)();
     const fields = await client.get<{ data: Row[] }>('/custom-fields?entityType=tasks');
+    const cycles = await client.get<{ data: Row[] }>(`/projects/${p.id}/cycles`);
     return {
       project: { id: p.id, key: p.key, name: p.name, status: p.status },
       statuses: vocab.statuses.map((s) => ({ id: s.id, name: s.name, category: s.category, isDefault: s.isDefault, position: s.position })),
       taskTypes: vocab.types.map((t) => ({ id: t.id, name: t.name, scope: t.projectId ? 'project' : 'workspace' })),
       labels: vocab.labels.map((l) => ({ id: l.id, name: l.name, color: l.color })),
+      cycles: cycles.data.map((c) => ({ id: c.id, name: c.name, status: c.status, startDate: c.startDate, endDate: c.endDate })),
       customFields: fields.data
         .filter((f) => !f.deprecated)
         .map((f) => ({ key: f.key, label: f.label, type: f.type, options: f.options, required: f.required })),
     };
   }));
 
-  server.tool('list_tasks', 'List tasks of a project – the calendar view an agent plans from. Filters by due-date window (the publication date), status, labels, type, title text and custom fields (e.g. platform). Statuses, labels and types may be passed by name.', {
+  server.tool('list_tasks', 'List tasks of a project – the calendar view an agent plans from. Filters by due-date window (the publication date), status, labels, type, parent task, cycle, title text and custom fields (e.g. platform). Statuses, labels, types and cycles may be passed by name.', {
     project: z.string().optional().describe('Project key or id; omit to search every project the token can reach (then statuses/labels must be ids)'),
     status: z.string().optional().describe('Status id, name or category'),
     labels: z.array(z.string()).optional().describe('Label ids or names – a task must carry all of them'),
     type: z.string().optional().describe('Task type id or name'),
+    parentId: z.string().optional().describe('Only the subtasks of this task'),
+    cycle: z.string().optional().describe('Cycle id or name (a name needs `project`)'),
     dueFrom: z.string().optional().describe('YYYY-MM-DD, inclusive'),
     dueTo: z.string().optional().describe('YYYY-MM-DD, inclusive'),
     q: z.string().optional().describe('Substring of the title'),
     customFields: z.record(z.string(), z.unknown()).optional().describe('Exact match per key, e.g. { platform: "linkedin" }; an array value matches any of its members'),
     limit: z.number().int().min(1).max(200).optional().describe('Defaults to 50'),
-  }, ({ project, status, labels, type, dueFrom, dueTo, q, customFields, limit }) => wrap(async () => {
+  }, ({ project, status, labels, type, parentId, cycle, dueFrom, dueTo, q, customFields, limit }) => wrap(async () => {
     const projectId = project ? await resolveProjectId(client, project) : null;
     const vocab = projectId ? vocabLoader(client, projectId) : async (): Promise<Vocab> => {
       throw new Error('Statuses, labels and types can only be resolved by name inside one project – pass `project`, or pass ids.');
@@ -349,6 +412,8 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
     if (status) qs.set('status', resolveStatus(await vocab(), status));
     if (type) qs.set('type', resolveType(await vocab(), type));
     if (labels?.length) qs.set('label', resolveLabels(await vocab(), labels).join(','));
+    if (parentId) qs.set('parentId', parentId);
+    if (cycle) qs.set('cycleId', projectId ? await resolveCycle(client, projectId, cycle) : cycle);
     if (dueFrom) qs.set('dueFrom', dueFrom);
     if (dueTo) qs.set('dueTo', dueTo);
     if (q) qs.set('q', q);
@@ -392,7 +457,7 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
     };
   }, VERSIONED));
 
-  server.tool('create_task', 'Create a task with everything a planned item needs: title, body text, calendar date, status, type, labels, custom fields and source links. '
+  server.tool('create_task', 'Create a task with everything a planned item needs: title, body text, calendar date, status, type, labels, custom fields and source links – or a subtask, with parentId, and straight into a cycle. '
     + 'For rich descriptions with images at specific positions, upload each image first with upload_attachment → src, then interleave `![alt](src)` lines inside text at the exact spots you want (images are block-level, one per line). '
     + 'Pass externalKey to keep re-runs identifiable – the tool then refuses to file a second task under the same key. Use upsert_task when the run is meant to be repeatable.', {
     projectId: z.string().describe('Project id or key (see list_projects)'),
@@ -414,7 +479,7 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
       }
     }
 
-    const body = await writeBody(args, vocab);
+    const body = await writeBody(args, vocab, { client, projectId: project });
     const customFields = {
       ...(args.customFields ?? {}),
       ...(externalKey
@@ -439,7 +504,7 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
     return { action: 'created', task: await readBack(client, created.id, vocab), links: added };
   }, VERSIONED));
 
-  server.tool('update_task', 'Rewrite a task: text, calendar date, status, type, labels, priority, custom fields, plus links to append. '
+  server.tool('update_task', 'Rewrite a task: text, calendar date, status, type, labels, priority, custom fields, parent task, cycle, plus links to append. '
     + 'For images, text fully replaces the body – read the current text with get_task, keep existing `![…](…)` lines you want, insert new ones (from upload_attachment) at the positions you want, then write back with expectedVersion. '
     + 'Send the version you read with get_task as expectedVersion and the call refuses instead of overwriting an edit someone made in ordi meanwhile.', {
     taskId: z.string(),
@@ -451,7 +516,7 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
     if (args.text !== undefined) args.text = fromAgent(args.text);
     const before = await client.get<Row>(`/tasks/${taskId}?include=links`);
     const vocab = vocabLoader(client, before.projectId);
-    const body = await writeBody(args, vocab);
+    const body = await writeBody(args, vocab, { client, projectId: before.projectId, taskId });
     if (!Object.keys(body).length && !addLinks?.length) throw new Error('Nothing to update – pass at least one field or addLinks.');
 
     // Always lock: with no expectedVersion the read above is the baseline, so a
@@ -494,7 +559,7 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
     const vocab = vocabLoader(client, projectId);
     const field = keyField ?? DEFAULT_KEY_FIELD;
     const existing = await findByKey(client, projectId, field, key);
-    const body = await writeBody(args, vocab);
+    const body = await writeBody(args, vocab, { client, projectId, taskId: existing?.id });
 
     if (!existing) {
       const customFields = {

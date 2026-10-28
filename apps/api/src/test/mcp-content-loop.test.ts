@@ -242,6 +242,34 @@ describe('publishing', () => {
   });
 });
 
+describe('a campaign broken into subtasks inside a cycle', () => {
+  it('files the subtask under its parent, straight into the cycle named on the board', async () => {
+    await owner.post('/cycles', { projectId, name: 'November', startDate: '2026-11-01', endDate: '2026-11-30' });
+    const schema = out(await tool('get_project_schema', { project: 'CNT' }));
+    const cycleId = schema.cycles.find((c: any) => c.name === 'November').id;
+
+    const parent = out(await tool('create_task', { projectId: 'CNT', title: 'Launch campaign' }));
+    const child = out(await tool('create_task', {
+      projectId: 'CNT', title: 'Write the launch post', parentId: parent.task.id, cycle: 'november',
+    }));
+    expect(child.task).toMatchObject({ parentId: parent.task.id, cycleId });
+
+    const stored = await json(owner.get(`/tasks/${child.task.id}`));
+    expect(stored).toMatchObject({ parentId: parent.task.id, cycleId });
+    const children = out(await tool('list_tasks', { project: 'CNT', parentId: parent.task.id }));
+    expect(children.data.map((t: any) => t.id)).toEqual([child.task.id]);
+
+    // The parent itself joins the cycle later, and the subtask leaves it.
+    out(await tool('update_task', { taskId: parent.task.id, cycle: cycleId }));
+    out(await tool('update_task', { taskId: child.task.id, cycle: null }));
+    const inCycle = out(await tool('list_tasks', { project: 'CNT', cycle: 'November' }));
+    expect(inCycle.data.map((t: any) => t.id)).toEqual([parent.task.id]);
+
+    // A parent cannot become a subtask of its own subtask.
+    expect(failure(await tool('update_task', { taskId: parent.task.id, parentId: child.task.id }))).toContain('subtask of this task');
+  });
+});
+
 describe('what a token cannot reach', () => {
   it('says the project is not among the ones it can see', async () => {
     const guest = await connectMcp(users.guest!.cookie);

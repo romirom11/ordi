@@ -39,6 +39,11 @@ const LABELS = [
 ];
 const TYPES = [{ id: 'ty-post', name: 'Post', projectId: null, icon: 'circle', color: '#6b7280' }];
 const PROJECT = { id: '01JBFAKEPROJECT00000000001', key: 'CONTENT', name: 'Content', status: 'active' };
+const OTHER_PROJECT_ID = '01JBFAKEPROJECT00000000002';
+const CYCLES = [
+  { id: 'cy-oct', projectId: PROJECT.id, name: 'October', status: 'active', startDate: '2026-10-01', endDate: '2026-10-31', goal: null },
+  { id: 'cy-nov', projectId: PROJECT.id, name: 'November', status: 'upcoming', startDate: '2026-11-01', endDate: '2026-11-30', goal: null },
+];
 
 /** An in-memory ordi with the parts of the task API these tools touch. */
 function fakeOrdi(seed: Partial<{ tasks: Row[]; fields: Row[] }> = {}): Fake {
@@ -64,6 +69,7 @@ function fakeOrdi(seed: Partial<{ tasks: Row[]; fields: Row[] }> = {}): Fake {
     if (route === '/projects') return { data: [PROJECT] } as T;
     if (route === `/projects/${PROJECT.id}`) return PROJECT as T;
     if (route === `/projects/${PROJECT.id}/task-statuses`) return { data: STATUSES } as T;
+    if (route === `/projects/${PROJECT.id}/cycles`) return { data: CYCLES } as T;
     if (route === '/task-types') return { data: TYPES } as T;
     if (route === '/labels') return { data: LABELS.filter((l) => l.scope === (qs.get('scope') ?? l.scope)) } as T;
     if (route === '/custom-fields') return { data: state.fields } as T;
@@ -82,6 +88,8 @@ function fakeOrdi(seed: Partial<{ tasks: Row[]; fields: Row[] }> = {}): Fake {
         (!qs.get('projectId') || t.projectId === qs.get('projectId'))
         && (!qs.get('status') || t.statusId === qs.get('status'))
         && (!qs.get('type') || t.typeId === qs.get('type'))
+        && (!qs.get('parentId') || t.parentId === qs.get('parentId'))
+        && (!qs.get('cycleId') || t.cycleId === qs.get('cycleId'))
         && (!qs.get('dueFrom') || (t.dueDate ?? '') >= qs.get('dueFrom')!)
         && (!qs.get('dueTo') || (t.dueDate ?? '') <= qs.get('dueTo')!)
         && wantLabels.every((id) => (t.labelIds ?? []).includes(id))
@@ -116,6 +124,8 @@ function fakeOrdi(seed: Partial<{ tasks: Row[]; fields: Row[] }> = {}): Fake {
         description: body.description ?? null,
         statusId: body.statusId ?? 'st-idea',
         typeId: body.typeId ?? null,
+        parentId: body.parentId ?? null,
+        cycleId: body.cycleId ?? null,
         priority: body.priority ?? 'none',
         dueDate: body.dueDate ?? null,
         startDate: body.startDate ?? null,
@@ -191,6 +201,10 @@ describe('finding the project and its structure', () => {
     // Project labels belong to the project picker, not to a task card.
     expect(schema.labels.map((l: Row) => l.name)).toEqual(['LinkedIn', 'Case study']);
     expect(schema.customFields).toEqual([{ key: 'platform', label: 'Platform', type: 'select', options: [{ value: 'linkedin', label: 'LinkedIn' }], required: false }]);
+    expect(schema.cycles).toEqual([
+      { id: 'cy-oct', name: 'October', status: 'active', startDate: '2026-10-01', endDate: '2026-10-31' },
+      { id: 'cy-nov', name: 'November', status: 'upcoming', startDate: '2026-11-01', endDate: '2026-11-30' },
+    ]);
   });
 
   it('names the keys it can reach when the project is unknown', async () => {
@@ -517,5 +531,76 @@ describe('editing a card', () => {
     expect(res.isError).toBe(true);
     expect(errorText(res)).toContain('not_found');
     expect(errorText(res)).toContain('list_tasks');
+  });
+});
+
+describe('subtasks and cycles', () => {
+  const seeded = () => fakeOrdi({ tasks: [
+    { id: 't1', number: 1, projectId: PROJECT.id, title: 'Launch campaign', statusId: 'st-idea', priority: 'none', parentId: null, cycleId: null, labelIds: [], customFields: {}, version: 1 },
+    { id: 't2', number: 2, projectId: PROJECT.id, title: 'Write the post', statusId: 'st-idea', priority: 'none', parentId: 't1', cycleId: null, labelIds: [], customFields: {}, version: 1 },
+    { id: 't3', number: 3, projectId: OTHER_PROJECT_ID, title: 'Elsewhere', statusId: 'st-idea', priority: 'none', parentId: null, cycleId: null, labelIds: [], customFields: {}, version: 1 },
+  ] });
+
+  it('creates a subtask straight into a cycle named the way the board shows it', async () => {
+    const api = seeded();
+    const client = await connect(api.client);
+    const res = body(await client.callTool({ name: 'create_task', arguments: {
+      projectId: 'CONTENT', title: 'Design the banner', parentId: 't1', cycle: 'october',
+    } }));
+    expect(api.posts.find((p) => p.path === '/tasks')!.body).toMatchObject({ parentId: 't1', cycleId: 'cy-oct' });
+    expect(res.task).toMatchObject({ parentId: 't1', cycleId: 'cy-oct' });
+  });
+
+  it('moves a task under a parent and into another cycle, and detaches it again with null', async () => {
+    const api = seeded();
+    const client = await connect(api.client);
+    await client.callTool({ name: 'update_task', arguments: { taskId: 't2', cycle: 'cy-nov' } });
+    expect(api.patches[0]!.body).toEqual({ cycleId: 'cy-nov', version: 1 });
+
+    const res = body(await client.callTool({ name: 'update_task', arguments: { taskId: 't2', parentId: null, cycle: null } }));
+    expect(api.patches[1]!.body).toEqual({ parentId: null, cycleId: null, version: 2 });
+    expect(res.task).toMatchObject({ parentId: null, cycleId: null });
+  });
+
+  it('refuses a parent from another project, the task itself, or one of its own subtasks', async () => {
+    const api = seeded();
+    const client = await connect(api.client);
+    const foreign = await client.callTool({ name: 'create_task', arguments: { projectId: 'CONTENT', title: 'X', parentId: 't3' } });
+    expect(foreign.isError).toBe(true);
+    expect(errorText(foreign)).toContain('another project');
+
+    const self = await client.callTool({ name: 'update_task', arguments: { taskId: 't1', parentId: 't1' } });
+    expect(self.isError).toBe(true);
+    expect(errorText(self)).toContain('own parent');
+
+    const loop = await client.callTool({ name: 'update_task', arguments: { taskId: 't1', parentId: 't2' } });
+    expect(loop.isError).toBe(true);
+    expect(errorText(loop)).toContain('subtask of this task');
+
+    const missing = await client.callTool({ name: 'create_task', arguments: { projectId: 'CONTENT', title: 'X', parentId: 'nope' } });
+    expect(missing.isError).toBe(true);
+    expect(errorText(missing)).toContain('Parent task "nope" not found');
+
+    expect(api.posts).toEqual([]);
+    expect(api.patches).toEqual([]);
+  });
+
+  it('refuses an unknown cycle by naming the ones that exist', async () => {
+    const api = seeded();
+    const client = await connect(api.client);
+    const res = await client.callTool({ name: 'update_task', arguments: { taskId: 't2', cycle: 'Sprint 9' } });
+    expect(res.isError).toBe(true);
+    expect(errorText(res)).toContain('October (active)');
+    expect(api.patches).toEqual([]);
+  });
+
+  it('lists the subtasks of a task and the tasks of a cycle', async () => {
+    const api = seeded();
+    api.tasks[0]!.cycleId = 'cy-oct';
+    const client = await connect(api.client);
+    const children = body(await client.callTool({ name: 'list_tasks', arguments: { project: 'CONTENT', parentId: 't1' } }));
+    expect(children.data.map((t: Row) => t.id)).toEqual(['t2']);
+    const inCycle = body(await client.callTool({ name: 'list_tasks', arguments: { project: 'CONTENT', cycle: 'October' } }));
+    expect(inCycle.data.map((t: Row) => t.id)).toEqual(['t1']);
   });
 });
