@@ -1239,8 +1239,12 @@ export async function myTasks(actor: Actor) {
   const today = new Date().toISOString().slice(0, 10);
   const weekEnd = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
 
+  // `status_id`, `version` and the project's `visibility` are what the list
+  // needs to change a status in place: the current pick, the optimistic-lock
+  // token for the PATCH, and the input to the caller's project-role check.
   const assigned = await db.execute(sql`
-    select t.id, t.title, t.due_date, t.priority, t.number, t.project_id, p.key, ts.category, ts.name as status_name, ts.color as status_color
+    select t.id, t.title, t.due_date, t.priority, t.number, t.project_id, t.status_id, t.version,
+      p.key, p.visibility, ts.category, ts.name as status_name, ts.color as status_color
     from tasks t
     join task_assignees ta on ta.task_id = t.id and ta.user_id = ${actor.userId}
     join projects p on p.id = t.project_id
@@ -1249,7 +1253,8 @@ export async function myTasks(actor: Actor) {
     order by t.due_date nulls last`) as any[];
 
   const created = await db.execute(sql`
-    select t.id, t.title, t.due_date, t.priority, t.number, t.project_id, p.key, ts.category, ts.name as status_name, ts.color as status_color,
+    select t.id, t.title, t.due_date, t.priority, t.number, t.project_id, t.status_id, t.version,
+      p.key, p.visibility, ts.category, ts.name as status_name, ts.color as status_color,
       exists (select 1 from task_assignees ta where ta.task_id = t.id) as has_assignee
     from tasks t
     join projects p on p.id = t.project_id
