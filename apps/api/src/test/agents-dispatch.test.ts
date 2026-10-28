@@ -242,7 +242,11 @@ describe('the worker end to end', () => {
 
     // The runtime got the rebuilt input.
     const input = seen!;
-    expect(input.credential).toEqual({ kind: 'api_key', secret: 'sk-ant-primary-secret-value' });
+    // A credential now also names its provider and any custom base URL; the
+    // primary one here is a native Anthropic key, so the URL stays null.
+    expect(input.credential).toEqual({
+      provider: 'anthropic', kind: 'api_key', secret: 'sk-ant-primary-secret-value', baseUrl: null,
+    });
     expect(input.prompt).toContain('DSP-');
     expect(input.prompt).toContain('Fix the retry logic');
     expect(input.systemAppend).toContain('Prefer small diffs.');
