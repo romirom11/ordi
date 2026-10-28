@@ -75,6 +75,29 @@ export function useLabels(scope: LabelScope): UseQueryResult<LabelLookup[]> {
   });
 }
 
+export interface TaskStatusLookup {
+  id: string;
+  name: string;
+  category: string;
+  color: string;
+  position: number;
+  isDefault?: boolean;
+}
+
+/**
+ * The status vocabulary of one project, in board order (the API sorts by
+ * position). Read by the project views, the task page and every status picker –
+ * including the ones on My tasks, which hit a different project per row.
+ */
+export function useTaskStatuses(projectId: string, enabled = true): UseQueryResult<TaskStatusLookup[]> {
+  return useQuery({
+    queryKey: ['task-statuses', projectId],
+    queryFn: () => api.get<{ data: TaskStatusLookup[] }>(`/projects/${projectId}/task-statuses`).then((r) => r.data),
+    enabled: enabled && !!projectId,
+    staleTime: 5 * 60_000,
+  });
+}
+
 /** Members of one project – read by both the properties rail and the access panel. */
 export function useProjectMembers(projectId: string): UseQueryResult<ProjectMember[]> {
   return useQuery({

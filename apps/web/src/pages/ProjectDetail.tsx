@@ -38,7 +38,8 @@ import { CycleDetailsDialog } from '../components/project/CycleDetails';
 import { PROJECT_STATUSES, STATUS_META, type UserLite } from '../components/project/pickers';
 import { TasksToolbar } from '../components/project/TasksToolbar';
 import type { LabelLite } from '../components/project/FilterPopover';
-import { useLabels } from '../lib/queries';
+import { useLabels, useTaskStatuses } from '../lib/queries';
+import { TaskStatusPicker } from '../components/task/StatusPicker';
 import {
   EMPTY_FILTERS, PRIORITIES, PRIORITY_LABEL_KEY, applyFilters, loadPrefs, orderTasks, sanitizeFilters, savePrefs,
   type Grouping, type TaskFilters, type TaskViewPrefs,
@@ -181,10 +182,7 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
   const setTab = (next: Tab) => navigate(next === 'overview' ? `/projects/${id}` : `/projects/${id}?section=${next}`);
 
   const projectQ = useQuery<Project>({ queryKey: ['project', id], queryFn: () => api.get<Project>(`/projects/${id}`) });
-  const statusesQ = useQuery<TaskStatus[]>({
-    queryKey: ['task-statuses', id],
-    queryFn: () => api.get<{ data: TaskStatus[] }>(`/projects/${id}/task-statuses`).then((r) => r.data),
-  });
+  const statusesQ = useTaskStatuses(id);
   const usersQ = useQuery<UserLite[]>({
     queryKey: ['users', 'lookup'],
     queryFn: () => api.get<{ data: UserLite[] }>('/users/lookup').then((r) => r.data),
@@ -694,47 +692,6 @@ function ProgressPill({ stats }: { stats: ChildStats }) {
 
 /* ---- List view (grouped, Linear-density rows) ---- */
 
-/**
- * The status icon in a row, made clickable (ORD-14): pick a status without
- * opening the task. The right-click menu offered this already, but nothing
- * suggested it exists – an icon that opens a picker on the same click that
- * would otherwise open the card is the discoverable form.
- */
-function RowStatusPicker({ task, statuses, current, canWrite, onMove }: {
-  task: Task; statuses: TaskStatus[]; current?: TaskStatus; canWrite: boolean;
-  onMove: (taskId: string, statusId: string, version?: number) => void;
-}) {
-  const t = useT();
-  const icon = <StatusIcon category={current?.category} color={current?.color} size={14} />;
-  if (!canWrite) return icon;
-  return (
-    <DropdownMenu
-      className="shrink-0"
-      trigger={
-        <span
-          role="button"
-          tabIndex={0}
-          aria-label={t('common.status')}
-          title={current?.name}
-          className="-m-1 grid h-6 w-6 cursor-pointer place-items-center rounded-md transition-colors duration-150 hover:bg-muted [&>svg]:block"
-        >
-          {icon}
-        </span>
-      }
-    >
-      <MenuLabel>{t('common.status')}</MenuLabel>
-      {statuses.map((s) => (
-        <MenuItem key={s.id} onSelect={() => { if (s.id !== task.statusId) onMove(task.id, s.id, task.version); }}>
-          <span className="flex items-center gap-2">
-            <StatusIcon category={s.category} color={s.color} size={14} /> {s.name}
-            {s.id === task.statusId && <span className="ml-auto pl-2 text-primary">✓</span>}
-          </span>
-        </MenuItem>
-      ))}
-    </DropdownMenu>
-  );
-}
-
 function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, resolveUsers, labelById, childStats, taskById, onOpen, onToggleCollapse, onAdd, onMove }: {
   projectId: string; projectKey?: string; statuses: TaskStatus[]; groups: TaskGroup[]; prefs: TaskViewPrefs;
   canWrite: boolean; resolveUsers: (ids?: string[]) => UserLite[];
@@ -867,12 +824,14 @@ function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, re
                           <span className="hidden w-16 shrink-0 truncate font-mono text-[11px] text-faint sm:block">{ref}</span>
                         )}
                         {props.status && (
-                          <RowStatusPicker
-                            task={task}
-                            statuses={statuses}
-                            current={st}
+                          <TaskStatusPicker
+                            projectId={projectId}
+                            statusId={task.statusId}
+                            category={st?.category}
+                            color={st?.color}
+                            statusName={st?.name}
                             canWrite={canWrite}
-                            onMove={onMove}
+                            onPick={(s) => onMove(task.id, s.id, task.version)}
                           />
                         )}
                         <span className="flex min-w-0 items-center gap-1.5">

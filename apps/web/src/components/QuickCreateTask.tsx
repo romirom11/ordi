@@ -5,7 +5,7 @@
  * more" switch and Cmd/Ctrl+Enter to create. `!high`-style tokens in the
  * title still set the priority.
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CalendarDays, ChevronDown, Tag, UserRound, X } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
@@ -15,7 +15,7 @@ import { Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator, toast, useMen
 import { ProjectIcon } from './project/ProjectIcon';
 import { RichEditor, EMPTY_DOC } from './richtext/RichEditor';
 import { docIsEmpty } from './richtext/RichText';
-import { useUsersLookup, useLabels, activeUsers } from '../lib/queries';
+import { useUsersLookup, useLabels, useTaskStatuses, activeUsers } from '../lib/queries';
 import { useT, extendDict } from '../lib/i18n';
 import { Calendar } from './DatePicker';
 import { LabelsMenu } from './LabelsMenu';
@@ -60,7 +60,6 @@ extendDict({
 });
 
 interface ProjectLite { id: string; name: string; key: string }
-interface StatusLite { id: string; name: string; category: string; color: string; position: number; isDefault?: boolean }
 interface UserLite { id: string; name?: string | null; email?: string | null; avatar?: string | null; isActive?: boolean }
 interface CreatedTask { id: string; ref?: string; title: string }
 
@@ -147,15 +146,8 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
   const projects = projectsQ.data ?? [];
   const project = projects.find((p) => p.id === projectId);
 
-  const statusesQ = useQuery<StatusLite[]>({
-    queryKey: ['task-statuses', projectId],
-    queryFn: () => api.get<{ data: StatusLite[] }>(`/projects/${projectId}/task-statuses`).then((r) => r.data),
-    enabled: open && !!projectId,
-  });
-  const statuses = useMemo(
-    () => [...(statusesQ.data ?? [])].sort((a, b) => a.position - b.position),
-    [statusesQ.data],
-  );
+  const statusesQ = useTaskStatuses(projectId, open);
+  const statuses = statusesQ.data ?? [];
   const status = statuses.find((s) => s.id === statusId);
 
   const usersQ = useUsersLookup();
