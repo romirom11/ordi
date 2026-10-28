@@ -10,7 +10,7 @@ import { AlertTriangle, ChevronRight, Copy, X } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { Link, useNavigate } from '../lib/router';
 import { usePageTitle } from '../lib/tabs';
-import { useUsersLookup } from '../lib/queries';
+import { useTaskStatuses, useUsersLookup } from '../lib/queries';
 import { useProjectRole } from '../lib/auth';
 import { Button, EmptyState, IconButton, Kbd, Skeleton, Tooltip } from '../components/ui';
 import { toast } from '../components/overlays';
@@ -21,7 +21,7 @@ import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
 import { SubtaskList } from '../components/task/SubtaskList';
 import { ActivityFeed } from '../components/task/CommentThread';
 import { AgentRunsBlock } from '../components/task/AgentRunsBlock';
-import type { TaskDetail, TaskPatch, TaskStatus, UserLite } from '../components/task/types';
+import type { TaskDetail, TaskPatch, UserLite } from '../components/task/types';
 import { useT, extendDict } from '../lib/i18n';
 import '../components/task/task.css';
 
@@ -91,10 +91,7 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
     queryKey: ['project', projectId],
     queryFn: () => api.get<ProjectLite>(`/projects/${projectId}`),
   });
-  const statusesQ = useQuery({
-    queryKey: ['task-statuses', projectId],
-    queryFn: () => api.get<{ data: TaskStatus[] }>(`/projects/${projectId}/task-statuses`).then((r) => r.data),
-  });
+  const statusesQ = useTaskStatuses(projectId);
   const usersQ = useUsersLookup();
 
   const task = taskQ.data;
