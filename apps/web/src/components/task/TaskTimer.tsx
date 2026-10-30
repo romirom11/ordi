@@ -3,14 +3,14 @@
  * timer runs at a time, so starting here stops whatever was running before –
  * the API handles that, and the header indicator follows the same query.
  */
-import { useEffect, useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Play, Square } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useCan } from '../../lib/auth';
 import { Button, Spinner, cn } from '../ui';
 import { toast } from '../overlays';
 import { useT, extendDict } from '../../lib/i18n';
+import { useActiveTimer, useStopTimer, useTimerElapsed } from '../../lib/timer';
 
 extendDict({
   en: {
@@ -31,8 +31,6 @@ extendDict({
   },
 });
 
-interface ActiveTimer { taskId?: string | null; ref?: string | null; elapsedSeconds?: number }
-
 function hms(total: number): string {
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
@@ -45,24 +43,10 @@ export function TaskTimer({ taskId }: { taskId: string }) {
   const t = useT();
   const qc = useQueryClient();
   const can = useCan();
-  const [tick, setTick] = useState(0);
-
-  const { data } = useQuery({
-    // The endpoint returns the timer itself (or null), not a wrapper.
-    queryKey: ['timer'],
-    queryFn: () => api.get<ActiveTimer | null>('/time/timer').catch(() => null),
-    enabled: can('time.track'),
-  });
-  const timer = data ?? null;
+  const timerQ = useActiveTimer(can('time.track'));
+  const timer = timerQ.data ?? null;
+  const elapsed = useTimerElapsed(timer, timerQ.dataUpdatedAt);
   const onThisTask = timer?.taskId === taskId;
-
-  // Local ticking so the elapsed time moves without polling the server.
-  useEffect(() => {
-    if (!onThisTask) return;
-    setTick(0);
-    const id = setInterval(() => setTick((v) => v + 1), 1000);
-    return () => clearInterval(id);
-  }, [onThisTask, timer?.elapsedSeconds]);
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['timer'] });
@@ -75,17 +59,12 @@ export function TaskTimer({ taskId }: { taskId: string }) {
     onSuccess: () => { refresh(); toast(t('task.timerStarted')); },
     onError: () => toast.error(t('task.timerFailed')),
   });
-  const stop = useMutation({
-    mutationFn: () => api.post('/time/timer/stop', {}),
-    onSuccess: () => { refresh(); toast(t('task.timerStopped')); },
-    onError: () => toast.error(t('task.timerFailed')),
-  });
+  const stop = useStopTimer();
 
   if (!can('time.track')) return null;
   const busy = start.isPending || stop.isPending;
 
-  if (onThisTask) {
-    const elapsed = (timer?.elapsedSeconds ?? 0) + tick;
+  if (onThisTask && timer) {
     return (
       <div className="px-3 py-1.5">
         <Button
@@ -93,7 +72,7 @@ export function TaskTimer({ taskId }: { taskId: string }) {
           variant="outline"
           className={cn('w-full justify-center border-success/40 text-success hover:bg-success/10')}
           disabled={busy}
-          onClick={() => stop.mutate()}
+          onClick={() => stop.mutate(timer, { onSuccess: refresh })}
         >
           {busy ? <Spinner /> : <Square size={13} />}
           <span className="tabular-nums">{hms(elapsed)}</span>
@@ -105,10 +84,11 @@ export function TaskTimer({ taskId }: { taskId: string }) {
 
   return (
     <div className="px-3 py-1.5">
-      <Button size="sm" variant="outline" className="w-full justify-center" disabled={busy} onClick={() => start.mutate()}>
+      <Button size="sm" variant="outline" className="w-full justify-center" disabled={busy || timerQ.isLoading || timerQ.isError} onClick={() => start.mutate()}>
         {busy ? <Spinner /> : <Play size={13} />}
         {t('task.startTimer')}
       </Button>
+      {timerQ.isError && <button type="button" className="mt-1 text-xs text-destructive" onClick={() => void timerQ.refetch()}>{t('time.timerUnavailable', 'Could not check the timer. Retry')}</button>}
       {timer && (
         <p className="mt-1 text-center text-[11px] text-faint">
           {t('task.timerRunningElsewhere')}{timer.ref ? ` (${timer.ref})` : ''}

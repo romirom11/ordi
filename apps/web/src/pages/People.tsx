@@ -509,6 +509,8 @@ function LeaveView() {
               </div>
             ))}
           </div>
+        ) : requests.isError && !requests.data ? (
+          <div role="alert" className="space-y-2 p-4 text-sm"><p>{t('common.loadFailed', 'Could not load the data.')}</p><Button type="button" variant="outline" size="sm" disabled={requests.isFetching} onClick={() => void requests.refetch()}>{t('common.retry', 'Retry')}</Button></div>
         ) : rows.length === 0 ? (
           <EmptyState icon={<CalendarClock size={20} />} title={t('people.noLeaveRequests')} hint={t('people.noLeaveRequestsHint')} />
         ) : (
@@ -531,16 +533,18 @@ function LeaveView() {
                 </div>
                 <StatusPill status={r.status ?? 'pending'} meta={LEAVE_STATUS_META} />
                 {canApprove && r.status === 'pending' && (
-                  <span className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                  <span className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
                     <button
                       className="rounded-md p-1.5 text-success transition-colors hover:bg-success/10"
                       title={t('people.approve')}
+                      aria-label={t('people.approve')}
                       onClick={() => decide.mutate({ id: r.id, action: 'approve' })}
                       disabled={decide.isPending}
                     ><Check size={14} /></button>
                     <button
                       className="rounded-md p-1.5 text-destructive transition-colors hover:bg-destructive/10"
                       title={t('people.reject')}
+                      aria-label={t('people.reject')}
                       onClick={() => decide.mutate({ id: r.id, action: 'reject' })}
                       disabled={decide.isPending}
                     ><X size={14} /></button>
@@ -554,7 +558,7 @@ function LeaveView() {
 
       <Card className="h-fit p-4">
         <div className="mb-3 text-[13px] font-medium">{t('people.requestLeave')}</div>
-        <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (form.leaveTypeId && form.fromDate) create.mutate(); }}>
+        <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (form.leaveTypeId && form.fromDate && form.toDate && form.toDate >= form.fromDate) create.mutate(); }}>
           {canRequestForOthers && staff.length > 0 && (
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">{t('people.leaveFor')}</label>
@@ -574,18 +578,18 @@ function LeaveView() {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">{t('resourcing.from')}</label>
-              <DateField value={form.fromDate} onChange={(v) => setForm((f) => ({ ...f, fromDate: v ?? '' }))} clearable={false} />
+              <DateField aria-label={t('resourcing.from')} value={form.fromDate} onChange={(v) => setForm((f) => ({ ...f, fromDate: v ?? '' }))} clearable={false} />
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">{t('resourcing.to')}</label>
-              <DateField value={form.toDate} onChange={(v) => setForm((f) => ({ ...f, toDate: v ?? '' }))} clearable={false} min={form.fromDate || undefined} />
+              <DateField aria-label={t('resourcing.to')} value={form.toDate} onChange={(v) => setForm((f) => ({ ...f, toDate: v ?? '' }))} clearable={false} min={form.fromDate || undefined} />
             </div>
           </div>
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">{t('people.reason')}</label>
             <Textarea value={form.reason} onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))} rows={2} />
           </div>
-          <Button type="submit" size="sm" className="w-full" disabled={create.isPending || !form.leaveTypeId || !form.fromDate}>
+          <Button type="submit" size="sm" className="w-full" disabled={create.isPending || !form.leaveTypeId || !form.fromDate || !form.toDate || form.toDate < form.fromDate}>
             {create.isPending ? <Spinner /> : t('people.submitRequest')}
           </Button>
         </form>

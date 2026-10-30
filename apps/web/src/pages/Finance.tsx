@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useId, useMemo, useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { appOrigin, api, qs, ApiError } from '../lib/api';
 import { useNavigate, useOpen, type OpenIntent } from '../lib/router';
@@ -6,7 +6,7 @@ import { useCan } from '../lib/auth';
 import { useTabs } from '../lib/tabs';
 import { Button, Input, Select, Card, PageHeader, EmptyState, Reveal, Skeleton, SegmentedControl, fmtMoney, fmtDate, cn } from '../components/ui';
 import { Dialog, ContextMenu, toast, type ContextMenuEntry } from '../components/overlays';
-import { Plus, Wallet, AlertTriangle, CheckCircle2, Receipt, FileStack, Copy, ExternalLink, Link2 } from 'lucide-react';
+import { Plus, Wallet, AlertTriangle, CheckCircle2, Receipt, FileStack, Copy, ExternalLink, Link2, RotateCw } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
 import { usePersistedState, oneOfPref, stringPref } from '../lib/prefs';
 import { byName } from '../lib/queries';
@@ -17,6 +17,7 @@ import { SortHeader, sortRows, useStatusRank, useTableSort } from '../components
 import { TransactionsTab, AddIncomeDialog } from '../components/finance/ledger';
 import { DateField } from '../components/DatePicker';
 import { DocumentForm, type DocumentFormValues } from '../components/finance/DocumentForm';
+import { queryView, type QueryView } from '../components/finance/queryState';
 
 extendDict({
   en: {
@@ -91,6 +92,37 @@ function StatusPill({ status, overdue }: { status?: string | null; overdue?: boo
   );
 }
 
+/**
+ * A first load that failed. Deliberately not an empty state: "no invoices" or
+ * a 0 total would be a claim about the business the app cannot make.
+ */
+function LoadFailed({ onRetry, retrying, compact }: { onRetry: () => void; retrying: boolean; compact?: boolean }) {
+  const t = useT();
+  return (
+    <div role="alert" className={cn('flex flex-col items-center justify-center gap-1.5 text-center', compact ? 'px-4 py-6' : 'rounded-xl border border-border py-12')}>
+      <AlertTriangle size={18} className="text-warning" aria-hidden />
+      <p className="text-sm font-medium">{t('finance.loadFailed', 'Couldn’t load this data')}</p>
+      <p className="max-w-sm text-[13px] text-muted-foreground">{t('finance.loadFailedHint', 'Check your connection and try again.')}</p>
+      <Button size="sm" variant="outline" className="mt-2" onClick={onRetry} disabled={retrying}>
+        <RotateCw size={13} className={cn(retrying && 'animate-spin')} /> {t('common.retry', 'Retry')}
+      </Button>
+    </div>
+  );
+}
+
+/** A refetch failed; what is on screen is the last data that did load. */
+function StaleNotice({ onRetry, retrying, className }: { onRetry: () => void; retrying: boolean; className?: string }) {
+  const t = useT();
+  return (
+    <div role="status" className={cn('flex items-center gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-1.5 text-xs', className)}>
+      <AlertTriangle size={13} className="shrink-0 text-warning" aria-hidden />
+      <span className="min-w-0 flex-1">{t('finance.staleData', 'Couldn’t refresh – showing the last loaded data.')}</span>
+      <Button size="xs" variant="ghost" onClick={onRetry} disabled={retrying}>
+        <RotateCw size={12} className={cn(retrying && 'animate-spin')} /> {t('common.retry', 'Retry')}
+      </Button>
+    </div>
+  );
+}
 
 interface Company { id: string; name: string; defaultCurrency?: string }
 interface DocRow {
@@ -141,7 +173,19 @@ export function FinancePage() {
                 <Plus size={14} /> {t('ledger.addIncome')}
               </Button>
             )}
-            <SegmentedControl options={tabs} value={tab} onChange={setTab} />
+            {/* Five segments do not fit a phone-width header; there the same
+              * choice is a select, so nothing is pushed off-screen. */}
+            <div className="hidden md:block">
+              <SegmentedControl options={tabs} value={tab} onChange={setTab} />
+            </div>
+            <Select
+              aria-label={t('finance.section', 'Finance section')}
+              value={tab}
+              onChange={(e) => setTab(e.target.value as Tab)}
+              className="md:hidden"
+            >
+              {tabs.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+            </Select>
           </div>
         }
       />
@@ -195,16 +239,18 @@ function DashboardView() {
     { label: '90+', key: 'bucket_90_plus' },
   ];
   const agingVal = (key: keyof AgingRow): number => agingRows.reduce((a, r) => a + Number(r[key] ?? 0), 0);
+  const { view, stale } = queryView(dash);
+  const retry = () => { void dash.refetch(); };
 
   const outstandingTotal = sumValues(d?.receivables?.total);
   const overdueTotal = (d?.overdue ?? []).reduce((a, r) => a + Number(r.outstanding || 0), 0);
   const paidPeriod = (d?.invoicedPaid ?? []).reduce((a, r) => a + Number(r.paid || 0), 0);
   const invoicedPeriod = (d?.invoicedPaid ?? []).reduce((a, r) => a + Number(r.invoiced || 0), 0);
 
-  if (dash.isLoading) {
+  if (view === 'loading') {
     return (
       <div className="space-y-6 p-6">
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(13rem,1fr))] gap-4">
           {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-20 w-full rounded-xl" />)}
         </div>
         <Skeleton className="h-40 w-full rounded-xl" />
@@ -214,7 +260,9 @@ function DashboardView() {
 
   return (
     <div className="space-y-6 p-6">
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      {view === 'error' ? <LoadFailed onRetry={retry} retrying={dash.isFetching} /> : <>
+      {stale && <StaleNotice onRetry={retry} retrying={dash.isFetching} />}
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(13rem,1fr))] gap-4">
         <Tile icon={<Wallet size={16} />} label={t('finance.outstanding')} value={fmtMoney(outstandingTotal, currency)} />
         <Tile icon={<AlertTriangle size={16} />} label={t('common.overdue')} value={fmtMoney(overdueTotal, currency)} tone="destructive" />
         <Tile icon={<CheckCircle2 size={16} />} label={t('finance.paidPeriod')} value={fmtMoney(paidPeriod, currency)} tone="success" />
@@ -223,7 +271,8 @@ function DashboardView() {
 
       <Card className="overflow-hidden">
         <div className="border-b border-border px-4 py-2.5 text-[13px] font-medium">{t('finance.receivablesAging')}</div>
-        <table className="w-full text-[13px]">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[22rem] text-[13px]">
           <thead>
             <tr className="text-left text-xs text-muted-foreground">
               {agingBuckets.map((b) => <th key={b.label} className="px-4 py-2 font-medium">{b.label}</th>)}
@@ -235,6 +284,7 @@ function DashboardView() {
             </tr>
           </tbody>
         </table>
+        </div>
       </Card>
 
       <div className="grid gap-6 md:grid-cols-2">
@@ -257,6 +307,7 @@ function DashboardView() {
           <p className="mt-1 text-xs text-muted-foreground">{t('finance.unbilledHint')}</p>
         </Card>
       </div>
+      </>}
 
       {can('finance.read_costs') && <ProfitabilityView />}
     </div>
@@ -294,6 +345,8 @@ function ProfitabilityView() {
   const t = useT();
   const prof = useQuery({ queryKey: ['profitability', 'project'], queryFn: () => api.get<{ rows: ProfitRow[] }>('/finance/profitability' + qs({ scope: 'project' })) });
   const rows = prof.data?.rows ?? [];
+  const { view, stale } = queryView(prof, (d) => ((d as { rows?: ProfitRow[] }).rows ?? []).length === 0);
+  const retry = () => { void prof.refetch(); };
   const { sort, toggle: toggleSort } = useTableSort<ProfitSortKey>();
   const sorted = sortRows(rows, sort, (r, key) => {
     const d = profitDerived(r);
@@ -308,7 +361,10 @@ function ProfitabilityView() {
   return (
     <Card className="overflow-hidden">
       <div className="border-b border-border px-4 py-2.5 text-[13px] font-medium">{t('finance.profitabilityByProject')}</div>
-      <table className="w-full text-[13px]">
+      {stale && <StaleNotice onRetry={retry} retrying={prof.isFetching} className="m-3" />}
+      {view === 'error' ? <LoadFailed compact onRetry={retry} retrying={prof.isFetching} /> : (
+      <div className="overflow-x-auto">
+      <table className="w-full min-w-[32rem] text-[13px]">
         <thead>
           <tr className="text-left text-[11px]">
             <th className="px-4 py-2"><SortHeader label={t('time.groupProject')} sortKey="name" sort={sort} onToggle={toggleSort} /></th>
@@ -319,8 +375,8 @@ function ProfitabilityView() {
           </tr>
         </thead>
         <tbody>
-          {prof.isLoading && <tr><td colSpan={5} className="px-4 py-3"><Skeleton className="h-5 w-full" /></td></tr>}
-          {!prof.isLoading && rows.length === 0 && <tr><td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">{t('finance.noProfitability')}</td></tr>}
+          {view === 'loading' && <tr><td colSpan={5} className="px-4 py-3"><Skeleton className="h-5 w-full" /></td></tr>}
+          {view === 'empty' && <tr><td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">{t('finance.noProfitability')}</td></tr>}
           {sorted.map((r, i) => {
             const cur = r.currency ?? 'USD';
             const { cost, margin, marginPct } = profitDerived(r);
@@ -336,6 +392,8 @@ function ProfitabilityView() {
           })}
         </tbody>
       </table>
+      </div>
+      )}
     </Card>
   );
 }
@@ -372,17 +430,19 @@ function InvoicesView() {
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
   });
   const rows = invoices.data?.data ?? [];
+  const { view, stale } = queryView(invoices, docsEmpty);
 
   return (
     <div className="p-6">
-      <div className="mb-4 flex items-center gap-3">
-        <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <Select aria-label={t('common.status')} value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">{t('common.allStatuses')}</option>
           {['draft', 'sent', 'viewed', 'partially_paid', 'paid', 'canceled'].map((s) => <option key={s} value={s}>{t(`finance.status.${s}`, s.replace('_', ' '))}</option>)}
         </Select>
         {can('finance.write') && <Button size="sm" className="ml-auto" onClick={() => setShowForm(true)}><Plus size={14} /> {t('finance.newInvoice')}</Button>}
       </div>
-      <DocTable rows={rows} loading={invoices.isLoading} kind="invoice" companies={companies.data?.data} onRow={(id, e) => open(`/finance/invoices/${id}`, e)} />
+      {stale && <StaleNotice className="mb-3" onRetry={() => void invoices.refetch()} retrying={invoices.isFetching} />}
+      <DocTable rows={rows} view={view} onRetry={() => void invoices.refetch()} retrying={invoices.isFetching} kind="invoice" companies={companies.data?.data} onRow={(id, e) => open(`/finance/invoices/${id}`, e)} />
 
       {can('finance.write') && (
         <Dialog open={showForm} onClose={() => setShowForm(false)} title={t('finance.newInvoice')} width={560}>
@@ -424,17 +484,19 @@ function QuotesView() {
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
   });
   const rows = quotes.data?.data ?? [];
+  const { view, stale } = queryView(quotes, docsEmpty);
 
   return (
     <div className="p-6">
-      <div className="mb-4 flex items-center gap-3">
-        <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <Select aria-label={t('common.status')} value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">{t('common.allStatuses')}</option>
           {['draft', 'sent', 'viewed', 'accepted', 'declined', 'expired'].map((s) => <option key={s} value={s}>{t(`finance.status.${s}`, s)}</option>)}
         </Select>
         {can('finance.write') && <Button size="sm" className="ml-auto" onClick={() => setShowForm(true)}><Plus size={14} /> {t('finance.newQuote')}</Button>}
       </div>
-      <DocTable rows={rows} loading={quotes.isLoading} kind="quote" companies={companies.data?.data} />
+      {stale && <StaleNotice className="mb-3" onRetry={() => void quotes.refetch()} retrying={quotes.isFetching} />}
+      <DocTable rows={rows} view={view} onRetry={() => void quotes.refetch()} retrying={quotes.isFetching} kind="quote" companies={companies.data?.data} />
 
       {can('finance.write') && (
         <Dialog open={showForm} onClose={() => setShowForm(false)} title={t('finance.newQuote')} width={560}>
@@ -453,8 +515,11 @@ const QUOTE_STATUS_ORDER = ['draft', 'sent', 'viewed', 'accepted', 'declined', '
 
 type DocSortKey = 'number' | 'company' | 'status' | 'date' | 'total';
 
-function DocTable({ rows, loading, kind, onRow, companies }: {
-  rows: DocRow[]; loading: boolean; kind: 'invoice' | 'quote'; onRow?: (id: string, e?: OpenIntent) => void; companies?: Company[];
+const docsEmpty = (d: unknown): boolean => ((d as { data?: DocRow[] }).data ?? []).length === 0;
+
+function DocTable({ rows, view, onRetry, retrying, kind, onRow, companies }: {
+  rows: DocRow[]; view: QueryView; onRetry: () => void; retrying: boolean;
+  kind: 'invoice' | 'quote'; onRow?: (id: string, e?: OpenIntent) => void; companies?: Company[];
 }) {
   const t = useT();
   const tabs = useTabs();
@@ -480,7 +545,7 @@ function DocTable({ rows, loading, kind, onRow, companies }: {
     }
   }), [rows, sort, statusRank, kind, companies]);
 
-  if (loading) {
+  if (view === 'loading') {
     return (
       <div className="overflow-hidden rounded-xl border border-border">
         {[0, 1, 2, 3].map((i) => (
@@ -494,6 +559,7 @@ function DocTable({ rows, loading, kind, onRow, companies }: {
       </div>
     );
   }
+  if (view === 'error') return <LoadFailed onRetry={onRetry} retrying={retrying} />;
   if (rows.length === 0) {
     return kind === 'invoice'
       ? <EmptyState icon={<Receipt size={20} />} title={t('public.noInvoices')} hint={t('finance.noInvoicesHint')} />
@@ -501,14 +567,17 @@ function DocTable({ rows, loading, kind, onRow, companies }: {
   }
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
-      {/* The lists never had a header – these double as the sort controls. */}
+      {/* The lists never had a header – these double as the sort controls.
+        * Below sm a row is two lines – company and amount first, then number,
+        * status and date – so the company never collapses to nothing; the
+        * header keeps the two sorts that still have a column. */}
       <div className="flex items-center gap-3 border-b border-border bg-muted/30 px-4 py-2 text-[11px]">
-        <SortHeader label={t('finance.colNumber')} sortKey="number" sort={sort} onToggle={toggleSort} className="w-28 shrink-0" />
+        <SortHeader label={t('finance.colNumber')} sortKey="number" sort={sort} onToggle={toggleSort} className="hidden w-28 shrink-0 sm:flex" />
         <SortHeader label={t('common.company')} sortKey="company" sort={sort} onToggle={toggleSort} className="min-w-0 flex-1" />
-        <SortHeader label={t('common.status')} sortKey="status" sort={sort} onToggle={toggleSort} className="w-24 shrink-0" />
+        <SortHeader label={t('common.status')} sortKey="status" sort={sort} onToggle={toggleSort} className="hidden w-24 shrink-0 sm:flex" />
         <SortHeader
           label={kind === 'invoice' ? t('finance.dueDate') : t('public.validUntil')}
-          sortKey="date" sort={sort} onToggle={toggleSort} className="w-20 shrink-0 justify-end"
+          sortKey="date" sort={sort} onToggle={toggleSort} className="hidden w-20 shrink-0 justify-end sm:flex"
         />
         <SortHeader label={t('public.amount')} sortKey="total" sort={sort} onToggle={toggleSort} className="w-24 shrink-0 justify-end" />
       </div>
@@ -521,21 +590,23 @@ function DocTable({ rows, loading, kind, onRow, companies }: {
             tabIndex={onRow ? 0 : undefined}
             onClick={onRow ? (e) => onRow(r.id, e) : undefined}
             onAuxClick={onRow ? (e) => onRow(r.id, e) : undefined}
-            onKeyDown={onRow ? (e) => { if (e.key === 'Enter') onRow(r.id); } : undefined}
+            onKeyDown={onRow ? (e) => { if (e.key === 'Enter' || e.key === ' ') onRow(r.id, e); } : undefined}
             className={cn(
-              'row-enter flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors duration-150',
+              'row-enter grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-2.5 text-left transition-colors duration-150 sm:flex sm:gap-3',
               i > 0 && 'border-t border-border',
               onRow && 'cursor-pointer hover:bg-muted/60',
             )}
             style={{ ['--i' as string]: Math.min(i, 10) }}
           >
-            <span className="w-28 shrink-0 truncate font-mono text-xs text-muted-foreground">{r.number ?? r.id.slice(0, 8)}</span>
-            <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{companyName(r) ?? '–'}</span>
-            <span className="flex w-24 shrink-0"><StatusPill status={r.status} overdue={overdue} /></span>
-            <span className="w-20 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-              {fmtDate(kind === 'invoice' ? r.dueDate : r.validUntil)}
+            <span className="order-1 min-w-0 truncate text-[13px] font-medium sm:order-2 sm:flex-1">{companyName(r) ?? '–'}</span>
+            <span className="order-2 text-right text-[13px] font-semibold tabular-nums sm:order-5 sm:w-24 sm:shrink-0">{fmtMoney(r.total ?? 0, r.currency ?? 'USD')}</span>
+            <span className="order-3 col-span-2 flex min-w-0 items-center gap-2 sm:contents">
+              <span className="min-w-0 truncate font-mono text-xs text-muted-foreground sm:order-1 sm:w-28 sm:shrink-0">{r.number ?? r.id.slice(0, 8)}</span>
+              <span className="flex shrink-0 sm:order-3 sm:w-24"><StatusPill status={r.status} overdue={overdue} /></span>
+              <span className="ml-auto shrink-0 text-right text-xs text-muted-foreground tabular-nums sm:order-4 sm:ml-0 sm:w-20">
+                {fmtDate(kind === 'invoice' ? r.dueDate : r.validUntil)}
+              </span>
             </span>
-            <span className="w-24 shrink-0 text-right text-[13px] font-semibold tabular-nums">{fmtMoney(r.total ?? 0, r.currency ?? 'USD')}</span>
           </div>
         );
         if (kind !== 'invoice' || !onRow) return <div key={r.id}>{row}</div>;
@@ -561,6 +632,7 @@ function ExpensesView() {
   // be a free-text box stuck on USD, so every UAH expense landed in dollars.
   const defaultCurrency = useDefaultCurrency();
   const [showForm, setShowForm] = useState(false);
+  const uid = useId();
   const blankForm = (currency: string) => ({ description: '', amount: '', currency, date: '', category: '' });
   const [form, setForm] = useState(() => blankForm(defaultCurrency));
   const openForm = () => { setForm(blankForm(defaultCurrency)); setShowForm(true); };
@@ -575,6 +647,8 @@ function ExpensesView() {
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
   });
   const rows = expenses.data?.data ?? [];
+  const { view: expView, stale: expStale } = queryView(expenses, (d) => ((d as { data?: Expense[] }).data ?? []).length === 0);
+  const retryExpenses = () => { void expenses.refetch(); };
 
   return (
     <div className="space-y-8 p-6">
@@ -593,7 +667,8 @@ function ExpensesView() {
         </h2>
         {can('finance.write') && <Button size="sm" variant="outline" onClick={openForm}><Plus size={14} /> {t('finance.newExpense')}</Button>}
       </div>
-      {expenses.isLoading ? (
+      {expStale && <StaleNotice onRetry={retryExpenses} retrying={expenses.isFetching} />}
+      {expView === 'loading' ? (
         <div className="overflow-hidden rounded-xl border border-border">
           {[0, 1, 2].map((i) => (
             <div key={i} className={cn('flex items-center gap-3 px-4 py-3', i > 0 && 'border-t border-border')}>
@@ -601,6 +676,8 @@ function ExpensesView() {
             </div>
           ))}
         </div>
+      ) : expView === 'error' ? (
+        <LoadFailed onRetry={retryExpenses} retrying={expenses.isFetching} />
       ) : rows.length === 0 ? (
         <EmptyState icon={<Receipt size={20} />} title={t('finance.noExpenses')} hint={t('finance.noExpensesHint')} action={can('finance.write') ? <Button size="sm" variant="outline" onClick={openForm}><Plus size={13} /> {t('finance.newExpense')}</Button> : undefined} />
       ) : (
@@ -625,27 +702,27 @@ function ExpensesView() {
         <Dialog open={showForm} onClose={() => setShowForm(false)} title={t('finance.newExpense')} width={440}>
           <form className="space-y-3 px-4 pb-4 pt-1" onSubmit={(e) => { e.preventDefault(); if (Number(form.amount) > 0) create.mutate(); }}>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">{t('public.description')}</label>
-              <Input autoFocus value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
+              <label htmlFor={`${uid}-description`} className="text-xs font-medium text-muted-foreground">{t('public.description')}</label>
+              <Input id={`${uid}-description`} autoFocus value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">{t('public.amount')}</label>
-                <Input type="number" min={0} step="0.01" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} />
+                <label htmlFor={`${uid}-amount`} className="text-xs font-medium text-muted-foreground">{t('public.amount')}</label>
+                <Input id={`${uid}-amount`} type="number" min={0} step="0.01" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} />
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">{t('common.currency')}</label>
-                <Select value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))} className="w-full">
+                <label htmlFor={`${uid}-currency`} className="text-xs font-medium text-muted-foreground">{t('common.currency')}</label>
+                <Select id={`${uid}-currency`} value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))} className="w-full">
                   {currencyOptions(form.currency).map((c) => <option key={c} value={c}>{c}</option>)}
                 </Select>
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">{t('common.date')}</label>
-                <DateField value={form.date} onChange={(v) => setForm((f) => ({ ...f, date: v ?? '' }))} clearable={false} />
+                <label htmlFor={`${uid}-date`} className="text-xs font-medium text-muted-foreground">{t('common.date')}</label>
+                <DateField id={`${uid}-date`} name="date" value={form.date} onChange={(v) => setForm((f) => ({ ...f, date: v ?? '' }))} clearable={false} />
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">{t('finance.category')}</label>
-                <Input value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} />
+                <label htmlFor={`${uid}-category`} className="text-xs font-medium text-muted-foreground">{t('finance.category')}</label>
+                <Input id={`${uid}-category`} value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} />
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-1">

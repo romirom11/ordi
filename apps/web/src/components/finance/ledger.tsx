@@ -10,6 +10,7 @@
  */
 import { useMemo, useState, type FormEvent } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { QueryFeedback } from '../QueryFeedback';
 import {
   ArrowLeftRight, BookOpen, ChevronRight, MoreHorizontal, Plus, Sprout, Undo2,
 } from 'lucide-react';
@@ -172,6 +173,7 @@ export function TransactionsTab() {
   const projectsQ = useQuery({
     queryKey: ['projects', 'ledger'],
     queryFn: () => api.get<{ data: ProjectLite[] }>('/projects'),
+    enabled: can('projects.read'),
     staleTime: 5 * 60_000,
   });
   const projectName = useMemo(() => {
@@ -192,6 +194,7 @@ export function TransactionsTab() {
 
   const rows = txQ.data?.data ?? [];
   const accounts = accountsQ.data ?? [];
+  const failedQueries = [txQ, incomeQ, accountsQ, projectsQ].filter((query) => query.isError);
 
   // Green income stat: net recorded income in the filtered period.
   const incomeRows = (incomeQ.data?.data ?? []).filter((r) => r.status === 'posted');
@@ -209,6 +212,7 @@ export function TransactionsTab() {
 
   return (
     <div className="space-y-4 p-6">
+      {failedQueries.length > 0 && <QueryFeedback stale={failedQueries.every((query) => query.data !== undefined)} pending={failedQueries.some((query) => query.isFetching)} onRetry={() => { for (const query of failedQueries) void query.refetch(); }} />}
       {/* Income stat + filters */}
       <div className="flex flex-wrap items-end gap-3">
         <Card className="flex items-center gap-3 border-success/25 bg-success/[0.06] p-3.5 pr-6">
@@ -219,6 +223,8 @@ export function TransactionsTab() {
             <div className="text-xs text-muted-foreground">{t('ledger.incomePeriod')}</div>
             {incomeQ.isLoading ? (
               <Skeleton className="mt-1 h-6 w-24" />
+            ) : incomeQ.isError && incomeQ.data === undefined ? (
+              <span className="text-sm text-muted-foreground">{t('common.error')}</span>
             ) : (
               <div className="flex items-baseline gap-3">
                 {incomeByCur.size === 0 ? (
@@ -236,8 +242,8 @@ export function TransactionsTab() {
           </div>
         </Card>
 
-        <div className="ml-auto flex items-center gap-2">
-          <Select value={accountId} onChange={(e) => setAccountId(e.target.value)} className="h-8 max-w-52">
+        <div className="ml-auto flex min-w-0 flex-wrap items-center gap-2">
+          <Select aria-label={t('ledger.allAccounts')} disabled={accountsQ.isError && accountsQ.data === undefined} value={accountId} onChange={(e) => setAccountId(e.target.value)} className="h-8 max-w-52">
             <option value="">{t('ledger.allAccounts')}</option>
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>
@@ -245,9 +251,9 @@ export function TransactionsTab() {
               </option>
             ))}
           </Select>
-          <div className="w-36 shrink-0"><DateField value={from} onChange={(v) => setFrom(v ?? '')} /></div>
+          <div className="w-36 shrink-0"><DateField aria-label={t('resourcing.from')} value={from} onChange={(v) => setFrom(v ?? '')} /></div>
           <span className="text-xs text-faint">–</span>
-          <div className="w-36 shrink-0"><DateField value={to} onChange={(v) => setTo(v ?? '')} /></div>
+          <div className="w-36 shrink-0"><DateField aria-label={t('resourcing.to')} value={to} onChange={(v) => setTo(v ?? '')} min={from || undefined} /></div>
         </div>
       </div>
 
@@ -263,7 +269,7 @@ export function TransactionsTab() {
             </div>
           ))}
         </div>
-      ) : rows.length === 0 ? (
+      ) : txQ.isError && txQ.data === undefined ? null : rows.length === 0 ? (
         <EmptyState
           icon={<BookOpen size={20} />}
           title={t('ledger.emptyJournal')}

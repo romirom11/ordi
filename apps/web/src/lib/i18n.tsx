@@ -3,13 +3,16 @@
  * the user profile (users.locale) with localStorage fallback before login.
  * Dates/numbers/currency go through Intl (see fmtMoney/fmtDate in ui.tsx).
  */
-import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react';
 
 export type Locale = 'en' | 'uk';
 
 type Dict = Record<string, string>;
 
 const en: Dict = {
+  'date.overdue': 'Overdue',
+  'common.reconnecting': 'Live updates disconnected. Reconnecting…',
+  'profile.notificationSound': 'Notification sound on this device',
   // shell / nav
   'nav.dashboard': 'Dashboard',
   'nav.myTasks': 'My tasks',
@@ -583,6 +586,9 @@ const en: Dict = {
 };
 
 const uk: Dict = {
+  'date.overdue': 'Прострочено',
+  'common.reconnecting': 'Звʼязок для оновлень перервано. Відновлюємо…',
+  'profile.notificationSound': 'Звук сповіщень на цьому пристрої',
   'nav.dashboard': 'Дашборд',
   'nav.myTasks': 'Мої задачі',
   'nav.clients': 'Клієнти',
@@ -1149,6 +1155,71 @@ const uk: Dict = {
 
 const DICTS: Record<Locale, Dict> = { en, uk };
 
+Object.assign(en, {
+  'common.confirm': 'Confirm', 'common.retry': 'Retry', 'common.unknown': 'Unknown',
+  'common.loadFailed': 'Could not load the data.',
+  'common.dataStale': 'Could not refresh. Showing the last available data.',
+  'time.resumeTimer': 'Resume timer', 'time.timerResumed': 'Timer resumed',
+  'time.alreadyRunning': 'A timer is already running',
+  'time.timerUnavailable': 'Could not check the timer. Retry',
+  'time.timerStale': 'Timer status could not be refreshed',
+  'public.status.draft': 'Draft', 'public.status.sent': 'Sent', 'public.status.viewed': 'Viewed',
+  'public.status.accepted': 'Accepted', 'public.status.declined': 'Declined',
+  'public.status.expired': 'Expired', 'public.status.partially_paid': 'Partially paid',
+  'public.status.paid': 'Paid', 'public.status.canceled': 'Canceled', 'public.status.overdue': 'Overdue',
+  'activity.verb.update': 'updated', 'activity.verb.update.you': 'updated',
+  'activity.verb.create': 'created', 'activity.verb.create.you': 'created',
+  'activity.verb.delete': 'deleted', 'activity.verb.delete.you': 'deleted',
+  'date.error.format': 'Enter a date like {example}', 'date.error.required': 'Enter a date',
+  'date.error.beforeMin': 'Choose {date} or later', 'date.error.afterMax': 'Choose {date} or earlier',
+  'nav.hideSidebar': 'Hide sidebar', 'nav.showSidebar': 'Show sidebar',
+  'nav.skipToContent': 'Skip to content', 'nav.sidebar': 'Sidebar', 'tabs.list': 'Open tabs',
+  'finance.lineItems': 'Line items', 'finance.lineN': 'line {n}', 'finance.deleteLineN': 'Delete line {n}',
+  'finance.loadFailed': 'Could not load this data', 'finance.loadFailedHint': 'Check your connection and try again.',
+  'finance.staleData': 'Could not refresh. Showing the last loaded data.', 'finance.section': 'Finance section',
+  'kb.publishWithChanges': 'Saves your changes and publishes the page',
+  'draft.whatPage': 'page', 'draft.whatTask': 'task',
+  'draft.saving': 'Saving…', 'draft.saved': 'Saved', 'draft.failed': 'Not saved',
+  'draft.restored': 'Unsaved changes restored', 'draft.unsaved': 'Unsaved changes',
+  'draft.notStored': 'not stored on this device', 'draft.retry': 'Retry', 'draft.discard': 'Discard changes',
+  'draft.conflictTitle': 'Someone else changed this {what} while you were editing.',
+  'draft.conflictBody': 'Your version is kept here and has not been saved. Choose which one to keep.',
+  'draft.keepMine': 'Keep my version', 'draft.takeTheirs': 'Use their version',
+  'draft.hideTheirs': 'Hide their version', 'draft.showTheirs': 'Show their version',
+});
+Object.assign(uk, {
+  'common.confirm': 'Підтвердити', 'common.retry': 'Повторити', 'common.unknown': 'Невідомо',
+  'common.loadFailed': 'Не вдалося завантажити дані.',
+  'common.dataStale': 'Не вдалося оновити дані. Показано останню доступну версію.',
+  'time.resumeTimer': 'Відновити таймер', 'time.timerResumed': 'Таймер відновлено',
+  'time.alreadyRunning': 'Таймер уже працює',
+  'time.timerUnavailable': 'Не вдалося перевірити таймер. Повторити',
+  'time.timerStale': 'Не вдалося оновити стан таймера',
+  'public.status.draft': 'Чернетка', 'public.status.sent': 'Надіслано', 'public.status.viewed': 'Переглянуто',
+  'public.status.accepted': 'Прийнято', 'public.status.declined': 'Відхилено',
+  'public.status.expired': 'Термін минув', 'public.status.partially_paid': 'Частково оплачено',
+  'public.status.paid': 'Оплачено', 'public.status.canceled': 'Скасовано', 'public.status.overdue': 'Прострочено',
+  'activity.verb.update': 'оновлено', 'activity.verb.update.you': 'оновили',
+  'activity.verb.create': 'створено', 'activity.verb.create.you': 'створили',
+  'activity.verb.delete': 'видалено', 'activity.verb.delete.you': 'видалили',
+  'date.error.format': 'Введіть дату у форматі {example}', 'date.error.required': 'Введіть дату',
+  'date.error.beforeMin': 'Оберіть {date} або пізніше', 'date.error.afterMax': 'Оберіть {date} або раніше',
+  'nav.hideSidebar': 'Сховати бічну панель', 'nav.showSidebar': 'Показати бічну панель',
+  'nav.skipToContent': 'Перейти до вмісту', 'nav.sidebar': 'Бічна панель', 'tabs.list': 'Відкриті вкладки',
+  'finance.lineItems': 'Позиції', 'finance.lineN': 'рядок {n}', 'finance.deleteLineN': 'Видалити рядок {n}',
+  'finance.loadFailed': 'Не вдалося завантажити дані', 'finance.loadFailedHint': 'Перевірте зʼєднання та спробуйте ще раз.',
+  'finance.staleData': 'Не вдалося оновити дані. Показано останню завантажену версію.', 'finance.section': 'Розділ фінансів',
+  'kb.publishWithChanges': 'Зберігає зміни й публікує сторінку',
+  'draft.whatPage': 'сторінку', 'draft.whatTask': 'задачу',
+  'draft.saving': 'Зберігаємо…', 'draft.saved': 'Збережено', 'draft.failed': 'Не збережено',
+  'draft.restored': 'Незбережені зміни відновлено', 'draft.unsaved': 'Незбережені зміни',
+  'draft.notStored': 'не збережено на цьому пристрої', 'draft.retry': 'Повторити', 'draft.discard': 'Відкинути зміни',
+  'draft.conflictTitle': 'Хтось змінив цю {what}, поки ви редагували.',
+  'draft.conflictBody': 'Ваша версія залишається тут і ще не збережена. Оберіть, яку версію залишити.',
+  'draft.keepMine': 'Залишити мою версію', 'draft.takeTheirs': 'Взяти іншу версію',
+  'draft.hideTheirs': 'Сховати іншу версію', 'draft.showTheirs': 'Показати іншу версію',
+});
+
 /**
  * Feature modules register their own strings at import time via extendDict –
  * this keeps page-specific keys next to the page instead of in this file, and
@@ -1165,15 +1236,20 @@ interface I18n {
   t: (key: string, fallback?: string) => string;
 }
 
-const I18nContext = createContext<I18n>({ locale: 'en', t: (k, f) => f ?? k });
+const defaultI18n: I18n = { locale: 'en', t: (k, f) => f ?? k };
+const I18nContext = createContext<I18n>(defaultI18n);
 
 export function I18nProvider({ locale, children }: { locale: string; children: ReactNode }) {
   const loc: Locale = locale === 'uk' ? 'uk' : 'en';
+  const parent = useContext(I18nContext);
+  useEffect(() => {
+    if (parent === defaultI18n) document.documentElement.lang = loc;
+  }, [loc, parent]);
   const value = useMemo<I18n>(() => ({
     locale: loc,
     t: (key, fallback) => DICTS[loc][key] ?? DICTS.en[key] ?? fallback ?? key,
   }), [loc]);
-  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+  return <I18nContext.Provider value={value}>{parent === defaultI18n ? children : <div lang={loc} className="contents">{children}</div>}</I18nContext.Provider>;
 }
 
 export function useT(): (key: string, fallback?: string) => string {

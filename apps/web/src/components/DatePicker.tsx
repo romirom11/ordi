@@ -7,15 +7,18 @@
  * native date control goes through here, so the popup looks the same, follows
  * the user's date format, and starts the week where their locale does.
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { CalendarDays, ChevronLeft, ChevronRight, Clock3, X } from 'lucide-react';
 import {
-  addDays, addMonths, formatDay, formatMonthTitle, isSameDay, parseDay, parseTyped,
+  addDays, addMonths, formatDay, formatMonthTitle, isSameDay, parseDay,
   toDayValue, today, weekdayLabels, weekStartsOn,
 } from '../lib/dates';
+import { checkDay, readTypedDay, type DateProblem } from '../lib/dateBounds';
 import { useT, extendDict } from '../lib/i18n';
 import { appLocale, cn } from './ui';
+import { useOverlayLayer } from './overlays';
+import { tabbables } from '../lib/overlayA11y';
 
 extendDict({
   en: {
@@ -63,16 +66,24 @@ export function Calendar({ value, onSelect, min, max, footer }: {
   const t = useT();
   const selected = parseDay(value);
   const now = today();
-  const [cursor, setCursor] = useState<Date>(() => selected ?? now);
-  const [focused, setFocused] = useState<Date>(() => selected ?? now);
+  const constrain = (date: Date): Date => {
+    const lower = parseDay(min), upper = parseDay(max);
+    if (lower && date < lower) return lower;
+    if (upper && date > upper) return upper;
+    return date;
+  };
+  const [cursor, setCursor] = useState<Date>(() => constrain(selected ?? now));
+  const [focused, setFocused] = useState<Date>(() => constrain(selected ?? now));
   const gridRef = useRef<HTMLDivElement>(null);
 
   // Reopening on a different value should land on that value's month.
   const key = selected ? toDayValue(selected) : '';
   useEffect(() => {
-    if (selected) { setCursor(selected); setFocused(selected); }
+    const next = constrain(selected ?? today());
+    setCursor(next);
+    setFocused(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, min, max]);
 
   const days = useMemo(() => monthGrid(cursor), [cursor]);
   const labels = useMemo(() => weekdayLabels(), []);
@@ -84,7 +95,8 @@ export function Calendar({ value, onSelect, min, max, footer }: {
     return (!!minDay && v < minDay) || (!!maxDay && v > maxDay);
   };
 
-  const move = (next: Date) => {
+  const move = (date: Date) => {
+    const next = constrain(date);
     setFocused(next);
     if (next.getMonth() !== cursor.getMonth() || next.getFullYear() !== cursor.getFullYear()) setCursor(next);
   };
@@ -117,7 +129,11 @@ export function Calendar({ value, onSelect, min, max, footer }: {
     [],
   );
   const headerNav = (dir: -1 | 1) => {
-    if (view === 'days') setCursor(addMonths(cursor, dir));
+    if (view === 'days') {
+      const next = constrain(addMonths(cursor, dir));
+      setCursor(next);
+      setFocused(next);
+    }
     else if (view === 'months') setCursor(new Date(cursor.getFullYear() + dir, cursor.getMonth(), 1));
     else setCursor(new Date(cursor.getFullYear() + dir * 12, cursor.getMonth(), 1));
   };
@@ -153,7 +169,7 @@ export function Calendar({ value, onSelect, min, max, footer }: {
               <button
                 key={y} type="button"
                 onClick={() => { setCursor(new Date(y, cursor.getMonth(), 1)); setView('months'); }}
-                className={cn(pickCell, y === cursor.getFullYear() && 'bg-primary font-medium text-primary-foreground hover:bg-primary')}
+                className={cn(pickCell, y === cursor.getFullYear() && 'bg-[hsl(var(--action))] font-medium text-primary-foreground hover:bg-[hsl(var(--action))]')}
               >
                 {y}
               </button>
@@ -167,7 +183,7 @@ export function Calendar({ value, onSelect, min, max, footer }: {
                   setFocused(new Date(cursor.getFullYear(), i, Math.min(focused.getDate(), 28)));
                   setView('days');
                 }}
-                className={cn(pickCell, 'capitalize', i === cursor.getMonth() && 'bg-primary font-medium text-primary-foreground hover:bg-primary')}
+                className={cn(pickCell, 'capitalize', i === cursor.getMonth() && 'bg-[hsl(var(--action))] font-medium text-primary-foreground hover:bg-[hsl(var(--action))]')}
               >
                 {name}
               </button>
@@ -226,6 +242,7 @@ export function Calendar({ value, onSelect, min, max, footer }: {
               role="gridcell"
               data-focused={isFocused}
               aria-selected={isSelected}
+              aria-label={formatDay(d)}
               tabIndex={isFocused ? 0 : -1}
               disabled={off}
               onClick={() => onSelect(toDayValue(d))}
@@ -237,7 +254,7 @@ export function Calendar({ value, onSelect, min, max, footer }: {
                 !off && !isSelected && 'hover:bg-muted',
                 outside && !isSelected ? 'text-faint' : 'text-foreground',
                 isToday && !isSelected && 'font-semibold text-primary',
-                isSelected && 'bg-primary font-medium text-primary-foreground hover:bg-primary',
+                isSelected && 'bg-[hsl(var(--action))] font-medium text-primary-foreground hover:bg-[hsl(var(--action))]',
               )}
             >
               {d.getDate()}
@@ -251,28 +268,87 @@ export function Calendar({ value, onSelect, min, max, footer }: {
   );
 }
 
-export function DateField({ value, onChange, placeholder, disabled, clearable = true, min, max, size = 'md', className, id }: {
+export function DateField({
+  value, onChange, placeholder, disabled, clearable = true, required = !clearable, min, max, size = 'md', className, id, name,
+  'aria-label': ariaLabel, 'aria-labelledby': ariaLabelledBy, 'aria-describedby': ariaDescribedBy,
+}: {
   /** 'yyyy-MM-dd', or null/'' for empty. */
   value?: string | null;
   onChange: (value: string | null) => void;
   placeholder?: string;
   disabled?: boolean;
   clearable?: boolean;
+  /** Empty is an error (typed, cleared or never set) rather than a cleared field. */
+  required?: boolean;
   min?: string | null;
   max?: string | null;
   /** 'sm' fits dense table rows; 'md' matches the standard Input height. */
   size?: 'sm' | 'md';
   className?: string;
+  /** Lands on the text input, so a `<label htmlFor>` names the field. */
   id?: string;
+  name?: string;
+  'aria-label'?: string;
+  'aria-labelledby'?: string;
+  'aria-describedby'?: string;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
+  /** Why the text last committed from the input was refused; the text stays. */
+  const [draftProblem, setDraftProblem] = useState<DateProblem | null>(null);
+  /** An untouched empty required field stays quiet until left or submitted. */
+  const [touched, setTouched] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const errorId = useId();
   const [pos, setPos] = useState<CSSProperties>({});
+  const closeCalendar = () => { inputRef.current?.focus(); setOpen(false); };
+  useOverlayLayer(open && !disabled, closeCalendar);
 
+  const leaveCalendar = (shift: boolean) => {
+    const input = inputRef.current;
+    if (!input) return;
+    const scope = input.closest<HTMLElement>('[role="dialog"]') ?? document.body;
+    const items = tabbables(scope).filter((el) => !popRef.current?.contains(el));
+    const at = items.indexOf(input);
+    const next = items[(at + (shift ? -1 : 1) + items.length) % items.length];
+    setOpen(false);
+    next?.focus();
+  };
+
+  const rules = { min, max, required };
   const shown = draft ?? formatDay(value);
+  // The committed value is checked too: a bound can move under it (the issue
+  // date changes after the due date was set) and that must not pass silently.
+  const valueProblem = checkDay(value, rules);
+  const problem = draftProblem ?? valueProblem;
+  const visibleProblem = problem === 'required' && !touched && !draftProblem ? null : problem;
+
+  const problemText = (p: DateProblem): string => {
+    switch (p) {
+      case 'format': return t('date.error.format', 'Enter a date like {example}').replace('{example}', formatDay(today()));
+      case 'required': return t('date.error.required', 'Enter a date');
+      case 'beforeMin': return t('date.error.beforeMin', 'Choose {date} or later').replace('{date}', formatDay(min));
+      case 'afterMax': return t('date.error.afterMax', 'Choose {date} or earlier').replace('{date}', formatDay(max));
+    }
+  };
+  const message = problem ? problemText(problem) : '';
+
+  // A value set from outside (a reset, another control) replaces refused text
+  // the user is no longer working on.
+  useEffect(() => {
+    if (document.activeElement === inputRef.current) return;
+    setDraft(null);
+    setDraftProblem(null);
+  }, [value]);
+
+  // Native constraint validation: a form cannot submit past a refused date,
+  // and the browser points at this field when someone tries.
+  useEffect(() => {
+    inputRef.current?.setCustomValidity(message);
+  }, [message]);
 
   useLayoutEffect(() => {
     if (!open || !anchorRef.current) return;
@@ -290,21 +366,31 @@ export function DateField({ value, onChange, placeholder, disabled, clearable = 
       if (popRef.current?.contains(e.target as Node) || anchorRef.current?.contains(e.target as Node)) return;
       setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } };
     document.addEventListener('mousedown', onDown);
-    window.addEventListener('keydown', onKey);
-    return () => { document.removeEventListener('mousedown', onDown); window.removeEventListener('keydown', onKey); };
+    return () => document.removeEventListener('mousedown', onDown);
   }, [open]);
 
-  /** Typing is a convenience, not the contract: unparseable text reverts. */
-  const commitTyped = () => {
-    if (draft === null) return;
-    const text = draft.trim();
+  /** Every route into the field – grid, Today, Clear, typing – lands here. */
+  const accept = (next: string | null) => {
     setDraft(null);
-    if (!text) { if (value) onChange(null); return; }
-    const parsed = parseTyped(text);
-    if (parsed) onChange(toDayValue(parsed));
+    setDraftProblem(null);
+    setTouched(true);
+    if (next !== (value || null)) onChange(next);
   };
+
+  /** Text that does not make a valid day is kept, with the reason beside it. */
+  const commitTyped = () => {
+    setTouched(true);
+    if (draft === null) return;
+    const result = readTypedDay(draft, rules);
+    if (result.ok) accept(result.value);
+    else setDraftProblem(result.problem);
+  };
+
+  const todayValue = toDayValue(today());
+  const todayAllowed = checkDay(todayValue, { min, max }) === null;
+  const canClear = clearable && !required;
+  const describedBy = [ariaDescribedBy, visibleProblem ? errorId : null].filter(Boolean).join(' ') || undefined;
 
   return (
     <>
@@ -313,37 +399,54 @@ export function DateField({ value, onChange, placeholder, disabled, clearable = 
         className={cn(
           'flex items-center gap-1.5 rounded-md border border-border bg-surface transition-colors duration-150',
           size === 'sm' ? 'h-7 gap-1 px-1.5 text-xs' : 'h-9 px-2.5 text-[13px]',
-          'focus-within:border-primary/60',
-          disabled ? 'cursor-not-allowed opacity-60' : 'hover:border-border-strong',
+          visibleProblem ? 'border-destructive/70 focus-within:border-destructive' : 'focus-within:border-primary/60',
+          disabled ? 'cursor-not-allowed opacity-60' : !visibleProblem && 'hover:border-border-strong',
           className,
         )}
       >
-        <CalendarDays size={size === 'sm' ? 12 : 14} className="shrink-0 text-faint" />
+        <CalendarDays size={size === 'sm' ? 12 : 14} className="shrink-0 text-faint" aria-hidden />
         <input
+          ref={inputRef}
           id={id}
+          name={name}
           value={shown}
           disabled={disabled}
           placeholder={placeholder ?? t('date.placeholder')}
-          onChange={(e) => setDraft(e.target.value)}
+          aria-label={ariaLabel}
+          aria-labelledby={ariaLabelledBy}
+          aria-describedby={describedBy}
+          aria-invalid={visibleProblem ? true : undefined}
+          aria-required={required || undefined}
+          autoComplete="off"
+          onChange={(e) => { setDraft(e.target.value); setDraftProblem(null); }}
           onFocus={() => { if (!disabled) setOpen(true); }}
           onBlur={commitTyped}
+          onInvalid={() => setTouched(true)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') { e.preventDefault(); commitTyped(); setOpen(false); }
-            if (e.key === 'ArrowDown' && !open) setOpen(true);
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              setOpen(true);
+              requestAnimationFrame(() => popRef.current?.querySelector<HTMLElement>('[data-focused="true"]')?.focus());
+            }
+            if (e.key === 'Tab' && open) { e.preventDefault(); commitTyped(); leaveCalendar(e.shiftKey); }
           }}
           className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-faint disabled:cursor-not-allowed"
         />
-        {clearable && value && !disabled && (
+        {canClear && value && !disabled && (
           <button
             type="button"
             aria-label={t('date.clear')}
-            onClick={() => { setDraft(null); onChange(null); }}
+            onClick={() => accept(null)}
             className="grid h-5 w-5 shrink-0 place-items-center rounded text-faint transition-colors duration-150 hover:bg-muted hover:text-foreground"
           >
             <X size={12} />
           </button>
         )}
       </div>
+      {visibleProblem && (
+        <p id={errorId} className="mt-1 text-xs text-destructive">{problemText(visibleProblem)}</p>
+      )}
 
       {open && !disabled && createPortal(
         <div
@@ -351,25 +454,27 @@ export function DateField({ value, onChange, placeholder, disabled, clearable = 
           className="fixed z-[70] overflow-hidden rounded-lg border border-border bg-elevated shadow-pop"
           style={{ ...pos, animation: 'dropdown-in var(--duration-fast) var(--ease-smooth-out) both' }}
           onMouseDown={(e) => e.preventDefault()}
+          onKeyDown={(e) => { if (e.key === 'Tab') { e.preventDefault(); leaveCalendar(e.shiftKey); } }}
         >
           <Calendar
             value={value}
             min={min}
             max={max}
-            onSelect={(day) => { setDraft(null); onChange(day); setOpen(false); }}
+            onSelect={(day) => { accept(day); closeCalendar(); }}
             footer={(
               <div className="mt-1.5 flex items-center justify-between border-t border-border pt-1.5">
                 <button
                   type="button"
-                  onClick={() => { setDraft(null); onChange(toDayValue(today())); setOpen(false); }}
-                  className="rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground"
+                  disabled={!todayAllowed}
+                  onClick={() => { accept(todayValue); closeCalendar(); }}
+                  className="rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
                 >
                   {t('date.today')}
                 </button>
-                {clearable && value && (
+                {canClear && value && (
                   <button
                     type="button"
-                    onClick={() => { setDraft(null); onChange(null); setOpen(false); }}
+                    onClick={() => { accept(null); closeCalendar(); }}
                     className="rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground"
                   >
                     {t('date.clear')}
@@ -405,7 +510,8 @@ export function DateTimeField({ value, onChange, disabled, min, max, className, 
   const time = value.slice(11, 16);
 
   return (
-    <div className={cn('grid grid-cols-[minmax(0,1fr)_9rem] gap-2', className)}>
+    <div className={cn('grid grid-cols-[minmax(0,1fr)_9rem] items-start gap-2', className)}>
+      <div className="min-w-0">
       <DateField
         id={id ? `${id}-date` : undefined}
         value={day}
@@ -414,9 +520,11 @@ export function DateTimeField({ value, onChange, disabled, min, max, className, 
         }}
         disabled={disabled}
         clearable={false}
+        required
         min={min}
         max={max}
       />
+      </div>
       <div
         className={cn(
           'flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-[13px]',

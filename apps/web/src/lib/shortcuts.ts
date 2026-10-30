@@ -98,6 +98,8 @@ export const GO_TO: readonly { key: string; to: string; labelKey: string }[] = [
 export const SHORTCUTS: readonly Shortcut[] = [
   /* General */
   { id: 'palette', group: 'general', keys: [MOD, 'K'], labelKey: 'keys.palette', match: (e) => isMod(e, 'KeyK') },
+  { id: 'sidebar', group: 'general', keys: [MOD, '\\'], labelKey: 'keys.sidebar', match: (e) => isMod(e, 'Backslash') },
+  { id: 'preferences', group: 'general', keys: [MOD, ','], labelKey: 'keys.preferences', match: (e) => isMod(e, 'Comma') },
   { id: 'quickAdd', group: 'general', keys: ['C'], labelKey: 'keys.quickAdd' },
   { id: 'stopTimer', group: 'general', keys: ['T'], labelKey: 'keys.stopTimer' },
   { id: 'help', group: 'general', keys: [SHIFT, '?'], labelKey: 'keys.help', match: (e) => e.key === '?' && !mod(e) },

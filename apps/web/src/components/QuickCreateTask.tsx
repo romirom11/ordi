@@ -4,12 +4,19 @@
  * (status / priority / assignees / project / labels / due date), a "create
  * more" switch and Cmd/Ctrl+Enter to create. `!high`-style tokens in the
  * title still set the priority.
+ *
+ * Closing the composer (Esc, outside click, ✕) never throws typed text away:
+ * the form is kept as a draft for this person and comes back on the next
+ * open, until the task is created or the draft is discarded.
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CalendarDays, ChevronDown, Tag, UserRound, X } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
-import { usePathname } from '../lib/router';
+import { useNavigate, usePathname } from '../lib/router';
+import { useMe } from '../lib/auth';
+import { draftStorageKey } from '../lib/draftSync';
+import { appDraftStore } from '../lib/useDraftSync';
 import { Avatar, Button, Kbd, PriorityIcon, Spinner, StatusIcon, Switch, cn, fmtDate } from './ui';
 import { Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator, toast, useMenuClose } from './overlays';
 import { ProjectIcon } from './project/ProjectIcon';
@@ -78,19 +85,46 @@ function parseQuickSyntax(raw: string): { title: string; priority?: string } {
   return { title, priority };
 }
 
-/** Property chip: the trigger button of every picker in the chip row. */
-function ChipButton({ children, muted }: { children: ReactNode; muted?: boolean }) {
+/**
+ * Property chip: the trigger of every picker in the chip row. A real button,
+ * so Tab reaches it and Enter/Space open its menu (the DropdownMenu anchor
+ * opens on the click the button fires). `label` names the property for
+ * assistive tech, since the chip itself only shows the value.
+ */
+function ChipButton({ children, muted, label, value, disabled }: {
+  children: ReactNode; muted?: boolean; label: string; value: string; disabled?: boolean;
+}) {
   return (
-    <span
+    <button
+      type="button"
+      aria-haspopup="menu"
+      aria-label={`${label}: ${value}`}
+      disabled={disabled}
       className={cn(
         'flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-border px-2 text-[13px]',
-        'transition-colors duration-150 hover:border-border-strong hover:bg-muted',
+        'transition-colors duration-150 hover:border-border-strong hover:bg-muted disabled:cursor-default disabled:opacity-60',
         muted && 'text-muted-foreground',
       )}
     >
       {children}
-    </span>
+    </button>
   );
+}
+
+/** Everything the composer holds, as kept between openings. */
+interface QuickDraft {
+  title: string; desc: unknown; priority: string; assigneeIds: string[]; labelIds: string[];
+  dueDate: string; projectId: string; statusId: string;
+}
+
+function readQuickDraft(key: string): QuickDraft | null {
+  try {
+    const raw = appDraftStore.getItem(key);
+    const d = raw ? JSON.parse(raw) as QuickDraft : null;
+    return d && typeof d.title === 'string' ? d : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Menu row that toggles without closing the dropdown (multi-select). */
@@ -111,10 +145,9 @@ function ToggleItem({ children, icon, checked, onToggle }: {
   );
 }
 
-/** Native date input inside a menu – picking a date applies it and closes. */
 /** The shared calendar inside a menu – picking a day applies it and closes. */
 function DatePickInput({ value, onSet }: {
-  value: string | null; onSet: (v: string) => void; ariaLabel?: string;
+  value: string | null; onSet: (v: string) => void;
 }) {
   const close = useMenuClose();
   return <Calendar value={value} onSelect={(day) => { onSet(day); close(); }} />;
@@ -123,6 +156,14 @@ function DatePickInput({ value, onSet }: {
 export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () => void }) {
   const t = useT();
   const qc = useQueryClient();
+  const navigate = useNavigate();
+  const me = useMe();
+  const draftKey = draftStorageKey(me.user.id, 'quick-create', 'task');
+  /** The form came back from an earlier, unfinished opening. */
+  const [restored, setRestored] = useState(false);
+  const [draftStored, setDraftStored] = useState(true);
+  /** A restored status waits for its project's statuses to load. */
+  const pendingStatus = useRef<string | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const submitting = useRef(false);
   const submitRef = useRef<() => void>(() => {});
@@ -171,8 +212,9 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
       const fromRoute = routeProjectId ? projects.find((p) => p.id === routeProjectId) : undefined;
       if (fromRoute) { setProjectId(fromRoute.id); return; }
     }
-    if (projectId) return;
-    const last = localStorage.getItem(LAST_PROJECT_KEY);
+    if (projectId && projects.some((p) => p.id === projectId)) return;
+    let last: string | null = null;
+    try { last = localStorage.getItem(LAST_PROJECT_KEY); } catch { /* optional preference */ }
     const preset = projects.find((p) => p.id === last) ?? projects[0]!;
     setProjectId(preset.id);
   }, [open, projects, projectId, routeProjectId]);
@@ -180,14 +222,18 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
   // Default status: project default (falls back to the first by position).
   useEffect(() => {
     if (!statuses.length) { setStatusId(''); return; }
+    const pending = pendingStatus.current;
+    if (pending && statuses.some((s) => s.id === pending)) {
+      pendingStatus.current = null;
+      setStatusId(pending);
+      return;
+    }
     setStatusId((cur) =>
       statuses.some((s) => s.id === cur) ? cur : (statuses.find((s) => s.isDefault) ?? statuses[0]!).id,
     );
   }, [statuses]);
 
-  // Fresh form on every open (project sticks via localStorage).
-  useEffect(() => {
-    if (!open) return;
+  const resetForm = () => {
     setTitle('');
     setDesc(EMPTY_DOC);
     setDescKey((k) => k + 1);
@@ -195,7 +241,55 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
     setAssigneeIds([]);
     setLabelIds([]);
     setDueDate('');
-  }, [open]);
+  };
+
+  // On open: the unfinished draft if there is one, else a fresh form (the
+  // project sticks via localStorage).
+  useEffect(() => {
+    if (!open) return;
+    const draft = readQuickDraft(draftKey);
+    if (!draft) { setRestored(false); resetForm(); return; }
+    setTitle(draft.title);
+    setDesc(draft.desc ?? EMPTY_DOC);
+    setDescKey((k) => k + 1);
+    setPriority(draft.priority || 'none');
+    setAssigneeIds(draft.assigneeIds ?? []);
+    setLabelIds(draft.labelIds ?? []);
+    setDueDate(draft.dueDate ?? '');
+    if (draft.projectId) {
+      routeApplied.current = true; // the draft's project wins over the route's
+      setProjectId(draft.projectId);
+      pendingStatus.current = draft.statusId || null;
+    }
+    setRestored(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, draftKey]);
+
+  // Mirror the form while it holds typed text, so closing loses nothing.
+  const hasText = title.trim() !== '' || !docIsEmpty(desc);
+  useEffect(() => {
+    if (!open) return;
+    try {
+      if (!hasText) { appDraftStore.removeItem(draftKey); setDraftStored(true); return; }
+      const draft: QuickDraft = { title, desc, priority, assigneeIds, labelIds, dueDate, projectId, statusId };
+      appDraftStore.setItem(draftKey, JSON.stringify(draft));
+      setDraftStored(true);
+    } catch { setDraftStored(false); }
+  }, [open, hasText, title, desc, priority, assigneeIds, labelIds, dueDate, projectId, statusId, draftKey]);
+
+  useEffect(() => {
+    if (!hasText || draftStored) return;
+    const onUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', onUnload);
+    return () => window.removeEventListener('beforeunload', onUnload);
+  }, [hasText, draftStored]);
+
+  const discardDraft = () => {
+    appDraftStore.removeItem(draftKey);
+    setRestored(false);
+    resetForm();
+    requestAnimationFrame(() => titleRef.current?.focus());
+  };
 
   const parsed = parseQuickSyntax(title);
   const effectivePriority = parsed.priority ?? priority;
@@ -217,15 +311,22 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
     onSuccess: (created) => {
       qc.invalidateQueries({ queryKey: ['tasks'] });
       qc.invalidateQueries({ queryKey: ['me-tasks'] });
+      qc.invalidateQueries({ queryKey: ['me', 'tasks'] });
+      qc.invalidateQueries({ queryKey: ['onboarding'] });
       qc.invalidateQueries({ queryKey: ['subtasks'] });
-      localStorage.setItem(LAST_PROJECT_KEY, projectId);
-      toast(`${created.ref ?? ''} · ${t('tasks.createdToast')}`.replace(/^ · /, ''));
+      try { localStorage.setItem(LAST_PROJECT_KEY, projectId); } catch { /* optional preference */ }
+      toast.action(`${created.ref ?? ''} · ${t('tasks.createdToast')}`.replace(/^ · /, ''), {
+        label: t('common.open', 'Open'), onSelect: () => navigate(`/projects/${projectId}/tasks/${created.id}`),
+      });
+      appDraftStore.removeItem(draftKey);
+      setRestored(false);
       if (createMore) {
         setTitle('');
         setDesc(EMPTY_DOC);
         setDescKey((k) => k + 1);
         requestAnimationFrame(() => titleRef.current?.focus());
       } else {
+        resetForm();
         onClose();
       }
     },
@@ -260,17 +361,7 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
 
   return (
     <Dialog open={open} onClose={onClose} title={t('tasks.newTask')} width={640}>
-      <div
-        onMouseDown={(e) => {
-          // Dialog stops mousedown propagation, so DropdownMenu's document-level
-          // outside-click handler never fires for clicks inside the dialog.
-          // Re-dispatch a document mousedown so open chip menus close as expected.
-          // Skip clicks inside a portaled menu: React portals bubble through the
-          // React tree, but those clicks are already handled by the menu itself.
-          if ((e.target as HTMLElement).closest?.('[role="menu"]')) return;
-          document.dispatchEvent(new MouseEvent('mousedown'));
-        }}
-      >
+      <>
         <div className="px-4 pt-2">
           {/* Title */}
           <input
@@ -302,7 +393,7 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
               width={220}
               disabled={!projectId || statusesQ.isLoading}
               trigger={
-                <ChipButton muted={!status}>
+                <ChipButton label={t('qc.status')} value={status?.name ?? t('common.loading')} muted={!status} disabled={!projectId || statusesQ.isLoading}>
                   {statusesQ.isLoading ? (
                     <Spinner className="h-3 w-3" />
                   ) : (
@@ -330,7 +421,7 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
             <DropdownMenu
               width={186}
               trigger={
-                <ChipButton muted={effectivePriority === 'none'}>
+                <ChipButton label={t('tasks.priority')} value={t(`task.priority.${effectivePriority}`)} muted={effectivePriority === 'none'}>
                   <PriorityIcon priority={effectivePriority} size={13} />
                   <span className="max-w-[120px] truncate">{t(`task.priority.${effectivePriority}`)}</span>
                   <ChevronDown size={12} className="text-faint" />
@@ -354,7 +445,7 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
             <DropdownMenu
               width={230}
               trigger={
-                <ChipButton muted={selectedUsers.length === 0}>
+                <ChipButton label={t('tasks.assignees')} value={selectedUsers.map(userName).join(', ') || t('qc.unassigned')} muted={selectedUsers.length === 0}>
                   {selectedUsers.length === 0 ? (
                     <UserRound size={13} className="text-muted-foreground" />
                   ) : (
@@ -400,7 +491,7 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
             <DropdownMenu
               width={260}
               trigger={
-                <ChipButton muted={!project}>
+                <ChipButton label={t('tasks.project')} value={project?.name ?? t('common.select')} muted={!project}>
                   {projectsQ.isLoading ? (
                     <Spinner className="h-3 w-3" />
                   ) : (
@@ -432,7 +523,7 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
             <DropdownMenu
               width={240}
               trigger={
-                <ChipButton muted={selectedLabels.length === 0}>
+                <ChipButton label={t('qc.labels')} value={selectedLabels.map((l) => l.name).join(', ') || t('common.nothingYet')} muted={selectedLabels.length === 0}>
                   {selectedLabels.length === 0 ? (
                     <Tag size={13} className="text-muted-foreground" />
                   ) : (
@@ -464,7 +555,7 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
             <DropdownMenu
               width={264}
               trigger={
-                <ChipButton muted={!dueDate}>
+                <ChipButton label={t('qc.dueDate')} value={dueDate ? fmtDate(dueDate) : t('common.select')} muted={!dueDate}>
                   <CalendarDays size={13} className={dueDate ? undefined : 'text-muted-foreground'} />
                   <span className="max-w-[120px] truncate">{dueDate ? fmtDate(dueDate) : t('qc.dueDate')}</span>
                   <ChevronDown size={12} className="text-faint" />
@@ -483,6 +574,13 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
           </div>
         </div>
 
+        {hasText && (restored || !draftStored) && (
+          <div className="flex flex-wrap items-center gap-2 px-4 pb-2 text-xs text-muted-foreground">
+            <span role="status">{draftStored ? t('draft.restored') : t('draft.notStored')}</span>
+            <Button type="button" size="xs" variant="ghost" onClick={discardDraft}>{t('draft.discard')}</Button>
+          </div>
+        )}
+
         {/* Footer */}
         <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
           <label className="flex cursor-pointer select-none items-center gap-2 text-[12px] text-muted-foreground">
@@ -500,7 +598,7 @@ export function QuickCreateTask({ open, onClose }: { open: boolean; onClose: () 
             </Button>
           </div>
         </div>
-      </div>
+      </>
     </Dialog>
   );
 }

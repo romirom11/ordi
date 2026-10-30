@@ -41,15 +41,14 @@ export function TaskStatusPicker({ projectId, statusId, category, color, statusN
     <DropdownMenu
       className="shrink-0"
       trigger={(
-        <span
-          role="button"
-          tabIndex={0}
-          aria-label={t('common.status')}
+        <button
+          type="button"
+          aria-label={`${t('common.status')}: ${statusName ?? t('common.select')}`}
           title={statusName}
           className="-m-1 grid h-6 w-6 cursor-pointer place-items-center rounded-md transition-colors duration-150 hover:bg-muted [&>svg]:block"
         >
           {icon}
-        </span>
+        </button>
       )}
     >
       <MenuLabel>{t('common.status')}</MenuLabel>

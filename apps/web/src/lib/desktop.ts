@@ -43,6 +43,7 @@ export function setBadge(count: number): void {
 
 interface DesktopHandlers {
   onQuickAdd: () => void;
+  onMenu: (command: string) => void;
   onNavigate: (to: string) => void;
   /** A newer version was downloaded and installed; it applies on restart. */
   onUpdateReady: (version: string) => void;
@@ -335,6 +336,7 @@ export function initDesktop(handlers: DesktopHandlers): () => void {
     if (ev?.listen) {
       // Global shortcut (registered in Rust) → open the quick-create modal.
       unlisteners.push(ev.listen('ordi://quick-add', () => handlers.onQuickAdd()));
+      unlisteners.push(ev.listen('ordi://menu', (e: { payload: unknown }) => handlers.onMenu(String(e.payload))));
       // Deep links: the deep-link plugin emits this event with the URL list.
       unlisteners.push(ev.listen('deep-link://new-url', (e: { payload: unknown }) => {
         const urls = Array.isArray(e?.payload) ? (e.payload as string[]) : [String(e?.payload ?? '')];

@@ -1,8 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '../lib/router';
-import { useTabs } from '../lib/tabs';
-import { useCan } from '../lib/auth';
+import { usePageTitle, useTabs } from '../lib/tabs';
+import { useCan, useMe } from '../lib/auth';
+import { draftStorageKey } from '../lib/draftSync';
+import { useDraftSync } from '../lib/useDraftSync';
+import { DraftConflictBanner, DraftStatusLine } from '../components/DraftStatus';
+import { RichText } from '../components/richtext/RichText';
 import { appOrigin, api, ApiError } from '../lib/api';
 import {
   Button, IconButton, Input, Card, Badge, Breadcrumbs, EmptyState, Skeleton, Spinner, fmtDate, cn,
@@ -489,6 +493,8 @@ export function KbPage({ spaceId, pageId }: { spaceId?: string; pageId?: string 
   const canManageSpaces = can('kb.manage_spaces');
 
   const spaces = useQuery({ queryKey: ['spaces'], queryFn: () => api.get<{ data: Space[] }>('/spaces') });
+  // A page names its tab itself (PageDetailView); a space view takes the space's name.
+  usePageTitle(spaceId && !pageId ? spaces.data?.data.find((s) => s.id === spaceId)?.name : null);
 
   const [expandedSpaces, setExpandedSpaces] = useState<Set<string>>(() => new Set(spaceId ? [spaceId] : []));
   useEffect(() => {
@@ -664,7 +670,7 @@ export function KbPage({ spaceId, pageId }: { spaceId?: string; pageId?: string 
         {spaceId && !pageId && (
           <EmptyState icon={<FileQuestion size={20} />} title={t('kb.selectPage')} hint={t('kb.selectPageHint')} />
         )}
-        {spaceId && pageId && <PageDetailView pageId={pageId} spaceId={spaceId} canWrite={canWrite} />}
+        {spaceId && pageId && <PageDetailView key={pageId} pageId={pageId} spaceId={spaceId} canWrite={canWrite} />}
       </div>
 
       <NameDialog
@@ -734,13 +740,18 @@ export function KbPage({ spaceId, pageId }: { spaceId?: string; pageId?: string 
   );
 }
 
+/** Typed text of a page: a local draft until the server has stored it. */
+type PageText = { title: string; body: unknown };
+
+/** Mounted per page (keyed by id): drafts, timers and focus never carry over. */
 function PageDetailView({ pageId, spaceId, canWrite }: { pageId: string; spaceId: string; canWrite: boolean }) {
   const t = useT();
   const qc = useQueryClient();
-  const [title, setTitle] = useState('');
-  const [bodyDoc, setBodyDoc] = useState<any>(EMPTY_DOC);
+  const me = useMe();
   const [showVersions, setShowVersions] = useState(false);
   const titleRef = useRef<HTMLTextAreaElement>(null);
+  const historyRef = useRef<HTMLButtonElement>(null);
+  const [publishing, setPublishing] = useState(false);
 
   const page = useQuery({ queryKey: ['page', pageId], queryFn: () => api.get<PageDetail>(`/pages/${pageId}`) });
   const spaces = useQuery({ queryKey: ['spaces'], queryFn: () => api.get<{ data: Space[] }>('/spaces') });
@@ -750,14 +761,37 @@ function PageDetailView({ pageId, spaceId, canWrite }: { pageId: string; spaceId
     enabled: !!spaceId,
   });
 
-  useEffect(() => { setShowVersions(false); }, [pageId]);
+  usePageTitle(page.data ? (page.data.title || t('kb.untitled')) : null);
 
-  useEffect(() => {
-    if (page.data) {
-      setTitle(page.data.title ?? '');
-      setBodyDoc(page.data.body ?? EMPTY_DOC);
-    }
-  }, [page.data]);
+  // Explicit Save (no autosave): the draft is mirrored per person and page,
+  // so leaving through the tree and coming back restores it; a conflict keeps
+  // it on screen next to the newer version instead of replacing it.
+  const text = useDraftSync<PageText, PageDetail>({
+    storageKey: draftStorageKey(me.user.id, 'kb-page', pageId),
+    snapshot: page.data,
+    fields: (d) => ({ title: d.title ?? '', body: d.body ?? EMPTY_DOC }),
+    version: (d) => d.version,
+    send: (body, version) => api.patch<PageDetail>(`/pages/${pageId}`, { ...body, version }),
+    isConflict: (e) => e instanceof ApiError && (e.status === 409 || e.code === 'conflict'),
+    refresh: () => page.refetch({ throwOnError: true }),
+    confirmUnload: true,
+    onSaved: (resp, extra) => {
+      // The response is the bare row; keep what only the detail read carries (the pdf file).
+      qc.setQueryData<PageDetail>(['page', pageId], (old) => {
+        if (!old || (old.version ?? 0) > (resp.version ?? 0)) return old;
+        return { ...old, ...resp, file: old.file };
+      });
+      qc.invalidateQueries({ queryKey: ['page', pageId] });
+      qc.invalidateQueries({ queryKey: ['spacePages'] });
+      toast(extra?.published ? t('kb.published') : t('kb.saved'));
+    },
+  });
+  const title = text.draft?.title ?? '';
+  const bodyDoc = text.draft?.body ?? EMPTY_DOC;
+  const dirty = canWrite && text.dirty;
+  const conflict = text.status === 'conflict';
+
+  useEffect(() => { setShowVersions(false); }, [pageId]);
 
   /* Grow the title box to fit, so long titles wrap instead of being clipped. */
   useLayoutEffect(() => {
@@ -775,42 +809,36 @@ function PageDetailView({ pageId, spaceId, canWrite }: { pageId: string; spaceId
     return () => ro.disconnect();
   }, [title]);
 
-  const dirty = !!page.data && (
-    title !== (page.data.title ?? '') || JSON.stringify(bodyDoc) !== JSON.stringify(page.data.body ?? EMPTY_DOC)
-  );
+  const save = () => { if (canWrite) void text.save(); };
 
-  const save = useMutation({
-    mutationFn: () => api.patch(`/pages/${pageId}`, { title, body: bodyDoc, version: page.data?.version }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['page', pageId] });
-      qc.invalidateQueries({ queryKey: ['spacePages'] });
-      toast(t('kb.saved'));
-    },
-    onError: (e) => {
-      if (e instanceof ApiError && e.status === 409) {
-        qc.invalidateQueries({ queryKey: ['page', pageId] });
-        toast.error(t('kb.conflict'));
-      } else {
-        toast.error(t('kb.saveFailed'));
-      }
-    },
-  });
+  // Cmd/Ctrl+S saves the page – never the browser's "save page as". With a
+  // dialog open (rename, delete…) the keystroke belongs to it and does nothing.
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== 's') return;
+      e.preventDefault();
+      if (document.querySelector('[role="dialog"]')) return;
+      saveRef.current();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
-  const discard = () => {
-    if (!page.data) return;
-    setTitle(page.data.title ?? '');
-    setBodyDoc(page.data.body ?? EMPTY_DOC);
+  // Publishing sends the text on screen in the same write as the flag, so a
+  // dirty page is never published with its old body.
+  const publish = async () => {
+    setPublishing(true);
+    const outcome = await text.save({ extra: { published: true } });
+    setPublishing(false);
+    if (outcome === 'saved') {
+      // The Publish button is gone now; keep focus in the page header.
+      requestAnimationFrame(() => historyRef.current?.focus());
+    } else if (outcome === 'failed') {
+      toast.error(t('kb.publishFailed'));
+    }
   };
-
-  const publish = useMutation({
-    mutationFn: () => api.patch(`/pages/${pageId}`, { published: true, version: page.data?.version }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['page', pageId] });
-      qc.invalidateQueries({ queryKey: ['spacePages'] });
-      toast(t('kb.published'));
-    },
-    onError: () => toast.error(t('kb.publishFailed')),
-  });
 
   const ancestors = useMemo(() => {
     if (!flat.data) return [] as FlatPage[];
@@ -857,16 +885,25 @@ function PageDetailView({ pageId, spaceId, canWrite }: { pageId: string; spaceId
             <>
               <span title={t('kb.draftHint')}><Badge className="bg-warning/15 text-warning">{t('kb.draft')}</Badge></span>
               {canWrite && (
-                <Button size="sm" variant="ghost" onClick={() => publish.mutate()} disabled={publish.isPending}>
-                  {publish.isPending ? <Spinner /> : t('kb.publish')}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => { void publish(); }}
+                  disabled={publishing || conflict}
+                  title={dirty ? t('kb.publishWithChanges', 'Saves your changes and publishes the page') : undefined}
+                >
+                  {publishing ? <Spinner /> : t('kb.publish')}
                 </Button>
               )}
             </>
           )}
           <IconButton
+            ref={historyRef}
             size="sm"
             onClick={() => setShowVersions((v) => !v)}
             title={t('kb.history')}
+            aria-label={t('kb.history')}
+            aria-pressed={showVersions}
             className={cn(showVersions && 'bg-muted text-foreground')}
           >
             <History size={14} />
@@ -874,17 +911,32 @@ function PageDetailView({ pageId, spaceId, canWrite }: { pageId: string; spaceId
         </div>
       </div>
 
+      {conflict && text.server && (
+        <DraftConflictBanner
+          what={t('draft.whatPage', 'page')}
+          onKeepMine={text.keepMine}
+          onTakeTheirs={text.takeTheirs}
+          theirs={(
+            <div className="space-y-2">
+              <p className="text-[15px] font-semibold">{text.server.title || t('kb.untitled')}</p>
+              <RichText doc={text.server.body} className="text-[13px]" />
+            </div>
+          )}
+        />
+      )}
+
       <div className="flex gap-4">
         <div className="min-w-0 flex-1 pb-24">
           <textarea
             ref={titleRef}
             rows={1}
             value={title}
-            onChange={(e) => setTitle(e.target.value.replace(/\n/g, ' '))}
+            onChange={(e) => text.edit({ title: e.target.value.replace(/\n/g, ' ') })}
             onKeyDown={(e) => {
               if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLTextAreaElement).blur(); }
             }}
             placeholder={t('kb.untitled')}
+            aria-label={t('kb.pageTitle')}
             readOnly={!canWrite}
             className="w-full resize-none overflow-hidden break-words bg-transparent text-[28px] font-bold leading-tight text-foreground outline-none placeholder:text-faint focus-visible:outline-none"
           />
@@ -896,24 +948,39 @@ function PageDetailView({ pageId, spaceId, canWrite }: { pageId: string; spaceId
           ) : (
             <RichEditor
               value={bodyDoc}
-              onChange={setBodyDoc}
+              onChange={(doc) => text.edit({ body: doc })}
               editable={canWrite}
               compact={false}
               placeholder={t('kb.bodyPlaceholder')}
-              onSubmit={() => { if (!save.isPending) save.mutate(); }}
+              onSubmit={save}
             />
           )}
         </div>
         {showVersions && <VersionsPanel pageId={pageId} />}
       </div>
 
-      {canWrite && dirty && (
+      {dirty && !conflict && (
         <div className="sticky bottom-4 z-10 flex justify-center">
           <div className="anim-pop-in flex items-center gap-3 rounded-lg border border-border bg-elevated px-3 py-2 shadow-pop">
-            <span className="text-xs text-muted-foreground">{t('kb.unsavedChanges')}</span>
-            <Button variant="ghost" size="sm" onClick={discard}>{t('common.cancel')}</Button>
-            <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>
-              {save.isPending ? <Spinner /> : t('common.save')}
+            <DraftStatusLine
+              status={text.status}
+              persisted={text.persisted}
+              error={text.error}
+              actions={false}
+              onRetry={save}
+              onSave={save}
+              onDiscard={text.discard}
+            />
+            <Button variant="ghost" size="sm" onClick={text.discard} disabled={text.status === 'saving'}>
+              {t('draft.discard', 'Discard changes')}
+            </Button>
+            <Button
+              size="sm"
+              onClick={save}
+              disabled={text.status === 'saving'}
+              title={`${t('common.save')} (${/Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl+'}S)`}
+            >
+              {text.status === 'saving' ? <Spinner /> : text.status === 'failed' ? t('draft.retry', 'Retry') : t('common.save')}
             </Button>
           </div>
         </div>

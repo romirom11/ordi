@@ -13,6 +13,7 @@
  * editable?, compact?, bare?, onSubmit? } + EMPTY_DOC – other pages depend on it.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { stableKey } from '../../lib/draftSync';
 import { useEditor, EditorContent, BubbleMenu, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import TiptapLink from '@tiptap/extension-link';
@@ -716,12 +717,26 @@ export function RichEditor({ value, onChange, placeholder, editable = true, comp
   editorRef.current = editor;
 
   // Apply external value changes when they differ from the editor content,
-  // but never while the user is typing in the editor.
+  // but never over text the person typed that the page has not taken in yet.
+  // With focus, a new value is applied only while the editor still holds
+  // exactly what it was last given (a newer server version of a page whose
+  // draft is clean); otherwise it waits for blur as before.
+  const lastValueRef = useRef<unknown>(value ?? EMPTY_DOC);
+  const appliedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!editor) return;
     const incoming = value ?? EMPTY_DOC;
-    if (!editor.isFocused && JSON.stringify(editor.getJSON()) !== JSON.stringify(incoming)) {
+    const current = editor.getJSON();
+    if (appliedRef.current === null) appliedRef.current = stableKey(current);
+    const previous = lastValueRef.current;
+    lastValueRef.current = incoming;
+    if (JSON.stringify(current) === JSON.stringify(incoming)) return;
+    const currentKey = stableKey(current);
+    if (currentKey === stableKey(incoming)) return;
+    const untouched = currentKey === appliedRef.current || currentKey === stableKey(previous);
+    if (!editor.isFocused || untouched) {
       editor.commands.setContent(incoming, false);
+      appliedRef.current = stableKey(editor.getJSON());
     }
   }, [editor, value]);
 

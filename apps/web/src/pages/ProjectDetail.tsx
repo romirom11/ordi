@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Ban, CalendarDays, Diamond, Inbox, Plus,
+  AlertTriangle, Ban, CalendarDays, Diamond, Inbox, Plus,
   LayoutDashboard, ListChecks, Repeat, CalendarClock, Settings, ChevronRight,
 } from 'lucide-react';
 import { api, qs, getAllPages, ApiError } from '../lib/api';
@@ -608,7 +608,7 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, canWrite, 
           onToggleCollapse={(key) => updatePrefs({
             collapsed: prefs.collapsed.includes(key) ? prefs.collapsed.filter((k) => k !== key) : [...prefs.collapsed, key],
           })}
-          onAdd={(title, seed) => addTask.mutate({ title, seed })}
+          onAdd={(title, seed) => addTask.mutateAsync({ title, seed })}
           onMove={(taskId, statusId, version) => move.mutate({ taskId, statusId, version })}
         />
       ) : view === 'board' ? (
@@ -617,7 +617,7 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, canWrite, 
             projectId={id} projectKey={projectKey} statuses={statuses} groups={groups} prefs={prefs}
             canWrite={canWrite} resolveUsers={resolveUsers} labelById={labelById} childStats={childStats}
             onOpen={onOpen}
-            onAdd={(title, seed) => addTask.mutate({ title, seed })}
+            onAdd={(title, seed) => addTask.mutateAsync({ title, seed })}
             onMove={(taskId, statusId, version) => move.mutate({ taskId, statusId, version })}
           />
         </div>
@@ -637,15 +637,25 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, canWrite, 
 }
 
 function QuickAdd({ seed, onAdd, placeholder, variant = 'row', inputRef, onDismiss }: {
-  seed?: Record<string, unknown>; onAdd: (title: string, seed?: Record<string, unknown>) => void;
+  seed?: Record<string, unknown>; onAdd: (title: string, seed?: Record<string, unknown>) => Promise<unknown>;
   placeholder: string; variant?: 'row' | 'card'; inputRef?: (el: HTMLInputElement | null) => void;
   /** Called on Escape or on blur with an empty draft – lets the list hide the row again. */
   onDismiss?: () => void;
 }) {
   const [title, setTitle] = useState('');
+  const [pending, setPending] = useState(false);
   return (
     <form
-      onSubmit={(e: FormEvent) => { e.preventDefault(); const v = title.trim(); if (!v) return; onAdd(v, seed); setTitle(''); }}
+      onSubmit={async (e: FormEvent) => {
+        e.preventDefault();
+        const value = title.trim();
+        if (!value || pending) return;
+        setPending(true);
+        try { await onAdd(value, seed); setTitle((current) => current.trim() === value ? '' : current); }
+        catch { /* The mutation reports the error; keep the title for retry. */ }
+        finally { setPending(false); }
+      }}
+      aria-busy={pending}
       className={cn('flex items-center gap-2.5', variant === 'row' ? 'h-9 px-4' : 'px-2 py-1.5')}
     >
       <Plus size={13} className="shrink-0 text-faint" />
@@ -697,7 +707,7 @@ function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, re
   canWrite: boolean; resolveUsers: (ids?: string[]) => UserLite[];
   labelById: Map<string, LabelLite>; childStats: Map<string, ChildStats>; taskById: Map<string, Task>;
   onOpen: (tid: string, e?: OpenIntent) => void; onToggleCollapse: (key: string) => void;
-  onAdd: (title: string, seed?: Record<string, unknown>) => void;
+  onAdd: (title: string, seed?: Record<string, unknown>) => Promise<unknown>;
   onMove: (taskId: string, statusId: string, version?: number) => void;
 }) {
   const t = useT();
@@ -802,7 +812,7 @@ function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, re
                       statuses={statuses}
                       canWrite={canWrite}
                     >
-                      <button
+                      <div
                         onClick={(e) => onOpen(task.id, e)}
                         onAuxClick={(e) => onOpen(task.id, e)}
                         className={cn(
@@ -814,9 +824,10 @@ function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, re
                       >
                         {canWrite && (
                           <RowCheckbox
+                            label={`${t('common.select')} ${ref} ${task.title}`}
                             checked={sel.has(task.id)}
                             onToggle={(shift) => sel.toggle(task.id, shift)}
-                            className={cn('transition-opacity duration-150', !sel.has(task.id) && sel.size === 0 && 'opacity-0 group-hover/row:opacity-100')}
+                            className={cn('transition-opacity duration-150 focus-visible:opacity-100', !sel.has(task.id) && sel.size === 0 && 'opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100')}
                           />
                         )}
                         {props.priority && <PriorityIcon priority={task.priority} size={15} />}
@@ -838,7 +849,7 @@ function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, re
                           {task.blocked && (
                             <span title={t('projects.blocked')} className="shrink-0 text-warning"><Ban size={13} /></span>
                           )}
-                          <span className="truncate text-[13px] font-medium">{task.title}</span>
+                          <a href={`/projects/${projectId}/tasks/${task.id}`} onClick={(e) => { e.stopPropagation(); onOpen(task.id, e); }} onAuxClick={(e) => { e.stopPropagation(); onOpen(task.id, e); }} className="truncate text-[13px] font-medium">{task.title}</a>
                           {parent && (
                             <span className="hidden min-w-0 max-w-44 truncate text-xs text-faint lg:block">› {parent.title}</span>
                           )}
@@ -847,13 +858,14 @@ function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, re
                         <span className="ml-auto flex shrink-0 items-center gap-2.5 pl-2">
                           {props.labels && labelChips(task, labelById)}
                           {props.dueDate && task.dueDate && (
-                            <span className={cn('text-xs tabular-nums', overdue ? 'text-destructive' : 'text-muted-foreground')}>
+                            <span className={cn('inline-flex items-center gap-1 text-xs tabular-nums', overdue ? 'text-destructive' : 'text-muted-foreground')}>
+                              {overdue && <><AlertTriangle size={12} aria-hidden /><span className="sr-only">{t('date.overdue')} </span></>}
                               {fmtDate(task.dueDate)}
                             </span>
                           )}
                           {props.assignee && assignees.length > 0 && <AvatarGroup users={assignees} size={20} max={3} />}
                         </span>
-                      </button>
+                      </div>
                     </TaskContextMenu>
                   );
                 })}
@@ -927,7 +939,7 @@ function BoardView({ projectId, projectKey, statuses, groups, prefs, canWrite, r
   canWrite: boolean; resolveUsers: (ids?: string[]) => UserLite[];
   labelById: Map<string, LabelLite>; childStats: Map<string, ChildStats>;
   onOpen: (tid: string, e?: OpenIntent) => void;
-  onAdd: (title: string, seed?: Record<string, unknown>) => void;
+  onAdd: (title: string, seed?: Record<string, unknown>) => Promise<unknown>;
   onMove: (taskId: string, statusId: string, version?: number) => void;
 }) {
   const t = useT();
@@ -984,14 +996,14 @@ function BoardView({ projectId, projectKey, statuses, groups, prefs, canWrite, r
                     canWrite={canWrite}
                     className="block"
                   >
-                    <div
+                    <a href={`/projects/${projectId}/tasks/${task.id}`}
                       draggable={canWrite}
                       onDragStart={(e) => { setDragId(task.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/task-id', task.id); }}
                       onDragEnd={() => { setDragId(null); setOverCol(null); }}
                       onClick={(e) => onOpen(task.id, e)}
                       onAuxClick={(e) => onOpen(task.id, e)}
                       className={cn(
-                        'cursor-pointer rounded-lg border border-border bg-card p-2.5 text-left shadow-sm transition-all duration-150 hover:border-border-strong',
+                        'block cursor-pointer rounded-lg border border-border bg-card p-2.5 text-left shadow-sm transition-all duration-150 hover:border-border-strong',
                         canWrite && 'active:cursor-grabbing',
                         dragId === task.id && 'opacity-40',
                       )}
@@ -1012,11 +1024,14 @@ function BoardView({ projectId, projectKey, statuses, groups, prefs, canWrite, r
                           <span className="font-mono text-[11px] text-muted-foreground">{ref}</span>
                         )}
                         {props.dueDate && task.dueDate && (
-                          <span className={cn('text-[11px] tabular-nums', overdue ? 'text-destructive' : 'text-muted-foreground')}>{fmtDate(task.dueDate)}</span>
+                          <span className={cn('inline-flex items-center gap-1 text-[11px] tabular-nums', overdue ? 'text-destructive' : 'text-muted-foreground')}>
+                            {overdue && <><AlertTriangle size={12} aria-hidden /><span className="sr-only">{t('date.overdue')} </span></>}
+                            {fmtDate(task.dueDate)}
+                          </span>
                         )}
                         {props.assignee && assignees.length > 0 && <span className="ml-auto"><AvatarGroup users={assignees} size={18} max={3} /></span>}
                       </div>
-                    </div>
+                    </a>
                   </TaskContextMenu>
                 );
               })}

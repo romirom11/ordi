@@ -26,10 +26,10 @@ export const Button = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLBut
         'transition-all duration-150 ease-smooth-out active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50',
         size === 'xs' ? 'h-6 px-2 text-xs' : size === 'sm' ? 'h-7 px-2.5 text-[13px]' : 'h-8 px-3 text-[13px]',
         (variant === 'default' || variant === 'primary') &&
-          'bg-primary text-primary-foreground shadow-sm hover:brightness-110',
+          'bg-[hsl(var(--action))] text-primary-foreground shadow-sm hover:bg-[hsl(var(--action-hover))]',
         variant === 'outline' && 'border border-border bg-card text-foreground hover:bg-muted hover:border-border-strong',
         variant === 'ghost' && 'text-muted-foreground hover:bg-muted hover:text-foreground',
-        variant === 'destructive' && 'bg-destructive text-destructive-foreground hover:brightness-110',
+        variant === 'destructive' && 'bg-[hsl(var(--destructive-action))] text-destructive-foreground hover:bg-[hsl(var(--destructive-action-hover))]',
         className,
       )}
       {...props}
@@ -63,7 +63,7 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
       className={cn(
         'h-8 w-full rounded-md border border-input bg-transparent px-2.5 text-[13px] outline-none',
         'transition-colors duration-150 placeholder:text-faint',
-        'hover:border-border-strong focus:border-primary/60 focus:ring-2 focus:ring-ring/25',
+        'hover:border-border-strong focus:border-ring focus:ring-2 focus:ring-ring',
         className,
       )}
       {...props}
@@ -77,7 +77,7 @@ export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTex
       className={cn(
         'w-full rounded-md border border-input bg-transparent px-2.5 py-2 text-[13px] outline-none',
         'transition-colors duration-150 placeholder:text-faint',
-        'hover:border-border-strong focus:border-primary/60 focus:ring-2 focus:ring-ring/25',
+        'hover:border-border-strong focus:border-ring focus:ring-2 focus:ring-ring',
         className,
       )}
       {...props}
@@ -90,7 +90,7 @@ export function Select({ className, children, ...props }: SelectHTMLAttributes<H
     <select
       className={cn(
         'h-8 cursor-pointer rounded-md border border-input bg-transparent px-2 text-[13px] outline-none',
-        'transition-colors duration-150 hover:border-border-strong focus:border-primary/60 [&>option]:bg-elevated',
+        'transition-colors duration-150 hover:border-border-strong focus:border-ring focus:ring-2 focus:ring-ring [&>option]:bg-elevated',
         className,
       )}
       {...props}
@@ -176,7 +176,7 @@ export function Badge({ children, color, className }: { children: ReactNode; col
   return (
     <span
       className={cn('inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium', !color && 'bg-muted text-muted-foreground', className)}
-      style={color ? { backgroundColor: color + '26', color } : undefined}
+      style={color ? { backgroundColor: `color-mix(in srgb, ${color} 15%, transparent)`, color: `color-mix(in srgb, ${color} 35%, hsl(var(--foreground)))` } : undefined}
     >
       {children}
     </span>
@@ -252,13 +252,13 @@ export function PageHeader({ title, actions, subtitle, breadcrumbs }: {
   // Name the active in-app tab after this page (no-op outside TabsProvider).
   usePageTitle(typeof title === 'string' ? title : undefined);
   return (
-    <div className="flex min-h-[52px] items-center justify-between gap-3 border-b border-border px-6 py-2.5">
-      <div className="min-w-0">
+    <div className="flex min-h-[52px] flex-wrap items-center justify-between gap-3 border-b border-border px-6 py-2.5">
+      <div className="min-w-0 flex-[1_1_10rem]">
         {breadcrumbs && <div className="mb-0.5 text-xs">{breadcrumbs}</div>}
         <h1 className="truncate text-[15px] font-semibold leading-tight">{title}</h1>
         {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
       </div>
-      <div className="flex shrink-0 items-center gap-2">{actions}</div>
+      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">{actions}</div>
     </div>
   );
 }
@@ -660,8 +660,18 @@ export function Tabs<T extends string>({ tabs, value, onChange, className }: {
       {tabs.map((tb) => (
         <button
           key={tb.key}
+          type="button"
           role="tab"
           aria-selected={value === tb.key}
+          tabIndex={value === tb.key ? 0 : -1}
+          onKeyDown={(e) => {
+            const at = tabs.findIndex((item) => item.key === tb.key);
+            const idx = e.key === 'ArrowRight' ? (at + 1) % tabs.length : e.key === 'ArrowLeft' ? (at - 1 + tabs.length) % tabs.length : e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : -1;
+            if (idx < 0) return;
+            e.preventDefault();
+            onChange(tabs[idx]!.key);
+            (e.currentTarget.parentElement?.querySelectorAll('button')[idx] as HTMLButtonElement | undefined)?.focus();
+          }}
           onClick={() => onChange(tb.key)}
           className={cn(
             'relative flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors duration-150',
@@ -698,6 +708,8 @@ export function SegmentedControl<T extends string>({ options, value, onChange, c
           key={o.key}
           type="button"
           title={o.title}
+          aria-label={typeof o.label === 'string' ? o.label : o.title}
+          aria-pressed={value === o.key}
           onClick={() => onChange(o.key)}
           className={cn(
             'relative z-10 flex items-center justify-center gap-1 rounded px-2 py-1 text-xs transition-colors duration-150',

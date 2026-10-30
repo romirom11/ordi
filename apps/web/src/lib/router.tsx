@@ -1,6 +1,6 @@
 import {
   createContext, useCallback, useContext, useEffect, useState,
-  type ReactNode, type MouseEvent, type CSSProperties,
+  type ReactNode, type MouseEvent, type AnchorHTMLAttributes,
 } from 'react';
 
 interface RouterState {
@@ -93,17 +93,15 @@ export function useOpen(): (to: string, e?: OpenIntent) => void {
   }, [navigate, openInNewTab]);
 }
 
-export function Link({ to, children, className, style, title, onClick }: {
-  to: string; children: ReactNode; className?: string; style?: CSSProperties;
-  title?: string; onClick?: () => void;
-}) {
+export function Link({ to, children, onClick, onAuxClick, ...props }: Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'href'> & { to: string; children: ReactNode }) {
   const open = useOpen();
-  const handle = (e: MouseEvent) => {
-    if (!e.metaKey && !e.ctrlKey && e.button === 0) onClick?.();
+  const handle = (e: MouseEvent<HTMLAnchorElement>) => {
+    onClick?.(e);
+    if (e.defaultPrevented || (props.target && props.target !== '_self')) return;
     open(to, e);
   };
   return (
-    <a href={to} className={className} style={style} title={title} onClick={handle} onAuxClick={(e) => open(to, e)}>
+    <a {...props} href={to} onClick={handle} onAuxClick={(e) => { onAuxClick?.(e); if (!e.defaultPrevented) open(to, e); }}>
       {children}
     </a>
   );

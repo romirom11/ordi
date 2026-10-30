@@ -230,14 +230,14 @@ export function PipelineTab() {
                   const next = nextByDeal.get(d.id);
                   return (
                     <ContextMenu key={d.id} items={dealMenu(d)}>
-                    <div
+                    <a href={`/deals/${d.id}`}
                       draggable
                       onDragStart={(e) => { setDraggingId(d.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', d.id); }}
                       onDragEnd={() => { setDraggingId(null); setOverStage(null); }}
                       onClick={(e) => open(`/deals/${d.id}`, e)}
                       onAuxClick={(e) => open(`/deals/${d.id}`, e)}
                       className={cn(
-                        'anim-fade-in group cursor-grab rounded-lg border border-border bg-card p-2.5 shadow-sm transition-all duration-150',
+                        'anim-fade-in group block cursor-grab rounded-lg border border-border bg-card p-2.5 shadow-sm transition-all duration-150',
                         'hover:border-border-strong hover:shadow-pop active:cursor-grabbing',
                         draggingId === d.id && 'opacity-40',
                       )}
@@ -280,7 +280,7 @@ export function PipelineTab() {
                           {owner && <Avatar name={owner.name} src={owner.avatar} size={18} />}
                         </div>
                       </div>
-                    </div>
+                    </a>
                     </ContextMenu>
                   );
                 })}

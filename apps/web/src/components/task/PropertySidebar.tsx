@@ -6,7 +6,7 @@
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { CalendarDays, CalendarPlus, Diamond, Gauge, Tag, UserPlus2, X } from 'lucide-react';
+import { AlertTriangle, CalendarDays, CalendarPlus, Diamond, Gauge, Tag, UserPlus2, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import {
   Avatar, AvatarGroup, Badge, PriorityIcon, StatusIcon, cn, fmtDate,
@@ -83,7 +83,7 @@ const PRIORITIES = ['urgent', 'high', 'medium', 'low', 'none'] as const;
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex items-start gap-2 px-3 py-0.5">
+    <div role="group" aria-label={label} className="flex items-start gap-2 px-3 py-0.5">
       <span className="w-[72px] shrink-0 pt-[7px] text-xs text-faint">{label}</span>
       <div className="min-w-0 flex-1">{children}</div>
     </div>
@@ -92,7 +92,7 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 
 function Chip({ children, empty }: { children: ReactNode; empty?: boolean }) {
   return (
-    <span
+    <button type="button"
       className={cn(
         'flex min-h-7 w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-[13px]',
         'transition-colors duration-150 hover:bg-muted',
@@ -100,7 +100,7 @@ function Chip({ children, empty }: { children: ReactNode; empty?: boolean }) {
       )}
     >
       {children}
-    </span>
+    </button>
   );
 }
 
@@ -128,7 +128,7 @@ function isoDate(d: Date): string {
 
 /** The shared calendar inside a menu – picking a day applies it and closes. */
 function DatePickInput({ value, onSet }: {
-  value: string | null; onSet: (v: string) => void; ariaLabel?: string;
+  value: string | null; onSet: (v: string) => void;
 }) {
   const close = useMenuClose();
   return <Calendar value={value} onSelect={(day) => { onSet(day); close(); }} />;
@@ -170,7 +170,10 @@ function DateMenu({ label, emptyLabel, icon, value, overdue, onSet, t }: {
         trigger={
           <Chip empty={!value}>
             {icon}
-            <span className={cn('truncate', overdue && 'text-destructive')}>{value ? fmtDate(value) : emptyLabel}</span>
+            <span className={cn('inline-flex items-center gap-1 truncate', overdue && 'text-destructive')}>
+              {overdue && <><AlertTriangle size={12} aria-hidden /><span className="sr-only">{t('date.overdue')} </span></>}
+              {value ? fmtDate(value) : emptyLabel}
+            </span>
           </Chip>
         }
       >
