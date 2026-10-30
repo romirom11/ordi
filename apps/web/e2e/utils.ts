@@ -7,11 +7,11 @@ export const OWNER = {
 
 let externalCookies: Cookie[] | undefined;
 
-/** Sign in through the real form and wait until the shell is up. */
+/** Sign in once through the real form, then reuse its session in this worker. */
 export async function login(page: Page): Promise<void> {
-  // A caller-owned instance can run several verification batches. Reuse its
-  // first real UI login within this worker instead of hitting auth rate limits.
-  if (process.env.E2E_BASE_URL && externalCookies) {
+  // The suite has one worker and more than ten specs. Reusing the first real
+  // session keeps the test setup faithful without tripping login rate limits.
+  if (externalCookies) {
     await page.context().addCookies(externalCookies);
     await page.goto('/');
     await expect(page.getByRole('link', { name: 'Projects', exact: true })).toBeVisible();
@@ -23,7 +23,7 @@ export async function login(page: Page): Promise<void> {
   await page.keyboard.press('Enter');
   // The sidebar is the shell's proof of life.
   await expect(page.getByText('Projects', { exact: true }).first()).toBeVisible({ timeout: 15_000 });
-  if (process.env.E2E_BASE_URL) externalCookies = await page.context().cookies();
+  externalCookies = await page.context().cookies();
 }
 
 /**

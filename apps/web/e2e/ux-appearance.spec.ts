@@ -11,6 +11,9 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
     const companies = await api<{ data: { id: string; name: string }[] }>(page, 'get', '/companies');
     const client = companies.data[0]!;
+    const invoices = await api<{ data: { companyId: string }[] }>(page, 'get', '/invoices');
+    const invoiceClient = companies.data.find((company) => company.id === invoices.data[0]?.companyId);
+    expect(invoiceClient, 'the seeded invoice company is present in the CRM list').toBeDefined();
     for (const width of [390, 768, 1280]) {
       await page.setViewportSize({ width, height: 900 });
       await page.goto(`/companies/${client.id}`);
@@ -22,7 +25,7 @@ for (const theme of ['light', 'dark'] as const) {
       await page.goto('/finance');
       if (width < 768) await page.getByRole('combobox', { name: 'Finance section', exact: true }).selectOption('invoices');
       else await page.getByRole('button', { name: 'Invoices', exact: true }).click();
-      await expect(page.getByRole('button', { name: new RegExp(client.name) }).first()).toBeVisible();
+      await expect(page.getByRole('button', { name: new RegExp(invoiceClient!.name) }).first()).toBeVisible();
       await page.screenshot({ path: info.outputPath(`invoices-${theme}-${width}.png`) });
       await page.getByRole('button', { name: 'New invoice', exact: true }).click();
       const dialog = page.getByRole('dialog', { name: 'New invoice', exact: true });
