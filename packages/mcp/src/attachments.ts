@@ -17,6 +17,7 @@ import { z } from 'zod';
 import { BLOCKED_FILE_EXTENSIONS, MAX_UPLOAD_BYTES } from '@ordi/shared';
 import type { OrdiClient } from './client';
 import { wrap } from './format';
+import { fetchPublicUrl } from './remote-fetch';
 
 const ALLOWED_ENTITY_TYPES = ['task', 'project', 'company', 'lead', 'deal', 'employee', 'intake_item'] as const;
 
@@ -89,20 +90,12 @@ export function registerAttachmentTools(server: McpServer, client: OrdiClient): 
           bytes = new Uint8Array(buf);
           mime = mimeType?.trim() || mimeFromPrefix || mimeFromExt(ext) || 'application/octet-stream';
         } else {
-          // Fetch server-side (agent has a URL but no bytes).
-          const res = await fetch(url!);
-          if (!res.ok) throw new Error(`Fetching url failed: ${res.status} ${res.statusText}`);
-          const len = res.headers.get('content-length');
-          if (len && Number(len) > MAX_UPLOAD_BYTES) {
-            throw new Error(`Remote file is ${len} bytes, exceeds the ${MAX_UPLOAD_BYTES} byte cap.`);
-          }
-          const ab = await res.arrayBuffer();
-          if (ab.byteLength > MAX_UPLOAD_BYTES) {
-            throw new Error(`Remote file is ${ab.byteLength} bytes, exceeds the cap.`);
-          }
-          if (!ab.byteLength) throw new Error('Remote file is empty.');
-          bytes = new Uint8Array(ab);
-          const headerMime = res.headers.get('content-type')?.split(';')[0]?.trim();
+          // Fetch server-side (agent has a URL but no bytes) – public
+          // addresses only, streamed up to the cap (see remote-fetch.ts).
+          const remote = await fetchPublicUrl(url!, { maxBytes: MAX_UPLOAD_BYTES });
+          if (!remote.bytes.byteLength) throw new Error('Remote file is empty.');
+          bytes = remote.bytes;
+          const headerMime = remote.contentType?.split(';')[0]?.trim();
           mime = mimeType?.trim() || headerMime || mimeFromExt(ext) || 'application/octet-stream';
         }
 
