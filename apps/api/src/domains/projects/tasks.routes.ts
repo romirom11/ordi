@@ -5,7 +5,7 @@ import {
   taskInputSchema, taskUpdateSchema, taskMoveSchema, taskRelationSchema, taskLinkSchema,
   bulkTaskUpdateSchema, commentInputSchema, commentEditSchema, reactionToggleSchema, labelInputSchema, labelPatchSchema, cycleInputSchema, cycleCompleteSchema,
   taskTemplateInputSchema, recurringTaskInputSchema, intakeAcceptSchema, intakeDeclineSchema, intakeSettingsSchema,
-  LABEL_SCOPES,
+  LABEL_SCOPES, addMonthsUtc,
   type CustomFieldFilter, type LabelScope,
 } from '@ordi/shared';
 import type { AppEnv } from '../../context';
@@ -30,9 +30,9 @@ function requireSettingsManage(c: any) {
 
 /** Next run date from a recurring frequency (PRD §8.7). */
 function nextRunFrom(frequency: string): string {
-  const d = new Date();
+  let d = new Date();
   if (frequency === 'weekly') d.setUTCDate(d.getUTCDate() + 7);
-  else if (frequency === 'monthly') d.setUTCMonth(d.getUTCMonth() + 1);
+  else if (frequency === 'monthly') d = addMonthsUtc(d, 1);
   else d.setUTCDate(d.getUTCDate() + 1); // daily | custom default
   return d.toISOString().slice(0, 10);
 }

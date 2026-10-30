@@ -3,7 +3,7 @@ import { getDb, schema, eq, and, isNull, asc, desc, inArray, sql } from '@ordi/d
 import { ulid } from 'ulid';
 import {
   publicQuoteDecisionSchema, intakeSubmitSchema, careersApplySchema,
-  parseTaskRefs, type EventType,
+  parseTaskRefs, computePaidState, type EventType,
 } from '@ordi/shared';
 import type { AppEnv } from '../../context';
 import { env } from '../../env';
@@ -22,7 +22,7 @@ import {
 import { syncGitLink } from '../integrations/git-links';
 import { storeGithubAppConfig, runtimeConfig } from '../../lib/runtime-config';
 import { renderInvoicePdf, renderQuotePdf } from '../finance/pdf';
-import { taxRateLabel } from '../finance/service';
+import { taxRateLabel, invoiceCredited } from '../finance/service';
 
 /**
  * What a public invoice/quote page (and its PDF) may know about the parties:
@@ -168,7 +168,11 @@ export function publicRoutes() {
 
     const parties = await documentParties(inv.companyId);
 
-    const outstanding = Number(inv.total) - Number(inv.amountPaid);
+    // Credit notes settle the balance too; amount_paid is cash only.
+    const amountCredited = await invoiceCredited(inv.id);
+    const { outstanding } = computePaidState({
+      total: Number(inv.total), payments: [Number(inv.amountPaid)], creditNotes: [amountCredited],
+    });
     return c.json({
       invoice: {
         number: inv.number, status, currency: inv.currency,
@@ -183,6 +187,7 @@ export function publicRoutes() {
       workspace: parties.workspace,
       invoiceSettings: parties.invoiceSettings,
       amountPaid: Number(inv.amountPaid),
+      amountCredited,
       outstanding,
     });
   });
@@ -196,7 +201,7 @@ export function publicRoutes() {
     const items = await db.select().from(schema.invoiceItems)
       .where(eq(schema.invoiceItems.invoiceId, inv.id)).orderBy(asc(schema.invoiceItems.position));
     const parties = await documentParties(inv.companyId);
-    const pdf = await renderInvoicePdf({ ...inv, taxRateName: await taxRateLabel(items) }, items, parties.companyRow, parties.workspaceRow);
+    const pdf = await renderInvoicePdf({ ...inv, amountCredited: await invoiceCredited(inv.id), taxRateName: await taxRateLabel(items) }, items, parties.companyRow, parties.workspaceRow);
     c.header('Content-Type', 'application/pdf');
     c.header('Content-Disposition', `inline; filename="${inv.number}.pdf"`);
     c.header('Cache-Control', 'private, no-store');

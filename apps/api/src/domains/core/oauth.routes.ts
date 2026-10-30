@@ -15,7 +15,7 @@ import { ulid } from 'ulid';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import type { AppEnv } from '../../context';
-import { authMiddleware, requireAuth, currentActor } from '../../core/auth';
+import { authMiddleware, requireAuth, requireSession, currentActor } from '../../core/auth';
 import { effectivePermissions } from '../../core/rbac';
 import { generateToken, sha256 } from '../../lib/crypto';
 import { err } from '../../lib/errors';
@@ -32,7 +32,21 @@ function s256(verifier: string): string {
  * Exact match, except loopback redirects where RFC 8252 §7.3 requires the
  * port to be allowed to vary (CLI clients bind a random port per run).
  */
+/**
+ * Schemes a browser runs or renders instead of handing to an app. The consent
+ * page navigates to the redirect, so one of these would execute script on the
+ * ordi origin with the code in hand.
+ */
+const UNSAFE_REDIRECT_SCHEMES = new Set(['javascript:', 'data:', 'vbscript:', 'file:', 'blob:', 'about:']);
+
+function unsafeRedirect(uri: string): boolean {
+  try { return UNSAFE_REDIRECT_SCHEMES.has(new URL(uri).protocol); } catch { return true; }
+}
+
 function redirectAllowed(registered: string[], presented: string): boolean {
+  // Re-checked here, not just at registration: clients registered before the
+  // check existed must not reach the browser with one of these either.
+  if (unsafeRedirect(presented)) return false;
   if (registered.includes(presented)) return true;
   let p: URL;
   try { p = new URL(presented); } catch { return false; }
@@ -83,11 +97,13 @@ export function oauthRoutes() {
       response_types: z.array(z.string()).optional(),
     }).passthrough().parse(await c.req.json());
 
-    // https redirects, custom app schemes (cursor://...) and loopback http only.
+    // https redirects, custom app schemes (cursor://...) and loopback http only –
+    // never a scheme the browser would execute or render itself.
     for (const uri of body.redirect_uris) {
       const u = new URL(uri);
       const loopback = u.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname);
       if (u.protocol === 'http:' && !loopback) throw err.validation(`Insecure redirect_uri: ${uri}`);
+      if (unsafeRedirect(uri)) throw err.validation(`Unsupported redirect_uri scheme: ${u.protocol}`);
     }
 
     const { db } = getDb();
@@ -116,7 +132,7 @@ export function oauthRoutes() {
   });
 
   // ── The signed-in user approves; we mint the code and hand back the redirect ──
-  app.post('/approve', authMiddleware, requireAuth, async (c) => {
+  app.post('/approve', authMiddleware, requireSession, async (c) => {
     const actor = currentActor(c);
     const raw = await c.req.json();
     const parsedBody = z.object({

@@ -4,18 +4,22 @@ import {
   timeEntryInputSchema, timeEntryUpdateSchema, timerStartSchema,
   projectRateInputSchema, timeReportQuerySchema, type Permission,
 } from '@ordi/shared';
-import type { AppEnv } from '../../context';
+import type { AppEnv, Actor } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
-import { guard, hasPerm } from '../../core/rbac';
+import { guard, hasPerm, isMutatingMethod, isWritePermission } from '../../core/rbac';
 import { assertProject } from '../../core/access';
 import { err } from '../../lib/errors';
 import { page } from '../../lib/http';
 import * as svc from './service';
 
-const WRITE_ACTIONS = ['write', 'create', 'delete', 'send', 'payments', 'manage', 'track', 'settings', 'approve_leave', 'manage_leave', 'recruit', 'manage_spaces'];
-function isWritePermission(p: string): boolean {
-  const action = p.split('.')[1] ?? '';
-  return WRITE_ACTIONS.some((a) => action === a || action.startsWith(a));
+/**
+ * cost_rate is derived from compensation (PRD §11.10), so an entry only carries
+ * it for finance.read_costs – time.read_all alone must not reveal pay.
+ */
+function withoutCost<T extends { costRate?: unknown }>(actor: Actor, entry: T): T | Omit<T, 'costRate'> {
+  if (hasPerm(actor, 'finance.read_costs')) return entry;
+  const { costRate: _costRate, ...rest } = entry;
+  return rest;
 }
 
 /** Passes when the actor holds ANY of the given permissions (PRD §4.5). */
@@ -24,7 +28,7 @@ function guardAny(...perms: Permission[]): MiddlewareHandler<AppEnv> {
     const actor = currentActor(c);
     const held = perms.filter((p) => actor.access.permissions.has(p));
     if (held.length === 0) throw err.forbidden(`Missing permission ${perms.join(' or ')}`, perms[0]);
-    if (actor.readOnly && held.every(isWritePermission)) throw err.forbidden('Read-only token', held[0]);
+    if (actor.readOnly && (isMutatingMethod(c.req.method) || held.every(isWritePermission))) throw err.forbidden('Read-only token', held[0]);
     await next();
   };
 }
@@ -53,7 +57,8 @@ export function timeRoutes() {
       from: c.req.query('from'), to: c.req.query('to'), projectId: c.req.query('projectId'),
       userId: c.req.query('userId'), taskId: c.req.query('taskId'), limit,
     }, hasPerm(actor, 'time.read_all'));
-    return c.json(page(rows, limit, (r) => ({ startedAt: r.startedAt })));
+    const res = page(rows, limit, (r) => ({ startedAt: r.startedAt }));
+    return c.json({ ...res, data: res.data.map((r) => withoutCost(actor, r)) });
   });
 
   app.post('/time/entries', guard('time.track'), async (c) => {
@@ -65,7 +70,7 @@ export function timeRoutes() {
   app.patch('/time/entries/:id', guardAny('time.track', 'time.manage'), async (c) => {
     const body = timeEntryUpdateSchema.parse(await c.req.json());
     const actor = currentActor(c);
-    return c.json(await svc.updateEntry(actor, c.req.param('id'), body, hasPerm(actor, 'time.manage')));
+    return c.json(withoutCost(actor, await svc.updateEntry(actor, c.req.param('id'), body, hasPerm(actor, 'time.manage'))));
   });
 
   app.delete('/time/entries/:id', guardAny('time.track', 'time.manage'), async (c) => {
@@ -120,7 +125,9 @@ export function timeRoutes() {
   app.get('/time/my-week', guard('time.track'), async (c) => {
     const weekStart = c.req.query('weekStart');
     if (!weekStart) throw err.validation('weekStart required');
-    return c.json(await svc.myWeek(currentActor(c), weekStart));
+    const actor = currentActor(c);
+    const week = await svc.myWeek(actor, weekStart);
+    return c.json({ ...week, days: week.days.map((d) => ({ ...d, entries: d.entries.map((e) => withoutCost(actor, e)) })) });
   });
 
   return app;

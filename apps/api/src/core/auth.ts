@@ -82,6 +82,19 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   await next();
 };
 
+/**
+ * Credential-issuing routes (API tokens, OAuth and desktop approvals, TOTP)
+ * need a signed-in session. An API token is a scoped credential: letting one
+ * mint another credential – or reset the second factor – would turn any
+ * leaked narrow or read-only token into the account's full role.
+ */
+export const requireSession: MiddlewareHandler<AppEnv> = async (c, next) => {
+  const actor = c.get('actor');
+  if (!actor) throw err.unauthenticated();
+  if (actor.tokenScopes !== null) throw err.forbidden('Sign in to manage credentials');
+  await next();
+};
+
 export function currentActor(c: { get: (k: 'actor') => Actor | undefined }): Actor {
   const actor = c.get('actor');
   if (!actor) throw err.unauthenticated();

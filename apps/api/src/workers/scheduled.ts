@@ -4,7 +4,7 @@
  */
 import { getDb, schema, eq, and, lte, isNull, sql, inArray } from '@ordi/db';
 import { ulid } from 'ulid';
-import { computeDocumentTotals } from '@ordi/shared';
+import { computeDocumentTotals, addMonthsIso } from '@ordi/shared';
 import { emit } from '../core/events';
 import { postExpense } from '../domains/finance/ledger.service';
 import { appLink, asLocale, loadBranding, renderEmail, tr } from '../lib/email-templates';
@@ -16,12 +16,12 @@ function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 function addFrequency(date: string, freq: string): string {
+  if (freq === 'monthly') return addMonthsIso(date, 1);
+  if (freq === 'quarterly') return addMonthsIso(date, 3);
+  if (freq === 'yearly') return addMonthsIso(date, 12);
   const d = new Date(date + 'T00:00:00Z');
   if (freq === 'daily') d.setUTCDate(d.getUTCDate() + 1);
   else if (freq === 'weekly') d.setUTCDate(d.getUTCDate() + 7);
-  else if (freq === 'monthly') d.setUTCMonth(d.getUTCMonth() + 1);
-  else if (freq === 'quarterly') d.setUTCMonth(d.getUTCMonth() + 3);
-  else if (freq === 'yearly') d.setUTCFullYear(d.getUTCFullYear() + 1);
   return d.toISOString().slice(0, 10);
 }
 
@@ -86,13 +86,14 @@ export async function runRecurringInvoices(): Promise<void> {
 
 /** Advance a YYYY-MM-DD date by one recurring-payment interval (UTC). */
 function advanceInterval(date: string, interval: string): string {
-  const d = new Date(date + 'T00:00:00Z');
-  if (interval === 'weekly') d.setUTCDate(d.getUTCDate() + 7);
-  else if (interval === 'monthly') d.setUTCMonth(d.getUTCMonth() + 1);
-  else if (interval === 'quarterly') d.setUTCMonth(d.getUTCMonth() + 3);
-  else if (interval === 'yearly') d.setUTCFullYear(d.getUTCFullYear() + 1);
-  else d.setUTCMonth(d.getUTCMonth() + 1);
-  return d.toISOString().slice(0, 10);
+  if (interval === 'weekly') {
+    const d = new Date(date + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + 7);
+    return d.toISOString().slice(0, 10);
+  }
+  if (interval === 'quarterly') return addMonthsIso(date, 3);
+  if (interval === 'yearly') return addMonthsIso(date, 12);
+  return addMonthsIso(date, 1);
 }
 
 /**

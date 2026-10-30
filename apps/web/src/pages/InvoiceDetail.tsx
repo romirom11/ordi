@@ -159,6 +159,7 @@ interface Invoice {
   taxTotal?: number | string | null;
   total?: number | string | null;
   amountPaid?: number | string | null;
+  amountCredited?: number | string | null;
   publicToken?: string | null;
   items?: InvoiceItem[];
   payments?: Payment[];
@@ -296,7 +297,8 @@ export function InvoiceDetailPage({ id }: { id: string }) {
   const cur = iv.currency ?? 'USD';
   const total = Number(iv.total ?? 0);
   const paid = Number(iv.amountPaid ?? 0);
-  const outstanding = total - paid;
+  // Credit notes settle the balance alongside cash (amountPaid is payments only).
+  const outstanding = Math.round((total - paid - Number(iv.amountCredited ?? 0)) * 100) / 100;
   const items = iv.items ?? [];
   const payments = iv.payments ?? [];
   const cancelable = iv.status !== 'paid' && iv.status !== 'canceled';

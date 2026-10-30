@@ -1,8 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { buildServer, textToDoc, docToText } from './server';
 import { OrdiClient } from './client';
+
+// The url path is remote-fetch.ts's to test (remote-fetch.test.ts); here it
+// only has to hand bytes back.
+const remoteFile = vi.hoisted(() => vi.fn());
+vi.mock('./remote-fetch', () => ({ fetchPublicUrl: remoteFile }));
 
 async function connect(api: OrdiClient) {
   const server = buildServer(api);
@@ -15,16 +20,12 @@ async function connect(api: OrdiClient) {
 
 function fakeClient(opts: {
   postFormImpl?: (path: string, form: FormData) => Promise<any>;
-  fetchImpl?: typeof fetch;
 } = {}): { api: OrdiClient; postFormCalls: { path: string; form: FormData }[] } {
   const api = new OrdiClient({ baseUrl: 'http://test', token: 't' });
   // Minimal GET stubs that buildServer may call (only needed for some tools – not for upload_attachment)
   (api as any).get = async () => ({ data: [] });
 
   const postFormCalls: { path: string; form: FormData }[] = [];
-  const origFetch = globalThis.fetch;
-
-  if (opts.fetchImpl) (globalThis as any).fetch = opts.fetchImpl;
 
   api.postForm = async <T>(path: string, form: FormData): Promise<T> => {
     postFormCalls.push({ path, form });
@@ -126,24 +127,29 @@ describe('upload_attachment', () => {
   });
 
   it('can fetch from url server-side', async () => {
-    const pngBytes = Buffer.from(tinyPngBase64, 'base64');
-    const fetchImpl = async () =>
-      new Response(pngBytes, { status: 200, headers: { 'content-type': 'image/png', 'content-length': String(pngBytes.length) } }) as any;
+    remoteFile.mockResolvedValueOnce({ bytes: new Uint8Array(Buffer.from(tinyPngBase64, 'base64')), contentType: 'image/png' });
+    const { api, postFormCalls } = fakeClient();
+    const client = await connect(api);
+    const res: any = await client.callTool({
+      name: 'upload_attachment',
+      arguments: { filename: 'remote.png', url: 'https://example.com/a.png' },
+    });
+    expect(res.isError).toBeFalsy();
+    expect(remoteFile).toHaveBeenCalledWith('https://example.com/a.png', expect.objectContaining({ maxBytes: expect.any(Number) }));
+    expect(postFormCalls).toHaveLength(1);
+    expect((postFormCalls[0]!.form.get('file') as File).type).toBe('image/png');
+  });
 
-    const prevFetch = globalThis.fetch;
-    (globalThis as any).fetch = fetchImpl;
-    try {
-      const { api, postFormCalls } = fakeClient({ fetchImpl });
-      const client = await connect(api);
-      const res: any = await client.callTool({
-        name: 'upload_attachment',
-        arguments: { filename: 'remote.png', url: 'https://example.com/a.png' },
-      });
-      expect(res.isError).toBeFalsy();
-      expect(postFormCalls).toHaveLength(1);
-    } finally {
-      (globalThis as any).fetch = prevFetch;
-    }
+  it('surfaces a refused url as a tool error', async () => {
+    remoteFile.mockRejectedValueOnce(new Error('url points at a private or internal address; only public URLs can be fetched.'));
+    const { api, postFormCalls } = fakeClient();
+    const client = await connect(api);
+    const res: any = await client.callTool({
+      name: 'upload_attachment',
+      arguments: { filename: 'x.txt', url: 'http://169.254.169.254/latest/meta-data' },
+    });
+    expect(res.isError).toBe(true);
+    expect(postFormCalls).toHaveLength(0);
   });
 });
 
