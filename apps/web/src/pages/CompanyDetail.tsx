@@ -127,8 +127,8 @@ export function CompanyDetailPage({ id }: { id: string }) {
       {/* Body: content at full width, rail pinned to the edge. Below 1100px the
         * rail moves above the content instead of disappearing – status and
         * owner live only there now, so hiding them would strand them. */}
-      <div className="flex min-h-0 flex-1 flex-col min-[1100px]:flex-row">
-        <div className="order-2 min-w-0 flex-1 overflow-auto min-[1100px]:order-1">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto min-[1100px]:flex-row min-[1100px]:overflow-visible">
+        <div className="order-2 min-w-0 flex-1 min-[1100px]:order-1 min-[1100px]:overflow-auto">
           <div className="space-y-7 px-6 py-6">
             {c && (
               <CustomFieldsSection
@@ -146,7 +146,7 @@ export function CompanyDetailPage({ id }: { id: string }) {
             <CompanyActivity companyId={id} users={usersQ.data ?? []} />
           </div>
         </div>
-        <aside style={rail.railStyle} className="relative order-1 shrink-0 space-y-6 overflow-auto border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-[var(--rail-w)] min-[1100px]:border-b-0 min-[1100px]:border-l">
+        <aside style={rail.railStyle} className="relative order-1 shrink-0 space-y-6 border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-[var(--rail-w)] min-[1100px]:overflow-auto min-[1100px]:border-b-0 min-[1100px]:border-l">
           <CompanyRail
             company={c}
             loading={companyQ.isLoading}

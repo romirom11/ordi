@@ -21,6 +21,12 @@ export default {
         success: 'hsl(var(--success))',
         warning: 'hsl(var(--warning))',
       },
+      textColor: {
+        primary: { DEFAULT: 'hsl(var(--primary-text))', foreground: 'hsl(var(--primary-foreground))' },
+        destructive: { DEFAULT: 'hsl(var(--destructive-text))', foreground: 'hsl(var(--destructive-foreground))' },
+        success: 'hsl(var(--success-text))',
+        warning: 'hsl(var(--warning-text))',
+      },
       fontFamily: { sans: ['Inter Variable', 'Inter', 'system-ui', 'sans-serif'] },
       boxShadow: {
         pop: 'var(--shadow-pop)',

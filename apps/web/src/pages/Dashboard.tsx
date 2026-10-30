@@ -10,6 +10,8 @@ import { useNavigate, useOpen } from '../lib/router';
 import { useMe, useCan } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import { Avatar, Card, Kbd, PageHeader, Skeleton, EmptyState, PriorityIcon, ProgressBar, appLocale, fmtDate, fmtRelative, cn } from '../components/ui';
+import { QueryFeedback } from '../components/QueryFeedback';
+import { QuickCreateTask } from '../components/QuickCreateTask';
 import { useUsersLookup } from '../lib/queries';
 import { extendDict, useT } from '../lib/i18n';
 
@@ -230,6 +232,7 @@ function OnboardingChecklist({ hasTasks }: { hasTasks: boolean }) {
     try { return localStorage.getItem(ONBOARDING_HINT_KEY) === '1'; } catch { return false; }
   });
   const [leaving, setLeaving] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
 
   const projectsQ = useQuery({
     queryKey: ['onboarding', 'projects'],
@@ -264,6 +267,7 @@ function OnboardingChecklist({ hasTasks }: { hasTasks: boolean }) {
       key: 'task',
       label: t('onboarding.task'),
       done: hasTasks,
+      onClick: () => (projectsQ.data?.length ?? 0) > 0 ? setQuickOpen(true) : navigate('/projects'),
       hint: <span className="flex items-center gap-1 text-xs text-faint">{t('onboarding.taskHint')} <Kbd>C</Kbd></span>,
     },
     {
@@ -278,7 +282,7 @@ function OnboardingChecklist({ hasTasks }: { hasTasks: boolean }) {
       key: 'client',
       label: t('onboarding.client'),
       done: (companiesQ.data?.length ?? 0) > 0,
-      onClick: () => navigate('/crm'),
+      onClick: () => navigate('/crm/companies'),
     });
   }
 
@@ -294,7 +298,7 @@ function OnboardingChecklist({ hasTasks }: { hasTasks: boolean }) {
   };
 
   return (
-    <div
+    <><QuickCreateTask open={quickOpen} onClose={() => setQuickOpen(false)} /><div
       className={cn(
         'anim-pop-in overflow-hidden rounded-lg border border-primary/15 bg-primary/5',
         'transition-[opacity,transform] duration-[150ms] ease-smooth-out',
@@ -349,6 +353,7 @@ function OnboardingChecklist({ hasTasks }: { hasTasks: boolean }) {
         })}
       </div>
     </div>
+    </>
   );
 }
 
@@ -587,6 +592,15 @@ export function DashboardPage() {
     );
   }
 
+  if ((dash.isError && dash.data === undefined) || (meTasks.isError && meTasks.data === undefined)) {
+    return (
+      <div>
+        <PageHeader title={`${t('dashboard.greeting')}, ${firstName}`} subtitle={t('dashboard.subtitle')} />
+        <div className="p-6"><QueryFeedback pending={dash.isFetching || meTasks.isFetching} onRetry={() => { void dash.refetch(); void meTasks.refetch(); }} /></div>
+      </div>
+    );
+  }
+
   const buckets: { key: string; tasks: MeTask[]; overdue?: boolean }[] = [
     { key: 'overdue', tasks: meTasks.data?.overdue ?? [], overdue: true },
     { key: 'today', tasks: meTasks.data?.today ?? [] },
@@ -612,6 +626,7 @@ export function DashboardPage() {
       <PageHeader title={`${t('dashboard.greeting')}, ${firstName}`} subtitle={t('dashboard.subtitle')} />
 
       <div className="space-y-4 p-6">
+        {(dash.isError || meTasks.isError) && <QueryFeedback stale pending={dash.isFetching || meTasks.isFetching} onRetry={() => { void dash.refetch(); void meTasks.refetch(); }} />}
         <OnboardingChecklist hasTasks={totalOpen > 0} />
 
         {/* Stat tiles */}
@@ -654,7 +669,8 @@ export function DashboardPage() {
                     {taskRef(task) && <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{taskRef(task)}</span>}
                     <span className="flex-1 truncate">{task.title}</span>
                     {task.due_date && (
-                      <span className={cn('shrink-0 text-xs tabular-nums', overdue ? 'text-destructive' : 'text-muted-foreground')}>
+                      <span className={cn('inline-flex shrink-0 items-center gap-1 text-xs tabular-nums', overdue ? 'text-destructive' : 'text-muted-foreground')}>
+                        {overdue && <><AlertTriangle size={12} aria-hidden /><span className="sr-only">{t('date.overdue')} </span></>}
                         {fmtDate(task.due_date)}
                       </span>
                     )}

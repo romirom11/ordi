@@ -2,8 +2,7 @@
  * Global search palette (Cmd/Ctrl+K). Linear-style: elevated modal, icon-led
  * results, full keyboard navigation with kbd hints in the footer.
  */
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowRight, Building2, FileText, Receipt, Search, SquareCheck } from 'lucide-react';
 import type { ModuleKey } from '@ordi/shared';
@@ -11,6 +10,7 @@ import { api, qs } from '../lib/api';
 import { useModules } from './ModuleGate';
 import { Kbd, Spinner, cn } from './ui';
 import { useT, extendDict } from '../lib/i18n';
+import { Dialog } from './overlays';
 
 extendDict({
   en: {
@@ -78,6 +78,7 @@ export function CommandPalette({ open, onClose, onNavigate }: {
   const { enabled } = useModules();
   const [q, setQ] = useState('');
   const [active, setActive] = useState(0);
+  const listId = useId();
   const listRef = useRef<HTMLDivElement>(null);
 
   const { data, isFetching } = useQuery({
@@ -94,6 +95,7 @@ export function CommandPalette({ open, onClose, onNavigate }: {
       && t(c.labelKey).toLowerCase().includes(q.trim().toLowerCase()))
     : [];
   const totalCount = navMatches.length + results.length;
+  const selected = Math.min(active, Math.max(0, totalCount - 1));
 
   useEffect(() => {
     if (!open) { setQ(''); setActive(0); }
@@ -115,12 +117,12 @@ export function CommandPalette({ open, onClose, onNavigate }: {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); onClose(); return; }
-      if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.min(a + 1, totalCount - 1)); }
+      if (e.isComposing || e.defaultPrevented) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.min(a + 1, Math.max(0, totalCount - 1))); }
       if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
       if (e.key === 'Enter' && totalCount > 0) {
         e.preventDefault();
-        pick(Math.min(active, totalCount - 1));
+        pick(selected);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -136,24 +138,20 @@ export function CommandPalette({ open, onClose, onNavigate }: {
 
   if (!open) return null;
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-[14vh]"
-      style={{ background: 'hsl(var(--overlay) / 0.55)', animation: 'fade-in 250ms var(--ease-smooth-out) both' }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div
-        role="dialog"
-        aria-modal
-        className="w-full max-w-xl overflow-hidden rounded-xl border border-border bg-elevated shadow-modal"
-        style={{ animation: 'modal-in 250ms var(--ease-smooth-out) both' }}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
+  return (
+    <Dialog open={open} onClose={onClose} width={576} hideClose ariaLabel={t('nav.search')}>
+      <div className="overflow-hidden rounded-xl">
         {/* Input row */}
         <div className="flex items-center gap-2.5 border-b border-border px-4">
           <Search size={15} className="shrink-0 text-faint" />
           <input
             autoFocus
+            role="combobox"
+            aria-label={t('nav.search')}
+            aria-autocomplete="list"
+            aria-expanded="true"
+            aria-controls={listId}
+            aria-activedescendant={totalCount > 0 ? `${listId}-${selected}` : undefined}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder={t('search.placeholder')}
@@ -163,7 +161,7 @@ export function CommandPalette({ open, onClose, onNavigate }: {
         </div>
 
         {/* Results */}
-        <div ref={listRef} className="max-h-[340px] overflow-y-auto p-1.5">
+        <div ref={listRef} id={listId} role="listbox" aria-label={t('nav.search')} className="max-h-[340px] overflow-y-auto p-1.5">
           {q.length <= 1 && (
             <div className="flex flex-col items-center gap-2 py-8 text-center">
               <Search size={18} className="text-faint" />
@@ -176,18 +174,23 @@ export function CommandPalette({ open, onClose, onNavigate }: {
           {navMatches.map((c, i) => (
             <button
               key={c.to}
+              id={`${listId}-${i}`}
+              role="option"
+              aria-selected={i === selected}
+              tabIndex={-1}
+              type="button"
               data-idx={i}
               onClick={() => pick(i)}
               onMouseMove={() => setActive(i)}
               className={cn(
                 'flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] transition-colors duration-150',
-                i === active ? 'bg-muted text-foreground' : 'text-foreground/90',
+                i === selected ? 'bg-muted text-foreground' : 'text-foreground/90',
               )}
             >
               <span className="shrink-0"><ArrowRight size={15} className="text-muted-foreground" /></span>
               <span className="min-w-0 flex-1 truncate">{t(c.labelKey)}</span>
               <span className="shrink-0 text-[11px] text-faint">{t('search.goto')}</span>
-              {i === active && <Kbd>↵</Kbd>}
+              {i === selected && <Kbd>↵</Kbd>}
             </button>
           ))}
           {results.map((r, i) => {
@@ -195,18 +198,23 @@ export function CommandPalette({ open, onClose, onNavigate }: {
             return (
               <button
                 key={r.kind + r.id}
+                id={`${listId}-${idx}`}
+                role="option"
+                aria-selected={idx === selected}
+                tabIndex={-1}
+                type="button"
                 data-idx={idx}
                 onClick={() => pick(idx)}
                 onMouseMove={() => setActive(idx)}
                 className={cn(
                   'flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] transition-colors duration-150',
-                  idx === active ? 'bg-muted text-foreground' : 'text-foreground/90',
+                  idx === selected ? 'bg-muted text-foreground' : 'text-foreground/90',
                 )}
               >
                 <span className="shrink-0">{KIND_ICON[r.kind] ?? <FileText size={15} className="text-muted-foreground" />}</span>
                 <span className="min-w-0 flex-1 truncate">{r.title}</span>
                 <span className="shrink-0 text-[11px] text-faint">{t(`search.kind.${r.kind}`, r.kind)}</span>
-                {idx === active && <Kbd>↵</Kbd>}
+                {idx === selected && <Kbd>↵</Kbd>}
               </button>
             );
           })}
@@ -219,7 +227,6 @@ export function CommandPalette({ open, onClose, onNavigate }: {
           <span className="flex items-center gap-1"><Kbd>Esc</Kbd> {t('search.hintClose')}</span>
         </div>
       </div>
-    </div>,
-    document.body,
+    </Dialog>
   );
 }

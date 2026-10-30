@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, qs, ApiError } from '../lib/api';
 import { useCan } from '../lib/auth';
@@ -12,6 +12,7 @@ import { ChevronLeft, ChevronRight, Plus, Play, Square, Clock, Timer } from 'luc
 import { useT, extendDict } from '../lib/i18n';
 import { usePersistedState, oneOfPref } from '../lib/prefs';
 import { DateField } from '../components/DatePicker';
+import { useActiveTimer, useStopTimer, useTimerElapsed } from '../lib/timer';
 
 extendDict({
   en: {
@@ -69,7 +70,6 @@ interface TimeEntry {
 interface DayGroup { date: string; entries: TimeEntry[] }
 interface MyWeek { weekStart?: string; days?: DayGroup[]; entries?: TimeEntry[]; totalSeconds?: number | string }
 interface ReportRow { key?: string; label?: string; name?: string; hours?: number | string; seconds?: number | string; billableAmount?: number | string; currency?: string }
-interface ActiveTimer { userId?: string; taskId: string; startedAt: string; note?: string | null; elapsedSeconds: number }
 interface TaskLite { id: string; ref?: string | null; title?: string | null }
 
 interface MyTaskLite { id: string; title: string; ref?: string | null; key?: string | null; number?: number | null }
@@ -187,25 +187,14 @@ export function TimePage() {
 function TimerHero({ onChange }: { onChange: () => void }) {
   const t = useT();
   const can = useCan();
-  const [tick, setTick] = useState(0);
   const [showStart, setShowStart] = useState(false);
   const [taskId, setTaskId] = useState('');
   const [note, setNote] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
-  const timerQ = useQuery({
-    queryKey: ['timer'],
-    queryFn: () => api.get<ActiveTimer | null>('/time/timer').catch(() => null),
-    refetchInterval: 30_000,
-  });
+  const timerQ = useActiveTimer(can('time.track'));
   const timer = timerQ.data ?? null;
-
-  useEffect(() => {
-    if (!timer) return;
-    const i = setInterval(() => setTick((x) => x + 1), 1000);
-    return () => clearInterval(i);
-  }, [timer]);
-  useEffect(() => { setTick(0); }, [timer?.startedAt]);
+  const elapsed = useTimerElapsed(timer, timerQ.dataUpdatedAt);
 
   const taskQ = useQuery({
     queryKey: ['task', 'ref', timer?.taskId],
@@ -225,14 +214,9 @@ function TimerHero({ onChange }: { onChange: () => void }) {
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('time.timerStartFailed')),
   });
-  const stop = useMutation({
-    mutationFn: () => api.post('/time/timer/stop'),
-    onSuccess: () => { toast(t('time.timerStopped')); onChange(); },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('time.timerStopFailed')),
-  });
+  const stop = useStopTimer();
 
   const canTrack = can('time.track');
-  const elapsed = timer ? Number(timer.elapsedSeconds ?? 0) + tick : 0;
   const ref = taskQ.data?.ref ?? taskQ.data?.title ?? timer?.taskId;
 
   return (
@@ -243,7 +227,7 @@ function TimerHero({ onChange }: { onChange: () => void }) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="font-mono text-[28px] font-semibold leading-none tabular-nums sm:text-[32px]">
-            {timer ? fmtClock(elapsed) : '00:00:00'}
+            {timerQ.isLoading || (!timer && timerQ.isError) ? '—' : timer ? fmtClock(elapsed) : '00:00:00'}
           </div>
           <div className="mt-1.5 truncate text-[13px] text-muted-foreground">
             {timer ? (
@@ -251,20 +235,21 @@ function TimerHero({ onChange }: { onChange: () => void }) {
                 <span className="font-medium text-foreground">{ref}</span>
                 {timer.note && <span> · {timer.note}</span>}
               </>
-            ) : t('time.timerIdle')}
+            ) : timerQ.isLoading ? t('common.loading') : timerQ.isError ? t('time.timerUnavailable', 'Could not check the timer. Retry') : t('time.timerIdle')}
           </div>
         </div>
         {canTrack && (
           timer ? (
-            <Button variant="destructive" size="sm" onClick={() => stop.mutate()} disabled={stop.isPending}>
+            <Button variant="destructive" size="sm" onClick={() => stop.mutate(timer, { onSuccess: onChange })} disabled={stop.isPending}>
               <Square size={13} /> {t('time.stopTimer')}
             </Button>
           ) : (
-            <Button size="sm" onClick={() => setShowStart(true)}>
+            <Button size="sm" onClick={() => setShowStart(true)} disabled={timerQ.isLoading || timerQ.isError}>
               <Play size={13} /> {t('time.startTimer')}
             </Button>
           )
         )}
+        {timerQ.isError && <button type="button" onClick={() => void timerQ.refetch()} className="w-full text-left text-xs text-destructive" role="status">{t('time.timerUnavailable', 'Could not check the timer. Retry')}</button>}
       </Card>
 
       <Dialog open={showStart} onClose={() => setShowStart(false)} title={t('time.startTimerTitle')} width={380}>

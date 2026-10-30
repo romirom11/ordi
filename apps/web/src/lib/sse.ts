@@ -8,12 +8,14 @@
  * realtime simply never connected there. A fetch-based reader handles both
  * worlds with the same code path the rest of the API client uses.
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { getInstanceUrl, getSessionToken } from './api';
 import { isTauri, notifyDesktop } from './desktop';
 import { useT } from './i18n';
-import { notifText } from './notifications';
+import { notifLink, notifText } from './notifications';
+import { useNavigate } from './router';
+import { loadPref, oneOfPref } from './prefs';
 import { toast } from '../components/overlays';
 
 /** Read one text/event-stream response, emitting (event, data) pairs. */
@@ -22,6 +24,7 @@ async function readSseStream(
   headers: Record<string, string>,
   onEvent: (event: string, data: string) => void,
   signal: AbortSignal,
+  onConnected: () => void,
 ): Promise<void> {
   const res = await fetch(url, {
     headers: { Accept: 'text/event-stream', ...headers },
@@ -29,6 +32,7 @@ async function readSseStream(
     signal,
   });
   if (!res.ok || !res.body) throw new Error(`stream ${res.status}`);
+  onConnected();
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = '';
@@ -89,6 +93,10 @@ function invalidateFor(qc: QueryClient, type: string, data: any): void {
   const inv = (key: unknown[]) => qc.invalidateQueries({ queryKey: key });
   if (type.startsWith('task.') || type.startsWith('cycle.') || type.startsWith('git.')) {
     inv(['tasks']);
+    if (data?.taskId || (data?.aggregateType === 'task' && data?.aggregateId)) inv(['task', data.taskId ?? data.aggregateId]);
+    inv(['me', 'tasks']);
+    inv(['dashboard']);
+    inv(['onboarding']);
     if (data?.projectId) inv(['tasks', data.projectId]);
     inv(['me-tasks']);
     inv(['cycles']);
@@ -107,6 +115,8 @@ function invalidateFor(qc: QueryClient, type: string, data: any): void {
     inv(['finance']);
   } else if (type.startsWith('page.')) {
     inv(['pages']);
+    if (data?.pageId || data?.aggregateId) inv(['page', data.pageId ?? data.aggregateId]);
+    inv(['spacePages']);
     inv(['spaces']);
   } else if (type.startsWith('leave.') || type.startsWith('employee.') || type.startsWith('applicant.')) {
     inv(['employees']);
@@ -115,6 +125,8 @@ function invalidateFor(qc: QueryClient, type: string, data: any): void {
   } else if (type.startsWith('time.')) {
     inv(['time']);
     inv(['timer']);
+    inv(['myWeek']);
+    inv(['timeReport']);
   } else if (type === 'agent.run_event') {
     // One frame per streamed SDK message: appended to the open log rather than
     // refetching it. The run row itself changes with the frames that carry the
@@ -140,6 +152,7 @@ function invalidateFor(qc: QueryClient, type: string, data: any): void {
 /** Soft two-tone chirp for events addressed to the current user. */
 function chirp(): void {
   try {
+    if (loadPref('ordi:notificationSound', 'on', oneOfPref(['on', 'off'], 'on')) === 'off') return;
     type AudioWindow = Window & { webkitAudioContext?: typeof AudioContext; __ordiAudio?: AudioContext };
     const w = window as AudioWindow;
     const Ctx = window.AudioContext ?? w.webkitAudioContext;
@@ -171,19 +184,25 @@ function chirp(): void {
  * event streams to every member of the project, "a task was assigned to you"
  * went to the whole team for a task assigned to one of them.
  */
-function personalPing(data: any, t: (key: string, fallback?: string) => string): void {
+function personalPing(data: any, t: (key: string, fallback?: string) => string, navigate: (to: string) => void): void {
   if (!data?.type) return;
   const text = notifText({ type: String(data.type), entityRef: data.entityRef ?? null, payload: data.payload }, t);
   if (isTauri) {
     notifyDesktop('ordi', text);
     return;
   }
-  toast.info(text);
+  const to = notifLink({ type: String(data.type), entityRef: data.entityRef ?? null, payload: data.payload });
+  if (to) toast.action(text, { label: t('common.open', 'Open'), onSelect: () => navigate(to) });
+  else toast.info(text);
   chirp();
 }
 
-export function useRealtime(): void {
+export function useRealtime(): { reconnecting: boolean } {
+  const [reconnecting, setReconnecting] = useState(false);
   const qc = useQueryClient();
+  const navigate = useNavigate();
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
   // Read through a ref: the stream must not reconnect when the language does.
   const t = useT();
   const tRef = useRef(t);
@@ -192,13 +211,14 @@ export function useRealtime(): void {
     const controller = new AbortController();
     let stopped = false;
     let retryMs = 2000;
+    let missedUpdates = false;
 
     const handled = new Set([
         'notification.created',
         'deal.stage_changed', 'deal.won', 'deal.lost', 'project.created', 'project.completed',
-        'task.created', 'task.status_changed', 'task.assigned',
+        'task.created', 'task.updated', 'task.status_changed', 'task.assigned',
         'comment.created', 'comment.mentioned',
-        'cycle.completed', 'page.published', 'page.mentioned', 'time.entry_created',
+        'cycle.completed', 'page.published', 'page.updated', 'page.mentioned', 'time.entry_created',
         'quote.accepted', 'quote.declined', 'invoice.created', 'invoice.sent', 'invoice.viewed',
         'invoice.overdue', 'invoice.paid', 'payment.recorded',
         'git.branch_created', 'git.pr_opened', 'git.pr_merged', 'git.pr_closed',
@@ -215,7 +235,7 @@ export function useRealtime(): void {
       try { data = JSON.parse(raw); } catch { /* ignore */ }
       if (type === 'notification.created') {
         qc.invalidateQueries({ queryKey: ['notifications'] });
-        personalPing(data, tRef.current);
+        personalPing(data, tRef.current, (to) => navigateRef.current(to));
         return;
       }
       invalidateFor(qc, type, data);
@@ -230,9 +250,16 @@ export function useRealtime(): void {
             token ? { Authorization: `Bearer ${token}` } : {},
             onEvent,
             controller.signal,
+            () => {
+              setReconnecting(false);
+              if (missedUpdates) void qc.invalidateQueries();
+              missedUpdates = false;
+            },
           );
         } catch { /* dropped or refused – retry below */ }
         if (stopped) return;
+        missedUpdates = true;
+        setReconnecting(true);
         await new Promise((r) => setTimeout(r, retryMs));
         retryMs = Math.min(retryMs * 2, 30_000);
       }
@@ -241,4 +268,5 @@ export function useRealtime(): void {
     void connect();
     return () => { stopped = true; controller.abort(); };
   }, [qc]);
+  return { reconnecting };
 }

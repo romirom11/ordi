@@ -259,7 +259,7 @@ function LabelEditor({ label, scope, onDone }: { label: LabelLookup; scope: Labe
           type="button"
           disabled={!canSave}
           onClick={() => save.mutate()}
-          className="ml-auto flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-[13px] text-primary-foreground transition-opacity duration-150 hover:opacity-90 disabled:opacity-60"
+          className="ml-auto flex items-center gap-1.5 rounded-md bg-[hsl(var(--action))] px-2.5 py-1.5 text-[13px] text-primary-foreground transition-opacity duration-150 hover:opacity-90 disabled:opacity-60"
         >
           {save.isPending && <Spinner className="h-3.5 w-3.5" />}
           {t('labels.save')}

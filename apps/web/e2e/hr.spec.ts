@@ -52,11 +52,10 @@ test('the employee card carries documents and the questionnaire with icons', asy
   await login(page);
 
   const stamp = Date.now();
-  const me = await api<{ user: { id: string } }>(page, 'get', '/me');
+  const me = await api<{ user: { id: string }; employee?: { id: string } | null }>(page, 'get', '/me');
   // The owner may already be linked to an employee from the previous test –
   // reuse it instead of colliding.
-  const employees = await api<{ data: { id: string; userId?: string | null }[] }>(page, 'get', '/employees');
-  let empId = employees.data.find((e) => e.userId === me.user.id)?.id;
+  let empId = me.employee?.id;
   if (!empId) {
     empId = (await api<{ id: string }>(page, 'post', '/employees', {
       firstName: 'Owner', lastName: 'Person', userId: me.user.id, birthday: '1990-01-15',
@@ -84,15 +83,15 @@ test('the employee card carries documents and the questionnaire with icons', asy
   // Fill it in inside the group's section: the empty select renders as a
   // "–" trigger, same control every custom-field grid uses.
   await expect(page.getByText(`Анкета ${stamp}`)).toBeVisible();
-  await expect(page.getByText('T-shirt size', { exact: true })).toBeVisible();
-  const qsection = page.locator('section').filter({ hasText: `Анкета ${stamp}` });
+  const qsection = page.getByRole('heading', { name: `Анкета ${stamp}`, exact: true }).locator('../..');
+  await expect(qsection.getByText('T-shirt size', { exact: true })).toBeVisible();
   await qsection.getByRole('button', { name: '–' }).first().click();
-  await page.getByRole('menuitem', { name: 'M', exact: true }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'M', exact: true }).click();
   await expect(qsection.getByText('M', { exact: true }).first()).toBeVisible();
 
   // The answer survives a reload – it went through the same PATCH the card uses.
   await page.reload();
-  await expect(page.getByText('M', { exact: true }).first()).toBeVisible();
+  await expect(qsection.getByText('M', { exact: true }).first()).toBeVisible();
 
   // The card names the login email; personal contacts live in custom fields now.
   await expect(page.getByText('Work email')).toBeVisible();

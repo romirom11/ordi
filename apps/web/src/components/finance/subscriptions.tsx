@@ -28,6 +28,7 @@ import {
   cn, fmtMoney, fmtDate,
 } from '../ui';
 import { DropdownMenu, MenuItem, MenuSeparator, Dialog, ConfirmDialog, toast } from '../overlays';
+import { QueryFeedback } from '../QueryFeedback';
 import { Hint } from '../Hint';
 import { DateField } from '../DatePicker';
 
@@ -203,6 +204,7 @@ export function RecurringExpensesSection() {
   });
 
   const activeCount = rows.filter((r) => r.isActive).length;
+  const failedQueries = [listQ, summaryQ].filter((query) => query.isError);
 
   return (
     <section className="space-y-3">
@@ -215,17 +217,19 @@ export function RecurringExpensesSection() {
             <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">{rows.length}</span>
           )}
         </h2>
-        <MonthlyTotalChip
+        {(summaryQ.data || summaryQ.isLoading) && (listQ.data || listQ.isLoading) && <MonthlyTotalChip
           monthlyTotal={summary?.monthlyTotal}
           activeCount={activeCount}
-          loading={summaryQ.isLoading}
-        />
+          loading={summaryQ.isLoading || listQ.isLoading}
+        />}
         {canWrite && (
           <Button size="sm" variant="outline" className="ml-auto" onClick={() => setDialog({ mode: 'create' })}>
             <Plus size={14} /> {t('subs.addRecurring')}
           </Button>
         )}
       </div>
+
+      {failedQueries.length > 0 && <QueryFeedback stale={failedQueries.every((query) => query.data !== undefined)} pending={failedQueries.some((query) => query.isFetching)} onRetry={() => { for (const query of failedQueries) void query.refetch(); }} />}
 
       {/* Next-30-days strip */}
       <UpcomingStrip upcoming={summary?.upcoming ?? []} loading={summaryQ.isLoading} />
@@ -235,7 +239,7 @@ export function RecurringExpensesSection() {
         <div className="space-y-px">
           {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-14 rounded-lg" />)}
         </div>
-      ) : rows.length === 0 ? (
+      ) : listQ.isError && listQ.data === undefined ? null : rows.length === 0 ? (
         <EmptyState
           icon={<Repeat size={20} />}
           title={t('subs.empty')}
@@ -259,7 +263,7 @@ export function RecurringExpensesSection() {
         </div>
       )}
 
-      {rows.length === 0 && !listQ.isLoading && (
+      {rows.length === 0 && !listQ.isLoading && !listQ.isError && (
         <Hint id="subs-intro" title={t('subs.hintTitle')}>{t('subs.hintBody')}</Hint>
       )}
 

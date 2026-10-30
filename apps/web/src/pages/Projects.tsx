@@ -22,6 +22,7 @@ import { PRIORITIES, PRIORITY_LABEL_KEY } from '../components/project/taskViewPr
 import { textToDoc } from '@ordi/shared';
 import { useT, extendDict } from '../lib/i18n';
 import { usePersistedState, oneOfPref } from '../lib/prefs';
+import { QueryFeedback } from '../components/QueryFeedback';
 
 extendDict({
   en: {
@@ -138,7 +139,7 @@ export function ProjectsPage() {
   const [filter, setFilter] = usePersistedState<Filter>('ordi:view:projects.filter', 'all', oneOfPref(FILTERS, 'all'));
 
 
-  const { data, isLoading } = useQuery<Project[]>({
+  const { data, isLoading, isError, isFetching, refetch } = useQuery<Project[]>({
     queryKey: ['projects'],
     queryFn: () => api.get<{ data: Project[] }>('/projects').then((r) => r.data),
   });
@@ -192,6 +193,7 @@ export function ProjectsPage() {
       />
 
       <div className="p-6">
+        {isError && <QueryFeedback stale={data !== undefined} pending={isFetching} onRetry={() => void refetch()} />}
         {!isLoading && projects.length > 0 && (
           <div className="mb-4 flex flex-wrap items-center gap-1.5">
             {FILTERS.map((f) => {
@@ -229,7 +231,7 @@ export function ProjectsPage() {
               </div>
             ))}
           </div>
-        ) : projects.length === 0 ? (
+        ) : isError && data === undefined ? null : projects.length === 0 ? (
           <EmptyState
             icon={<FolderKanban size={20} />}
             title={t('projects.empty')}

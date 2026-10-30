@@ -123,7 +123,7 @@ function TaskRow({ task, index, overdue, onPickStatus }: {
   const role = useProjectRole(task.project_id, task.visibility);
   const href = `/projects/${task.project_id}/tasks/${task.id}`;
   return (
-    <button
+    <div
       onClick={(e) => open(href, e)}
       onAuxClick={(e) => open(href, e)}
       className="row-enter flex h-9 w-full cursor-pointer items-center gap-3 border-b border-border px-6 text-left transition-colors duration-150 hover:bg-muted"
@@ -140,7 +140,7 @@ function TaskRow({ task, index, overdue, onPickStatus }: {
         canWrite={role === 'admin' || role === 'member'}
         onPick={(status) => onPickStatus(task, status)}
       />
-      <span className="min-w-0 flex-1 truncate text-[13px]">{task.title}</span>
+      <a href={href} className="min-w-0 flex-1 truncate text-[13px]" onClick={(e) => { e.stopPropagation(); open(href, e); }} onAuxClick={(e) => { e.stopPropagation(); open(href, e); }}>{task.title}</a>
       <Badge>{task.key}</Badge>
       <span
         className={cn(
@@ -153,7 +153,7 @@ function TaskRow({ task, index, overdue, onPickStatus }: {
       >
         {task.due_date ? fmtDate(task.due_date) : ''}
       </span>
-    </button>
+    </div>
   );
 }
 

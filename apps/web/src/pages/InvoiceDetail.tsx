@@ -25,6 +25,7 @@ import { useWorkspaceSettings } from '../components/finance/workspace';
 import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
 import { DateField } from '../components/DatePicker';
 import { DocumentForm } from '../components/finance/DocumentForm';
+import { QueryFeedback } from '../components/QueryFeedback';
 
 extendDict({
   en: {
@@ -290,7 +291,12 @@ export function InvoiceDetailPage({ id }: { id: string }) {
       </div>
     );
   }
-  if (invoice.isError || !invoice.data) return <div className="p-8 text-sm text-muted-foreground">{t('finance.invoiceNotFound')}</div>;
+  const unavailable = invoice.error instanceof ApiError && [401, 403, 404, 410].includes(invoice.error.status);
+  if (unavailable || !invoice.data) return <div className="p-4 sm:p-8">{
+    invoice.error instanceof ApiError && invoice.error.status === 404
+      ? <p role="alert" className="text-sm text-muted-foreground">{t('finance.invoiceNotFound')}</p>
+      : <QueryFeedback pending={invoice.isFetching} onRetry={() => void invoice.refetch()} />
+  }</div>;
 
   const iv = invoice.data;
   const cur = iv.currency ?? 'USD';
@@ -318,7 +324,8 @@ export function InvoiceDetailPage({ id }: { id: string }) {
   const timeline = buildTimeline(iv, payments, t);
 
   return (
-    <div className="mx-auto max-w-4xl p-8">
+    <div className="mx-auto w-full max-w-4xl p-4 sm:p-8">
+      {invoice.isError && <QueryFeedback stale pending={invoice.isFetching} onRetry={() => void invoice.refetch()} />}
       <Breadcrumbs
         className="mb-4"
         items={[{ label: t('nav.finance'), to: '/finance' }]}
@@ -333,7 +340,7 @@ export function InvoiceDetailPage({ id }: { id: string }) {
 
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <h1 className="font-mono text-2xl font-semibold tracking-tight" style={accentText}>{iv.number ?? t('public.invoice')}</h1>
             <span
               className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium', !accent && statusClass)}

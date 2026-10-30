@@ -6,7 +6,7 @@
  * invoice has been sent (the API refuses them); everything else stays
  * editable, because dates, wording and tax are what a client asks to change.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, Trash2 } from 'lucide-react';
 import { api } from '../../lib/api';
@@ -111,6 +111,8 @@ export function DocumentForm({ kind, mode, companies, initial, defaultCurrency, 
   submitLabel: string;
 }) {
   const t = useT();
+  const uid = useId();
+  const fid = (name: string) => `${uid}-${name}`;
   const taxRates = useTaxRates();
   const rates = taxRates.data?.data ?? [];
 
@@ -172,91 +174,122 @@ export function DocumentForm({ kind, mode, companies, initial, defaultCurrency, 
     >
       {mode === 'create' && (
         <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">{t('common.company')}</label>
-          <Select value={companyId} onChange={(e) => setCompanyId(e.target.value)} className="block w-full">
+          <label htmlFor={fid('company')} className="text-xs font-medium text-muted-foreground">{t('common.company')}</label>
+          <Select id={fid('company')} name="companyId" required value={companyId} onChange={(e) => setCompanyId(e.target.value)} className="block w-full">
             <option value="">{t('common.select')}</option>
             {byName(companies ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">{t('finance.issueDate')}</label>
-          <DateField value={issueDate} onChange={(v) => setIssueDate(v ?? todayIso())} clearable={false} />
+      {/* One column on a phone-width dialog, two from sm up. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="min-w-0 space-y-1">
+          <label htmlFor={fid('issueDate')} className="text-xs font-medium text-muted-foreground">{t('finance.issueDate')}</label>
+          <DateField id={fid('issueDate')} name="issueDate" value={issueDate} onChange={(v) => setIssueDate(v ?? todayIso())} clearable={false} required />
         </div>
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">{kind === 'invoice' ? t('finance.dueDateOptional') : t('finance.validUntilOptional')}</label>
-          <DateField value={endDate} onChange={(v) => setEndDate(v ?? '')} min={issueDate} />
+        <div className="min-w-0 space-y-1">
+          <label htmlFor={fid('endDate')} className="text-xs font-medium text-muted-foreground">{kind === 'invoice' ? t('finance.dueDateOptional') : t('finance.validUntilOptional')}</label>
+          <DateField id={fid('endDate')} name={kind === 'invoice' ? 'dueDate' : 'validUntil'} value={endDate} onChange={(v) => setEndDate(v ?? '')} min={issueDate} />
         </div>
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">{t('common.currency')}</label>
-          <Select value={currency} onChange={(e) => setCurrency(e.target.value)} className="block w-full">
+        <div className="min-w-0 space-y-1">
+          <label htmlFor={fid('currency')} className="text-xs font-medium text-muted-foreground">{t('common.currency')}</label>
+          <Select id={fid('currency')} name="currency" value={currency} onChange={(e) => setCurrency(e.target.value)} className="block w-full">
             {currencyOptions(currency).map((cur) => <option key={cur} value={cur}>{cur}</option>)}
           </Select>
         </div>
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">{t('finance.language')}</label>
-          <Select value={language} onChange={(e) => setLanguage(e.target.value === 'uk' ? 'uk' : 'en')} className="block w-full">
+        <div className="min-w-0 space-y-1">
+          <label htmlFor={fid('language')} className="text-xs font-medium text-muted-foreground">{t('finance.language')}</label>
+          <Select id={fid('language')} name="language" value={language} onChange={(e) => setLanguage(e.target.value === 'uk' ? 'uk' : 'en')} className="block w-full">
             <option value="uk">{t('finance.lang.uk')}</option>
             <option value="en">{t('finance.lang.en')}</option>
           </Select>
         </div>
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">{t('finance.taxRate')}</label>
-          <Select value={taxRateId} onChange={(e) => setTaxRateId(e.target.value)} className="block w-full" disabled={!itemsEditable}>
+        <div className="min-w-0 space-y-1">
+          <label htmlFor={fid('tax')} className="text-xs font-medium text-muted-foreground">{t('finance.taxRate')}</label>
+          <Select id={fid('tax')} name="taxRateId" value={taxRateId} onChange={(e) => setTaxRateId(e.target.value)} className="block w-full" disabled={!itemsEditable}>
             <option value="">{t('finance.noTax')}</option>
             {rates.map((r) => <option key={r.id} value={r.id}>{r.name.includes(`${Number(r.ratePercent)}%`) ? r.name : `${r.name} ${Number(r.ratePercent)}%`}</option>)}
           </Select>
         </div>
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">{t('finance.discount')}</label>
-          <div className="flex gap-2">
-            <Select value={discountType} onChange={(e) => setDiscountType(e.target.value as 'none' | 'percent' | 'fixed')} className="block w-full">
+        <div className="min-w-0 space-y-1">
+          <label htmlFor={fid('discountType')} className="text-xs font-medium text-muted-foreground">{t('finance.discount')}</label>
+          {/* The type select keeps room for its longest option ("Fixed amount")
+            * and the amount takes what is left; when the column cannot hold
+            * both they wrap instead of squeezing the select to its arrow. */}
+          <div className="flex flex-wrap gap-2">
+            <Select id={fid('discountType')} name="discountType" value={discountType} onChange={(e) => setDiscountType(e.target.value as 'none' | 'percent' | 'fixed')} className="block min-w-[8.5rem] flex-[1_1_8.5rem]">
               <option value="none">{t('finance.discountNone')}</option>
               <option value="percent">{t('finance.discountPercent')}</option>
               <option value="fixed">{t('finance.discountFixed')}</option>
             </Select>
             {discountType !== 'none' && (
-              <Input type="number" min={0} step="0.01" value={discountValue} onChange={(e) => setDiscountValue(e.target.value)} className="w-24 shrink-0" placeholder={discountType === 'percent' ? '%' : currency} />
+              <Input
+                id={fid('discountValue')}
+                name="discountValue"
+                type="number" min={0} step="0.01"
+                value={discountValue}
+                onChange={(e) => setDiscountValue(e.target.value)}
+                aria-label={`${t('finance.discount')}, ${discountType === 'percent' ? '%' : currency}`}
+                className="min-w-[5rem] flex-[1_1_5rem]"
+                placeholder={discountType === 'percent' ? '%' : currency}
+              />
             )}
           </div>
         </div>
       </div>
 
-      <div className="space-y-2">
+      <fieldset className="min-w-0 space-y-2">
+        <legend className="sr-only">{t('finance.lineItems', 'Line items')}</legend>
         {!itemsEditable && <p className="text-xs text-muted-foreground">{t('finance.itemsLocked')}</p>}
-        {items.map((it, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <div className="min-w-0 flex-1">
-              <Input placeholder={t('public.description')} value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} disabled={!itemsEditable} />
+        {/* Column headings stay on screen once the fields hold values (a
+          * placeholder does not). On a narrow dialog each line stacks and the
+          * headings move onto the fields themselves. */}
+        <div aria-hidden className="hidden grid-cols-[minmax(0,1fr)_4.5rem_6.5rem_1.75rem] gap-2 text-[11px] font-medium text-muted-foreground sm:grid">
+          <span>{t('public.description')}</span>
+          <span>{t('public.qty')}</span>
+          <span>{t('finance.unitPrice')}</span>
+          <span />
+        </div>
+        {items.map((it, i) => {
+          const n = i + 1;
+          const lineSuffix = <span className="sr-only">, {t('finance.lineN', 'line {n}').replace('{n}', String(n))}</span>;
+          const labelClass = 'text-[11px] font-medium text-muted-foreground sm:sr-only';
+          return (
+            <div key={i} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_1.75rem] items-end gap-2 sm:grid-cols-[minmax(0,1fr)_4.5rem_6.5rem_1.75rem]">
+              <div className="col-span-3 min-w-0 space-y-0.5 sm:col-span-1">
+                <label htmlFor={fid(`line${n}-description`)} className={labelClass}>{t('public.description')}{lineSuffix}</label>
+                <Input id={fid(`line${n}-description`)} name={`items.${i}.description`} required placeholder={t('public.description')} value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} disabled={!itemsEditable} />
+              </div>
+              <div className="min-w-0 space-y-0.5">
+                <label htmlFor={fid(`line${n}-quantity`)} className={labelClass}>{t('public.qty')}{lineSuffix}</label>
+                <Input id={fid(`line${n}-quantity`)} name={`items.${i}.quantity`} type="number" min={0} step="0.01" placeholder={t('public.qty')} value={it.quantity} onChange={(e) => setItem(i, { quantity: e.target.value })} disabled={!itemsEditable} />
+              </div>
+              <div className="min-w-0 space-y-0.5">
+                <label htmlFor={fid(`line${n}-unitPrice`)} className={labelClass}>{t('finance.unitPrice')}{lineSuffix}</label>
+                <Input id={fid(`line${n}-unitPrice`)} name={`items.${i}.unitPrice`} type="number" min={0} step="0.01" placeholder={t('public.price')} value={it.unitPrice} onChange={(e) => setItem(i, { unitPrice: e.target.value })} disabled={!itemsEditable} />
+              </div>
+              {itemsEditable ? (
+                <button type="button" className="grid h-8 w-7 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-40" onClick={() => setItems((arr) => arr.filter((_, j) => j !== i))} disabled={items.length === 1} aria-label={t('finance.deleteLineN', 'Delete line {n}').replace('{n}', String(n))}>
+                  <Trash2 size={14} />
+                </button>
+              ) : <span />}
             </div>
-            <div className="w-16 shrink-0">
-              <Input type="number" min={0} step="0.01" placeholder={t('public.qty')} value={it.quantity} onChange={(e) => setItem(i, { quantity: e.target.value })} disabled={!itemsEditable} />
-            </div>
-            <div className="w-24 shrink-0">
-              <Input type="number" min={0} step="0.01" placeholder={t('public.price')} value={it.unitPrice} onChange={(e) => setItem(i, { unitPrice: e.target.value })} disabled={!itemsEditable} />
-            </div>
-            {itemsEditable && (
-              <button type="button" className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive" onClick={() => setItems((arr) => arr.filter((_, j) => j !== i))} disabled={items.length === 1} aria-label={t('common.delete')}>
-                <Trash2 size={14} />
-              </button>
-            )}
-          </div>
-        ))}
+          );
+        })}
         {itemsEditable && (
           <Button type="button" variant="outline" size="sm" onClick={() => setItems((arr) => [...arr, { ...emptyLine }])}><Plus size={13} /> {t('finance.addLine')}</Button>
         )}
-      </div>
+      </fieldset>
 
-      <div className="flex items-end justify-between gap-4 border-t border-border pt-3">
+      <div className="flex flex-wrap items-end justify-between gap-4 border-t border-border pt-3">
         <dl className="space-y-0.5 text-[13px] text-muted-foreground">
           {(discount > 0 || tax > 0) && <div className="flex gap-3"><dt>{t('finance.subtotal')}</dt><dd className="tabular-nums">{fmtMoney(subtotal, currency)}</dd></div>}
           {discount > 0 && <div className="flex gap-3"><dt>{t('finance.discount')}</dt><dd className="tabular-nums">-{fmtMoney(discount, currency)}</dd></div>}
           {tax > 0 && <div className="flex gap-3"><dt>{t('finance.taxAmount')} ({ratePct}%)</dt><dd className="tabular-nums">{fmtMoney(tax, currency)}</dd></div>}
           <div className="flex gap-3"><dt>{t('common.total')}</dt><dd className="font-semibold tabular-nums text-foreground">{fmtMoney(total, currency)}</dd></div>
         </dl>
-        <div className="flex gap-2">
+        <div className="ml-auto flex gap-2">
           {onCancel && <Button type="button" variant="ghost" size="sm" onClick={onCancel}>{t('common.cancel')}</Button>}
           <Button type="submit" size="sm" disabled={pending || !valid}>{submitLabel}</Button>
         </div>

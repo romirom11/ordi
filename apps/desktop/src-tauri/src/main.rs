@@ -101,7 +101,30 @@ fn main() {
             None,
         ))
         .invoke_handler(tauri::generate_handler![check_update])
+        .on_menu_event(|app, event| {
+            let id = event.id().as_ref();
+            if let Some(command) = id.strip_prefix("ordi-") {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.emit("ordi://menu", command);
+                }
+            }
+        })
         .setup(|app| {
+            // Preserve the native Edit / Window commands and expose the web
+            // workspace's actions in the macOS menu bar.
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::menu::{Menu, MenuItem, Submenu};
+                let menu = Menu::default(app.handle())?;
+                let task = MenuItem::with_id(app, "ordi-new-task", "New Task", true, Some("CmdOrCtrl+N"))?;
+                let search = MenuItem::with_id(app, "ordi-search", "Search", true, Some("CmdOrCtrl+K"))?;
+                let sidebar = MenuItem::with_id(app, "ordi-sidebar", "Toggle Sidebar", true, Some("CmdOrCtrl+\\"))?;
+                let preferences = MenuItem::with_id(app, "ordi-preferences", "Settings…", true, Some("CmdOrCtrl+,"))?;
+                let shortcuts = MenuItem::with_id(app, "ordi-shortcuts", "Keyboard Shortcuts", true, Some("CmdOrCtrl+/"))?;
+                let workspace = Submenu::with_items(app, "Workspace", true, &[&task, &search, &sidebar, &preferences, &shortcuts])?;
+                menu.append(&workspace)?;
+                app.set_menu(menu)?;
+            }
             // Best-effort: a failed registration (e.g. shortcut taken) must not
             // prevent the app from starting.
             let _ = app

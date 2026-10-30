@@ -76,7 +76,7 @@ function tabIcon(url: string): ReactNode {
     case '': return <LayoutDashboard size={13} />;
     case 'my-tasks': return <CheckSquare size={13} />;
     case 'projects': return <FolderKanban size={13} />;
-    case 'crm': case 'companies': case 'deals': return <Handshake size={13} />;
+    case 'crm': case 'companies': case 'leads': case 'deals': return <Handshake size={13} />;
     case 'kb': return <BookText size={13} />;
     case 'time': return <Clock size={13} />;
     case 'finance': return <Receipt size={13} />;
@@ -89,7 +89,15 @@ function tabIcon(url: string): ReactNode {
   }
 }
 
-export function TabStrip() {
+export function TabStrip({ leading, trafficLightInset = false }: {
+  /** Rendered before back/forward – the shell's sidebar toggle. */
+  leading?: ReactNode;
+  /**
+   * macOS overlay title bar with the sidebar hidden: the window buttons now
+   * sit over the strip's left end, so the strip starts after them.
+   */
+  trafficLightInset?: boolean;
+} = {}) {
   const tabs = useTabs();
   const t = useT();
   const [closingIds, setClosingIds] = useState<ReadonlySet<string>>(new Set());
@@ -203,7 +211,7 @@ export function TabStrip() {
         onDrop={(e) => { e.preventDefault(); if (dragId) tabs.reorderTabs(dragId, tab.id); setDragId(null); setOverId(null); }}
         onDragEnd={() => { setDragId(null); setOverId(null); }}
         onClick={() => tabs.activateTab(tab.id)}
-        onKeyDown={(e) => { if (e.key === 'Enter') tabs.activateTab(tab.id); }}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tabs.activateTab(tab.id); } }}
         onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); closeAnimated(tab.id); } }}
         className={cn(
           'anim-pop-in group/tab relative flex h-7 min-w-0 max-w-[180px] shrink-0 cursor-pointer select-none items-center gap-1.5 overflow-hidden rounded-md border px-2 text-[13px]',
@@ -236,10 +244,10 @@ export function TabStrip() {
   return (
     <div className="shrink-0" data-tauri-drag-region={isMacDesktop || undefined}>
       <div
-        className="flex items-center gap-1 pb-1 pl-2.5 pr-1 pt-1.5"
-        role="tablist"
+        className={cn('flex items-center gap-1 pb-1 pr-1 pt-1.5', trafficLightInset ? 'pl-[78px]' : 'pl-2.5')}
         data-tauri-drag-region={isMacDesktop || undefined}
       >
+        {leading}
         <div className="mr-0.5 flex shrink-0 items-center">
           <NavArrow label={t('tabs.back')} shortcut={`${MOD}[`} disabled={!tabs.canGoBack} onClick={() => tabs.go(-1)}>
             <ArrowLeft size={14} />
@@ -248,8 +256,11 @@ export function TabStrip() {
             <ArrowRight size={14} />
           </NavArrow>
         </div>
+        {/* Only the tabs are the tablist; back/forward/new are plain buttons. */}
         <div
           ref={stripRef}
+          role="tablist"
+          aria-label={t('tabs.list', 'Open tabs')}
           className="flex min-w-0 items-center gap-1 overflow-x-auto"
           style={{ scrollbarWidth: 'none' }}
         >

@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 /* ─────────────────────────────────────────────────────────────
-   Design tokens – Linear-inspired. Dark is the default theme;
+   Design tokens. System appearance is selected before first paint;
    [data-theme="light"] overrides. Theme is applied to <html> by
    lib/theme.tsx before first paint.
    ───────────────────────────────────────────────────────────── */
@@ -16,19 +16,27 @@
   --foreground: 220 14% 93%;
   --muted: 228 7% 14%;              /* hover fills, chips      */
   --muted-foreground: 220 7% 62%;
-  --faint: 220 5% 44%;              /* tertiary text           */
+  --faint: 220 5% 57%;              /* readable tertiary text  */
   --border: 228 7% 16%;
   --border-strong: 228 7% 22%;
   --input: 228 7% 18%;
   --primary: 235 65% 65%;           /* brand indigo #5E6AD2-ish */
+  --primary-text: 235 65% 76%;
   --primary-foreground: 0 0% 100%;
+  --action: 235 65% 56%;
+  --action-hover: 235 65% 52%;
   --ring: 235 65% 65%;
   --accent: 228 7% 15%;
   --accent-foreground: 220 14% 93%;
   --destructive: 0 68% 62%;
+  --destructive-text: 0 68% 72%;
   --destructive-foreground: 0 0% 100%;
+  --destructive-action: 0 62% 48%;   /* white label ≥ 4.5:1 at rest and on hover */
+  --destructive-action-hover: 0 62% 44%;
   --success: 152 42% 51%;
+  --success-text: 152 42% 57%;
   --warning: 36 90% 58%;
+  --warning-text: 36 90% 64%;
   --overlay: 240 10% 2%;
 
   --shadow-pop: 0 0 0 1px hsl(var(--border)), 0 8px 24px -6px rgb(0 0 0 / 0.5);
@@ -72,20 +80,28 @@
   --elevated: 0 0% 100%;
   --foreground: 224 12% 15%;
   --muted: 220 14% 94%;
-  --muted-foreground: 220 9% 44%;
-  --faint: 220 7% 60%;
+  --muted-foreground: 220 9% 38%;
+  --faint: 220 9% 42%;
   --border: 220 13% 90%;
   --border-strong: 220 13% 82%;
   --input: 220 13% 86%;
   --primary: 234 45% 58%;
+  --primary-text: 234 55% 40%;
   --primary-foreground: 0 0% 100%;
+  --action: 234 45% 50%;
+  --action-hover: 234 45% 46%;
   --ring: 234 45% 58%;
   --accent: 220 14% 93%;
   --accent-foreground: 224 12% 15%;
   --destructive: 0 68% 52%;
+  --destructive-text: 0 68% 38%;
   --destructive-foreground: 0 0% 100%;
+  --destructive-action: 0 70% 47%;   /* white label ≥ 4.5:1 at rest and on hover */
+  --destructive-action-hover: 0 70% 43%;
   --success: 152 45% 40%;
+  --success-text: 152 55% 24%;
   --warning: 32 92% 46%;
+  --warning-text: 32 92% 28%;
   --overlay: 240 10% 10%;
 
   --shadow-pop: 0 0 0 1px hsl(var(--border)), 0 8px 24px -8px rgb(0 0 0 / 0.16);
@@ -117,11 +133,14 @@ body {
 *::-webkit-scrollbar-track { background: transparent; }
 
 /* Focus ring only for keyboard nav */
-:focus-visible {
-  outline: 2px solid hsl(var(--ring) / 0.6);
+:root :focus-visible {
+  outline: 2px solid hsl(var(--ring));
   outline-offset: 1px;
-  border-radius: 4px;
 }
+:root [role='menu'] [role^='menuitem']:focus-visible { outline-offset: -2px; }
+/* <main> when it only receives focus as the fallback after an overlay closes
+   (lib/overlayA11y restoreFocus) – a ring around the whole page is noise. */
+:root [data-focus-fallback]:focus-visible { outline: none; }
 
 /* ─── Shared keyframes ─── */
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }

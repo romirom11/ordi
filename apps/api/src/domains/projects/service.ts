@@ -650,6 +650,7 @@ export async function updateTask(actor: Actor, id: string, input: any) {
     await emit({ type: 'task.assigned', aggregateType: 'task', aggregateId: id, payload: { assigneeIds: newAssignees, ref, taskId: id, projectId: before.projectId }, actorId: actor.userId, actorType: actor.actorType });
   }
   await writeActivity(db, { entityType: 'task', entityId: id, action: 'updated', before, after: patch, actorId: actor.userId, actorType: actor.actorType });
+  await emit({ type: 'task.updated', aggregateType: 'task', aggregateId: id, payload: { taskId: id, projectId: before.projectId }, actorId: actor.userId, actorType: actor.actorType });
   const task = await loadTask(id);
   return { ...task, ref };
 }

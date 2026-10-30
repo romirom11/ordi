@@ -90,16 +90,16 @@ export function LeadDetailPage({ id }: { id: string }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-border px-4 py-2">
+      <div className="flex min-h-11 shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2">
         <Link to="/crm" className="hidden text-[13px] text-muted-foreground hover:text-foreground sm:block">{t('crm.title')}</Link>
         <ChevronRight size={12} className="hidden text-faint sm:block" />
         <Link to="/crm/leads" className="hidden text-[13px] text-muted-foreground hover:text-foreground sm:block">{t('crm.tabLeads')}</Link>
         <ChevronRight size={12} className="hidden text-faint sm:block" />
         <Target size={16} className="shrink-0 text-warning" />
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[min(100%,10rem)] flex-1">
           <EditableName value={lead.title} editable={editable} size="sm" onSave={(title) => patch.mutate({ title })} />
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           {lead.opener && <Button size="sm" variant="outline" onClick={copyOpener}><Copy size={13} /> {t('crm.copyOpener')}</Button>}
           {lead.sourceUrl && (
             <a
@@ -130,10 +130,10 @@ export function LeadDetailPage({ id }: { id: string }) {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col min-[1100px]:flex-row">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto min-[1100px]:flex-row min-[1100px]:overflow-visible">
         {/* Content takes the full width up to the rail; the rail flexes with
           * the viewport instead of a fixed 320px. */}
-        <main className="order-2 min-w-0 flex-1 overflow-auto min-[1100px]:order-1">
+        <div className="order-2 min-w-0 flex-1 min-[1100px]:order-1 min-[1100px]:overflow-auto">
           <div className="w-full space-y-7 px-6 py-6">
             <Card className={`p-4 ${next ? 'border-primary/30' : 'border-warning/40'}`}>
               <div className="flex items-start gap-3">
@@ -270,10 +270,10 @@ export function LeadDetailPage({ id }: { id: string }) {
               </>
             )}
           </div>
-        </main>
+        </div>
 
         {/* The rail width is user-draggable and persisted – see RailResize. */}
-        <aside style={rail.railStyle} className="relative order-1 shrink-0 space-y-6 overflow-auto border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-[var(--rail-w)] min-[1100px]:border-b-0 min-[1100px]:border-l">
+        <aside style={rail.railStyle} className="relative order-1 shrink-0 space-y-6 border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-[var(--rail-w)] min-[1100px]:overflow-auto min-[1100px]:border-b-0 min-[1100px]:border-l">
           <div>
             <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('crm.properties')}</h2>
             <div className="space-y-0.5">

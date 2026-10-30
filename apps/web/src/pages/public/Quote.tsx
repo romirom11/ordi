@@ -89,7 +89,7 @@ function QuoteDocument({ token, data }: { token: string; data: PubQuotePayload }
             <h1 className="text-2xl font-semibold" style={accent ? { color: accent } : undefined}>{t('public.quote')} {q.number ?? ''}</h1>
             {issuer && <p className="mt-1 text-sm text-muted-foreground">{t('public.from')} {issuer}</p>}
           </div>
-          <Badge color={(q.status && STATUS_COLORS[q.status]) || '#6b7280'}>{q.status ?? 'draft'}</Badge>
+          <Badge color={(q.status && STATUS_COLORS[q.status]) || '#6b7280'}>{t(`public.status.${q.status ?? 'draft'}`, t('common.unknown', 'Unknown'))}</Badge>
         </div>
 
         <div className="mb-8 grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">

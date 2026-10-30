@@ -108,6 +108,7 @@ export function useSelection<T extends { id: string }>(rows: T[]): Selection<T> 
 export function RowCheckbox({ checked, onToggle, className, label }: {
   checked: boolean; onToggle: (shiftKey: boolean) => void; className?: string; label?: string;
 }) {
+  const t = useT();
   const fire = (e: { stopPropagation: () => void; preventDefault: () => void; shiftKey: boolean }) => {
     e.stopPropagation();
     e.preventDefault();
@@ -117,14 +118,14 @@ export function RowCheckbox({ checked, onToggle, className, label }: {
     <span
       role="checkbox"
       aria-checked={checked}
-      aria-label={label}
+      aria-label={label ?? t('common.select')}
       tabIndex={0}
       onClickCapture={fire}
       onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') fire(e); }}
       className={cn(
         'grid h-4 w-4 shrink-0 cursor-pointer place-items-center rounded border transition-colors duration-150',
         checked ? 'border-primary bg-primary' : 'border-border-strong bg-transparent hover:border-primary/60',
-        className,
+        className, 'focus-visible:opacity-100',
       )}
     >
       <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden>

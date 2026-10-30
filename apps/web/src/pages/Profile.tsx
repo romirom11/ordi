@@ -9,6 +9,7 @@ import { extendDict, useT } from '../lib/i18n';
 import { useNavigate } from '../lib/router';
 import { DATE_FORMATS, TIME_ZONES, formatSample, offsetLabel, rememberDateFormat, type DateFormat } from '../lib/dates';
 import { downscaleImage } from '../components/settings/image';
+import { usePersistedState, oneOfPref } from '../lib/prefs';
 
 extendDict({
   en: {
@@ -308,6 +309,7 @@ function NotificationsSection() {
   const me = useMe();
   const qc = useQueryClient();
   const stored = me.user.emailNotificationPrefs;
+  const [sound, setSound] = usePersistedState('ordi:notificationSound', 'on', oneOfPref(['on', 'off'], 'on'));
   const [prefs, setPrefs] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {};
     for (const { type } of NOTIFICATION_TYPES) initial[type] = stored[type] ?? true;
@@ -328,6 +330,10 @@ function NotificationsSection() {
   return (
     <Card className="p-4">
       <SectionHeader title={t('profile.emailNotifications')} />
+      <div className="mb-4 flex items-center justify-between gap-3 text-sm">
+        <span>{t('profile.notificationSound', 'Notification sound on this device')}</span>
+        <Switch checked={sound === 'on'} onChange={(on) => setSound(on ? 'on' : 'off')} label={t('profile.notificationSound', 'Notification sound on this device')} />
+      </div>
       <p className="-mt-2 mb-3 text-xs text-muted-foreground">{t('profile.emailNotificationsHint')}</p>
       <div className="grid grid-cols-1 gap-x-6 gap-y-2.5 sm:grid-cols-2">
         {NOTIFICATION_TYPES.map(({ type, label }) => (

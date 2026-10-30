@@ -8,6 +8,8 @@
 import { defineConfig } from '@playwright/test';
 
 const DB = process.env.E2E_DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/ordi_e2e';
+// An explicitly supplied test instance is owned by the caller: never reset it.
+const existingBaseURL = process.env.E2E_BASE_URL;
 
 const apiEnv = {
   NODE_ENV: 'development',
@@ -37,7 +39,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: existingBaseURL ?? 'http://localhost:5173',
     locale: 'en-US',
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
@@ -47,7 +49,7 @@ export default defineConfig({
       ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH, args: ['--no-sandbox'] } }
       : {}),
   },
-  webServer: [
+  webServer: existingBaseURL ? undefined : [
     {
       command: 'pnpm exec s3rver --directory ../../.e2e-s3 --configure-bucket ordi --port 4568',
       port: 4568,
@@ -55,7 +57,7 @@ export default defineConfig({
       timeout: 60_000,
     },
     {
-      command: 'bash -c "node e2e/reset-db.mjs && pnpm --dir ../.. run db:migrate && pnpm --dir ../api run seed && pnpm --dir ../api exec tsx src/server.ts"',
+      command: 'bash -c "node e2e/reset-db.mjs && pnpm --dir ../.. run db:migrate && pnpm --dir ../api run seed && pnpm --dir ../api exec tsx ../web/e2e/server.ts"',
       port: 3000,
       env: apiEnv,
       reuseExistingServer: false,

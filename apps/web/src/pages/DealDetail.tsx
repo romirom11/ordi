@@ -125,8 +125,8 @@ export function DealDetailPage({ id }: { id: string }) {
       </div>
 
       {/* Body: content at full width, rail pinned to the edge. */}
-      <div className="flex min-h-0 flex-1 flex-col min-[1100px]:flex-row">
-        <div className="order-2 min-w-0 flex-1 overflow-auto min-[1100px]:order-1">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto min-[1100px]:flex-row min-[1100px]:overflow-visible">
+        <div className="order-2 min-w-0 flex-1 min-[1100px]:order-1 min-[1100px]:overflow-auto">
           <div className="space-y-7 px-6 py-6">
             {sourceLeadQ.data && (
               <Card className="flex items-start gap-3 border-primary/20 p-4">
@@ -170,7 +170,7 @@ export function DealDetailPage({ id }: { id: string }) {
           </div>
         </div>
         {/* Same rail as the lead page: width is user-draggable and persisted. */}
-        <aside style={rail.railStyle} className="relative order-1 shrink-0 space-y-6 overflow-auto border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-[var(--rail-w)] min-[1100px]:border-b-0 min-[1100px]:border-l">
+        <aside style={rail.railStyle} className="relative order-1 shrink-0 space-y-6 border-b border-border p-4 min-[1100px]:order-2 min-[1100px]:w-[var(--rail-w)] min-[1100px]:overflow-auto min-[1100px]:border-b-0 min-[1100px]:border-l">
           <DealRail
             deal={d}
             stage={stage}

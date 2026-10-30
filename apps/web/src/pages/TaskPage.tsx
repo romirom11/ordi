@@ -1,8 +1,10 @@
 /**
  * Full-page task view (Linear-style). Route: /projects/:id/tasks/:taskId
  * Two columns: main content (title, description, sub-tasks, activity) and a
- * properties sidebar. Every edit PATCHes with the optimistic-lock version;
- * conflicts refetch + toast.
+ * properties sidebar. Every edit PATCHes with the optimistic-lock version.
+ * Property pickers refetch + toast on a conflict; the title and description
+ * are typed text and go through a local draft (lib/useDraftSync) that is
+ * kept until the server acknowledges it and never replaced by a conflict.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -11,7 +13,11 @@ import { api, ApiError } from '../lib/api';
 import { Link, useNavigate } from '../lib/router';
 import { usePageTitle } from '../lib/tabs';
 import { useTaskStatuses, useUsersLookup } from '../lib/queries';
-import { useProjectRole } from '../lib/auth';
+import { useMe, useProjectRole } from '../lib/auth';
+import { draftStorageKey } from '../lib/draftSync';
+import { useDraftSync } from '../lib/useDraftSync';
+import { DraftConflictBanner, DraftStatusLine } from '../components/DraftStatus';
+import { RichText } from '../components/richtext/RichText';
 import { Button, EmptyState, IconButton, Kbd, Skeleton, Tooltip } from '../components/ui';
 import { toast } from '../components/overlays';
 import { RichEditor, EMPTY_DOC } from '../components/richtext/RichEditor';
@@ -72,8 +78,19 @@ function TaskSkeleton() {
   );
 }
 
-export function TaskPage({ projectId, taskId }: { projectId: string; taskId: string }) {
+/** Typed text of a task: kept as a local draft until the server has it. */
+type TaskText = { title: string; description: unknown };
+
+const isConflict = (e: unknown) => e instanceof ApiError && (e.status === 409 || e.code === 'conflict');
+
+/** One instance per task: its draft, timers and title state never carry over to the next one. */
+export function TaskPage(props: { projectId: string; taskId: string }) {
+  return <TaskPageView key={props.taskId} {...props} />;
+}
+
+function TaskPageView({ projectId, taskId }: { projectId: string; taskId: string }) {
   const t = useT();
+  const me = useMe();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const rail = useRailWidth('task', 256);
@@ -110,25 +127,24 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
   usePageTitle(task ? `${refLabel} ${task.title}` : null);
 
   /* ── Patch mutation (version-aware) ── */
+  const applySaved = (resp: TaskDetail) => {
+    qc.setQueryData<TaskDetail>(['task', taskId], (old) => {
+      if (!old || (old.version ?? 0) > (resp.version ?? 0)) return old;
+      return { ...old, ...resp, assignees: old.assignees, labels: old.labels, comments: old.comments };
+    });
+    qc.invalidateQueries({ queryKey: ['task', taskId] });
+    qc.invalidateQueries({ queryKey: ['task-audit', taskId] });
+    qc.invalidateQueries({ queryKey: ['tasks'] });
+    qc.invalidateQueries({ queryKey: ['me-tasks'] });
+    qc.invalidateQueries({ queryKey: ['me', 'tasks'] });
+    qc.invalidateQueries({ queryKey: ['subtasks'] });
+  };
   const patchM = useMutation({
     mutationFn: (patch: TaskPatch) => {
       const cur = qc.getQueryData<TaskDetail>(['task', taskId]);
       return api.patch<TaskDetail>(`/tasks/${taskId}`, { ...patch, version: cur?.version ?? task?.version });
     },
-    onSuccess: (resp) => {
-      qc.setQueryData<TaskDetail>(['task', taskId], (old) => (old ? {
-        ...old,
-        ...resp,
-        assignees: old.assignees,
-        labels: old.labels,
-        comments: old.comments,
-      } : old));
-      qc.invalidateQueries({ queryKey: ['task', taskId] });
-      qc.invalidateQueries({ queryKey: ['task-audit', taskId] });
-      qc.invalidateQueries({ queryKey: ['tasks'] });
-      qc.invalidateQueries({ queryKey: ['me-tasks'] });
-      qc.invalidateQueries({ queryKey: ['subtasks'] });
-    },
+    onSuccess: (resp) => applySaved(resp),
     onError: (e: Error) => {
       if (e instanceof ApiError && (e.status === 409 || e.code === 'conflict')) {
         toast.error(t('task.conflict'));
@@ -140,12 +156,25 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
   });
   const patch = useCallback((p: TaskPatch) => patchM.mutate(p), [patchM]);
 
-  /* ── Title (borderless auto-growing textarea) ── */
-  const [title, setTitle] = useState('');
+  /* ── Title + description: one local draft, saved in the background ── */
+  const [savedThisVisit, setSavedThisVisit] = useState(false);
+  const text = useDraftSync<TaskText, TaskDetail>({
+    storageKey: draftStorageKey(me.user.id, 'task', taskId),
+    snapshot: taskQ.data,
+    fields: (d) => ({ title: d.title, description: d.description ?? EMPTY_DOC }),
+    version: (d) => d.version,
+    send: (body, version) => api.patch<TaskDetail>(`/tasks/${taskId}`, { ...body, version }),
+    isConflict,
+    refresh: () => taskQ.refetch({ throwOnError: true }),
+    autosave: true,
+    onSaved: (resp) => { applySaved(resp); setSavedThisVisit(true); },
+  });
+  const textRef = useRef(text);
+  textRef.current = text;
+
+  /* Title: a borderless auto-growing textarea, committed to the draft on blur/Enter */
+  const title = text.draft?.title ?? task?.title ?? '';
   const titleRef = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
-    if (task && document.activeElement !== titleRef.current) setTitle(task.title);
-  }, [task?.title, task]);
   useLayoutEffect(() => {
     const el = titleRef.current;
     if (!el) return;
@@ -154,36 +183,25 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
   }, [title, task]);
   const saveTitle = () => {
     const next = title.trim();
-    if (!task) return;
-    if (!next) { setTitle(task.title); return; }
-    if (next !== task.title) patch({ title: next });
+    if (!next) { text.edit({ title: text.server?.title ?? task?.title ?? '' }); return; }
+    if (next !== title) text.edit({ title: next });
+    void text.save({ auto: true });
   };
 
-  /* ── Description (debounced save) ── */
-  const descRef = useRef<unknown>(null);
-  const savedDescRef = useRef<string>('');
+  /* Description: debounced save of the draft */
   const descTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (task) {
-      descRef.current = task.description ?? EMPTY_DOC;
-      savedDescRef.current = JSON.stringify(task.description ?? EMPTY_DOC);
-    }
-    // Only reset the baseline when a different task loads.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task?.id]);
   const flushDescription = useCallback(() => {
     if (descTimer.current) { clearTimeout(descTimer.current); descTimer.current = null; }
-    const json = JSON.stringify(descRef.current ?? EMPTY_DOC);
-    if (descRef.current != null && json !== savedDescRef.current) {
-      savedDescRef.current = json;
-      patch({ description: descRef.current });
-    }
-  }, [patch]);
+    void textRef.current.save({ auto: true });
+  }, []);
   const onDescChange = (doc: unknown) => {
-    descRef.current = doc;
+    text.edit({ description: doc });
     if (descTimer.current) clearTimeout(descTimer.current);
     descTimer.current = setTimeout(flushDescription, 800);
   };
+  // Leaving the page sends what is pending; if that fails the stored draft
+  // brings it back on return.
+  useEffect(() => () => { if (descTimer.current) flushDescription(); }, [flushDescription]);
 
   /* ── Esc → back to project ── */
   useEffect(() => {
@@ -233,6 +251,16 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
           <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{refLabel}</span>
         </nav>
         <div className="flex shrink-0 items-center gap-1">
+          <DraftStatusLine
+            className="mr-1"
+            status={text.status}
+            persisted={text.persisted}
+            error={text.error}
+            quietWhenSaved={!savedThisVisit}
+            onRetry={() => { void text.save(); }}
+            onSave={() => { void text.save(); }}
+            onDiscard={text.discard}
+          />
           <Tooltip label={t('task.copyRef')}>
             <IconButton size="sm" aria-label={t('task.copyRef')} onClick={copyRef}><Copy size={13} /></IconButton>
           </Tooltip>
@@ -248,13 +276,27 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto min-[1100px]:flex-row min-[1100px]:overflow-hidden">
         <div className="min-[1100px]:min-h-0 min-[1100px]:flex-1 min-[1100px]:overflow-y-auto">
           <div className="page-enter mx-auto w-full max-w-[760px] px-8 pb-10 pt-7">
+            {text.status === 'conflict' && text.server && (
+              <DraftConflictBanner
+                what={t('draft.whatTask', 'task')}
+                onKeepMine={text.keepMine}
+                onTakeTheirs={text.takeTheirs}
+                theirs={(
+                  <div className="space-y-2">
+                    <p className="text-[15px] font-semibold">{text.server.title}</p>
+                    <RichText doc={text.server.description} className="text-[13px]" />
+                  </div>
+                )}
+              />
+            )}
             {/* Title */}
             <textarea
               ref={titleRef}
               rows={1}
               value={title}
               placeholder={t('tasks.title')}
-              onChange={(e) => setTitle(e.target.value)}
+              aria-label={t('tasks.title')}
+              onChange={(e) => text.edit({ title: e.target.value })}
               onBlur={saveTitle}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLTextAreaElement).blur(); }
@@ -265,7 +307,7 @@ export function TaskPage({ projectId, taskId }: { projectId: string; taskId: str
             {/* Description */}
             <div className="task-desc mt-1" onBlur={flushDescription}>
               <RichEditor
-                value={task.description ?? EMPTY_DOC}
+                value={text.draft?.description ?? task.description ?? EMPTY_DOC}
                 onChange={onDescChange}
                 placeholder={t('tasks.addDescription')}
                 compact

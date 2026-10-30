@@ -55,6 +55,7 @@ export function PortalPage({ token }: { token: string }) {
 }
 
 function DocList({ title, docs, base, dateKey, empty }: { title: string; docs: PortalDoc[]; base: 'i' | 'q'; dateKey: 'dueDate' | 'validUntil'; empty: string }) {
+  const t = useT();
   return (
     <Card className="overflow-hidden">
       <div className="border-b border-border px-4 py-2 text-sm font-medium">{title}</div>
@@ -66,7 +67,7 @@ function DocList({ title, docs, base, dateKey, empty }: { title: string; docs: P
             const inner = (
               <>
                 <span className="font-medium">{d.number ?? d.id}</span>
-                <Badge color={color(d.status)}>{d.status ?? 'draft'}</Badge>
+                <Badge color={color(d.status)}>{t(`public.status.${d.status ?? 'draft'}`, t('common.unknown', 'Unknown'))}</Badge>
                 <span className="ml-auto text-muted-foreground">{fmtDate(d[dateKey])}</span>
                 <span className="w-24 text-right tabular-nums">{fmtMoney(d.total ?? 0, d.currency ?? 'USD')}</span>
               </>

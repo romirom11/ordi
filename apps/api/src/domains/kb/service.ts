@@ -639,6 +639,7 @@ export async function updatePage(actor: Actor, id: string, input: any) {
     .where(and(eq(schema.kbPages.id, id), eq(schema.kbPages.version, before.version)));
 
   const after = await loadPage(id);
+  await emit({ type: 'page.updated', aggregateType: 'page', aggregateId: id, payload: { pageId: id, spaceId: after.spaceId }, actorId: actor.userId, actorType: actor.actorType });
   const contentChanged = input.title !== undefined || input.body !== undefined;
   if (contentChanged) {
     await createVersion(id, after.title, after.body, actor.userId);
