@@ -11,7 +11,7 @@ import {
 import type { AppEnv } from '../../context';
 import { env } from '../../env';
 import { err } from '../../lib/errors';
-import { SESSION_COOKIE, requireAuth, currentActor } from '../../core/auth';
+import { SESSION_COOKIE, requireSession, currentActor } from '../../core/auth';
 import { hashPassword, verifyPassword, generateToken, sha256 } from '../../lib/crypto';
 import { checkRate } from '../../lib/rate-limit';
 import { effectivePermissions } from '../../core/rbac';
@@ -182,7 +182,7 @@ export function authRoutes() {
 
   // ── API tokens (PRD §6, §4.5.5) ──
   const tokens = new Hono<AppEnv>();
-  tokens.use('*', requireAuth);
+  tokens.use('*', requireSession);
 
   tokens.get('/', async (c) => {
     const actor = currentActor(c);
@@ -226,7 +226,7 @@ export function authRoutes() {
   const totpCodeSchema = z.object({ code: z.string().min(1) });
 
   const totp = new Hono<AppEnv>();
-  totp.use('*', requireAuth);
+  totp.use('*', requireSession);
 
   totp.get('/', async (c) => {
     const actor = currentActor(c);
@@ -238,9 +238,14 @@ export function authRoutes() {
 
   totp.post('/setup', async (c) => {
     const actor = currentActor(c);
+    const { db } = getDb();
+    // A new secret would switch the enabled factor off without its code;
+    // /disable (which asks for one) is the only way out of an enabled factor.
+    const [current] = await db.select({ totpEnabled: schema.users.totpEnabled })
+      .from(schema.users).where(eq(schema.users.id, actor.userId));
+    if (current?.totpEnabled) throw err.domain('Two-factor authentication is already enabled; disable it first');
     const secret = new OTPAuth.Secret();
     const instance = new OTPAuth.TOTP({ issuer: 'ordi', label: actor.email, secret });
-    const { db } = getDb();
     // Enabled stays false until the user confirms a valid code via /totp/enable.
     await db.update(schema.users).set({ totpSecret: secret.base32, totpEnabled: false })
       .where(eq(schema.users.id, actor.userId));
@@ -325,7 +330,7 @@ export function authRoutes() {
   });
 
   /** The signed-in browser user approves the waiting desktop app. */
-  desktop.post('/approve', requireAuth, async (c) => {
+  desktop.post('/approve', requireSession, async (c) => {
     const body = z.object({ state: z.string() }).parse(await c.req.json());
     const actor = currentActor(c);
     const { db } = getDb();

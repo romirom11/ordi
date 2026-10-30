@@ -40,7 +40,7 @@ export function guard(required: Permission): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const actor = c.get('actor') as Actor | undefined;
     if (!actor) throw err.unauthenticated();
-    if (actor.readOnly && isWritePermission(required)) {
+    if (actor.readOnly && (isMutatingMethod(c.req.method) || isWritePermission(required))) {
       throw err.forbidden('Read-only token', required);
     }
     if (!actor.access.permissions.has(required)) {
@@ -56,6 +56,9 @@ export function guardAll(...required: Permission[]): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const actor = c.get('actor') as Actor | undefined;
     if (!actor) throw err.unauthenticated();
+    if (actor.readOnly && (isMutatingMethod(c.req.method) || required.some(isWritePermission))) {
+      throw err.forbidden('Read-only token', required[0]);
+    }
     for (const p of required) {
       if (!actor.access.permissions.has(p)) throw err.forbidden(`Missing permission ${p}`, p);
     }
@@ -69,9 +72,18 @@ export function publicRoute(): MiddlewareHandler<AppEnv> {
 }
 
 const WRITE_ACTIONS = ['write', 'create', 'delete', 'send', 'payments', 'manage', 'track', 'approve_leave', 'manage_leave', 'recruit', 'manage_spaces'];
-function isWritePermission(p: string): boolean {
+export function isWritePermission(p: string): boolean {
   const action = p.split('.')[1] ?? '';
   return WRITE_ACTIONS.some((a) => action === a || action.startsWith(a));
+}
+
+/**
+ * A read-only token changes nothing, so every guard also refuses it on a
+ * mutating method – the permission name alone is not enough (finance.settings
+ * guards both the reads and the writes of the same settings).
+ */
+export function isMutatingMethod(method: string): boolean {
+  return !['GET', 'HEAD', 'OPTIONS'].includes(method.toUpperCase());
 }
 
 export function hasPerm(actor: Actor, p: Permission): boolean {
