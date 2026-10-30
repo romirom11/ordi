@@ -25,6 +25,7 @@ export * from './calc/git-mentions';
 export * from './calc/fractional';
 export * from './calc/cost';
 export * from './calc/aging';
+export * from './calc/dates';
 export * from './calc/leave';
 export * from './calc/rbac';
 export * from './calc/redaction';

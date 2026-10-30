@@ -28,6 +28,8 @@ export interface PdfDoc {
   discountType?: string;
   discountValue?: string | number;
   amountPaid?: string | number | null;
+  /** Σ credit notes – settles the balance alongside amountPaid (cash only). */
+  amountCredited?: string | number | null;
   notes?: string | null;
   terms?: string | null;
   publicToken: string;
@@ -71,7 +73,7 @@ const LABELS = {
     due: 'Due date', validUntil: 'Valid until', status: 'Status',
     description: 'Description', qty: 'Qty', unit: 'Unit price', amount: 'Amount',
     subtotal: 'Subtotal', discount: 'Discount', tax: 'Tax', total: 'Total',
-    paid: 'Amount paid', balance: 'Balance due', paidInFull: 'Paid in full', notes: 'Notes', terms: 'Terms',
+    paid: 'Amount paid', credited: 'Credited', balance: 'Balance due', paidInFull: 'Paid in full', notes: 'Notes', terms: 'Terms',
     paymentDetails: 'Payment details', taxId: 'Tax ID', viewOnline: 'View online', page: 'Page',
     status_draft: 'Draft', status_sent: 'Sent', status_viewed: 'Viewed', status_partially_paid: 'Partially paid',
     status_paid: 'Paid', status_overdue: 'Overdue', status_canceled: 'Canceled', status_accepted: 'Accepted',
@@ -82,7 +84,7 @@ const LABELS = {
     due: 'Термін оплати', validUntil: 'Дійсна до', status: 'Статус',
     description: 'Опис', qty: 'К-сть', unit: 'Ціна', amount: 'Сума',
     subtotal: 'Проміжна сума', discount: 'Знижка', tax: 'Податок', total: 'Разом',
-    paid: 'Сплачено', balance: 'До сплати', paidInFull: 'Оплачено повністю', notes: 'Примітки', terms: 'Умови',
+    paid: 'Сплачено', credited: 'Зараховано кредит-нотами', balance: 'До сплати', paidInFull: 'Оплачено повністю', notes: 'Примітки', terms: 'Умови',
     paymentDetails: 'Реквізити для оплати', taxId: 'Код', viewOnline: 'Переглянути онлайн', page: 'Сторінка',
     status_draft: 'Чернетка', status_sent: 'Надіслано', status_viewed: 'Переглянуто', status_partially_paid: 'Частково оплачено',
     status_paid: 'Оплачено', status_overdue: 'Прострочено', status_canceled: 'Скасовано', status_accepted: 'Прийнято',
@@ -414,12 +416,15 @@ function render(
     totals.push({ label: L.total, value: fmtMoney(doc.total, cur), bold: true });
   } else {
     const paid = Number(doc.amountPaid ?? 0);
-    const balance = Number(doc.total) - paid;
-    if (paid > 0) {
+    const credited = Number(doc.amountCredited ?? 0);
+    const settled = paid + credited;
+    const balance = Math.round((Number(doc.total) - settled) * 100) / 100;
+    if (settled > 0) {
       totals.push({ label: L.total, value: fmtMoney(doc.total, cur), bold: true });
-      totals.push({ label: L.paid, value: fmtMoney(paid, cur) });
+      if (paid > 0) totals.push({ label: L.paid, value: fmtMoney(paid, cur) });
+      if (credited > 0) totals.push({ label: L.credited, value: fmtMoney(credited, cur) });
     }
-    totals.push({ label: balance <= 0 && paid > 0 ? L.paidInFull : L.balance, value: fmtMoney(Math.max(0, balance), cur), bold: true, final: true });
+    totals.push({ label: balance <= 0 && settled > 0 ? L.paidInFull : L.balance, value: fmtMoney(Math.max(0, balance), cur), bold: true, final: true });
   }
   const totalsW = 230;
   const totalsX = PAGE.width - MARGIN.x - totalsW;

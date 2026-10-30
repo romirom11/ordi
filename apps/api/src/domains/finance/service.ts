@@ -10,7 +10,7 @@ import {
 import { ulid } from 'ulid';
 import {
   computeDocumentTotals, computePaidState, wouldOverpay, computeAging, computeProfitability, utilization,
-  lineAmount, INVOICE_TRANSITIONS, QUOTE_TRANSITIONS,
+  lineAmount, addMonthsIso, INVOICE_TRANSITIONS, QUOTE_TRANSITIONS,
   type InvoiceStatus, type QuoteStatus,
 } from '@ordi/shared';
 import type { Actor } from '../../context';
@@ -171,7 +171,26 @@ export async function listInvoices(params: {
     params.to ? lte(schema.invoices.issueDate, params.to) : undefined,
     params.q ? sql`${schema.invoices.number} ilike ${'%' + params.q + '%'}` : undefined,
   )).orderBy(desc(schema.invoices.createdAt)).limit(params.limit + 1);
-  return rows.map(withOverdue);
+  const credited = await creditedByInvoice(rows.map((r) => r.id));
+  return rows.map((r) => ({ ...withOverdue(r), amountCredited: credited.get(r.id) ?? 0 }));
+}
+
+/**
+ * Σ credit notes per invoice. amount_paid carries cash only, so every balance
+ * shown anywhere is total − amountPaid − amountCredited.
+ */
+export async function creditedByInvoice(ids: string[]): Promise<Map<string, number>> {
+  if (!ids.length) return new Map();
+  const { db } = getDb();
+  const rows = await db.select({
+    invoiceId: schema.creditNotes.invoiceId,
+    amount: sql<string>`coalesce(sum(${schema.creditNotes.amount}), 0)`,
+  }).from(schema.creditNotes).where(inArray(schema.creditNotes.invoiceId, ids)).groupBy(schema.creditNotes.invoiceId);
+  return new Map(rows.map((r) => [r.invoiceId, Number(r.amount)]));
+}
+
+export async function invoiceCredited(id: string): Promise<number> {
+  return (await creditedByInvoice([id])).get(id) ?? 0;
 }
 
 export async function getInvoiceRow(id: string) {
@@ -208,6 +227,7 @@ export async function getInvoice(id: string) {
   const billing = (company[0]?.address ?? {}) as { legalName?: string | null; taxId?: string | null; address?: string | null };
   return {
     ...withOverdue(inv), companyName: company[0]?.name ?? null,
+    amountCredited: Math.round(credits.reduce((sum, cn) => sum + Number(cn.amount), 0) * 100) / 100,
     taxRateLabel: await taxRateLabel(items),
     company: company[0] ? { name: company[0].name, billingEmail: company[0].billingEmail, legalName: billing.legalName ?? null, taxId: billing.taxId ?? null, address: billing.address ?? null } : null,
     items, payments: pays, creditNotes: credits, sends,
@@ -352,7 +372,7 @@ export async function sendInvoice(actor: Actor, id: string, opts: { to?: string;
   if (!(await emailConfigured())) throw err.domain('Outgoing email is not configured – set up SMTP in Settings → Integrations first', { code: 'email_not_configured' });
 
   const items = await db.select().from(schema.invoiceItems).where(eq(schema.invoiceItems.invoiceId, id)).orderBy(schema.invoiceItems.position);
-  const pdf = await renderInvoicePdf({ ...inv, taxRateName: await taxRateLabel(items) }, items, company, workspace);
+  const pdf = await renderInvoicePdf({ ...inv, amountCredited: await invoiceCredited(inv.id), taxRateName: await taxRateLabel(items) }, items, company, workspace);
 
   const isFirstSend = inv.status === 'draft';
   if (isFirstSend) assertTransition(INVOICE_TRANSITIONS, inv.status, 'sent');
@@ -427,7 +447,7 @@ export async function getInvoicePdfBuffer(id: string): Promise<{ buffer: Buffer;
   const company = await getCompanyRow(inv.companyId);
   const workspace = await getWorkspace();
   const items = await db.select().from(schema.invoiceItems).where(eq(schema.invoiceItems.invoiceId, id)).orderBy(schema.invoiceItems.position);
-  return { buffer: await renderInvoicePdf({ ...inv, taxRateName: await taxRateLabel(items) }, items, company, workspace), number: inv.number };
+  return { buffer: await renderInvoicePdf({ ...inv, amountCredited: await invoiceCredited(inv.id), taxRateName: await taxRateLabel(items) }, items, company, workspace), number: inv.number };
 }
 
 export async function softDeleteInvoice(actor: Actor, id: string) {
@@ -817,11 +837,11 @@ export async function deleteRecurring(actor: Actor, id: string) {
 // ─── Recurring payments / subscriptions ─────────────────────────────────────
 /** Advance a YYYY-MM-DD date by one recurring-payment interval (UTC). */
 export function advanceRecurringDate(date: string, interval: string): string {
+  if (interval === 'monthly') return addMonthsIso(date, 1);
+  if (interval === 'quarterly') return addMonthsIso(date, 3);
+  if (interval === 'yearly') return addMonthsIso(date, 12);
   const d = new Date(date + 'T00:00:00Z');
   if (interval === 'weekly') d.setUTCDate(d.getUTCDate() + 7);
-  else if (interval === 'monthly') d.setUTCMonth(d.getUTCMonth() + 1);
-  else if (interval === 'quarterly') d.setUTCMonth(d.getUTCMonth() + 3);
-  else if (interval === 'yearly') d.setUTCFullYear(d.getUTCFullYear() + 1);
   return d.toISOString().slice(0, 10);
 }
 

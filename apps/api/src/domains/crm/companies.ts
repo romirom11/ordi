@@ -228,7 +228,8 @@ export async function companyOverview(actor: Actor, id: string) {
       select currency,
         coalesce(sum(total),0) as invoiced,
         coalesce(sum(amount_paid),0) as paid,
-        coalesce(sum(total - amount_paid) filter (where status not in ('paid','canceled','draft')),0) as receivables
+        coalesce(sum(total - amount_paid - coalesce((select sum(cn.amount) from credit_notes cn where cn.invoice_id = invoices.id),0))
+          filter (where status not in ('paid','canceled','draft')),0) as receivables
       from invoices where company_id = ${id} and deleted_at is null group by currency`);
     const [unbilled] = await db.execute(sql`
       select coalesce(sum(duration_seconds),0)/3600.0 as unbilled_hours from time_entries te

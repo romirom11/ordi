@@ -49,6 +49,7 @@ interface InvoiceRow {
   issueDate?: string | null;
   total?: number | string | null;
   amountPaid?: number | string | null;
+  amountCredited?: number | string | null;
   currency?: string | null;
   isOverdue?: boolean;
 }
@@ -325,7 +326,7 @@ function InvoicesSection({ companyId }: { companyId: string }) {
   const currency = invoices[0]?.currency ?? 'USD';
   const outstanding = invoices.reduce((sum, iv) => {
     if (iv.status === 'canceled') return sum;
-    return sum + (Number(iv.total ?? 0) - Number(iv.amountPaid ?? 0));
+    return sum + (Number(iv.total ?? 0) - Number(iv.amountPaid ?? 0) - Number(iv.amountCredited ?? 0));
   }, 0);
 
   return (
