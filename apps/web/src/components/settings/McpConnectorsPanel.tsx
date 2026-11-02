@@ -12,6 +12,7 @@ import {
   Cable, ExternalLink, MoreHorizontal, Plug2, Plus, RotateCcw, ShieldCheck, Trash2, Wrench, X,
 } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
+import { startExternalFlow } from '../../lib/desktop';
 import { useCan } from '../../lib/auth';
 import { useMcpConnectors, useUsersLookup, type McpConnectorLookup } from '../../lib/queries';
 import {
@@ -64,6 +65,7 @@ extendDict({
     'connectors.deleted': 'Connector deleted',
     'connectors.oauthConnected': 'Connector authorized',
     'connectors.oauthFailed': 'Authorization failed',
+    'connectors.continueInBrowser': 'Continue in your browser – this page updates when you come back.',
     'connectors.saveFailed': 'Could not save the connector',
     'connectors.created': 'Connector added',
     // Add dialog
@@ -132,6 +134,7 @@ extendDict({
     'connectors.deleted': 'Конектор видалено',
     'connectors.oauthConnected': 'Конектор авторизовано',
     'connectors.oauthFailed': 'Не вдалося авторизувати',
+    'connectors.continueInBrowser': 'Продовжіть у браузері – сторінка оновиться, коли повернетеся.',
     'connectors.saveFailed': 'Не вдалося зберегти конектор',
     'connectors.created': 'Конектор додано',
     // Add dialog
@@ -223,8 +226,12 @@ function ConnectorCard({ conn, users }: { conn: McpConnectorLookup; users: { id:
     try {
       const { authorizationUrl } = await api.post<{ authorizationUrl: string | null }>(`/mcp-connectors/${conn.id}/oauth/start`, {});
       if (!authorizationUrl) { toast(t('connectors.alreadyAuthorized')); invalidate(); setAuthorizing(false); return; }
-      // Consent happens on the provider; the API redirects back to this tab.
-      window.location.assign(authorizationUrl);
+      // Consent happens on the provider; the API redirects back to this tab –
+      // or, on desktop, finishes in the system browser (startExternalFlow).
+      if (startExternalFlow(authorizationUrl, invalidate)) {
+        setAuthorizing(false);
+        toast(t('connectors.continueInBrowser'));
+      }
     } catch (e) {
       setAuthorizing(false);
       toast.error(errMessage(e, t('connectors.oauthFailed')));

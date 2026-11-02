@@ -52,7 +52,6 @@ extendDict({
     'intake.formLink': 'Form link',
     'intake.copyLink': 'Copy link',
     'intake.linkCopied': 'Link copied',
-    'intake.formDisabledHint': 'The link stops working while the form is off.',
     'intake.mailTitle': 'Email intake (IMAP mailbox)',
     'intake.mailHint': 'Every unseen email in the folder becomes a request and is marked as read – use a dedicated mailbox that no human reads. Checked every 10 minutes.',
     'intake.mailHost': 'IMAP host',
@@ -63,6 +62,7 @@ extendDict({
     'intake.mailPassKeep': 'Leave blank to keep the current password.',
     'intake.mailFolder': 'Folder',
     'intake.mailDisconnect': 'Disconnect',
+    'intake.mailConnect': 'Connect mailbox',
     'intake.mailDisconnected': 'Mailbox disconnected',
   },
   uk: {
@@ -91,7 +91,6 @@ extendDict({
     'intake.formLink': 'Посилання на форму',
     'intake.copyLink': 'Скопіювати посилання',
     'intake.linkCopied': 'Посилання скопійовано',
-    'intake.formDisabledHint': 'Поки форма вимкнена, посилання не працює.',
     'intake.mailTitle': 'Запити з пошти (IMAP-скринька)',
     'intake.mailHint': 'Кожен непрочитаний лист у теці стає запитом і позначається прочитаним – використовуйте окрему скриньку, яку ніхто не читає. Перевірка кожні 10 хвилин.',
     'intake.mailHost': 'IMAP-хост',
@@ -102,6 +101,7 @@ extendDict({
     'intake.mailPassKeep': 'Залиште порожнім, щоб зберегти поточний пароль.',
     'intake.mailFolder': 'Тека',
     'intake.mailDisconnect': 'Відключити',
+    'intake.mailConnect': 'Підключити скриньку',
     'intake.mailDisconnected': 'Скриньку відключено',
   },
 });
@@ -383,16 +383,17 @@ export function IntakeSettingsSection({ projectId }: { projectId: string }) {
               </div>
               <Switch checked={settings.formEnabled} onChange={(next) => patch.mutate(next)} disabled={patch.isPending} />
             </div>
-            <div className="flex items-center justify-between gap-4 border-t border-border py-3">
-              <div className="min-w-0">
-                <p className="text-[13px] font-medium">{t('intake.formLink')}</p>
-                <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground" title={link}>{link}</p>
-                {!settings.formEnabled && <p className="mt-0.5 text-xs text-warning">{t('intake.formDisabledHint')}</p>}
+            {settings.formEnabled && (
+              <div className="flex items-center justify-between gap-4 border-t border-border py-3">
+                <div className="min-w-0">
+                  <p className="text-[13px] font-medium">{t('intake.formLink')}</p>
+                  <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground" title={link}>{link}</p>
+                </div>
+                <Button size="xs" variant="outline" className="shrink-0" onClick={copy}>
+                  <Copy size={12} /> {t('intake.copyLink')}
+                </Button>
               </div>
-              <Button size="xs" variant="outline" className="shrink-0" onClick={copy}>
-                <Copy size={12} /> {t('intake.copyLink')}
-              </Button>
-            </div>
+            )}
             <MailboxSettings projectId={projectId} mailbox={settings.mailbox ?? null} />
           </>
         )}
@@ -401,7 +402,11 @@ export function IntakeSettingsSection({ projectId }: { projectId: string }) {
   );
 }
 
-/** IMAP mailbox form: emails in a dedicated folder become intake requests. */
+/**
+ * IMAP mailbox form: emails in a dedicated folder become intake requests.
+ * Independent of the public form toggle – the poller reads a connected mailbox
+ * either way – so it stays visible, but collapsed until a mailbox is set up.
+ */
 function MailboxSettings({ projectId, mailbox }: {
   projectId: string;
   mailbox: NonNullable<IntakeSettings['mailbox']> | null;
@@ -414,6 +419,7 @@ function MailboxSettings({ projectId, mailbox }: {
   const [user, setUser] = useState(mailbox?.user ?? '');
   const [pass, setPass] = useState('');
   const [folder, setFolder] = useState(mailbox?.folder ?? '');
+  const [editing, setEditing] = useState(false);
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['intake-settings', projectId] });
   const onError = (cause: unknown) => toast.error(cause instanceof ApiError ? cause.message : t('common.saveFailed'));
@@ -437,6 +443,7 @@ function MailboxSettings({ projectId, mailbox }: {
     mutationFn: () => api.patch(`/projects/${projectId}/intake-settings`, { mailbox: null }),
     onSuccess: () => {
       setHost(''); setPort(''); setSecure(true); setUser(''); setPass(''); setFolder('');
+      setEditing(false);
       refresh();
       toast(t('intake.mailDisconnected'));
     },
@@ -444,6 +451,20 @@ function MailboxSettings({ projectId, mailbox }: {
   });
 
   const busy = save.isPending || disconnect.isPending;
+
+  if (!mailbox && !editing) {
+    return (
+      <div className="flex items-center justify-between gap-4 border-t border-border py-3">
+        <div className="min-w-0">
+          <p className="text-[13px] font-medium">{t('intake.mailTitle')}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{t('intake.mailHint')}</p>
+        </div>
+        <Button size="xs" variant="outline" className="shrink-0" onClick={() => setEditing(true)}>
+          <Mail size={12} /> {t('intake.mailConnect')}
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <form
@@ -495,9 +516,13 @@ function MailboxSettings({ projectId, mailbox }: {
         <Input value={folder} onChange={(event) => setFolder(event.target.value)} placeholder="INBOX" />
       </div>
       <div className="flex items-center justify-end gap-2">
-        {mailbox && (
+        {mailbox ? (
           <Button type="button" size="sm" variant="destructive" disabled={busy} onClick={() => disconnect.mutate()}>
             {disconnect.isPending ? <Spinner /> : t('intake.mailDisconnect')}
+          </Button>
+        ) : (
+          <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => setEditing(false)}>
+            {t('common.cancel')}
           </Button>
         )}
         <Button type="submit" size="sm" disabled={busy || !host.trim() || !user.trim()}>

@@ -18,9 +18,11 @@ import { verifyOAuthState, exchangeGithubCode, exchangeSlackCode } from '../inte
 import {
   convertManifestCode, githubAppConfigured, getInstallation, listInstallationRepos,
   upsertInstallationConnection, syncInstallationRepos,
+  buildAppManifest, manifestActionUrl, renderManifestLaunchPage,
 } from '../integrations/github-app';
 import { syncGitLink, type GitCandidate } from '../integrations/git-links';
 import { bitbucketCandidates } from '../integrations/bitbucket';
+import { completeConnectorOAuth } from '../agents/connector-oauth';
 import { storeGithubAppConfig, runtimeConfig } from '../../lib/runtime-config';
 import { renderInvoicePdf, renderQuotePdf } from '../finance/pdf';
 import { taxRateLabel, invoiceCredited } from '../finance/service';
@@ -437,6 +439,44 @@ export function publicRoutes() {
     } catch {
       return c.redirect(`${appUrl}/settings/integrations?git=error`);
     }
+  });
+
+  // ── MCP connector OAuth callback – public; the provider redirects the
+  // browser here after consent. No session: the redirect carries no bearer
+  // header and the desktop app has no cookie, so the consent may well finish
+  // in the system browser. The single-use state stored at the guarded start
+  // authenticates it and names the admin (completeConnectorOAuth). ──
+  app.get('/mcp-connectors/oauth/callback', async (c) => {
+    const q = c.req.query();
+    const back = `${env.appUrl.replace(/\/$/, '')}/settings/connectors`;
+    if (q.error || !q.code || !q.state) {
+      return c.redirect(`${back}?oauth=error&reason=${encodeURIComponent(q.error_description ?? q.error ?? 'missing code')}`);
+    }
+    try {
+      const done = await completeConnectorOAuth(q.code, q.state);
+      return c.redirect(`${back}?oauth=connected&connector=${encodeURIComponent(done.slug)}`);
+    } catch (e) {
+      return c.redirect(`${back}?oauth=error&reason=${encodeURIComponent((e as Error).message)}`);
+    }
+  });
+
+  // ── GitHub App manifest launch – public; the desktop app opens it in the
+  // system browser (see manifestLaunchUrl). The signed state, issued by the
+  // guarded POST /integrations/github-app/manifest, stands in for the session
+  // the browser does not have; the page itself changes nothing, it only posts
+  // the manifest to GitHub. ──
+  app.get('/integrations/github-app/manifest/launch', async (c) => {
+    const appUrl = env.appUrl.replace(/\/$/, '');
+    const state = c.req.query('state');
+    if (!verifyOAuthState(state)) return c.redirect(`${appUrl}/settings/integrations?githubApp=error`);
+    const organization = c.req.query('organization')?.trim() || undefined;
+    const { db } = getDb();
+    const [ws] = await db.select({ name: schema.workspaceSettings.name })
+      .from(schema.workspaceSettings).where(eq(schema.workspaceSettings.id, 'workspace'));
+    return c.html(renderManifestLaunchPage(
+      manifestActionUrl(state!, organization),
+      JSON.stringify(buildAppManifest(ws?.name || 'ordi')),
+    ));
   });
 
   // ── GitHub App setup callback (PRD §13.1) – public; GitHub redirects here

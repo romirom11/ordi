@@ -114,6 +114,28 @@ describe('manifest flow', () => {
     expect((await guest.post('/integrations/github-app/manifest', {})).status).toBe(403);
   });
 
+  // Desktop: the system browser opens launchUrl, which must post the same
+  // manifest to GitHub without a session of its own.
+  it('launch page posts the manifest to GitHub on a valid state, without a session', async () => {
+    const owner = reqAs(users.owner!.cookie);
+    const { launchUrl } = await json(owner.post('/integrations/github-app/manifest', { organization: 'kdnx' }));
+    const url = new URL(launchUrl);
+    expect(url.pathname).toBe('/api/v1/integrations/github-app/manifest/launch');
+    const res = await app.request(`${url.pathname}${url.search}`);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('action="https://github.com/organizations/kdnx/settings/apps/new?state=');
+    const value = html.match(/name="manifest" value="([^"]*)"/)?.[1];
+    const manifest = JSON.parse(value!.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'));
+    expect(manifest.redirect_url).toContain('/api/v1/integrations/github-app/setup');
+  });
+
+  it('launch page refuses a forged state', async () => {
+    const res = await app.request('/api/v1/integrations/github-app/manifest/launch?state=forged.sig');
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toContain('githubApp=error');
+  });
+
   it('setup callback rejects a forged state', async () => {
     const res = await app.request('/api/v1/integrations/github-app/setup?code=abc&state=forged.sig');
     expect(res.status).toBe(302);

@@ -1,11 +1,12 @@
 /**
- * Theme handling: system (default), light, or dark. The choice is stored in
+ * Theme handling: dark (default), light, or system. The choice is stored in
  * localStorage and applied as data-theme on <html> before React paints
  * (applyStoredTheme is called from main.tsx at module load).
  *
  * The surface style is a second, independent axis: `classic` (solid panels)
  * or `glass` (translucent panels over an ambient backdrop). It works with
- * either colour theme and lands on <html> as data-style.
+ * either colour theme and lands on <html> as data-style. A new installation
+ * starts on Glass Dark; an explicitly stored choice always wins.
  */
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 
@@ -18,9 +19,9 @@ const STYLE_KEY = 'ordi:style';
 
 export function getStoredStyle(): StylePref {
   try {
-    if (localStorage.getItem(STYLE_KEY) === 'glass') return 'glass';
+    if (localStorage.getItem(STYLE_KEY) === 'classic') return 'classic';
   } catch { /* private mode */ }
-  return 'classic';
+  return 'glass';
 }
 
 function applyStyle(style: StylePref) {
@@ -33,7 +34,7 @@ export function getStoredTheme(): ThemePref {
     const v = localStorage.getItem(KEY);
     if (v === 'light' || v === 'dark' || v === 'system') return v;
   } catch { /* private mode */ }
-  return 'system';
+  return 'dark';
 }
 
 function resolve(pref: ThemePref): 'dark' | 'light' {
@@ -57,7 +58,7 @@ interface ThemeCtx {
   style: StylePref;
   setStyle: (s: StylePref) => void;
 }
-const Ctx = createContext<ThemeCtx>({ pref: 'system', setPref: () => {}, resolved: 'dark', style: 'classic', setStyle: () => {} });
+const Ctx = createContext<ThemeCtx>({ pref: 'dark', setPref: () => {}, resolved: 'dark', style: 'glass', setStyle: () => {} });
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [pref, setPrefState] = useState<ThemePref>(getStoredTheme);

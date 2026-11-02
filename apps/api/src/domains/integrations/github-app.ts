@@ -62,6 +62,34 @@ export function buildAppManifest(workspaceName: string): Record<string, unknown>
 }
 
 /** Where the manifest form POSTs to: user account or an organization. */
+/**
+ * A GET address that posts the manifest to GitHub (renderManifestLaunchPage).
+ * The desktop app hands app creation to the system browser, and a browser can
+ * be given a URL to open but not a form to submit.
+ */
+export function manifestLaunchUrl(state: string, organization?: string): string {
+  const query = new URLSearchParams({ state });
+  if (organization) query.set('organization', organization);
+  return `${env.apiUrl}/api/v1/integrations/github-app/manifest/launch?${query}`;
+}
+
+const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '"': '&quot;', '<': '&lt;', '>': '&gt;', "'": '&#39;' };
+const escapeHtml = (value: string) => value.replace(/[&"<>']/g, (ch) => HTML_ESCAPES[ch]!);
+
+/** A page that submits the manifest form to GitHub as soon as it loads. */
+export function renderManifestLaunchPage(actionUrl: string, manifest: string): string {
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Creating the GitHub App…</title></head>
+<body style="font-family:system-ui,sans-serif;padding:3rem;text-align:center">
+<form id="manifest" method="post" action="${escapeHtml(actionUrl)}">
+<input type="hidden" name="manifest" value="${escapeHtml(manifest)}">
+<p>Taking you to GitHub to create the app…</p>
+<button type="submit">Continue to GitHub</button>
+</form>
+<script>document.getElementById('manifest').submit();</script>
+</body></html>`;
+}
+
 export function manifestActionUrl(state: string, organization?: string): string {
   const base = organization
     ? `https://github.com/organizations/${encodeURIComponent(organization)}/settings/apps/new`

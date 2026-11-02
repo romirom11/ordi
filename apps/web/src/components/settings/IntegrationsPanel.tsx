@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { BitbucketIcon } from '../BitbucketIcon';
+import { isTauri, startExternalFlow } from '../../lib/desktop';
 import { useCan } from '../../lib/auth';
 import {
   Button, IconButton, Input, Select, Badge, Skeleton, Spinner, fmtDate, cn,
@@ -45,6 +46,8 @@ extendDict({
     'settings.ghAppOrgPlaceholder': 'my-company',
     'settings.ghAppOrgHint': 'Leave empty to create the app on your personal account.',
     'settings.ghAppInstall': 'Install',
+    'settings.ghAppManageRepos': 'Choose repositories',
+    'settings.continueInBrowser': 'Continue in your browser – this page updates when you come back.',
     'settings.ghAppInstallHint': 'Install the app on an organization or account and pick repositories – they sync automatically.',
     'settings.ghAppCreated': 'GitHub App created – now install it',
     'settings.ghAppInstalled': 'GitHub App installed, repositories synced',
@@ -137,6 +140,8 @@ extendDict({
     'settings.ghAppOrgPlaceholder': 'my-company',
     'settings.ghAppOrgHint': 'Залиште порожнім, щоб створити застосунок на особистому акаунті.',
     'settings.ghAppInstall': 'Встановити',
+    'settings.ghAppManageRepos': 'Обрати репозиторії',
+    'settings.continueInBrowser': 'Продовжіть у браузері – сторінка оновиться, коли повернетеся.',
     'settings.ghAppInstallHint': 'Встановіть застосунок на організацію чи акаунт і оберіть репозиторії – вони синхронізуються автоматично.',
     'settings.ghAppCreated': 'GitHub App створено – тепер встановіть його',
     'settings.ghAppInstalled': 'GitHub App встановлено, репозиторії синхронізовано',
@@ -248,9 +253,16 @@ function GitHubCard() {
   const configured = oauth.data?.configured;
   const appConfigured = ghApp.data?.configured;
   const githubConnected = conns.some((c) => c.provider === 'github');
+  // The app is private (manifest `public: false`), so GitHub lets it live on
+  // its owner account only: once installed, the same URL opens that
+  // installation's repository picker rather than installing anything anew.
+  const appInstalled = conns.some((c) => c.kind === 'app');
 
   const [connecting, setConnecting] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
+  const refreshGithub = () => {
+    for (const key of ['gitOAuthStatus', 'githubAppStatus', 'gitConnections']) qc.invalidateQueries({ queryKey: [key] });
+  };
   const [conn, setConn] = useState({ provider: 'github', instanceUrl: '', token: '' });
   const [toDelete, setToDelete] = useState<GitConnection | null>(null);
   const [appOrg, setAppOrg] = useState('');
@@ -260,7 +272,7 @@ function GitHubCard() {
     setConnecting(true);
     try {
       const { url } = await api.get<{ url: string }>('/integrations/git/oauth/start');
-      window.location.href = url;
+      if (startExternalFlow(url, refreshGithub)) { setConnecting(false); toast(t('settings.continueInBrowser')); }
     } catch {
       setConnecting(false);
       toast.error(t('settings.githubConnectError'));
@@ -270,10 +282,18 @@ function GitHubCard() {
   const createApp = async () => {
     setCreatingApp(true);
     try {
-      const { actionUrl, manifest } = await api.post<{ actionUrl: string; manifest: string }>(
+      const { actionUrl, manifest, launchUrl } = await api.post<{ actionUrl: string; manifest: string; launchUrl: string }>(
         '/integrations/github-app/manifest',
         { organization: appOrg.trim() || undefined },
       );
+      // GitHub takes the manifest as a form POST, which the system browser
+      // cannot be handed – on desktop it opens an API page that posts it.
+      if (isTauri) {
+        startExternalFlow(launchUrl, refreshGithub);
+        setCreatingApp(false);
+        toast(t('settings.continueInBrowser'));
+        return;
+      }
       postManifestToGithub(actionUrl, manifest);
     } catch {
       setCreatingApp(false);
@@ -313,8 +333,14 @@ function GitHubCard() {
           </StatusChip>
         )}
         {appConfigured && ghApp.data?.installUrl && (
-          <Button size="sm" onClick={() => { window.location.href = ghApp.data!.installUrl!; }}>
-            <Github size={14} /> {t('settings.ghAppInstall')}
+          <Button
+            size="sm"
+            variant={appInstalled ? 'outline' : undefined}
+            onClick={() => {
+              if (startExternalFlow(ghApp.data!.installUrl!, refreshGithub)) toast(t('settings.continueInBrowser'));
+            }}
+          >
+            <Github size={14} /> {t(appInstalled ? 'settings.ghAppManageRepos' : 'settings.ghAppInstall')}
           </Button>
         )}
       </div>
@@ -668,7 +694,10 @@ function SlackCard() {
     setConnecting(true);
     try {
       const { url } = await api.get<{ url: string }>('/integrations/slack/oauth/start');
-      window.location.href = url;
+      if (startExternalFlow(url, () => qc.invalidateQueries({ queryKey: ['slackStatus'] }))) {
+        setConnecting(false);
+        toast(t('settings.continueInBrowser'));
+      }
     } catch {
       setConnecting(false);
       toast.error(t('settings.slackConnectError'));

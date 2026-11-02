@@ -108,6 +108,33 @@ export function openExternal(url: string): void {
   window.open(url, '_blank', 'noopener');
 }
 
+/**
+ * Send the user through a flow that runs on a provider's site – OAuth consent,
+ * installing the GitHub App – and comes back by redirect. On the web the tab
+ * itself goes there. The desktop window must not: it would end up on GitHub
+ * (or, after the redirect, on the web build of ordi) with no way back, so the
+ * system browser takes the flow instead. The provider's callback finishes it
+ * on the server – they are public, authenticated by a signed state – and
+ * `onReturn` runs whenever the window regains focus afterwards, for the
+ * caller to refetch what the flow changed. Returns whether it left the app,
+ * i.e. whether the caller should stop showing a spinner.
+ */
+export function startExternalFlow(url: string, onReturn?: () => void): boolean {
+  if (!isTauri) { window.location.assign(url); return false; }
+  void openInBrowser(url);
+  if (onReturn) {
+    const stop = Date.now() + RETURN_WATCH_MS;
+    const onFocus = () => {
+      if (Date.now() > stop) { window.removeEventListener('focus', onFocus); return; }
+      onReturn();
+    };
+    window.addEventListener('focus', onFocus);
+  }
+  return true;
+}
+/** How long a flow started from the desktop window keeps refetching on focus. */
+const RETURN_WATCH_MS = 15 * 60_000;
+
 /** An href that names its own scheme; anything else resolves against the app. */
 const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
 /** The schemes the operating system owns rather than the app window. */

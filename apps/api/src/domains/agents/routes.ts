@@ -19,7 +19,7 @@ import { err } from '../../lib/errors';
 import * as credentials from './credentials';
 import * as profiles from './profiles';
 import * as connectors from './connectors';
-import { startConnectorOAuth, completeConnectorOAuth, revokeConnectorOAuth, connectorCallbackUrl } from './connector-oauth';
+import { startConnectorOAuth, revokeConnectorOAuth, connectorCallbackUrl } from './connector-oauth';
 import * as runs from './runs';
 import { listWorkers } from './run-service';
 import { runtimeAdapter } from './runtime';
@@ -94,22 +94,6 @@ export function agentsRoutes() {
   app.post('/mcp-connectors/custom', guard('integrations.manage'), async (c) => {
     const body = customMcpConnectorInputSchema.parse(await c.req.json());
     return c.json(await connectors.createCustomConnector(currentActor(c), body), 201);
-  });
-
-  // The browser lands here after consent. Registered before /:id so the
-  // literal segment wins.
-  app.get('/mcp-connectors/oauth/callback', guard('integrations.manage'), async (c) => {
-    const q = z.object({ code: z.string().optional(), state: z.string().optional(), error: z.string().optional(), error_description: z.string().optional() }).parse(c.req.query());
-    const back = `${env.appUrl.replace(/\/$/, '')}/settings/connectors`;
-    if (q.error || !q.code || !q.state) {
-      return c.redirect(`${back}?oauth=error&reason=${encodeURIComponent(q.error_description ?? q.error ?? 'missing code')}`);
-    }
-    try {
-      const done = await completeConnectorOAuth(currentActor(c), q.code, q.state);
-      return c.redirect(`${back}?oauth=connected&connector=${encodeURIComponent(done.slug)}`);
-    } catch (e) {
-      return c.redirect(`${back}?oauth=error&reason=${encodeURIComponent((e as Error).message)}`);
-    }
   });
 
   app.get('/mcp-connectors/:id', guard('integrations.manage'), async (c) => c.json(await connectors.getConnector(c.req.param('id'))));
