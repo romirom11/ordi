@@ -5,14 +5,14 @@ import {
   Clock, Receipt, Users, Settings, Search, LogOut, LayoutGrid, CalendarRange,
   SquarePen, Sun, Moon, Monitor, ChevronDown, ChevronRight, GripVertical, User as UserIcon,
   SquareArrowOutUpRight, Link as LinkIcon, ArrowUp, ArrowDown,
-  MonitorDown, UserPlus, PanelLeft, X,
+  MonitorDown, UserPlus, PanelLeft, X, Square, Sparkles,
 } from 'lucide-react';
 import { Link, usePathname, useNavigate } from '../lib/router';
 import { useMe, useCan } from '../lib/auth';
 import { appOrigin, api, setSessionToken } from '../lib/api';
 import { useRealtime } from '../lib/sse';
 import { useT, extendDict } from '../lib/i18n';
-import { useTheme, type ThemePref } from '../lib/theme';
+import { useTheme, type StylePref, type ThemePref } from '../lib/theme';
 import { initDesktop, restartDesktop, isTauri, isMacDesktop } from '../lib/desktop';
 import { TabsProvider, useTabs } from '../lib/tabs';
 import { Avatar, cn, Kbd, Tooltip, IconButton } from './ui';
@@ -176,7 +176,7 @@ function ShellInner({ children }: { children: ReactNode }) {
   const tabs = useTabs();
   const activeTimer = useActiveTimer(can('time.track'));
   const stopTimer = useStopTimer();
-  const { pref: themePref, setPref: setThemePref } = useTheme();
+  const { pref: themePref, setPref: setThemePref, style: surfaceStyle, setStyle: setSurfaceStyle } = useTheme();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
   const [keysOpen, setKeysOpen] = useState(false);
@@ -395,6 +395,10 @@ function ShellInner({ children }: { children: ReactNode }) {
     { key: 'light', label: t('theme.light'), icon: <Sun size={14} /> },
     { key: 'system', label: t('theme.system'), icon: <Monitor size={14} /> },
   ];
+  const styleItems: { key: StylePref; label: string; icon: ReactNode }[] = [
+    { key: 'classic', label: t('theme.styleClassic'), icon: <Square size={14} /> },
+    { key: 'glass', label: t('theme.styleGlass'), icon: <Sparkles size={14} /> },
+  ];
 
   /** Reorder without dragging – the context-menu equivalent of drag & drop. */
   const moveWithinSection = (key: string, delta: number) => {
@@ -589,6 +593,13 @@ function ShellInner({ children }: { children: ReactNode }) {
                 </MenuItem>
               ))}
               <MenuSeparator />
+              <MenuLabel>{t('theme.style')}</MenuLabel>
+              {styleItems.map((it) => (
+                <MenuItem key={it.key} icon={it.icon} checked={surfaceStyle === it.key} onSelect={() => setSurfaceStyle(it.key)}>
+                  {it.label}
+                </MenuItem>
+              ))}
+              <MenuSeparator />
               <MenuItem icon={<LogOut size={14} />} danger onSelect={logout}>{t('nav.signOut')}</MenuItem>
             </DropdownMenu>
           </ContextMenu>
@@ -728,7 +739,7 @@ function ShellInner({ children }: { children: ReactNode }) {
         />
         <VersionGuard />
         {realtime.reconnecting && <p role="status" className="px-3 py-1 text-xs text-muted-foreground">{t('common.reconnecting')}</p>}
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-sm">
+        <div className="app-surface flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-sm">
           <div
             ref={contentRef}
             key={contentKey}

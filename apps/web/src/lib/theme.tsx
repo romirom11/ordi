@@ -2,12 +2,31 @@
  * Theme handling: system (default), light, or dark. The choice is stored in
  * localStorage and applied as data-theme on <html> before React paints
  * (applyStoredTheme is called from main.tsx at module load).
+ *
+ * The surface style is a second, independent axis: `classic` (solid panels)
+ * or `glass` (translucent panels over an ambient backdrop). It works with
+ * either colour theme and lands on <html> as data-style.
  */
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 
 export type ThemePref = 'dark' | 'light' | 'system';
 
+export type StylePref = 'classic' | 'glass';
+
 const KEY = 'ordi:theme';
+const STYLE_KEY = 'ordi:style';
+
+export function getStoredStyle(): StylePref {
+  try {
+    if (localStorage.getItem(STYLE_KEY) === 'glass') return 'glass';
+  } catch { /* private mode */ }
+  return 'classic';
+}
+
+function applyStyle(style: StylePref) {
+  if (style === 'glass') document.documentElement.dataset.style = 'glass';
+  else delete document.documentElement.dataset.style;
+}
 
 export function getStoredTheme(): ThemePref {
   try {
@@ -28,14 +47,28 @@ function apply(pref: ThemePref) {
 
 export function applyStoredTheme(): void {
   apply(getStoredTheme());
+  applyStyle(getStoredStyle());
 }
 
-interface ThemeCtx { pref: ThemePref; setPref: (p: ThemePref) => void; resolved: 'dark' | 'light' }
-const Ctx = createContext<ThemeCtx>({ pref: 'system', setPref: () => {}, resolved: 'dark' });
+interface ThemeCtx {
+  pref: ThemePref;
+  setPref: (p: ThemePref) => void;
+  resolved: 'dark' | 'light';
+  style: StylePref;
+  setStyle: (s: StylePref) => void;
+}
+const Ctx = createContext<ThemeCtx>({ pref: 'system', setPref: () => {}, resolved: 'dark', style: 'classic', setStyle: () => {} });
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [pref, setPrefState] = useState<ThemePref>(getStoredTheme);
   const [systemTheme, setSystemTheme] = useState(() => resolve('system'));
+  const [style, setStyleState] = useState<StylePref>(getStoredStyle);
+
+  const setStyle = (next: StylePref) => {
+    setStyleState(next);
+    try { localStorage.setItem(STYLE_KEY, next); } catch { /* private mode */ }
+    applyStyle(next);
+  };
 
   const setPref = (p: ThemePref) => {
     setPrefState(p);
@@ -54,7 +87,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => mq.removeEventListener('change', onChange);
   }, [pref]);
 
-  return <Ctx.Provider value={{ pref, setPref, resolved: pref === 'system' ? systemTheme : pref }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ pref, setPref, resolved: pref === 'system' ? systemTheme : pref, style, setStyle }}>{children}</Ctx.Provider>;
 }
 
 export function useTheme(): ThemeCtx {
