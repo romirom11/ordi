@@ -125,8 +125,11 @@ makes the invariants directly testable.
   (SIL OFL), so Cyrillic renders where the built-in WinAnsi fonts could not.
   The earlier Typst-or-fallback pair produced an unbranded monospace document
   on every real deploy, because no image shipped Typst.
-- **Email** (`lib/email.ts`): Nodemailer + SMTP; without SMTP configured it logs
-  (dev) instead of sending. User-initiated document sends stay synchronous because
+- **Email** (`lib/email.ts`): Nodemailer + SMTP, one transport per mail sender
+  (Settings → Email; stored in `workspace_settings.integrations.mailSenders`
+  with a system and an invoice role, `SMTP_URL` as a read-only "env" sender).
+  Queued deliveries carry `sender_id`; an id deleted since falls back to the
+  system sender. Without any sender it logs (dev) instead of sending. User-initiated document sends stay synchronous because
   the user needs an immediate result; event-driven notifications and reminders
   use `email_deliveries` so SMTP latency never blocks the outbox relay. **S3**
   (`lib/s3.ts`): presigned upload/download; without an endpoint it returns a

@@ -2,13 +2,14 @@
  * Scheduled jobs (PRD §8.4, §8.7, §11.5, §11.6). All idempotent: safe to run more
  * often than required (reminder_log dedup, next_run guards, per-day snapshot unique).
  */
-import { getDb, schema, eq, and, lte, isNull, sql, inArray } from '@ordi/db';
+import { getDb, schema, eq, and, lte, isNull, sql, inArray, desc } from '@ordi/db';
 import { ulid } from 'ulid';
 import { computeDocumentTotals, addMonthsIso } from '@ordi/shared';
 import { emit } from '../core/events';
 import { postExpense } from '../domains/finance/ledger.service';
 import { appLink, asLocale, loadBranding, renderEmail, tr } from '../lib/email-templates';
 import { logger } from '../lib/logger';
+import { runtimeConfig } from '../lib/runtime-config';
 import { enqueueEmail, type QueuedEmailInput } from './email-delivery';
 import { sweepCredentialExpiry } from '../domains/agents/credentials';
 
@@ -144,6 +145,18 @@ export async function runRecurringPayments(): Promise<void> {
   if (due.length) logger.info({ count: due.length }, 'recurring payments processed');
 }
 
+/** The mail sender of an invoice's most recent send, from the activity log. */
+async function lastInvoiceSenderId(invoiceId: string): Promise<string | null> {
+  const { db } = getDb();
+  const [row] = await db.select({ diff: schema.activityLog.diff }).from(schema.activityLog)
+    .where(and(eq(schema.activityLog.entityType, 'invoice'), eq(schema.activityLog.entityId, invoiceId), eq(schema.activityLog.action, 'sent')))
+    .orderBy(desc(schema.activityLog.createdAt))
+    .limit(1);
+  // Per-field diff: { senderId: { from: null, to: '<id>' } }.
+  const senderId = (row?.diff as { senderId?: { to?: unknown } } | undefined)?.senderId?.to;
+  return typeof senderId === 'string' ? senderId : null;
+}
+
 /** Invoice reminders per reminder_rules, idempotent via reminder_log. */
 export async function runReminders(): Promise<void> {
   const { db } = getDb();
@@ -151,6 +164,7 @@ export async function runReminders(): Promise<void> {
   if (!rules.length) return;
   const openInvoices = await db.select().from(schema.invoices)
     .where(and(inArray(schema.invoices.status, ['sent', 'viewed', 'partially_paid']), eq(schema.invoices.remindersPaused, false)));
+  const { invoiceSenderId } = await runtimeConfig();
   for (const inv of openInvoices) {
     // No payment deadline: nothing to remind about, and never overdue.
     if (!inv.dueDate) continue;
@@ -182,6 +196,8 @@ export async function runReminders(): Promise<void> {
         });
         email = {
           idempotencyKey: `invoice-reminder:${inv.id}:${rule.id}`,
+          // Follow up from the address the invoice went out from.
+          senderId: (await lastInvoiceSenderId(inv.id)) ?? invoiceSenderId,
           to: company.billingEmail,
           subject: tr(locale, overdue ? 'reminder.subjectOverdue' : 'reminder.subject', vars),
           body: rendered.text,

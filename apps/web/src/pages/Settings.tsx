@@ -8,7 +8,7 @@ import {
   Building2, ArrowLeftRight, Users as UsersIcon, Shield, SlidersHorizontal, Wallet, Plug,
   ScrollText, Inbox, Plus, Copy, Upload, Trash2, Lock, Globe, ImageIcon, ChevronRight,
   ChevronLeft, MoreHorizontal, Check, RotateCcw, Boxes, Receipt, FolderKanban, Bot, CalendarClock,
-  KeyRound, Sun, Plug2,
+  KeyRound, Sun, Plug2, Mail,
 } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
 import { Link } from '../lib/router';
@@ -20,6 +20,7 @@ import {
 import { Dialog, ConfirmDialog, DropdownMenu, MenuItem, toast } from '../components/overlays';
 import { ImportExportPanel } from '../components/ImportExportPanel';
 import { IntegrationsPanel } from '../components/settings/IntegrationsPanel';
+import { EmailPanel } from '../components/settings/EmailPanel';
 import { McpPanel } from '../components/settings/McpPanel';
 import { AgentsPanel } from '../components/settings/AgentsPanel';
 import { McpConnectorsPanel } from '../components/settings/McpConnectorsPanel';
@@ -285,6 +286,7 @@ const GROUPS: NavGroup[] = [
       { id: 'custom-fields', label: 'settings.customFields', perm: 'settings.manage', icon: SlidersHorizontal },
       { id: 'finance', label: 'nav.finance', perm: 'finance.settings', icon: Wallet },
       { id: 'invoices', label: 'settings.invoices', perm: 'finance.settings', icon: Receipt },
+      { id: 'email', label: 'email.title', perm: 'settings.manage', icon: Mail },
       { id: 'integrations', label: 'settings.integrations', perm: 'integrations.manage', icon: Plug },
       // Personal MCP/API tokens – available to every authenticated user, no perm gate.
       { id: 'mcp', label: 'settings.mcp', icon: Bot },
@@ -403,6 +405,7 @@ export function SettingsPage({ section }: { section?: string }) {
             {active.id === 'custom-fields' && <CustomFieldsPanel />}
             {active.id === 'finance' && <FinancePanel />}
             {active.id === 'invoices' && <InvoicesPanel />}
+            {active.id === 'email' && <EmailPanel />}
             {active.id === 'integrations' && <IntegrationsPanel />}
             {active.id === 'mcp' && <McpPanel />}
             {active.id === 'agents' && <AgentsPanel />}

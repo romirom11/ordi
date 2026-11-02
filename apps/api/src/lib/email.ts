@@ -1,13 +1,15 @@
 /**
- * Email sending (PRD §14.3, §11.3) via Nodemailer + SMTP. Settings come from
- * the workspace (Settings → Integrations) or, as a fallback, SMTP_URL in the
- * server env. With neither configured, emails are logged instead of sent.
+ * Email sending (PRD §14.3, §11.3) via Nodemailer + SMTP. Mail goes out
+ * through one of the workspace's senders (Settings → Email): the system
+ * sender unless the caller names another, with SMTP_URL in the server env as
+ * a read-only sender of its own. With none configured, emails are logged
+ * instead of sent.
  * This module is the synchronous SMTP transport. Background delivery must go
  * through the durable email-delivery worker.
  */
 import nodemailer, { type Transporter } from 'nodemailer';
 import { logger } from './logger';
-import { runtimeConfig, type SmtpConfig } from './runtime-config';
+import { pickSender, runtimeConfig, type MailSender, type SmtpConfig } from './runtime-config';
 
 /**
  * The timeouts matter: nodemailer waits two minutes by default, and hosting
@@ -26,17 +28,24 @@ function transportFor(smtp: SmtpConfig): Transporter {
   });
 }
 
-let cached: { key: string; transport: Transporter } | null = null;
+/** One transport per distinct server login; a settings change gets a new one. */
+const transports = new Map<string, Transporter>();
 
 /** Identity of a config, so a settings change rebuilds the transport. */
 const keyOf = (s: SmtpConfig) => `${s.host}:${s.port}:${s.secure}:${s.user}:${s.pass}`;
 
-async function getTransport(): Promise<{ transport: Transporter; from: string } | null> {
-  const { smtp } = await runtimeConfig();
-  if (!smtp?.host) return null;
-  const key = keyOf(smtp);
-  if (!cached || cached.key !== key) cached = { key, transport: transportFor(smtp) };
-  return { transport: cached.transport, from: smtp.from };
+type Role = 'system' | 'invoices';
+
+async function getTransport(senderId?: string | null, role: Role = 'system'): Promise<{ transport: Transporter; sender: MailSender } | null> {
+  const sender = pickSender(await runtimeConfig(), senderId, role);
+  if (!sender?.smtp.host) return null;
+  const key = keyOf(sender.smtp);
+  let transport = transports.get(key);
+  if (!transport) {
+    transport = transportFor(sender.smtp);
+    transports.set(key, transport);
+  }
+  return { transport, sender };
 }
 
 export interface EmailInput {
@@ -45,16 +54,19 @@ export interface EmailInput {
   body: string;
   html?: string;
   attachments?: { filename: string; content: Buffer; contentType?: string }[];
+  /** The sender to go out through; the system sender when omitted or unknown. */
+  senderId?: string | null;
 }
 
 export async function sendEmailNow(input: EmailInput): Promise<void> {
-  const t = await getTransport();
+  const t = await getTransport(input.senderId);
   if (!t) {
     logger.info({ to: input.to, subject: input.subject }, '[email:dev] not sent (no SMTP configured)');
     return;
   }
   await t.transport.sendMail({
-    from: t.from,
+    from: t.sender.smtp.from,
+    replyTo: t.sender.replyTo ?? undefined,
     to: input.to,
     subject: input.subject,
     text: input.body,
@@ -63,9 +75,9 @@ export async function sendEmailNow(input: EmailInput): Promise<void> {
   });
 }
 
-/** True when the instance has SMTP configured at all. */
-export async function emailConfigured(): Promise<boolean> {
-  return !!(await runtimeConfig()).smtp?.host;
+/** True when there is a sender for the role (the system one by default). */
+export async function emailConfigured(role: Role = 'system'): Promise<boolean> {
+  return !!pickSender(await runtimeConfig(), null, role)?.smtp.host;
 }
 
 /**
@@ -75,7 +87,7 @@ export async function emailConfigured(): Promise<boolean> {
  */
 export async function trySendEmail(input: EmailInput): Promise<{ sent: boolean; error?: string }> {
   try {
-    const t = await getTransport();
+    const t = await getTransport(input.senderId);
     if (!t) return { sent: false, error: 'not_configured' };
     await sendEmailNow(input);
     return { sent: true };
@@ -86,10 +98,10 @@ export async function trySendEmail(input: EmailInput): Promise<{ sent: boolean; 
   }
 }
 
-/** Probe the configured SMTP server – used by the settings page to test setup. */
-export async function verifyEmailTransport(): Promise<{ ok: boolean; error?: string }> {
+/** Probe a sender's SMTP server (the system one by default) – the settings page's "Test connection". */
+export async function verifyEmailTransport(senderId?: string | null): Promise<{ ok: boolean; error?: string }> {
   try {
-    const t = await getTransport();
+    const t = await getTransport(senderId);
     if (!t) return { ok: false, error: 'not_configured' };
     await t.transport.verify();
     return { ok: true };

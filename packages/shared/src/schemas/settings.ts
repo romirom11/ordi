@@ -94,3 +94,27 @@ export const integrationsConfigSchema = z.object({
   }).optional(),
 });
 export type IntegrationsConfigInput = z.infer<typeof integrationsConfigSchema>;
+
+/**
+ * A mail sender (Settings → Email): an address ordi sends from and the SMTP
+ * login that carries it. The password is write-only like every other secret:
+ * an omitted or empty one keeps what is stored.
+ */
+export const mailSenderInputSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  from: z.string().trim().min(3).max(200),
+  replyTo: z.string().trim().max(200).optional().or(z.literal('')),
+  host: z.string().trim().min(1).max(255),
+  port: z.number().int().min(1).max(65535),
+  secure: z.boolean(),
+  user: z.string().trim().max(255).default(''),
+  pass: z.string().max(1000).optional(),
+});
+export type MailSenderInput = z.infer<typeof mailSenderInputSchema>;
+export const mailSenderUpdateSchema = mailSenderInputSchema.partial();
+
+/** Which sender carries system mail and which is the default for invoices and quotes. */
+export const mailRolesSchema = z.object({
+  system: z.string().min(1).nullable().optional(),
+  invoices: z.string().min(1).nullable().optional(),
+});
