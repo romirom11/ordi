@@ -239,7 +239,7 @@ export function McpPanel() {
       ) : tokens.isError ? (
         <p className="py-3 text-[13px] text-destructive">{t('mcp.loadFailed')}</p>
       ) : rows.length === 0 ? (
-        <EmptyState icon={<KeyRound size={18} />} title={t('mcp.noTokens')} hint={t('mcp.noTokensHint')} />
+        <RowList><EmptyState icon={<KeyRound size={18} />} title={t('mcp.noTokens')} hint={t('mcp.noTokensHint')} /></RowList>
       ) : (
         <RowList>
           {rows.map((tok, i) => {

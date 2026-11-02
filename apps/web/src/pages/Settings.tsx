@@ -503,6 +503,7 @@ function WorkspacePanel() {
       {/* Logo */}
       <input ref={fileRef} type="file" accept="image/*" className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ''; }} />
+      <RowList className="px-4">
       <SettingRow label={t('settings.logo')} hint={t('settings.logoHint')}>
         <div className="flex items-center gap-3">
           <div
@@ -570,6 +571,7 @@ function WorkspacePanel() {
           })}
         </div>
       </SettingRow>
+      </RowList>
 
       <div className="mt-5 flex h-8 items-center gap-3">
         {dirty && <Button size="sm" onClick={saveForm} disabled={patch.isPending}>{patch.isPending ? <Spinner /> : null} {t('common.save')}</Button>}
@@ -728,7 +730,7 @@ function UsersPanel() {
       {users.isLoading ? (
         <div className="space-y-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
       ) : rows.length === 0 && pending.length === 0 ? (
-        <EmptyState icon={<UsersIcon size={18} />} title={t('settings.noUsers')} />
+        <RowList><EmptyState icon={<UsersIcon size={18} />} title={t('settings.noUsers')} /></RowList>
       ) : (
         <RowList>
           {pending.map((inv, i) => (
@@ -1177,7 +1179,7 @@ function FinancePanel() {
       {taxes.isLoading ? (
         <Skeleton className="h-20 w-full" />
       ) : rows.length === 0 ? (
-        <EmptyState icon={<Wallet size={18} />} title={t('settings.noTaxRates')} hint={t('settings.financeHint')} />
+        <RowList><EmptyState icon={<Wallet size={18} />} title={t('settings.noTaxRates')} hint={t('settings.financeHint')} /></RowList>
       ) : (
         <RowList>
           {rows.map((tr) => (
@@ -1221,7 +1223,7 @@ function AuditPanel() {
           </Select>
         } />
       {isLoading ? <Skeleton className="h-40 w-full" /> : rows.length === 0 ? (
-        <EmptyState icon={<ScrollText size={18} />} title={t('settings.noAuditRecords')} hint={t('settings.noAuditRecordsHint')} />
+        <RowList><EmptyState icon={<ScrollText size={18} />} title={t('settings.noAuditRecords')} hint={t('settings.noAuditRecordsHint')} /></RowList>
       ) : (
         <RowList className="divide-y divide-border">
           {rows.map((r) => (
@@ -1264,9 +1266,9 @@ function DlqPanel() {
     <div>
       <SectionHead title={t('settings.dlqTitle')} desc={t('settings.eventsDesc')} />
       {isLoading ? <Skeleton className="h-32 w-full" /> : isError ? (
-        <EmptyState icon={<Inbox size={18} />} title={t('settings.dlqForbidden')} />
+        <RowList><EmptyState icon={<Inbox size={18} />} title={t('settings.dlqForbidden')} /></RowList>
       ) : rows.length === 0 ? (
-        <EmptyState icon={<Check size={18} />} title={t('settings.queueHealthy')} hint={t('settings.queueHealthyHint')} />
+        <RowList><EmptyState icon={<Check size={18} />} title={t('settings.queueHealthy')} hint={t('settings.queueHealthyHint')} /></RowList>
       ) : (
         <RowList>
           {rows.map((r) => (

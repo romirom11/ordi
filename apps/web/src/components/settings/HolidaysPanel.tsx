@@ -113,7 +113,7 @@ export function HolidaysPanel() {
       {calendarsQ.isLoading ? (
         <div className="space-y-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
       ) : calendars.length === 0 ? (
-        <EmptyState icon={<CalendarDays size={18} />} title={t('holidays.noCalendars')} hint={t('holidays.noCalendarsHint')} />
+        <RowList><EmptyState icon={<CalendarDays size={18} />} title={t('holidays.noCalendars')} hint={t('holidays.noCalendarsHint')} /></RowList>
       ) : (
         <>
           <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('holidays.calendars')}</div>
@@ -156,7 +156,7 @@ export function HolidaysPanel() {
               {holidaysQ.isLoading ? (
                 <div className="space-y-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
               ) : holidays.length === 0 ? (
-                <EmptyState icon={<Sun size={18} />} title={t('holidays.empty')} hint={t('holidays.emptyHint')} />
+                <RowList><EmptyState icon={<Sun size={18} />} title={t('holidays.empty')} hint={t('holidays.emptyHint')} /></RowList>
               ) : (
                 <RowList>
                   {holidays.map((h, i) => (

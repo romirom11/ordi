@@ -272,6 +272,7 @@ body {
   --glass-tint-a: 0.07;
   --glass-hover-a: 0.1;
   --glass-selected-a: 0.15;   /* picked chip: must beat the card tint of its neighbours */
+  --glass-skeleton-a: 0.09;
   --glass-line: 0 0% 100% / 0.1;
   --glass-line-strong: 0 0% 100% / 0.18;
   --glass-rim: 0 0% 100% / 0.15;
@@ -325,6 +326,7 @@ body {
   --glass-tint-a: 0.06;
   --glass-hover-a: 0.075;
   --glass-selected-a: 0.09;
+  --glass-skeleton-a: 0.07;
   --glass-line: 150 9% 8% / 0.1;
   --glass-line-strong: 150 9% 8% / 0.18;
   --glass-rim: 0 0% 100% / 0.72;
@@ -463,6 +465,11 @@ body {
 :where([data-style='glass']) .bg-muted\/20 { background-color: hsl(var(--glass-tint) / calc(var(--glass-tint-a) * 0.2)); }
 :where([data-style='glass']) .bg-muted\/15 { background-color: hsl(var(--glass-tint) / calc(var(--glass-tint-a) * 0.15)); }
 :where([data-style='glass']) .ui-seg.bg-muted\/60 { background-color: hsl(var(--glass-tint) / var(--glass-tint-a)); }
+
+/* Skeletons: a neutral tint over the glass. The solid --muted is warm
+   graphite in the dark theme and a yellowish grey in the light one, which
+   read as a dark hole and a cream smear while loading. */
+:where([data-style='glass']) .skeleton { background: hsl(var(--glass-tint) / var(--glass-skeleton-a)); }
 
 /* A picked chip (bg-muted framed by border-border-strong) sits among chips
    that are themselves glass, so it needs a denser tint to read as chosen. */

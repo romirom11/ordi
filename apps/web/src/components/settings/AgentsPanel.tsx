@@ -899,7 +899,7 @@ export function AgentsPanel() {
       {credsQ.isLoading ? (
         <div className="space-y-2">{[0, 1].map((i) => <Skeleton key={i} className="h-20 w-full" />)}</div>
       ) : credentials.length === 0 ? (
-        <EmptyState icon={<KeyRound size={18} />} title={t('agents.noCredentials')} hint={t('agents.noCredentialsHint')} />
+        <RowList><EmptyState icon={<KeyRound size={18} />} title={t('agents.noCredentials')} hint={t('agents.noCredentialsHint')} /></RowList>
       ) : (
         <div className="space-y-2">
           {credentials.map((c) => <CredentialCard key={c.id} cred={c} users={users} />)}
@@ -918,7 +918,7 @@ export function AgentsPanel() {
       {agentsQ.isLoading ? (
         <div className="space-y-2">{[0, 1].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
       ) : agents.length === 0 ? (
-        <EmptyState icon={<Bot size={18} />} title={t('agents.none')} hint={t('agents.noneHint')} />
+        <RowList><EmptyState icon={<Bot size={18} />} title={t('agents.none')} hint={t('agents.noneHint')} /></RowList>
       ) : (
         <RowList>
           {agents.map((a, i) => (

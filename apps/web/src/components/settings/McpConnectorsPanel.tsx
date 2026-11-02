@@ -18,7 +18,7 @@ import {
   Badge, Button, Card, Input, SegmentedControl, Select, Skeleton, Spinner, EmptyState, cn, fmtDate, fmtRelative,
 } from '../ui';
 import { Dialog, ConfirmDialog, DropdownMenu, MenuItem, toast } from '../overlays';
-import { SectionHead, Field, Disclosure, StatusChip } from './primitives';
+import { SectionHead, Field, Disclosure, StatusChip, RowList } from './primitives';
 import { useT, extendDict } from '../../lib/i18n';
 
 extendDict({
@@ -698,12 +698,14 @@ export function McpConnectorsPanel() {
       {connectorsQ.isLoading ? (
         <div className="space-y-2">{[0, 1].map((i) => <Skeleton key={i} className="h-24 w-full" />)}</div>
       ) : connectors.length === 0 ? (
-        <EmptyState
-          icon={<Plug2 size={18} />}
-          title={t('connectors.none')}
-          hint={t('connectors.noneHint')}
-          action={<Button size="sm" onClick={() => setAddOpen(true)}><Plus size={14} /> {t('connectors.add')}</Button>}
-        />
+        <RowList>
+          <EmptyState
+            icon={<Plug2 size={18} />}
+            title={t('connectors.none')}
+            hint={t('connectors.noneHint')}
+            action={<Button size="sm" onClick={() => setAddOpen(true)}><Plus size={14} /> {t('connectors.add')}</Button>}
+          />
+        </RowList>
       ) : (
         <div className="space-y-2">
           {connectors.map((c) => <ConnectorCard key={c.id} conn={c} users={users} />)}
