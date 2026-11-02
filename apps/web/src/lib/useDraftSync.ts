@@ -104,7 +104,16 @@ export function useDraftSync<F extends DraftFields, D>(opts: {
       return 'saved';
     } catch (e) {
       const conflict = o.current.isConflict(e);
-      apply(fail(sRef.current ?? started.state, conflict));
+      const failed = fail(sRef.current ?? started.state, conflict, started.version);
+      apply(failed);
+      if (conflict && !failed.stale) {
+        // The newer version arrived while this write was out (realtime beat
+        // the 409): nothing to wait for. A real conflict is the person's to
+        // decide; a 409 over a field nobody here touched just goes again.
+        if (conflictKeys(failed).length) { owed.current = null; return 'conflict'; }
+        if (!mode.auto || o.current.autosave) return run({ auto: mode.auto, extra: mode.extra });
+        return 'conflict';
+      }
       if (conflict) {
         // Remember an explicit save so a 409 caused by a field nobody here
         // touched goes through once the newer version is known.

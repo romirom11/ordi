@@ -3,6 +3,7 @@ import { getDb, schema, eq, desc } from '@ordi/db';
 import { ulid } from 'ulid';
 import {
   gitConnectionInputSchema, gitRepositoryInputSchema, webhookSubscriptionInputSchema,
+  bitbucketConnectionInputSchema,
 } from '@ordi/shared';
 import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
@@ -16,7 +17,10 @@ import {
 } from './oauth';
 import {
   githubAppConfigured, buildAppManifest, manifestActionUrl, manifestLaunchUrl, listInstallationRepos, githubAppWebhookUrl,
+  syncInstallationRepos,
 } from './github-app';
+import { BitbucketApiError, bitbucketWebhookUrl, listBitbucketRepos } from './bitbucket';
+import { connectBitbucketWorkspace, ensureBitbucketHooksForConnection, openBitbucketCredentials } from './bitbucket-sync';
 
 /**
  * Integrations domain (PRD §13): git connections/repositories, manual resync,
@@ -48,7 +52,17 @@ export function integrationsRoutes() {
     const [conn] = await db.select().from(schema.gitConnections)
       .where(eq(schema.gitConnections.id, c.req.param('id')));
     if (!conn) throw err.notFound('Connection not found');
-    if (conn.provider !== 'github') throw err.domain('Only GitHub repo listing is supported');
+    if (conn.provider === 'bitbucket') {
+      const creds = openBitbucketCredentials(conn.credentials);
+      if (!creds) throw err.domain('Stored credentials are invalid');
+      if (!conn.accountLogin) throw err.domain('The Bitbucket connection has no workspace');
+      try {
+        return c.json({ data: await listBitbucketRepos(creds, conn.accountLogin) });
+      } catch (e) {
+        return c.json({ error: { code: 'provider_error', message: e instanceof Error ? e.message : 'Provider request failed' } }, 502);
+      }
+    }
+    if (conn.provider !== 'github') throw err.domain('Repo listing is supported for GitHub and Bitbucket only');
     try {
       // App installations list through an installation token; legacy
       // connections through the stored OAuth/PAT token.
@@ -102,6 +116,66 @@ export function integrationsRoutes() {
       manifest: JSON.stringify(buildAppManifest(ws?.name || 'ordi')),
       // The same, as a page to open – for the desktop app's system browser.
       launchUrl: manifestLaunchUrl(state, organization),
+    });
+  });
+
+  // ── Bitbucket Cloud (workspace + token) ──
+  // Where registered webhooks point – shown so an admin can recognise ordi's
+  // hook in the repository settings. (any authed user)
+  app.get('/integrations/bitbucket/status', async (c) => {
+    return c.json({ webhookUrl: bitbucketWebhookUrl() });
+  });
+
+  // Connect a workspace (or rotate the token of a connected one). The token
+  // is checked by listing the workspace's repositories before it is stored.
+  app.post('/integrations/bitbucket/connections', guard('integrations.manage'), async (c) => {
+    const body = bitbucketConnectionInputSchema.parse(await c.req.json());
+    const actor = currentActor(c);
+    let result: Awaited<ReturnType<typeof connectBitbucketWorkspace>>;
+    try {
+      result = await connectBitbucketWorkspace({
+        workspace: body.workspace, token: body.token, email: body.email, userId: actor.userId,
+      });
+    } catch (e) {
+      if (e instanceof BitbucketApiError) throw err.domain(e.message);
+      throw e;
+    }
+    // A rotated token may come with a new scope set – refresh the webhooks of
+    // repositories already bound, so a reconnect is also the repair path.
+    const hooks = result.created ? [] : await ensureBitbucketHooksForConnection(result.id);
+    const { db } = getDb();
+    await writeActivity(db, {
+      entityType: 'git_connection', entityId: result.id, action: result.created ? 'created' : 'updated',
+      after: { provider: 'bitbucket', workspace: body.workspace, kind: body.email ? 'api_token' : 'access_token', repos: result.repos },
+      actorId: actor.userId, actorType: actor.actorType,
+    });
+    return c.json({
+      id: result.id, created: result.created, repos: result.repos,
+      webhookFailures: hooks.flatMap((h) => (h.status === 'failed' ? [{ repository: h.fullName, error: h.error }] : [])),
+    }, result.created ? 201 : 200);
+  });
+
+  // Re-list the workspace's repositories and refresh the webhooks of bound ones.
+  app.post('/integrations/bitbucket/connections/:id/sync', guard('integrations.manage'), async (c) => {
+    const { db } = getDb();
+    const [conn] = await db.select().from(schema.gitConnections)
+      .where(eq(schema.gitConnections.id, c.req.param('id')));
+    if (!conn || conn.provider !== 'bitbucket') throw err.notFound('Connection not found');
+    const creds = openBitbucketCredentials(conn.credentials);
+    if (!creds || !conn.accountLogin) throw err.domain('Stored credentials are invalid – reconnect the workspace');
+    let repos: Awaited<ReturnType<typeof listBitbucketRepos>>;
+    try {
+      repos = await listBitbucketRepos(creds, conn.accountLogin);
+    } catch (e) {
+      if (e instanceof BitbucketApiError) throw err.domain(e.message);
+      throw e;
+    }
+    const added = await syncInstallationRepos(conn.id, repos);
+    const hooks = await ensureBitbucketHooksForConnection(conn.id);
+    return c.json({
+      repos: repos.length, added,
+      webhooks: hooks.filter((h) => h.status === 'ok').length,
+      webhookFailures: hooks.flatMap((h) => (h.status === 'failed' ? [{ repository: h.fullName, error: h.error }] : [])),
     });
   });
 

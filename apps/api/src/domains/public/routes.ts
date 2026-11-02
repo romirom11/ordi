@@ -20,7 +20,8 @@ import {
   upsertInstallationConnection, syncInstallationRepos,
   buildAppManifest, manifestActionUrl, renderManifestLaunchPage,
 } from '../integrations/github-app';
-import { syncGitLink } from '../integrations/git-links';
+import { syncGitLink, type GitCandidate } from '../integrations/git-links';
+import { bitbucketCandidates } from '../integrations/bitbucket';
 import { completeConnectorOAuth } from '../agents/connector-oauth';
 import { storeGithubAppConfig, runtimeConfig } from '../../lib/runtime-config';
 import { renderInvoicePdf, renderQuotePdf } from '../finance/pdf';
@@ -631,8 +632,11 @@ export function publicRoutes() {
     const deliveryId = c.req.header('x-github-delivery')
       ?? c.req.header('x-gitlab-event-uuid')
       ?? c.req.header('x-gitea-delivery')
+      ?? c.req.header('x-request-uuid') // bitbucket
       ?? null;
-    const event = c.req.header('x-github-event') ?? c.req.header('x-gitlab-event') ?? c.req.header('x-gitea-event') ?? null;
+    const event = c.req.header('x-github-event') ?? c.req.header('x-gitlab-event') ?? c.req.header('x-gitea-event')
+      ?? c.req.header('x-event-key') // bitbucket
+      ?? null;
     const delivery = { provider, deliveryId, event };
     const ignored = (reason: string, extra: Record<string, unknown> = {}) => {
       logger.info({ ...delivery, ...extra }, `git webhook ignored: ${reason}`);
@@ -655,7 +659,7 @@ export function publicRoutes() {
       const sigHeader = c.req.header('x-hub-signature-256')
         ?? c.req.header('x-gitea-signature')
         ?? c.req.header('x-gitlab-token')
-        ?? c.req.header('x-hub-signature')
+        ?? c.req.header('x-hub-signature') // bitbucket (sha256=…)
         ?? '';
       const sig = sigHeader.replace(/^sha256=/, '');
       const connections = await db.select().from(schema.gitConnections)
@@ -752,17 +756,11 @@ export function publicRoutes() {
       const linkRepoId = repoByName?.id ?? repos[0]?.id ?? null;
 
       // Collect webhook "candidates": pieces of text that may reference tasks.
-      interface Candidate {
-        text: string;
-        type: 'branch' | 'commit' | 'pr';
-        event: EventType | null;
-        state: string | null;
-        title: string | null;
-        url: string | null;
-        externalRef: string;
-        author: string | null;
-      }
-      const candidates: Candidate[] = [];
+      const candidates: GitCandidate[] = [];
+
+      // Bitbucket shapes its payloads its own way (`push.changes[]`,
+      // `pullrequest`) and names the event only in a header.
+      if (provider === 'bitbucket') candidates.push(...bitbucketCandidates(event, payload));
 
       // Branch (push events, github/gitlab/gitea share `ref`).
       const ref: string | null = typeof payload?.ref === 'string' ? payload.ref : null;

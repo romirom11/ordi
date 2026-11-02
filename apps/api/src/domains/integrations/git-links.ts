@@ -9,8 +9,26 @@
  */
 import { getDb, schema, eq, and } from '@ordi/db';
 import { ulid } from 'ulid';
+import type { EventType } from '@ordi/shared';
 
 export type GitLinkType = 'branch' | 'commit' | 'pr' | 'mr';
+
+/**
+ * A piece of an incoming delivery that may name tasks – a branch name, a
+ * commit message, a pull request's title and body – with what to record on
+ * the task when it does. Each forge's payload is reduced to these.
+ */
+export interface GitCandidate {
+  text: string;
+  type: 'branch' | 'commit' | 'pr';
+  /** The transition this delivery marks, if any (a branch appearing, a PR opening/merging/closing). */
+  event: EventType | null;
+  state: string | null;
+  title: string | null;
+  url: string | null;
+  externalRef: string;
+  author: string | null;
+}
 
 export interface GitLinkInput {
   taskId: string;

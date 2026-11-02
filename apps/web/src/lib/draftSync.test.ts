@@ -88,6 +88,41 @@ describe('a conflict', () => {
     expect(begin(s, { force: true })).toBeNull();
   });
 
+  // Someone saves; their realtime refetch reaches us while our Save is still
+  // out, and our 409 lands after it. The newer version is already known, so
+  // the state must not wait for another one: that used to leave the page on
+  // "Saving…" forever, with Keep my version sending nothing.
+  it('a 409 that lands after the newer snapshot is a conflict at once, and keep mine then saves', () => {
+    const w = begin(edit(initDraft(server1, 1), { body: doc('mine') }), { force: true })!;
+    let s = receiveServer(w.state, { title: 'Handbook', body: doc('theirs') }, 2);
+    s = fail(s, true, w.version);
+    expect(s.stale).toBe(false);
+    expect(syncStatus(s)).toBe('conflict');
+    expect(s.draft.body).toEqual(doc('mine'));
+    s = keepMine(s);
+    const again = begin(s, { force: true })!;
+    expect(again.payload).toEqual({ body: doc('mine') });
+    expect(again.version).toBe(2);
+  });
+
+  it('a 409 after a newer snapshot that changed only other fields is no conflict and can go again', () => {
+    const w = begin(edit(initDraft(server1, 1), { body: doc('mine') }), { force: true })!;
+    let s = receiveServer(w.state, { title: 'Renamed', body: doc('v1') }, 2);
+    s = fail(s, true, w.version);
+    expect(conflictKeys(s)).toEqual([]);
+    expect(s.draft).toEqual({ title: 'Renamed', body: doc('mine') });
+    const again = begin(s, { force: true })!;
+    expect(again.payload).toEqual({ body: doc('mine') });
+    expect(again.version).toBe(2);
+  });
+
+  it('a 409 with no newer snapshot yet still waits for one', () => {
+    const w = begin(edit(initDraft(server1, 1), { body: doc('mine') }))!;
+    const s = fail(w.state, true, w.version);
+    expect(s.stale).toBe(true);
+    expect(syncStatus(s)).toBe('saving');
+  });
+
   it('keep mine overwrites deliberately, with the latest version', () => {
     let s = edit(initDraft(server1, 1), { body: doc('mine') });
     s = receiveServer(s, { title: 'Handbook', body: doc('theirs') }, 2);

@@ -10,6 +10,7 @@ import {
 } from '../ui';
 import { Dialog, DropdownMenu, MenuItem, MenuLabel, toast } from '../overlays';
 import { useT, extendDict } from '../../lib/i18n';
+import { BitbucketIcon } from '../BitbucketIcon';
 
 extendDict({
   en: {
@@ -27,6 +28,7 @@ extendDict({
     'projects.noConnectionsHint': 'Add a git connection first in Settings → Integrations.',
     'projects.noConnRepos': 'No repositories available on this connection.',
     'projects.reposLoadFailed': 'Could not load repositories.',
+    'projects.repoWebhookFailed': 'Repository linked, but its webhook could not be registered: {error}',
     'projects.unbindRepo': 'Unbind',
     'projects.repoBound': 'Repository linked',
     'projects.repoUnbound': 'Repository unlinked',
@@ -65,6 +67,7 @@ extendDict({
     'projects.noConnectionsHint': 'Спершу додайте git-зʼєднання в Налаштування → Інтеграції.',
     'projects.noConnRepos': 'На цьому зʼєднанні немає доступних репозиторіїв.',
     'projects.reposLoadFailed': 'Не вдалося завантажити репозиторії.',
+    'projects.repoWebhookFailed': 'Репозиторій привʼязано, але не вдалося зареєструвати вебхук: {error}',
     'projects.unbindRepo': 'Відвʼязати',
     'projects.repoBound': 'Репозиторій привʼязано',
     'projects.repoUnbound': 'Репозиторій відвʼязано',
@@ -90,7 +93,13 @@ extendDict({
   },
 });
 
-interface Connection { id: string; provider: string; status?: string; instanceUrl?: string | null }
+interface Connection { id: string; provider: string; status?: string; instanceUrl?: string | null; accountLogin?: string | null }
+
+/** What a connection is called in the picker: its host, or the provider and the account/workspace on it. */
+function connectionLabel(c: Connection): string {
+  if (c.instanceUrl) return c.instanceUrl;
+  return c.accountLogin ? `${c.provider} · ${c.accountLogin}` : c.provider;
+}
 interface Repo { id?: string; connectionId?: string; externalId: string; fullName?: string; defaultBranch?: string }
 interface BoundRepo {
   id?: string; repositoryId?: string; connectionId?: string;
@@ -100,6 +109,7 @@ interface BoundRepo {
 function ProviderIcon({ provider, className }: { provider?: string; className?: string }) {
   if (provider === 'gitlab') return <Gitlab size={14} className={className} />;
   if (provider === 'github') return <Github size={14} className={className} />;
+  if (provider === 'bitbucket') return <BitbucketIcon size={14} className={className} />;
   return <GitBranch size={14} className={className} />;
 }
 
@@ -248,16 +258,21 @@ function ConnectRepoDialog({ projectId, open, onClose, boundIds }: {
   });
 
   const bind = useMutation({
-    mutationFn: (repo: Repo) => api.post(`/projects/${projectId}/repositories`, {
+    mutationFn: (repo: Repo) => api.post<{ webhook?: { status: 'ok' | 'failed'; error?: string } }>(`/projects/${projectId}/repositories`, {
       repositoryId: repo.id ?? repo.externalId,
       connectionId: activeConn,
       externalId: repo.externalId,
       fullName: repo.fullName,
       defaultBranch: repo.defaultBranch ?? 'main',
     }),
-    onSuccess: () => {
+    onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['project-repos', projectId] });
       toast(t('projects.repoBound'));
+      // Bitbucket: the repository's webhook is registered on bind. The binding
+      // stands either way; without the hook nothing reaches the tasks.
+      if (r?.webhook?.status === 'failed') {
+        toast.error(t('projects.repoWebhookFailed').replace('{error}', r.webhook.error ?? ''));
+      }
       onClose();
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
@@ -289,7 +304,7 @@ function ConnectRepoDialog({ projectId, open, onClose, boundIds }: {
                 trigger={
                   <span className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md border border-input px-2.5 text-[13px] transition-colors hover:border-border-strong">
                     <ProviderIcon provider={selectedConn?.provider} className="text-muted-foreground" />
-                    <span className="flex-1 truncate">{selectedConn ? (selectedConn.instanceUrl || selectedConn.provider) : '–'}</span>
+                    <span className="flex-1 truncate">{selectedConn ? connectionLabel(selectedConn) : '–'}</span>
                   </span>
                 }
               >
@@ -297,7 +312,7 @@ function ConnectRepoDialog({ projectId, open, onClose, boundIds }: {
                 {connections.map((c) => (
                   <MenuItem key={c.id} icon={<ProviderIcon provider={c.provider} />} checked={c.id === activeConn}
                     onSelect={() => { setConnId(c.id); setSearch(''); }}>
-                    {c.instanceUrl || c.provider}
+                    {connectionLabel(c)}
                   </MenuItem>
                 ))}
               </DropdownMenu>

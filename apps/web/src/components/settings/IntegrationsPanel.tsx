@@ -2,9 +2,10 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { EVENT_TYPES, GIT_PROVIDERS } from '@ordi/shared';
 import {
-  Github, Slack, GitBranch, Plus, Trash2, ChevronRight, ExternalLink, Copy, Webhook as WebhookIcon,
+  Github, Slack, GitBranch, Plus, Trash2, ChevronRight, ExternalLink, Copy, Webhook as WebhookIcon, RefreshCw,
 } from 'lucide-react';
-import { api } from '../../lib/api';
+import { api, ApiError } from '../../lib/api';
+import { BitbucketIcon } from '../BitbucketIcon';
 import { isTauri, startExternalFlow } from '../../lib/desktop';
 import { useCan } from '../../lib/auth';
 import {
@@ -18,7 +19,7 @@ import { useT, extendDict } from '../../lib/i18n';
 
 extendDict({
   en: {
-    'settings.integrationsDesc': 'Connect GitHub and Slack, and send outgoing webhooks.',
+    'settings.integrationsDesc': 'Connect GitHub, Bitbucket and Slack, and send outgoing webhooks.',
     // GitHub
     'settings.stateConnected': 'Connected',
     'settings.stateReady': 'OAuth app ready',
@@ -57,6 +58,31 @@ extendDict({
     'settings.ghAppWebhookUrl': 'Webhook URL',
     'settings.ghAppWebhookHint': 'What this instance expects GitHub to call. If the app’s Webhook URL on GitHub differs (an app created from another host keeps that host), every delivery answers 404 and nothing links to tasks – paste this one there and redeliver.',
     'settings.ghAppWebhookCopied': 'Webhook URL copied',
+    // Bitbucket
+    'settings.bitbucketTitle': 'Bitbucket',
+    'settings.bitbucketDesc': 'Link Bitbucket Cloud repositories to projects – branches and PRs show up on tasks.',
+    'settings.bbIntro': 'Connect a Bitbucket Cloud workspace with a token. ordi registers a webhook on each repository you bind to a project – nothing to copy by hand.',
+    'settings.bbWorkspace': 'Workspace',
+    'settings.bbWorkspacePlaceholder': 'my-team',
+    'settings.bbWorkspaceHint': 'The slug from bitbucket.org/<workspace>.',
+    'settings.bbEmail': 'Atlassian email',
+    'settings.bbEmailHint': 'For an API token. Leave empty for a workspace or repository access token.',
+    'settings.bbToken': 'Token',
+    'settings.bbConnect': 'Connect Bitbucket',
+    'settings.bbConnected': 'Bitbucket workspace connected – {n} repositories found',
+    'settings.bbReconnected': 'Token updated – {n} repositories found',
+    'settings.bbConnectError': 'Could not connect Bitbucket',
+    'settings.bbHowTo': 'Which token, and which permissions?',
+    'settings.bbHowApi': 'API token (any plan): create one at',
+    'settings.bbHowApi2': '– “Create API token with scopes”, app Bitbucket. Enter it together with your Atlassian email.',
+    'settings.bbHowAccess': 'Access token (workspace, project or repository): Bitbucket → settings → Access tokens. Leave the email empty.',
+    'settings.bbHowScopes': 'Permissions: repositories read (write too, if AI agents push), pull requests read (write for agents) and webhooks read and write. API token scopes:',
+    'settings.bbSync': 'Sync repositories and webhooks',
+    'settings.bbSynced': '{n} repositories, {h} webhooks refreshed',
+    'settings.bbWebhookFailed': 'Webhook not registered on {repo}: {error}',
+    'settings.bbReconnectHint': 'To rotate the token, connect the same workspace again.',
+    'settings.bbWebhookUrl': 'Webhook URL',
+    'settings.bbWebhookHint': 'ordi registers this URL on bound repositories (Repository settings → Webhooks, description “ordi”).',
     // Slack
     'settings.slackTitle': 'Slack',
     'settings.slackDesc': 'Get notified about events (tasks, deals, invoices) in Slack.',
@@ -87,7 +113,7 @@ extendDict({
     'settings.deleteWebhookBody': 'Delete this webhook? Deliveries will stop immediately.',
   },
   uk: {
-    'settings.integrationsDesc': 'Підключіть GitHub і Slack та надсилайте вихідні вебхуки.',
+    'settings.integrationsDesc': 'Підключіть GitHub, Bitbucket і Slack та надсилайте вихідні вебхуки.',
     // GitHub
     'settings.stateConnected': 'Підключено',
     'settings.stateReady': 'OAuth-застосунок готовий',
@@ -126,6 +152,31 @@ extendDict({
     'settings.ghAppWebhookUrl': 'Webhook URL',
     'settings.ghAppWebhookHint': 'Куди цей інстанс чекає доставки від GitHub. Якщо в налаштуваннях застосунку на GitHub інший Webhook URL (застосунок, створений з іншого хоста, зберігає той хост), кожна доставка отримує 404 і нічого не привʼязується до задач – вставте туди цей і зробіть redeliver.',
     'settings.ghAppWebhookCopied': 'Webhook URL скопійовано',
+    // Bitbucket
+    'settings.bitbucketTitle': 'Bitbucket',
+    'settings.bitbucketDesc': 'Привʼяжіть репозиторії Bitbucket Cloud до проєктів – гілки й PR зʼявляться в задачах.',
+    'settings.bbIntro': 'Підключіть воркспейс Bitbucket Cloud токеном. ordi сам реєструє вебхук на кожному репозиторії, який ви привʼяжете до проєкту – нічого не треба копіювати вручну.',
+    'settings.bbWorkspace': 'Воркспейс',
+    'settings.bbWorkspacePlaceholder': 'my-team',
+    'settings.bbWorkspaceHint': 'Slug з адреси bitbucket.org/<workspace>.',
+    'settings.bbEmail': 'Email Atlassian',
+    'settings.bbEmailHint': 'Для API-токена. Для access-токена воркспейсу чи репозиторію залиште порожнім.',
+    'settings.bbToken': 'Токен',
+    'settings.bbConnect': 'Підключити Bitbucket',
+    'settings.bbConnected': 'Воркспейс Bitbucket підключено – знайдено репозиторіїв: {n}',
+    'settings.bbReconnected': 'Токен оновлено – знайдено репозиторіїв: {n}',
+    'settings.bbConnectError': 'Не вдалося підключити Bitbucket',
+    'settings.bbHowTo': 'Який токен і з якими правами?',
+    'settings.bbHowApi': 'API-токен (будь-який тариф): створіть на',
+    'settings.bbHowApi2': '– «Create API token with scopes», застосунок Bitbucket. Вводьте разом з email Atlassian.',
+    'settings.bbHowAccess': 'Access-токен (воркспейсу, проєкту чи репозиторію): Bitbucket → налаштування → Access tokens. Email залиште порожнім.',
+    'settings.bbHowScopes': 'Права: репозиторії – читання (і запис, якщо AI-агенти пушать), pull requests – читання (запис для агентів), вебхуки – читання й запис. Скоупи API-токена:',
+    'settings.bbSync': 'Синхронізувати репозиторії й вебхуки',
+    'settings.bbSynced': 'Репозиторіїв: {n}, оновлено вебхуків: {h}',
+    'settings.bbWebhookFailed': 'Вебхук не зареєстровано на {repo}: {error}',
+    'settings.bbReconnectHint': 'Щоб змінити токен, підключіть той самий воркспейс ще раз.',
+    'settings.bbWebhookUrl': 'Webhook URL',
+    'settings.bbWebhookHint': 'ordi реєструє цю адресу на привʼязаних репозиторіях (Repository settings → Webhooks, опис «ordi»).',
     // Slack
     'settings.slackTitle': 'Slack',
     'settings.slackDesc': 'Отримуйте сповіщення про події (задачі, угоди, інвойси) у Slack.',
@@ -185,6 +236,7 @@ interface WorkspaceFull { integrations?: { slackWebhookUrl?: string | null } }
 
 function providerIcon(provider?: string | null) {
   if (provider === 'github') return <Github size={15} />;
+  if (provider === 'bitbucket') return <BitbucketIcon size={15} />;
   return <GitBranch size={15} />;
 }
 
@@ -196,7 +248,8 @@ function GitHubCard() {
   const oauth = useQuery({ queryKey: ['gitOAuthStatus'], queryFn: () => api.get<{ configured: boolean }>('/integrations/git/oauth/status') });
   const ghApp = useQuery({ queryKey: ['githubAppStatus'], queryFn: () => api.get<GithubAppStatus>('/integrations/github-app/status') });
   const connections = useQuery({ queryKey: ['gitConnections'], queryFn: () => api.get<{ data: GitConnection[] }>('/integrations/git/connections') });
-  const conns = connections.data?.data ?? [];
+  // Bitbucket workspaces have their own card.
+  const conns = (connections.data?.data ?? []).filter((c) => c.provider !== 'bitbucket');
   const configured = oauth.data?.configured;
   const appConfigured = ghApp.data?.configured;
   const githubConnected = conns.some((c) => c.provider === 'github');
@@ -424,6 +477,185 @@ function GitHubCard() {
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={!!toDelete}
+        onClose={() => setToDelete(null)}
+        onConfirm={() => toDelete && del.mutate(toDelete.id)}
+        title={t('settings.deleteConnection')}
+        body={t('settings.deleteConnectionBody')}
+        confirmLabel={t('common.delete')}
+        danger
+        pending={del.isPending}
+      />
+    </div>
+  );
+}
+
+/* ─────────────── Bitbucket ─────────────── */
+
+interface BitbucketConnectResult {
+  id: string; created: boolean; repos: number;
+  webhookFailures?: { repository: string; error: string }[];
+}
+interface BitbucketSyncResult {
+  repos: number; added: number; webhooks: number;
+  webhookFailures?: { repository: string; error: string }[];
+}
+
+const BB_API_TOKEN_SCOPES = [
+  'read:repository:bitbucket', 'write:repository:bitbucket',
+  'read:pullrequest:bitbucket', 'write:pullrequest:bitbucket',
+  'read:webhook:bitbucket', 'write:webhook:bitbucket',
+];
+
+/**
+ * Bitbucket Cloud: one connection per workspace, made with a pasted token.
+ * There is no app to install, so webhooks are registered per repository by
+ * the server when a repository is bound to a project (and refreshed by Sync).
+ */
+function BitbucketCard() {
+  const t = useT();
+  const qc = useQueryClient();
+  const connections = useQuery({ queryKey: ['gitConnections'], queryFn: () => api.get<{ data: GitConnection[] }>('/integrations/git/connections') });
+  const status = useQuery({ queryKey: ['bitbucketStatus'], queryFn: () => api.get<{ webhookUrl: string }>('/integrations/bitbucket/status') });
+  const conns = (connections.data?.data ?? []).filter((c) => c.provider === 'bitbucket');
+  const [form, setForm] = useState({ workspace: '', email: '', token: '' });
+  const [toDelete, setToDelete] = useState<GitConnection | null>(null);
+
+  const reportHookFailures = (failures?: { repository: string; error: string }[]) => {
+    for (const f of failures ?? []) {
+      toast.error(t('settings.bbWebhookFailed').replace('{repo}', f.repository).replace('{error}', f.error));
+    }
+  };
+
+  const connect = useMutation({
+    mutationFn: () => api.post<BitbucketConnectResult>('/integrations/bitbucket/connections', {
+      workspace: form.workspace.trim(),
+      email: form.email.trim() || undefined,
+      token: form.token.trim(),
+    }),
+    onSuccess: (r) => {
+      setForm({ workspace: '', email: '', token: '' });
+      qc.invalidateQueries({ queryKey: ['gitConnections'] });
+      qc.invalidateQueries({ queryKey: ['git-connections'] });
+      toast((r.created ? t('settings.bbConnected') : t('settings.bbReconnected')).replace('{n}', String(r.repos)));
+      reportHookFailures(r.webhookFailures);
+    },
+    onError: (e: unknown) => toast.error(e instanceof ApiError ? e.message : t('settings.bbConnectError')),
+  });
+
+  const sync = useMutation({
+    mutationFn: (id: string) => api.post<BitbucketSyncResult>(`/integrations/bitbucket/connections/${id}/sync`, {}),
+    onSuccess: (r) => {
+      toast(t('settings.bbSynced').replace('{n}', String(r.repos)).replace('{h}', String(r.webhooks)));
+      reportHookFailures(r.webhookFailures);
+    },
+    onError: (e: unknown) => toast.error(e instanceof ApiError ? e.message : t('settings.saveFailed')),
+  });
+
+  const del = useMutation({
+    mutationFn: (id: string) => api.del(`/integrations/git/connections/${id}`),
+    onSuccess: () => {
+      setToDelete(null);
+      qc.invalidateQueries({ queryKey: ['gitConnections'] });
+      qc.invalidateQueries({ queryKey: ['git-connections'] });
+      toast(t('settings.remove'));
+    },
+    onError: () => { setToDelete(null); toast.error(t('settings.saveFailed')); },
+  });
+
+  const canSubmit = form.workspace.trim() && form.token.trim() && !connect.isPending;
+
+  return (
+    <div>
+      {connections.isSuccess && (
+        <StatusChip tone={conns.length > 0 ? 'ok' : 'off'}>
+          {conns.length > 0 ? t('settings.stateConnected') : t('settings.stateNone')}
+        </StatusChip>
+      )}
+
+      {conns.length > 0 && (
+        <>
+          <RowList className="mt-3">
+            {conns.map((c) => (
+              <div key={c.id} className="flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-0">
+                <span className="text-muted-foreground"><BitbucketIcon size={15} /></span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13px]">
+                    {c.accountLogin ?? 'bitbucket'} <span className="text-muted-foreground">· bitbucket.org</span>
+                  </div>
+                  {c.createdAt && <div className="text-[11px] text-faint">{fmtDate(c.createdAt)}</div>}
+                </div>
+                <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <span className={cn('h-1.5 w-1.5 rounded-full', c.status === 'connected' ? 'bg-success' : 'bg-faint')} />
+                  {c.status ?? 'connected'}
+                </span>
+                <IconButton size="sm" onClick={() => sync.mutate(c.id)} disabled={sync.isPending} title={t('settings.bbSync')}>
+                  {sync.isPending && sync.variables === c.id ? <Spinner /> : <RefreshCw size={14} />}
+                </IconButton>
+                <IconButton size="sm" onClick={() => setToDelete(c)} title={t('settings.deleteConnection')}>
+                  <Trash2 size={14} />
+                </IconButton>
+              </div>
+            ))}
+          </RowList>
+          <p className="mt-2 text-[11px] text-faint">{t('settings.repoLinkHint')} {t('settings.bbReconnectHint')}</p>
+        </>
+      )}
+
+      <div className="mt-3 border-t border-border pt-3">
+        <p className="text-xs text-muted-foreground">{t('settings.bbIntro')}</p>
+        <form
+          className="mt-3 grid gap-3 sm:grid-cols-2"
+          onSubmit={(e) => { e.preventDefault(); if (canSubmit) connect.mutate(); }}
+        >
+          <Field label={t('settings.bbWorkspace')}>
+            <Input value={form.workspace} onChange={(e) => setForm((f) => ({ ...f, workspace: e.target.value }))} placeholder={t('settings.bbWorkspacePlaceholder')} />
+            <span className="mt-1 block text-[11px] text-faint">{t('settings.bbWorkspaceHint')}</span>
+          </Field>
+          <Field label={t('settings.bbEmail')}>
+            <Input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} placeholder="you@company.com" />
+            <span className="mt-1 block text-[11px] text-faint">{t('settings.bbEmailHint')}</span>
+          </Field>
+          <Field label={t('settings.bbToken')} className="sm:col-span-2">
+            <Input type="password" value={form.token} onChange={(e) => setForm((f) => ({ ...f, token: e.target.value }))} placeholder="ATATT…" autoComplete="off" />
+          </Field>
+          <div className="sm:col-span-2">
+            <Button type="submit" size="sm" disabled={!canSubmit}>
+              {connect.isPending ? <Spinner /> : <BitbucketIcon size={14} />} {t('settings.bbConnect')}
+            </Button>
+          </div>
+        </form>
+
+        <Disclosure label={t('settings.bbHowTo')} className="mt-3">
+          <ul className="mt-2 list-disc space-y-1.5 pl-5 text-xs text-muted-foreground">
+            <li>
+              {t('settings.bbHowApi')}{' '}
+              <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noreferrer noopener" className="text-primary hover:underline">id.atlassian.com</a>
+              {' '}{t('settings.bbHowApi2')}
+            </li>
+            <li>{t('settings.bbHowAccess')}</li>
+            <li>
+              {t('settings.bbHowScopes')}{' '}
+              <span className="font-mono text-[11px] text-foreground">{BB_API_TOKEN_SCOPES.join(', ')}</span>
+            </li>
+          </ul>
+        </Disclosure>
+      </div>
+
+      {status.data?.webhookUrl && (
+        <div className="mt-3 border-t border-border pt-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">{t('settings.bbWebhookUrl')}</div>
+          <div className="mt-1.5 flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded-md border border-border bg-surface px-2.5 py-1.5 font-mono text-[12px]">{status.data.webhookUrl}</code>
+            <Button size="sm" variant="outline" onClick={() => { void navigator.clipboard?.writeText(status.data!.webhookUrl); toast(t('settings.ghAppWebhookCopied')); }}>
+              <Copy size={13} />
+            </Button>
+          </div>
+          <p className="mt-1 text-[11px] text-faint">{t('settings.bbWebhookHint')}</p>
+        </div>
+      )}
 
       <ConfirmDialog
         open={!!toDelete}
@@ -710,7 +942,7 @@ function AddWebhookDialog({ open, onClose }: { open: boolean; onClose: () => voi
 
 /* ─────────────── Panel ─────────────── */
 
-type IntegrationKey = 'github' | 'slack' | 'webhooks';
+type IntegrationKey = 'github' | 'bitbucket' | 'slack' | 'webhooks';
 
 /**
  * Integrations as a short list – one row per service with its state – and
@@ -756,6 +988,7 @@ export function IntegrationsPanel() {
   const webhooks = useQuery({ queryKey: ['webhooks'], queryFn: () => api.get<{ data: Webhook[] }>('/webhooks') });
 
   const githubConnected = (gitConns.data?.data ?? []).some((c) => c.provider === 'github');
+  const bitbucketConnected = (gitConns.data?.data ?? []).some((c) => c.provider === 'bitbucket');
   const hookCount = (webhooks.data?.data ?? []).filter((h) => h.active !== false).length;
 
   const rows: { key: IntegrationKey; icon: ReactNode; title: string; desc: string; state: ReactNode }[] = [
@@ -765,6 +998,14 @@ export function IntegrationsPanel() {
         <StatusChip tone={githubConnected ? 'ok' : (ghApp.data?.configured || oauth.data?.configured) ? 'muted' : 'off'}>
           {githubConnected ? t('settings.stateConnected') : ghApp.data?.configured ? t('settings.ghAppReady')
             : oauth.data?.configured ? t('settings.stateReady') : t('settings.stateNone')}
+        </StatusChip>
+      ) : null,
+    },
+    {
+      key: 'bitbucket', icon: <BitbucketIcon size={18} />, title: t('settings.bitbucketTitle'), desc: t('settings.bitbucketDesc'),
+      state: gitConns.isSuccess ? (
+        <StatusChip tone={bitbucketConnected ? 'ok' : 'off'}>
+          {bitbucketConnected ? t('settings.stateConnected') : t('settings.stateNone')}
         </StatusChip>
       ) : null,
     },
@@ -811,6 +1052,7 @@ export function IntegrationsPanel() {
 
       <SidePanel open={!!current} onClose={() => setOpen(null)} title={current?.title ?? ''} subtitle={current?.desc} icon={current?.icon}>
         {open === 'github' && <GitHubCard />}
+        {open === 'bitbucket' && <BitbucketCard />}
         {open === 'slack' && <SlackCard />}
         {open === 'webhooks' && <WebhooksSection />}
       </SidePanel>

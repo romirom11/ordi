@@ -13,6 +13,7 @@ import { err } from '../../lib/errors';
 import { assertProject } from '../../core/access';
 import * as svc from './service';
 import { projectOverviewRoutes } from './overview.routes';
+import { ensureBitbucketHook } from '../integrations/bitbucket-sync';
 
 type Db = ReturnType<typeof getDb>['db'];
 
@@ -154,7 +155,15 @@ export function projectsRoutes() {
     const { db } = getDb();
     const repositoryId = await resolveRepositoryId(db, body);
     await db.insert(schema.projectRepositories).values({ projectId, repositoryId }).onConflictDoNothing();
-    return c.json({ ok: true, repositoryId }, 201);
+    // Bitbucket has no app installation that delivers events on its own: the
+    // repository gets its webhook when it is bound. A failure (usually a
+    // token without the webhook scope) does not undo the binding – the
+    // reason goes back to the UI so the admin can fix the token.
+    const hook = await ensureBitbucketHook(repositoryId);
+    return c.json({
+      ok: true, repositoryId,
+      ...(hook.status === 'skipped' ? {} : { webhook: hook.status === 'ok' ? { status: 'ok' } : { status: 'failed', error: hook.error } }),
+    }, 201);
   });
 
   app.delete('/projects/:id/repositories/:repoId', async (c) => {
