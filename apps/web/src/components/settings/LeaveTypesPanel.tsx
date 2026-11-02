@@ -104,7 +104,7 @@ export function LeaveTypesPanel() {
       {typesQ.isLoading ? (
         <div className="space-y-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
       ) : types.length === 0 ? (
-        <EmptyState icon={<CalendarClock size={18} />} title={t('ltypes.empty')} hint={t('ltypes.emptyHint')} />
+        <RowList><EmptyState icon={<CalendarClock size={18} />} title={t('ltypes.empty')} hint={t('ltypes.emptyHint')} /></RowList>
       ) : (
         <RowList>
           {types.map((lt, i) => (

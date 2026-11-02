@@ -183,8 +183,10 @@ export function InvoicesPanel() {
       <SectionHead title={t('settings.invoices')} desc={t('settings.invoicesDesc')} />
 
       <div className="grid grid-cols-1 items-start gap-10 lg:grid-cols-[minmax(0,380px),minmax(0,1fr)]">
-        {/* Form: stacked, full-width – the page has the room, use it. */}
-        <div className="space-y-6">
+        {/* Form: stacked, full-width – the page has the room, use it. Fields sit
+            in a card like every other settings section; Save stays outside. */}
+        <div className="space-y-4">
+        <div className="space-y-6 rounded-lg border border-border bg-card p-4">
           <div
             className="flex items-center justify-between gap-4"
             onMouseEnter={() => setFocus('logo')}
@@ -285,6 +287,7 @@ export function InvoicesPanel() {
             <label className="mt-2.5 block text-xs font-medium text-muted-foreground">{t('settings.invoiceDefaultTerms')}</label>
             <Textarea value={defaultTerms} onChange={(e) => setDefaultTerms(e.target.value)} placeholder={t('settings.invoiceDefaultTermsPlaceholder')} rows={3} className="mt-1 w-full" />
           </div>
+        </div>
 
           <div className="flex h-8 items-center gap-3">
             {dirty && (

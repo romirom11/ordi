@@ -221,6 +221,31 @@ body {
   }
 }
 
+/* The task view controls float bottom-right (components/project/TasksToolbar);
+   where the bulk-selection bar spans the width, they step up above it. */
+@media (max-width: 1023px) {
+  body:has(.bulk-bar) .tasks-fab { bottom: 4.75rem; }
+}
+
+/* Urbanist Cyrillic: Urbanist with Cyrillic added (OFL, see
+   assets/fonts/urbanist-cyrillic/OFL.txt), so a Ukrainian sentence with
+   English names in it stays in one typeface. Only Glass uses it, and the
+   browser fetches it only once something in Glass asks for it. */
+@font-face {
+  font-family: 'Urbanist Cyrillic';
+  src: url('./assets/fonts/urbanist-cyrillic/UrbanistCyrillic-wght.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Urbanist Cyrillic';
+  src: url('./assets/fonts/urbanist-cyrillic/UrbanistCyrillic-Italic-wght.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+
 /* ─────────────────────────────────────────────────────────────
    Glass style (data-style="glass" on <html>, lib/theme.tsx).
    A second axis next to light/dark: the same tokens and components,
@@ -271,6 +296,8 @@ body {
   --glass-tint: 0 0% 100%;            /* fills: chips, selected rows */
   --glass-tint-a: 0.07;
   --glass-hover-a: 0.1;
+  --glass-selected-a: 0.15;   /* picked chip: must beat the card tint of its neighbours */
+  --glass-skeleton-a: 0.09;
   --glass-line: 0 0% 100% / 0.1;
   --glass-line-strong: 0 0% 100% / 0.18;
   --glass-rim: 0 0% 100% / 0.15;
@@ -323,6 +350,8 @@ body {
   --glass-tint: 150 9% 8%;
   --glass-tint-a: 0.06;
   --glass-hover-a: 0.075;
+  --glass-selected-a: 0.09;
+  --glass-skeleton-a: 0.07;
   --glass-line: 150 9% 8% / 0.1;
   --glass-line-strong: 150 9% 8% / 0.18;
   --glass-rim: 0 0% 100% / 0.72;
@@ -341,7 +370,7 @@ body {
    left, a warm brick mass in the middle, dark olive ground – under a wash
    that sets the theme's brightness. */
 [data-style='glass'] body {
-  font-family: 'Urbanist Variable', Urbanist, 'Inter Variable', system-ui, sans-serif;
+  font-family: 'Urbanist Cyrillic', 'Inter Variable', system-ui, sans-serif;
   font-feature-settings: normal;
   font-weight: 500;
   background:
@@ -399,8 +428,8 @@ body {
 :where([data-style='glass']) .bg-card.border-border { border-color: hsl(var(--glass-rim)); }
 :where([data-style='glass']) .border-input { border-color: hsl(var(--glass-line-strong)); }
 
-/* Urbanist runs lighter and smaller than Inter: one step up in weight
-   keeps labels and body text as legible as in the classic style. */
+/* Urbanist runs lighter than Inter: one step up in weight keeps labels as
+   legible as in the classic style. */
 :where([data-style='glass']) .font-medium { font-weight: 600; }
 
 /* Geometry: generous corners, pill controls. */
@@ -442,6 +471,9 @@ body {
 
 /* Fields sit in a soft well. */
 :where([data-style='glass']) .border-input.bg-transparent { background-color: hsl(var(--glass-ctl)); }
+/* …except where a page strips the field chrome to show flow text: the task
+   description editor (task.css drops its border and radius, so drop the well). */
+:where([data-style='glass']) .task-desc > .border-input { background-color: transparent; }
 /* A soft halo instead of a solid lime ring around the focused field. */
 [data-style='glass'] .focus\:ring-ring:focus { --tw-ring-color: hsl(var(--ring) / 0.3); }
 
@@ -457,6 +489,15 @@ body {
 :where([data-style='glass']) .bg-muted\/20 { background-color: hsl(var(--glass-tint) / calc(var(--glass-tint-a) * 0.2)); }
 :where([data-style='glass']) .bg-muted\/15 { background-color: hsl(var(--glass-tint) / calc(var(--glass-tint-a) * 0.15)); }
 :where([data-style='glass']) .ui-seg.bg-muted\/60 { background-color: hsl(var(--glass-tint) / var(--glass-tint-a)); }
+
+/* Skeletons: a neutral tint over the glass. The solid --muted is warm
+   graphite in the dark theme and a yellowish grey in the light one, which
+   read as a dark hole and a cream smear while loading. */
+:where([data-style='glass']) .skeleton { background: hsl(var(--glass-tint) / var(--glass-skeleton-a)); }
+
+/* A picked chip (bg-muted framed by border-border-strong) sits among chips
+   that are themselves glass, so it needs a denser tint to read as chosen. */
+:where([data-style='glass']) .bg-muted.border-border-strong { background-color: hsl(var(--glass-tint) / var(--glass-selected-a)); }
 
 /* Hovers: one clearly visible tint whatever step the classic style uses.
    Tailwind emits its hover: variants after this file's rules, so these use a

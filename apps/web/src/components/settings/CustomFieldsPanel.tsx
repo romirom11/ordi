@@ -162,7 +162,7 @@ export function CustomFieldsPanel({ projectId }: { projectId?: string } = {}) {
       {fieldsQ.isLoading ? (
         <Skeleton className="h-24 w-full" />
       ) : rows.length === 0 ? (
-        <EmptyState icon={<SlidersHorizontal size={18} />} title={t('settings.noCustomFields')} />
+        <RowList><EmptyState icon={<SlidersHorizontal size={18} />} title={t('settings.noCustomFields')} /></RowList>
       ) : (
         <RowList>
           {rows.map((f, i) => (

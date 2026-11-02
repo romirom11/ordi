@@ -2,7 +2,6 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import '@fontsource-variable/inter';
-import '@fontsource-variable/urbanist';
 import './index.css';
 import { applyStoredTheme, ThemeProvider } from './lib/theme';
 import { RouterProvider, usePathname } from './lib/router';

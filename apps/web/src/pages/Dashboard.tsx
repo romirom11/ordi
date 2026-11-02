@@ -65,6 +65,9 @@ extendDict({
     'activity.verb.deactivated': 'deactivated',
     'activity.verb.totp_enabled': 'enabled two-factor auth for',
     'activity.verb.totp_disabled': 'disabled two-factor auth for',
+    'activity.phrase.mail_senders_updated': 'changed the mail senders',
+    'activity.phrase.integrations_config_updated': 'changed the integration settings',
+    'activity.noun.workspace': 'the workspace',
     'activity.noun.task': 'a task',
     'activity.noun.project': 'a project',
     'activity.noun.deal': 'a deal',
@@ -133,6 +136,11 @@ extendDict({
     'activity.verb.deactivated': 'деактивовано',
     'activity.verb.totp_enabled': 'увімкнено двофакторний вхід для',
     'activity.verb.totp_disabled': 'вимкнено двофакторний вхід для',
+    'activity.phrase.mail_senders_updated': 'змінено поштових відправників',
+    'activity.phrase.mail_senders_updated.you': 'змінили поштових відправників',
+    'activity.phrase.integrations_config_updated': 'змінено налаштування інтеграцій',
+    'activity.phrase.integrations_config_updated.you': 'змінили налаштування інтеграцій',
+    'activity.noun.workspace': 'воркспейс',
     'activity.verb.payment_recorded.you': 'зафіксували платіж за',
     'activity.verb.moved': 'переміщено',
     'activity.verb.reassigned': 'передано іншому виконавцю',
@@ -541,13 +549,18 @@ function humanize(s?: string): string {
 
 function activityText(a: ActivityItem, t: (k: string, fallback?: string) => string, isYou: boolean): string {
   const action = a.action || 'updated';
+  const cap = (x: string) => (isYou ? x : x.charAt(0).toUpperCase() + x.slice(1));
+  // Some actions read as a whole phrase rather than "verb + noun" (the noun's
+  // grammatical case would differ per verb in Ukrainian).
+  const phrase = (isYou && t(`activity.phrase.${action}.you`, '')) || t(`activity.phrase.${action}`, '');
+  if (phrase) return cap(phrase);
   const base = t(`activity.verb.${action}`, humanize(action));
   // After a "You/Ви" prefix some locales need a different verb form.
   const verb = isYou ? t(`activity.verb.${action}.you`, base) : base;
   const noun = a.entityType ? t(`activity.noun.${a.entityType}`, humanize(a.entityType)) : '';
   const text = noun ? `${verb} ${noun}` : verb;
   // Standalone sentence starts with a capital; after "You " it stays lowercase.
-  return isYou ? text : text.charAt(0).toUpperCase() + text.slice(1);
+  return cap(text);
 }
 
 /* ───────────────────────── Page ───────────────────────── */

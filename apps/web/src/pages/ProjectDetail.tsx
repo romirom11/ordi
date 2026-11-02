@@ -567,7 +567,8 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, canWrite, 
   const filtered = allTasks.length > 0 && visibleTasks.length === 0;
 
   return (
-    <div className="flex min-h-full flex-col">
+    // pb-16: room under the last row for the floating view controls.
+    <div className="flex min-h-full flex-col pb-16">
       <TasksToolbar
         projectId={id}
         prefs={prefs}
@@ -1371,7 +1372,7 @@ function SettingsTab({ project, isAdmin, onPatch, pending }: {
               {PROJECT_STATUSES.map((s) => (
                 <button key={s} disabled={!isAdmin} onClick={() => { if (s !== project.status) onPatch({ status: s }); }}
                   className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors',
-                    project.status === s ? 'border-primary/40 bg-primary/10 text-foreground' : 'border-border bg-card text-muted-foreground hover:bg-muted',
+                    project.status === s ? 'border-border-strong bg-muted text-foreground' : 'border-border bg-card text-muted-foreground hover:bg-muted',
                     !isAdmin && 'pointer-events-none opacity-60')}>
                   <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: STATUS_META[s]!.color }} />
                   {t(STATUS_META[s]!.key)}

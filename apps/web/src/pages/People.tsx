@@ -368,7 +368,7 @@ function DirectoryView() {
                 onClick={() => setFilter(f.key)}
                 className={cn(
                   'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors duration-150',
-                  active ? 'border-primary/40 bg-primary/10 text-foreground' : 'border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground',
+                  active ? 'border-border-strong bg-muted text-foreground' : 'border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground',
                 )}
               >
                 {f.color && <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: f.color }} />}

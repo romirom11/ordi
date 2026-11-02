@@ -119,7 +119,7 @@ export function ProjectTypesPanel() {
       {typesQ.isLoading ? (
         <div className="space-y-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
       ) : types.length === 0 ? (
-        <EmptyState icon={<FolderKanban size={18} />} title={t('ptypes.empty')} hint={t('ptypes.emptyHint')} />
+        <RowList><EmptyState icon={<FolderKanban size={18} />} title={t('ptypes.empty')} hint={t('ptypes.emptyHint')} /></RowList>
       ) : (
         <RowList>
           {types.map((pt, i) => (

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Download, Upload, CheckCircle2, AlertCircle } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, ApiError } from '../lib/api';
 import { useCan } from '../lib/auth';
 import { useT } from '../lib/i18n';
 import { Button, Select, Textarea, cn } from './ui';
@@ -11,12 +11,12 @@ import { toast } from './overlays';
 /** CSV import/export (PRD §14.6): exports per domain permission; imports with dry-run. */
 
 const EXPORTS: { path: string; label: string; perm: string }[] = [
-  { path: '/api/v1/export/companies.csv', label: 'Companies', perm: 'crm.export' },
-  { path: '/api/v1/export/contacts.csv', label: 'Contacts', perm: 'crm.export' },
-  { path: '/api/v1/export/leads.csv', label: 'Leads', perm: 'crm.export' },
-  { path: '/api/v1/export/tasks.csv', label: 'Tasks', perm: 'projects.export' },
-  { path: '/api/v1/export/invoices.csv', label: 'Invoices', perm: 'finance.export' },
-  { path: '/api/v1/export/time.csv', label: 'Time entries', perm: 'time.read_all' },
+  { path: '/export/companies.csv', label: 'Companies', perm: 'crm.export' },
+  { path: '/export/contacts.csv', label: 'Contacts', perm: 'crm.export' },
+  { path: '/export/leads.csv', label: 'Leads', perm: 'crm.export' },
+  { path: '/export/tasks.csv', label: 'Tasks', perm: 'projects.export' },
+  { path: '/export/invoices.csv', label: 'Invoices', perm: 'finance.export' },
+  { path: '/export/time.csv', label: 'Time entries', perm: 'time.read_all' },
 ];
 
 const IMPORT_TARGETS = [
@@ -58,21 +58,23 @@ export function ImportExportPanel() {
   const hasErrors = (result?.errors ?? []).length > 0;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-4">
       <SectionHead title={t('settings.importExport', 'Import & export')} desc={t('settings.importExportDesc', 'Bulk import and export via CSV.')} />
 
       {/* Export: one click per file – the everyday half of this page. */}
-      <section>
+      <section className="rounded-lg border border-border bg-card p-4">
         <div className="mb-3 flex items-center gap-2 text-[13px] font-semibold"><Download size={15} /> {t('importexport.export', 'Export CSV')}</div>
         {visibleExports.length === 0 ? (
           <p className="text-[13px] text-muted-foreground">{t('common.noAccess')}</p>
         ) : (
           <div className="flex flex-wrap gap-2">
             {visibleExports.map((e) => (
-              <a key={e.path} href={e.path}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-[13px] transition-colors hover:border-border-strong hover:bg-muted">
+              // Through fetch, not <a href>: a navigation carries the cookie but
+              // not the desktop app's bearer token, so the link answered 401 there.
+              <Button key={e.path} variant="outline"
+                onClick={() => api.download(e.path, e.path.split('/').pop()!).catch((err) => toast.error(err instanceof ApiError ? err.message : t('crm.exportFailed', 'Export failed')))}>
                 <Download size={14} className="text-muted-foreground" /> {e.label}
-              </a>
+              </Button>
             ))}
           </div>
         )}
@@ -80,7 +82,7 @@ export function ImportExportPanel() {
 
       {/* Import */}
       {visibleImports.length > 0 && (
-        <section>
+        <section className="rounded-lg border border-border bg-card p-4">
           <Disclosure label={<span className="inline-flex items-center gap-2 font-semibold text-foreground"><Upload size={15} /> {t('importexport.import', 'Import CSV')}</span>}>
           <div className="space-y-3 pt-3">
             <div className="flex flex-wrap items-center gap-2">
