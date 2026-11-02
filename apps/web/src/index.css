@@ -343,7 +343,7 @@ body {
    left, a warm brick mass in the middle, dark olive ground – under a wash
    that sets the theme's brightness. */
 [data-style='glass'] body {
-  font-family: 'Urbanist Variable', Urbanist, 'Inter Variable', system-ui, sans-serif;
+  font-family: 'Manrope Variable', Manrope, 'Inter Variable', system-ui, sans-serif;
   font-feature-settings: normal;
   font-weight: 500;
   background:
@@ -401,8 +401,9 @@ body {
 :where([data-style='glass']) .bg-card.border-border { border-color: hsl(var(--glass-rim)); }
 :where([data-style='glass']) .border-input { border-color: hsl(var(--glass-line-strong)); }
 
-/* Urbanist runs lighter and smaller than Inter: one step up in weight
-   keeps labels and body text as legible as in the classic style. */
+/* Manrope runs lighter than Inter: one step up in weight keeps labels as
+   legible as in the classic style. It covers Latin and Cyrillic alike, so a
+   Ukrainian sentence with English names in it stays in one typeface. */
 :where([data-style='glass']) .font-medium { font-weight: 600; }
 
 /* Geometry: generous corners, pill controls. */
@@ -444,6 +445,9 @@ body {
 
 /* Fields sit in a soft well. */
 :where([data-style='glass']) .border-input.bg-transparent { background-color: hsl(var(--glass-ctl)); }
+/* …except where a page strips the field chrome to show flow text: the task
+   description editor (task.css drops its border and radius, so drop the well). */
+:where([data-style='glass']) .task-desc > .border-input { background-color: transparent; }
 /* A soft halo instead of a solid lime ring around the focused field. */
 [data-style='glass'] .focus\:ring-ring:focus { --tw-ring-color: hsl(var(--ring) / 0.3); }
 
