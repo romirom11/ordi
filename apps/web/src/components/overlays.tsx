@@ -107,6 +107,80 @@ function useModalLayer({ active, rootRef, panelRef, onEscape, returnTo }: {
   }, [active]);
 }
 
+/* ───────────────────────── Side panel ───────────────────────── */
+
+/**
+ * A full-height panel that slides in from the right edge – for settings that
+ * want room without leaving the page (one integration at a time). Same layer
+ * rules as Dialog: modal, Escape and a backdrop click close it, focus returns
+ * to whatever opened it.
+ */
+export function SidePanel({ open, onClose, children, width = 560, title, subtitle, icon }: {
+  open: boolean; onClose: () => void; children: ReactNode; width?: number; title: ReactNode; subtitle?: ReactNode; icon?: ReactNode;
+}) {
+  const t = useT();
+  const [visible, setVisible] = useState(open);
+  const [closing, setClosing] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const returnTo = useReturnTarget(open);
+
+  useEffect(() => {
+    if (open) { setVisible(true); setClosing(false); return; }
+    if (!visible) return;
+    setClosing(true);
+    const id = setTimeout(() => { setVisible(false); setClosing(false); }, 200);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  useModalLayer({ active: open && visible && !closing, rootRef, panelRef, onEscape: onClose, returnTo });
+
+  if (!visible) return null;
+
+  return createPortal(
+    <div
+      ref={rootRef}
+      inert={closing}
+      aria-hidden={closing || undefined}
+      className="modal-backdrop fixed inset-0 z-50 flex justify-end"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{
+        background: 'hsl(var(--overlay) / 0.4)',
+        animation: `${closing ? 'overlay-out' : 'overlay-in'} ${closing ? 'var(--duration-quick)' : 'var(--duration-fast)'} var(--ease-smooth-out) both`,
+      }}
+    >
+      <style>{`@keyframes overlay-out { from { opacity: 1 } to { opacity: 0 } } @keyframes side-in { from { transform: translateX(24px); opacity: 0 } to { transform: none; opacity: 1 } } @keyframes side-out { from { transform: none; opacity: 1 } to { transform: translateX(24px); opacity: 0 } }`}</style>
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="side-panel m-2 flex h-[calc(100%-1rem)] w-full flex-col overflow-hidden rounded-xl border border-border bg-elevated shadow-modal focus-visible:outline-none"
+        style={{
+          maxWidth: width,
+          animation: `${closing ? 'side-out' : 'side-in'} ${closing ? 'var(--duration-quick)' : 'var(--duration-fast)'} var(--ease-smooth-out) both`,
+        }}
+      >
+        <div className="flex shrink-0 items-start gap-3 border-b border-border px-5 py-4">
+          {icon && <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">{icon}</div>}
+          <div className="min-w-0 flex-1">
+            <h2 id={titleId} className="text-[15px] font-semibold leading-tight">{title}</h2>
+            {subtitle && <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>}
+          </div>
+          <IconButton type="button" size="sm" onClick={onClose} aria-label={t('common.close')} data-dialog-close="">
+            <X size={14} />
+          </IconButton>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 /* ───────────────────────── Dialog ───────────────────────── */
 
 export function Dialog({ open, onClose, children, width = 480, title, hideClose, ariaLabel }: {

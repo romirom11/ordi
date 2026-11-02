@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { EVENT_TYPES, GIT_PROVIDERS } from '@ordi/shared';
 import {
@@ -7,11 +7,11 @@ import {
 import { api } from '../../lib/api';
 import { useCan } from '../../lib/auth';
 import {
-  Button, IconButton, Input, Select, Card, Badge, Skeleton, Spinner, fmtDate, cn,
+  Button, IconButton, Input, Select, Badge, Skeleton, Spinner, fmtDate, cn,
 } from '../ui';
-import { Dialog, ConfirmDialog, toast } from '../overlays';
+import { Dialog, ConfirmDialog, SidePanel, toast } from '../overlays';
 import { SectionHead, Field, RowList, Disclosure, StatusChip } from './primitives';
-import { EmailCard, OAuthCredentials } from './integrationsConfig';
+import { OAuthCredentials } from './integrationsConfig';
 import { Hint } from '../Hint';
 import { useT, extendDict } from '../../lib/i18n';
 
@@ -74,6 +74,7 @@ extendDict({
     'settings.slackRemoved': 'Slack webhook removed',
     // Webhooks
     'settings.webhooksDesc': 'Send a signed POST to your endpoint when events happen.',
+    'settings.webhooksActive': '{n} active',
     'settings.addWebhook': 'Add webhook',
     'settings.webhookSecret': 'Signing secret',
     'settings.webhookSecretHint': 'Sent as a signature header; store it to verify payloads.',
@@ -140,6 +141,7 @@ extendDict({
     'settings.slackRemoved': 'Slack webhook видалено',
     // Webhooks
     'settings.webhooksDesc': 'Надсилаємо підписаний POST на ваш ендпоінт, коли стаються події.',
+    'settings.webhooksActive': 'Активних: {n}',
     'settings.addWebhook': 'Додати вебхук',
     'settings.webhookSecret': 'Секрет підпису',
     'settings.webhookSecretHint': 'Надсилається як заголовок підпису; збережіть, щоб перевіряти запити.',
@@ -248,15 +250,8 @@ function GitHubCard() {
   });
 
   return (
-    <Card className="p-4">
-      <div className="flex items-start gap-3">
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-muted text-foreground">
-          <Github size={18} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-semibold">{t('settings.githubTitle')}</div>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t('settings.githubDesc')}</p>
-        </div>
+    <div>
+      <div className="flex flex-wrap items-center gap-3">
         {oauth.isSuccess && ghApp.isSuccess && (
           <StatusChip tone={githubConnected ? 'ok' : (appConfigured || configured) ? 'muted' : 'off'}>
             {githubConnected ? t('settings.stateConnected')
@@ -414,7 +409,7 @@ function GitHubCard() {
         danger
         pending={del.isPending}
       />
-    </Card>
+    </div>
   );
 }
 
@@ -478,15 +473,8 @@ function SlackCard() {
   const webhookDirty = value.trim() !== (stored ?? '');
 
   return (
-    <Card className="p-4">
-      <div className="flex items-start gap-3">
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-muted text-foreground">
-          <Slack size={18} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-semibold">{t('settings.slackTitle')}</div>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t('settings.slackDesc')}</p>
-        </div>
+    <div>
+      <div className="flex flex-wrap items-center gap-3">
         {status.isSuccess && (
           <StatusChip tone={connected ? 'ok' : configured ? 'muted' : 'off'}>
             {connected ? t('settings.stateConnected') : configured ? t('settings.stateReady') : t('settings.stateNone')}
@@ -574,7 +562,7 @@ function SlackCard() {
         danger
         pending={disconnect.isPending}
       />
-    </Card>
+    </div>
   );
 }
 
@@ -596,11 +584,7 @@ function WebhooksSection() {
 
   return (
     <div>
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-[13px] font-semibold"><WebhookIcon size={15} /> {t('settings.webhooks')}</div>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t('settings.webhooksDesc')}</p>
-        </div>
+      <div className="mb-3 flex justify-end">
         <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}><Plus size={14} /> {t('settings.addWebhook')}</Button>
       </div>
 
@@ -697,11 +681,20 @@ function AddWebhookDialog({ open, onClose }: { open: boolean; onClose: () => voi
 
 /* ─────────────── Panel ─────────────── */
 
+type IntegrationKey = 'github' | 'slack' | 'webhooks';
+
+/**
+ * Integrations as a short list – one row per service with its state – and
+ * each one's setup in a side panel, so the page stays scannable however much
+ * configuration a single integration carries.
+ */
 export function IntegrationsPanel() {
   const t = useT();
+  const [open, setOpen] = useState<IntegrationKey | null>(null);
 
   // Handle the OAuth return redirect (?git=connected|error). Read from the raw
-  // URL on mount, toast, then strip the param via history.replaceState.
+  // URL on mount, toast, then strip the param via history.replaceState. The
+  // integration it came back from opens, so its new state is in view.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const git = params.get('git');
@@ -714,6 +707,8 @@ export function IntegrationsPanel() {
     if (ghApp === 'created') toast(t('settings.ghAppCreated'));
     else if (ghApp === 'installed') toast(t('settings.ghAppInstalled'));
     else if (ghApp === 'error') toast.error(t('settings.ghAppError'));
+    if (git || ghApp) setOpen('github');
+    else if (slack) setOpen('slack');
     if (git || slack || ghApp) {
       params.delete('git');
       params.delete('slack');
@@ -724,13 +719,72 @@ export function IntegrationsPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The same queries the panels use (react-query shares them), for the row states.
+  const oauth = useQuery({ queryKey: ['gitOAuthStatus'], queryFn: () => api.get<{ configured: boolean }>('/integrations/git/oauth/status') });
+  const ghApp = useQuery({ queryKey: ['githubAppStatus'], queryFn: () => api.get<GithubAppStatus>('/integrations/github-app/status') });
+  const gitConns = useQuery({ queryKey: ['gitConnections'], queryFn: () => api.get<{ data: GitConnection[] }>('/integrations/git/connections') });
+  const slack = useQuery({ queryKey: ['slackStatus'], queryFn: () => api.get<SlackStatus>('/integrations/slack/status') });
+  const webhooks = useQuery({ queryKey: ['webhooks'], queryFn: () => api.get<{ data: Webhook[] }>('/webhooks') });
+
+  const githubConnected = (gitConns.data?.data ?? []).some((c) => c.provider === 'github');
+  const hookCount = (webhooks.data?.data ?? []).filter((h) => h.active !== false).length;
+
+  const rows: { key: IntegrationKey; icon: ReactNode; title: string; desc: string; state: ReactNode }[] = [
+    {
+      key: 'github', icon: <Github size={18} />, title: t('settings.githubTitle'), desc: t('settings.githubDesc'),
+      state: oauth.isSuccess && ghApp.isSuccess && gitConns.isSuccess ? (
+        <StatusChip tone={githubConnected ? 'ok' : (ghApp.data?.configured || oauth.data?.configured) ? 'muted' : 'off'}>
+          {githubConnected ? t('settings.stateConnected') : ghApp.data?.configured ? t('settings.ghAppReady')
+            : oauth.data?.configured ? t('settings.stateReady') : t('settings.stateNone')}
+        </StatusChip>
+      ) : null,
+    },
+    {
+      key: 'slack', icon: <Slack size={18} />, title: t('settings.slackTitle'), desc: t('settings.slackDesc'),
+      state: slack.isSuccess ? (
+        <StatusChip tone={slack.data.connected ? 'ok' : slack.data.configured ? 'muted' : 'off'}>
+          {slack.data.connected ? t('settings.stateConnected') : slack.data.configured ? t('settings.stateReady') : t('settings.stateNone')}
+        </StatusChip>
+      ) : null,
+    },
+    {
+      key: 'webhooks', icon: <WebhookIcon size={18} />, title: t('settings.webhooks'), desc: t('settings.webhooksDesc'),
+      state: webhooks.isSuccess ? (
+        <StatusChip tone={hookCount > 0 ? 'ok' : 'off'}>
+          {hookCount > 0 ? t('settings.webhooksActive').replace('{n}', String(hookCount)) : t('settings.stateNone')}
+        </StatusChip>
+      ) : null,
+    },
+  ];
+  const current = rows.find((r) => r.key === open);
+
   return (
-    <div className="space-y-6">
+    <div>
       <SectionHead title={t('settings.integrations')} desc={t('settings.integrationsDesc')} />
-      <EmailCard />
-      <GitHubCard />
-      <SlackCard />
-      <WebhooksSection />
+      <RowList>
+        {rows.map((r) => (
+          <button
+            key={r.key}
+            type="button"
+            onClick={() => setOpen(r.key)}
+            className="flex w-full items-center gap-3 border-b border-border px-4 py-3 text-left transition-colors duration-150 last:border-0 hover:bg-muted"
+          >
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-muted text-foreground">{r.icon}</span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[13px] font-semibold">{r.title}</span>
+              <span className="mt-0.5 block truncate text-xs text-muted-foreground">{r.desc}</span>
+            </span>
+            {r.state}
+            <ChevronRight size={15} className="shrink-0 text-faint" />
+          </button>
+        ))}
+      </RowList>
+
+      <SidePanel open={!!current} onClose={() => setOpen(null)} title={current?.title ?? ''} subtitle={current?.desc} icon={current?.icon}>
+        {open === 'github' && <GitHubCard />}
+        {open === 'slack' && <SlackCard />}
+        {open === 'webhooks' && <WebhooksSection />}
+      </SidePanel>
     </div>
   );
 }
