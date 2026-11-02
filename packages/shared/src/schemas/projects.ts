@@ -52,6 +52,8 @@ export const projectUpdateSchema = z.object({
     slackWebhookUrl: z.string().url().nullable().optional(),
     /** Preferred Slack channel id for this project (Slack app posts here). */
     slackChannelId: z.string().nullable().optional(),
+    /** Time-boxed cycles (sprints) for this project; off unless a project uses them. */
+    cycles: z.boolean().optional(),
   }).partial().optional(),
   version: z.number().int().optional(),
 });
@@ -178,6 +180,7 @@ export const bulkTaskUpdateSchema = z.object({
   assigneeIds: z.array(idSchema).optional(),
   labelIds: z.array(idSchema).optional(),
   cycleId: idSchema.nullable().optional(),
+  milestoneId: idSchema.nullable().optional(),
   priority: z.enum(TASK_PRIORITIES).optional(),
 });
 
