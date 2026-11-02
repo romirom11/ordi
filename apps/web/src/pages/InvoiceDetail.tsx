@@ -39,8 +39,8 @@ extendDict({
     'finance.sendConfirm': 'Send to {to}',
     'finance.sendNoRecipient': 'This company has no billing email. Enter an address here or set it on the company page.',
     'finance.sendInvalidEmail': 'Enter a valid email address.',
-    'finance.mailNotConfigured': 'Outgoing email is not configured. Set up SMTP in Settings → Integrations to send invoices.',
-    'finance.mailNotConfiguredShort': 'Email is not configured (Settings → Integrations)',
+    'finance.mailNotConfigured': 'Outgoing email is not configured. Add a sender in Settings → Email to send invoices.',
+    'finance.mailNotConfiguredShort': 'Email is not configured (Settings → Email)',
     'finance.mailSettings': 'Open email settings',
     'finance.resend': 'Send again',
     'finance.sending': 'Sending…',
@@ -90,8 +90,8 @@ extendDict({
     'finance.sendConfirm': 'Надіслати на {to}',
     'finance.sendNoRecipient': 'У компанії немає email для рахунків. Введіть адресу тут або задайте її на сторінці компанії.',
     'finance.sendInvalidEmail': 'Введіть коректну email-адресу.',
-    'finance.mailNotConfigured': 'Вихідна пошта не налаштована. Налаштуйте SMTP у Налаштування → Інтеграції, щоб надсилати рахунки.',
-    'finance.mailNotConfiguredShort': 'Пошта не налаштована (Налаштування → Інтеграції)',
+    'finance.mailNotConfigured': 'Вихідна пошта не налаштована. Додайте відправника в Налаштування → Пошта, щоб надсилати рахунки.',
+    'finance.mailNotConfiguredShort': 'Пошта не налаштована (Налаштування → Пошта)',
     'finance.mailSettings': 'Відкрити налаштування пошти',
     'finance.resend': 'Надіслати ще раз',
     'finance.sending': 'Надсилаємо…',
@@ -171,6 +171,9 @@ interface Invoice {
 interface SendPreview {
   mailConfigured: boolean;
   from: string | null;
+  /** The invoice default sender, preselected; `senders` is every address it can go from. */
+  senderId: string | null;
+  senders: { id: string; name: string; from: string }[];
   to: string | null;
   subject: string;
   body: string;
@@ -195,7 +198,7 @@ export function InvoiceDetailPage({ id }: { id: string }) {
   const [showCancel, setShowCancel] = useState(false);
   const [showSend, setShowSend] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
-  const [mail, setMail] = useState({ to: '', subject: '', body: '' });
+  const [mail, setMail] = useState({ to: '', subject: '', body: '', senderId: '' });
   const invoice = useQuery({ queryKey: ['invoice', id], queryFn: () => api.get<Invoice>(`/invoices/${id}`) });
   // Loaded up front, so the Send button already knows whether mail can go out at all.
   const preview = useQuery({
@@ -246,6 +249,7 @@ export function InvoiceDetailPage({ id }: { id: string }) {
       to: mail.to.trim(),
       subject: mail.subject.trim() || undefined,
       body: mail.body.trim() || undefined,
+      senderId: mail.senderId || undefined,
     }),
     onSuccess: (r) => {
       setShowSend(false);
@@ -259,7 +263,7 @@ export function InvoiceDetailPage({ id }: { id: string }) {
   const openSend = () => {
     send.reset();
     const p = preview.data;
-    setMail({ to: p?.to ?? '', subject: p?.subject ?? '', body: p?.body ?? '' });
+    setMail({ to: p?.to ?? '', subject: p?.subject ?? '', body: p?.body ?? '', senderId: p?.senderId ?? '' });
     setShowSend(true);
   };
   const cancel = useMutation({
@@ -395,7 +399,7 @@ export function InvoiceDetailPage({ id }: { id: string }) {
           <AlertTriangle size={15} className="mt-0.5 shrink-0 text-warning" />
           <div>
             {t('finance.mailNotConfigured')}
-            {can('settings.manage') && <> <Link to="/settings/integrations" className="text-primary hover:underline">{t('finance.mailSettings')}</Link></>}
+            {can('settings.manage') && <> <Link to="/settings/email" className="text-primary hover:underline">{t('finance.mailSettings')}</Link></>}
           </div>
         </div>
       )}
@@ -589,8 +593,14 @@ export function InvoiceDetailPage({ id }: { id: string }) {
           onSubmit={(e) => { e.preventDefault(); if (EMAIL_RE.test(mail.to.trim())) send.mutate(); }}
         >
           <div className="grid grid-cols-[64px,1fr] items-center gap-x-3 gap-y-2 text-[13px]">
-            <span className="text-xs font-medium text-muted-foreground">{t('finance.sendFrom')}</span>
-            <span className="truncate text-muted-foreground">{preview.data?.from ?? '–'}</span>
+            <label className="text-xs font-medium text-muted-foreground" htmlFor="send-from">{t('finance.sendFrom')}</label>
+            {(preview.data?.senders.length ?? 0) > 1 ? (
+              <Select id="send-from" value={mail.senderId} onChange={(e) => setMail((m) => ({ ...m, senderId: e.target.value }))}>
+                {preview.data!.senders.map((s) => <option key={s.id} value={s.id}>{s.name} – {s.from}</option>)}
+              </Select>
+            ) : (
+              <span id="send-from" className="truncate text-muted-foreground">{preview.data?.from ?? '–'}</span>
+            )}
             <label className="text-xs font-medium text-muted-foreground" htmlFor="send-to">{t('finance.sendTo')}</label>
             <Input
               id="send-to"
