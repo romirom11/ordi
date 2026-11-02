@@ -207,7 +207,7 @@ export function ProjectsPage() {
                   className={cn(
                     'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors duration-150',
                     active
-                      ? 'border-primary/40 bg-primary/10 text-foreground'
+                      ? 'border-border-strong bg-muted text-foreground'
                       : 'border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground',
                   )}
                 >
@@ -760,7 +760,7 @@ function FormChip({ children, active, label }: { children: ReactNode; active?: b
       className={cn(
         'inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-full border px-2.5 text-xs transition-colors duration-150',
         active
-          ? 'border-primary/40 bg-primary/10 text-foreground'
+          ? 'border-border-strong bg-muted text-foreground'
           : 'border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground',
       )}
     >

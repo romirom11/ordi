@@ -449,7 +449,7 @@ function NewPageDialog({ open, onClose, onSubmit, title, pending }: {
                 onClick={() => setType(o.key)}
                 className={cn(
                   'flex flex-col gap-1 rounded-md border px-3 py-2 text-left transition-colors duration-150',
-                  type === o.key ? 'border-primary bg-primary/5 text-foreground' : 'border-border text-muted-foreground hover:bg-muted/60',
+                  type === o.key ? 'border-border-strong bg-muted text-foreground' : 'border-border text-muted-foreground hover:bg-muted/60',
                 )}
               >
                 <span className="flex items-center gap-1.5 text-[13px] font-medium">{o.icon}{o.label}</span>
