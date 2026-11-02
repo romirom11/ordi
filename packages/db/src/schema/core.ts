@@ -243,6 +243,9 @@ export const emailDeliveries = pgTable('email_deliveries', {
   subject: text('subject').notNull(),
   body: text('body').notNull(),
   html: text('html'),
+  // The mail sender to deliver through (Settings → Email); null means the
+  // system sender. An id that no longer exists falls back the same way.
+  senderId: text('sender_id'),
   status: text('status').notNull().default('pending'), // pending | sending | sent | dead
   attempts: integer('attempts').notNull().default(0),
   nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),

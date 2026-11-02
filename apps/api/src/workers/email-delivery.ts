@@ -28,6 +28,7 @@ export async function enqueueEmail(
     subject: input.subject,
     body: input.body,
     html: input.html ?? null,
+    senderId: input.senderId ?? null,
   }).onConflictDoNothing({ target: schema.emailDeliveries.idempotencyKey });
 }
 
@@ -37,6 +38,7 @@ interface ClaimedDelivery {
   subject: string;
   body: string;
   html: string | null;
+  sender_id: string | null;
   attempts: number;
 }
 
@@ -92,6 +94,7 @@ export async function processEmailDeliveries(
       delivery.subject,
       delivery.body,
       delivery.html,
+      delivery.sender_id,
       delivery.attempts
   `) as unknown as ClaimedDelivery[];
 
@@ -109,6 +112,7 @@ export async function processEmailDeliveries(
         subject: delivery.subject,
         body: delivery.body,
         html: delivery.html ?? undefined,
+        senderId: delivery.sender_id,
       });
       await db.update(schema.emailDeliveries).set({
         status: 'sent',

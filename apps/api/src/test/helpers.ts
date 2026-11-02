@@ -71,6 +71,10 @@ export async function setTestSmtp(on: boolean): Promise<void> {
   const { db } = getDb();
   const [ws] = await db.select().from(schema.workspaceSettings).where(eq(schema.workspaceSettings.id, 'workspace'));
   const integrations = { ...((ws?.integrations as Record<string, unknown>) ?? {}) };
+  // Senders written through the API live in mailSenders; reset those too so
+  // "off" really means no mail and "on" means exactly this one sender.
+  delete integrations.mailSenders;
+  delete integrations.mailRoles;
   if (on) integrations.smtp = { host: 'smtp.test.local', port: 587, secure: false, user: '', from: 'ordi <test@ordi.local>' };
   else delete integrations.smtp;
   if (ws) await db.update(schema.workspaceSettings).set({ integrations }).where(eq(schema.workspaceSettings.id, 'workspace'));

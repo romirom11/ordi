@@ -295,6 +295,13 @@
       "when": 1791146530611,
       "tag": "0041_codex_base_url",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1793629036850,
+      "tag": "0042_email_delivery_sender",
+      "breakpoints": true
     }
   ]
 }

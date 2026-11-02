@@ -51,6 +51,8 @@ export const sendDocumentSchema = z.object({
   to: z.string().email().optional(),
   subject: z.string().optional(),
   body: z.string().optional(),
+  /** Mail sender to send from (Settings → Email); the invoice default when omitted. */
+  senderId: z.string().min(1).optional(),
 });
 
 export const paymentInputSchema = z.object({

@@ -5,10 +5,14 @@ import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { guard } from '../../core/rbac';
 import { emailConfigured, trySendEmail, verifyEmailTransport } from '../../lib/email';
-import { encryptIntegrationSecrets, invalidateRuntimeConfig, runtimeConfig, storeSlackAppConfig } from '../../lib/runtime-config';
+import {
+  ENV_SENDER_ID, LEGACY_SENDER_ID, encryptIntegrationSecrets, invalidateRuntimeConfig, runtimeConfig, saveMailSenders, storeSlackAppConfig,
+  type MailSender, type StoredMailSender,
+} from '../../lib/runtime-config';
+import { ulid } from 'ulid';
 import { createSlackApp, SlackManifestError } from '../integrations/slack-app';
 import { invalidateModuleCache } from '../../core/modules';
-import { integrationsConfigSchema } from '@ordi/shared';
+import { integrationsConfigSchema, mailRolesSchema, mailSenderInputSchema, mailSenderUpdateSchema } from '@ordi/shared';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 
@@ -101,6 +105,117 @@ export function settingsRoutes() {
     return c.json({ ...result, to: user.email });
   });
 
+  // ── Mail senders (Settings → Email) ──
+  // Secrets never leave the API: a sender reports whether it has a password.
+  const publicSender = (s: MailSender) => ({
+    id: s.id, name: s.name, from: s.smtp.from, replyTo: s.replyTo, source: s.source,
+    host: s.smtp.host, port: s.smtp.port, secure: s.smtp.secure, user: s.smtp.user, hasPassword: !!s.smtp.pass,
+  });
+  const logSenders = (c: Parameters<typeof currentActor>[0], diff: Record<string, unknown>) => writeActivity(getDb().db, {
+    entityType: 'workspace', entityId: 'workspace', action: 'mail_senders_updated',
+    actorId: currentActor(c).userId, actorType: currentActor(c).actorType, diff,
+  });
+  const notEnv = (id: string) => {
+    if (id === ENV_SENDER_ID) throw err.validation('The server .env sender is read-only – change SMTP_URL on the server');
+  };
+
+  app.get('/mail-senders', guard('settings.manage'), async (c) => {
+    const cfg = await runtimeConfig();
+    return c.json({ senders: cfg.senders.map(publicSender), systemSenderId: cfg.systemSenderId, invoiceSenderId: cfg.invoiceSenderId });
+  });
+
+  app.post('/mail-senders', guard('settings.manage'), async (c) => {
+    const input = mailSenderInputSchema.parse(await c.req.json());
+    const id = ulid();
+    await saveMailSenders((senders, roles) => ({
+      senders: [...senders, { id, name: input.name, from: input.from, replyTo: input.replyTo || undefined, host: input.host, port: input.port, secure: input.secure, user: input.user, pass: input.pass }],
+      roles,
+    }));
+    await logSenders(c, { created: id, name: input.name });
+    const cfg = await runtimeConfig();
+    return c.json(publicSender(cfg.senders.find((s) => s.id === id)!), 201);
+  });
+
+  app.patch('/mail-senders/:id', guard('settings.manage'), async (c) => {
+    const id = c.req.param('id');
+    notEnv(id);
+    const input = mailSenderUpdateSchema.parse(await c.req.json());
+    let found = false;
+    await saveMailSenders((senders, roles) => ({
+      senders: senders.map((s) => {
+        if (s.id !== id) return s;
+        found = true;
+        const next: StoredMailSender = { ...s, ...Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)) } as StoredMailSender;
+        if (input.replyTo === '') delete next.replyTo;
+        if (!input.pass) next.pass = s.pass;
+        return next;
+      }),
+      roles,
+    }));
+    if (!found) throw err.notFound('Mail sender not found');
+    await logSenders(c, { updated: id, keys: Object.keys(input).filter((k) => k !== 'pass') });
+    const cfg = await runtimeConfig();
+    return c.json(publicSender(cfg.senders.find((s) => s.id === id)!));
+  });
+
+  app.delete('/mail-senders/:id', guard('settings.manage'), async (c) => {
+    const id = c.req.param('id');
+    notEnv(id);
+    let found = false;
+    await saveMailSenders((senders, roles) => {
+      found = senders.some((s) => s.id === id);
+      // A role on a deleted sender falls back to the default (first sender).
+      return {
+        senders: senders.filter((s) => s.id !== id),
+        roles: { system: roles.system === id ? null : roles.system, invoices: roles.invoices === id ? null : roles.invoices },
+      };
+    });
+    if (!found) throw err.notFound('Mail sender not found');
+    await logSenders(c, { deleted: id });
+    return c.json({ ok: true });
+  });
+
+  app.put('/mail-senders/roles', guard('settings.manage'), async (c) => {
+    const input = mailRolesSchema.parse(await c.req.json());
+    const cfg = await runtimeConfig();
+    for (const id of [input.system, input.invoices]) {
+      if (id && !cfg.senders.some((s) => s.id === id)) throw err.validation(`Unknown mail sender: ${id}`);
+    }
+    await saveMailSenders((senders, roles) => ({
+      senders,
+      roles: {
+        system: input.system !== undefined ? input.system : roles.system,
+        invoices: input.invoices !== undefined ? input.invoices : roles.invoices,
+      },
+    }));
+    await logSenders(c, { roles: input });
+    const next = await runtimeConfig();
+    return c.json({ systemSenderId: next.systemSenderId, invoiceSenderId: next.invoiceSenderId });
+  });
+
+  app.get('/mail-senders/:id/health', guard('settings.manage'), async (c) => {
+    const id = c.req.param('id');
+    if (!(await runtimeConfig()).senders.some((s) => s.id === id)) throw err.notFound('Mail sender not found');
+    return c.json(await verifyEmailTransport(id));
+  });
+
+  app.post('/mail-senders/:id/test', guard('settings.manage'), async (c) => {
+    const id = c.req.param('id');
+    const sender = (await runtimeConfig()).senders.find((s) => s.id === id);
+    if (!sender) throw err.notFound('Mail sender not found');
+    const actor = currentActor(c);
+    const [user] = await getDb().db.select().from(schema.users).where(eq(schema.users.id, actor.userId!));
+    if (!user?.email) throw err.validation('Your account has no email address');
+    const result = await trySendEmail({
+      to: user.email,
+      senderId: id,
+      subject: `ordi test email from ${sender.name}`,
+      body: `If you are reading this, ordi can send mail as ${sender.smtp.from}.`,
+      html: `<p>If you are reading this, ordi can send mail as <b>${sender.smtp.from.replace(/[<>&]/g, (ch) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[ch]!)}</b>.</p>`,
+    });
+    return c.json({ ...result, to: user.email });
+  });
+
   // Integration settings that would otherwise need a server restart to change.
   // Secrets are never returned – only whether one is set, and where the
   // effective value comes from.
@@ -136,12 +251,28 @@ export function settingsRoutes() {
 
     // An omitted secret means "keep the stored one" – the UI never receives it,
     // so it cannot send it back.
-    const encrypted = encryptIntegrationSecrets(patch);
-    const merged: Record<string, unknown> = { ...current };
-    for (const key of ['smtp', 'github', 'githubApp', 'slack'] as const) {
+    // SMTP is a sender now: the old single setting edits sender "smtp", which
+    // saveMailSenders writes (and encrypts) on its own.
+    if (patch.smtp) {
+      const smtp = patch.smtp;
+      await saveMailSenders((senders, roles) => {
+        const prev = senders.find((s) => s.id === LEGACY_SENDER_ID);
+        const next: StoredMailSender = {
+          id: LEGACY_SENDER_ID, name: prev?.name ?? 'Default', replyTo: prev?.replyTo,
+          host: smtp.host, port: smtp.port, secure: smtp.secure, user: smtp.user, pass: smtp.pass || prev?.pass, from: smtp.from,
+        };
+        return { senders: prev ? senders.map((s) => (s.id === LEGACY_SENDER_ID ? next : s)) : [next, ...senders], roles };
+      });
+    }
+    const [fresh] = await db.select().from(schema.workspaceSettings)
+      .where(eq(schema.workspaceSettings.id, 'workspace'));
+    const latest = ((fresh?.integrations ?? {}) as Record<string, unknown>);
+    const encrypted = encryptIntegrationSecrets({ ...patch, smtp: undefined });
+    const merged: Record<string, unknown> = { ...latest };
+    for (const key of ['github', 'githubApp', 'slack'] as const) {
       const incoming = encrypted[key];
       if (incoming === undefined) continue;
-      const prev = (current[key] ?? {}) as Record<string, unknown>;
+      const prev = (latest[key] ?? {}) as Record<string, unknown>;
       const next = { ...prev, ...incoming } as Record<string, unknown>;
       for (const secretKey of ['pass', 'clientSecret', 'privateKey', 'webhookSecret', 'signingSecret']) {
         if (next[secretKey] === '' || next[secretKey] === undefined) {
@@ -152,7 +283,7 @@ export function settingsRoutes() {
       merged[key] = next;
     }
 
-    if (existing) {
+    if (fresh) {
       await db.update(schema.workspaceSettings).set({ integrations: merged })
         .where(eq(schema.workspaceSettings.id, 'workspace'));
     } else {
