@@ -22,7 +22,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLBut
     <button
       ref={ref}
       className={cn(
-        'inline-flex select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-md font-medium',
+        'ui-btn inline-flex select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-md font-medium',
         'transition-all duration-150 ease-smooth-out active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50',
         size === 'xs' ? 'h-6 px-2 text-xs' : size === 'sm' ? 'h-7 px-2.5 text-[13px]' : 'h-8 px-3 text-[13px]',
         (variant === 'default' || variant === 'primary') &&
@@ -43,7 +43,7 @@ export const IconButton = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTM
       <button
         ref={ref}
         className={cn(
-          'inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground',
+          'ui-icon-btn inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground',
           'transition-colors duration-150 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50',
           size === 'sm' ? 'h-6 w-6' : 'h-7 w-7',
           className,
@@ -112,7 +112,7 @@ export function Switch({ checked, onChange, disabled, label }: {
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        'relative inline-flex h-[18px] w-[30px] shrink-0 items-center rounded-full transition-colors duration-150',
+        'ui-switch relative inline-flex h-[18px] w-[30px] shrink-0 items-center rounded-full transition-colors duration-150',
         checked ? 'bg-primary' : 'bg-border-strong',
         disabled && 'pointer-events-none opacity-50',
       )}
@@ -135,7 +135,7 @@ export function Checkbox({ checked, onChange, disabled }: { checked: boolean; on
       disabled={disabled}
       onClick={(e) => { e.stopPropagation(); onChange?.(!checked); }}
       className={cn(
-        'grid h-4 w-4 shrink-0 place-items-center rounded border transition-colors duration-150',
+        'ui-check grid h-4 w-4 shrink-0 place-items-center rounded border transition-colors duration-150',
         checked ? 'border-primary bg-primary' : 'border-border-strong bg-transparent hover:border-primary/60',
         disabled && 'pointer-events-none opacity-50',
       )}
@@ -695,12 +695,12 @@ export function SegmentedControl<T extends string>({ options, value, onChange, c
   const idx = Math.max(0, options.findIndex((o) => o.key === value));
   return (
     <div
-      className={cn('relative inline-grid select-none items-stretch rounded-md border border-border bg-muted/60 p-0.5', className)}
+      className={cn('ui-seg relative inline-grid select-none items-stretch rounded-md border border-border bg-muted/60 p-0.5', className)}
       style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
     >
       <span
         aria-hidden
-        className="absolute bottom-0.5 top-0.5 rounded-[5px] bg-card shadow-sm ring-1 ring-border transition-transform duration-[250ms] ease-smooth-out"
+        className="ui-seg-thumb absolute bottom-0.5 top-0.5 rounded-[5px] bg-card shadow-sm ring-1 ring-border transition-transform duration-[250ms] ease-smooth-out"
         style={{ width: `calc((100% - 4px) / ${options.length})`, transform: `translateX(calc(${idx} * 100% + 2px))` }}
       />
       {options.map((o) => (
@@ -712,7 +712,7 @@ export function SegmentedControl<T extends string>({ options, value, onChange, c
           aria-pressed={value === o.key}
           onClick={() => onChange(o.key)}
           className={cn(
-            'relative z-10 flex items-center justify-center gap-1 rounded px-2 py-1 text-xs transition-colors duration-150',
+            'ui-seg-item relative z-10 flex items-center justify-center gap-1 rounded px-2 py-1 text-xs transition-colors duration-150',
             value === o.key ? 'font-medium text-foreground' : 'text-muted-foreground hover:text-foreground',
           )}
         >

@@ -205,7 +205,7 @@ export function ClientsTab({ onNewClient }: { onNewClient: () => void }) {
               <SortHeader label={t('crm.colDeals')} sortKey="deals" sort={sort} onToggle={toggleSort} className="justify-end" />
               <SortHeader label={t('crm.owner')} sortKey="owner" sort={sort} onToggle={toggleSort} className="justify-end" />
             </div>
-            <div className="space-y-px">
+            <div className="flex flex-col gap-px">
               {sortedCompanies.map((c, i) => {
                 const r = rollup.get(c.id);
                 const owner = c.ownerId ? userMap.get(c.ownerId) : undefined;

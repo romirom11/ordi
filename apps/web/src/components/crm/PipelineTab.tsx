@@ -215,7 +215,7 @@ export function PipelineTab() {
               </div>
 
               {/* Cards */}
-              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
+              <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
                 {list.length === 0 ? (
                   <div className={cn(
                     'grid place-items-center rounded-md border border-dashed py-8 text-center text-xs text-faint transition-colors',

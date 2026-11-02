@@ -152,7 +152,7 @@ export function Dialog({ open, onClose, children, width = 480, title, hideClose,
       ref={rootRef}
       inert={closing}
       aria-hidden={closing || undefined}
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 pt-[12vh]"
+      className="modal-backdrop fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 pt-[12vh]"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
       style={{
         background: 'hsl(var(--overlay) / 0.55)',

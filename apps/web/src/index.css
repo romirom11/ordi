@@ -220,3 +220,260 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────
+   Glass style (data-style="glass" on <html>, lib/theme.tsx).
+   A second axis next to light/dark: the same tokens and components,
+   redrawn as frosted panes over a soft, out-of-focus landscape – warm
+   neutrals, a lime accent, pill controls, generous corners. Selectors are
+   scoped with :where() so each one weighs exactly as much as the utility it
+   restyles; sitting later in the file, it wins. Blur sits on containers only
+   (the content pane, popovers, dialogs), never on rows.
+   ───────────────────────────────────────────────────────────── */
+
+/* Tokens. Plain selectors: they have to outweigh :root and
+   [data-theme='light']. The light block re-sets everything the dark one sets. */
+[data-style='glass'] {
+  /* Solid tokens, for whatever still paints one (sticky headers, tracks,
+     skeletons): warm graphite, never neutral black. */
+  --background: 150 6% 7%;
+  --surface: 165 7% 11%;
+  --card: 165 7% 12%;
+  --card-foreground: 90 18% 95%;
+  --elevated: 168 7% 13%;
+  --foreground: 90 18% 95%;
+  --muted: 160 5% 18%;
+  --muted-foreground: 113 5% 77%;
+  --faint: 120 3% 62%;
+  --border: 160 4% 22%;
+  --border-strong: 160 4% 30%;
+  --input: 160 5% 26%;
+  --accent: 160 5% 18%;
+  --accent-foreground: 90 18% 95%;
+  --primary: 76 82% 68%;
+  --primary-text: 76 82% 68%;
+  --primary-foreground: 206 16% 9%;
+  --action: 76 82% 68%;
+  --action-hover: 76 78% 62%;
+  --ring: 80 42% 60%;                  /* sage: visible, not neon */
+  --destructive: 14 100% 74%;
+  --destructive-text: 14 100% 76%;
+  --success: 80 74% 63%;
+  --success-text: 80 74% 66%;
+  --overlay: 160 10% 3%;
+
+  /* Glass layers */
+  --glass: 180 7% 9% / 0.46;          /* the content pane */
+  --glass-tile: 0 0% 100% / 0.06;     /* cards inside it */
+  --glass-tile-hover: 0 0% 100% / 0.1;
+  --glass-ctl: 0 0% 100% / 0.08;      /* outline buttons, inputs */
+  --glass-float: 168 7% 13% / 0.9;    /* popovers, dialogs */
+  --glass-tint: 0 0% 100%;            /* fills: chips, selected rows */
+  --glass-tint-a: 0.07;
+  --glass-hover-a: 0.1;
+  --glass-line: 0 0% 100% / 0.1;
+  --glass-line-strong: 0 0% 100% / 0.18;
+  --glass-rim: 0 0% 100% / 0.15;
+  --glass-blur: blur(22px) saturate(150%);
+  --glass-shadow: inset 0 1px 0 #ffffff1f, 0 30px 60px -30px #0009;
+  --glass-tile-shadow: inset 0 1px 0 #ffffff14, 0 18px 30px -22px #00000073;
+  --shadow-pop: 0 24px 60px -18px #000000b3, 0 0 0 1px #ffffff1a;
+  --shadow-modal: 0 24px 60px -18px #000000b3, 0 0 0 1px #ffffff1a;
+  --glass-wash: linear-gradient(180deg, #080b0a80, #080b0a6b 45%, #080b0a8c);
+  --glass-seg-thumb: 0 0% 100% / 0.14;
+  /* "On" for switches and checks: the lime, muted down to moss so a
+     column of them doesn't glow. */
+  --glass-on: 79 60% 41%;
+  --glass-pill: 170 3% 35% / 0.74;    /* pressed chips */
+  --glass-on-pill: 90 18% 95%;
+}
+
+[data-style='glass'][data-theme='light'] {
+  --background: 90 10% 92%;
+  --surface: 90 16% 96%;
+  --card: 90 20% 98%;
+  --card-foreground: 206 16% 9%;
+  --elevated: 90 25% 98%;
+  --foreground: 206 16% 9%;
+  --muted: 90 8% 90%;
+  --muted-foreground: 146 4% 31%;
+  --faint: 137 4% 35%;
+  --border: 90 6% 84%;
+  --border-strong: 90 5% 74%;
+  --input: 90 6% 80%;
+  --accent: 90 8% 90%;
+  --accent-foreground: 206 16% 9%;
+  --primary: 76 83% 62%;
+  --primary-text: 85 72% 23%;
+  --primary-foreground: 206 16% 9%;
+  --action: 76 83% 62%;
+  --action-hover: 76 80% 57%;
+  --ring: 85 60% 32%;
+  --destructive: 13 71% 42%;
+  --destructive-text: 13 71% 40%;
+  --success: 95 72% 28%;
+  --success-text: 95 72% 26%;
+  --overlay: 150 10% 10%;
+
+  --glass: 0 0% 100% / 0.5;
+  --glass-tile: 0 0% 100% / 0.55;
+  --glass-tile-hover: 0 0% 100% / 0.8;
+  --glass-ctl: 0 0% 100% / 0.58;
+  --glass-float: 0 0% 100% / 0.86;
+  --glass-tint: 150 9% 8%;
+  --glass-tint-a: 0.06;
+  --glass-hover-a: 0.075;
+  --glass-line: 150 9% 8% / 0.1;
+  --glass-line-strong: 150 9% 8% / 0.18;
+  --glass-rim: 0 0% 100% / 0.72;
+  --glass-shadow: inset 0 1px 0 #fffc, 0 24px 50px -32px #141e1466;
+  --glass-tile-shadow: inset 0 1px 0 #fffc, 0 18px 30px -24px #141e1440;
+  --shadow-pop: 0 24px 60px -18px #0f191459, 0 2px 6px #0f191414;
+  --shadow-modal: 0 24px 60px -18px #0f191459, 0 2px 6px #0f191414;
+  --glass-wash: linear-gradient(180deg, #f0f3eea8, #f0f3ee99 45%, #ecefe9b3);
+  --glass-seg-thumb: 0 0% 100% / 0.95;
+  --glass-on: 85 72% 23%;
+  --glass-pill: 206 16% 9%;
+  --glass-on-pill: 90 18% 95%;
+}
+
+/* Backdrop: an out-of-focus dusk landscape – blue sky, a pale horizon on the
+   left, a warm brick mass in the middle, dark olive ground – under a wash
+   that sets the theme's brightness. */
+[data-style='glass'] body {
+  font-family: 'Urbanist Variable', Urbanist, 'Inter Variable', system-ui, sans-serif;
+  font-feature-settings: normal;
+  font-weight: 500;
+  background:
+    var(--glass-wash),
+    radial-gradient(34% 22% at 4% 46%, #ddd0ccd9, transparent 70%),
+    radial-gradient(30% 26% at 54% 40%, #a5807ab3, transparent 70%),
+    radial-gradient(46% 34% at 56% 60%, #6e3f2ef2, transparent 72%),
+    radial-gradient(30% 30% at 88% 30%, #b9bccbb3, transparent 70%),
+    radial-gradient(40% 30% at 8% 92%, #161a05f2, transparent 72%),
+    radial-gradient(40% 30% at 96% 86%, #1a1608e6, transparent 72%),
+    linear-gradient(180deg, #4a7aa8 0%, #7891b4 20%, #8a8a96 36%, #5c4840 54%, #3b2f22 72%, #22250f 100%);
+  background-attachment: fixed;
+}
+
+/* Surfaces */
+:where([data-style='glass']) .bg-background { background-color: transparent; }
+:where([data-style='glass']) :is(.bg-surface, .bg-surface\/95) {
+  background-color: hsl(var(--glass));
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+:where([data-style='glass']) .bg-card {
+  background-color: hsl(var(--glass-tile));
+  box-shadow: var(--glass-tile-shadow);
+}
+:where([data-style='glass']) .bg-elevated {
+  background-color: hsl(var(--glass-float));
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+
+/* The content pane: one big frosted card on the landscape. */
+[data-style='glass'] .app-surface {
+  border-radius: 22px;
+  border-color: hsl(var(--glass-rim));
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow);
+}
+/* The sidebar as a drawer (narrow windows) needs its own pane. */
+:where([data-style='glass']) #app-sidebar.bg-background {
+  background-color: hsl(var(--glass-float));
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+:where([data-style='glass']) .modal-backdrop {
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+/* Hairlines; framed cards get the brighter rim. */
+:where([data-style='glass']) * { border-color: hsl(var(--glass-line)); }
+:where([data-style='glass']) .border-border { border-color: hsl(var(--glass-line)); }
+:where([data-style='glass']) .border-border-strong { border-color: hsl(var(--glass-line-strong)); }
+:where([data-style='glass']) .bg-card.border-border { border-color: hsl(var(--glass-rim)); }
+:where([data-style='glass']) .border-input { border-color: hsl(var(--glass-line-strong)); }
+
+/* Urbanist runs lighter and smaller than Inter: one step up in weight
+   keeps labels and body text as legible as in the classic style. */
+:where([data-style='glass']) .font-medium { font-weight: 600; }
+
+/* Geometry: generous corners, pill controls. */
+:where([data-style='glass']) .rounded-md { border-radius: 10px; }
+:where([data-style='glass']) .rounded-lg { border-radius: 18px; }
+:where([data-style='glass']) .rounded-xl { border-radius: 22px; }
+:where([data-style='glass']) :is(.ui-btn, .ui-seg, .ui-seg-thumb, .ui-seg-item) { border-radius: 999px; }
+:where([data-style='glass']) .ui-icon-btn { border-radius: 999px; }
+:where([data-style='glass']) .ui-btn { font-weight: 600; }
+
+/* Buttons */
+:where([data-style='glass']) .ui-btn[class*='--action'] {
+  box-shadow: inset 0 1px 0 #ffffff80, 0 10px 24px -14px #78a014b3;
+}
+:where([data-style='glass']) .ui-btn[class*='--action']:hover { filter: brightness(1.05); }
+:where([data-style='glass']) .ui-btn.bg-card {
+  background-color: hsl(var(--glass-ctl));
+  border-color: hsl(var(--glass-rim));
+  box-shadow: none;
+}
+
+/* Segmented control: a well with a floating pill. */
+:where([data-style='glass']) .ui-seg { background-color: hsl(var(--glass-tint) / var(--glass-tint-a)); border-color: transparent; }
+:where([data-style='glass']) .ui-seg-thumb { background-color: hsl(var(--glass-seg-thumb)); box-shadow: 0 2px 6px -2px #0003; --tw-ring-color: transparent; }
+
+/* Switches, checkboxes and day toggles: moss when on, a hairline well when off. */
+:where([data-style='glass']) :is(.ui-switch, .ui-check, .border-primary).bg-primary {
+  background-color: hsl(var(--glass-on));
+  border-color: hsl(var(--glass-on));
+  color: #fff;
+}
+/* Pressed chip toggles (working days and the like) read as an ink pill. */
+:where([data-style='glass']) button.border-primary.bg-primary:not(.ui-check, [role='checkbox']) {
+  background-color: hsl(var(--glass-pill));
+  border-color: transparent;
+  color: hsl(var(--glass-on-pill));
+}
+:where([data-style='glass']) .ui-switch.bg-border-strong { background-color: hsl(var(--glass-line-strong)); }
+
+/* Fields sit in a soft well. */
+:where([data-style='glass']) .border-input.bg-transparent { background-color: hsl(var(--glass-ctl)); }
+/* A soft halo instead of a solid lime ring around the focused field. */
+[data-style='glass'] .focus\:ring-ring:focus { --tw-ring-color: hsl(var(--ring) / 0.3); }
+
+/* Tinted fills – a tint over whatever glass lies beneath, never an opaque
+   block. Opacity steps keep their proportion to the base fill. */
+:where([data-style='glass']) .bg-muted { background-color: hsl(var(--glass-tint) / var(--glass-tint-a)); }
+:where([data-style='glass']) .bg-muted\/70 { background-color: hsl(var(--glass-tint) / calc(var(--glass-tint-a) * 0.7)); }
+:where([data-style='glass']) .bg-muted\/60 { background-color: hsl(var(--glass-tint) / calc(var(--glass-tint-a) * 0.6)); }
+:where([data-style='glass']) .bg-muted\/50 { background-color: hsl(var(--glass-tint) / calc(var(--glass-tint-a) * 0.5)); }
+:where([data-style='glass']) .bg-muted\/40 { background-color: hsl(var(--glass-tint) / calc(var(--glass-tint-a) * 0.4)); }
+:where([data-style='glass']) .bg-muted\/30 { background-color: hsl(var(--glass-tint) / calc(var(--glass-tint-a) * 0.3)); }
+:where([data-style='glass']) .bg-muted\/25 { background-color: hsl(var(--glass-tint) / calc(var(--glass-tint-a) * 0.25)); }
+:where([data-style='glass']) .bg-muted\/20 { background-color: hsl(var(--glass-tint) / calc(var(--glass-tint-a) * 0.2)); }
+:where([data-style='glass']) .bg-muted\/15 { background-color: hsl(var(--glass-tint) / calc(var(--glass-tint-a) * 0.15)); }
+:where([data-style='glass']) .ui-seg.bg-muted\/60 { background-color: hsl(var(--glass-tint) / var(--glass-tint-a)); }
+
+/* Hovers: one clearly visible tint whatever step the classic style uses.
+   Tailwind emits its hover: variants after this file's rules, so these use a
+   plain [data-style] (one attribute heavier) instead of :where(). */
+[data-style='glass'] :is(.hover\:bg-muted, .hover\:bg-muted\/70, .hover\:bg-muted\/60, .hover\:bg-muted\/50, .hover\:bg-muted\/40):hover,
+[data-style='glass'] .focus-visible\:bg-muted:focus-visible,
+[data-style='glass'] .group:hover .group-hover\:bg-muted\/40 {
+  background-color: hsl(var(--glass-tint) / var(--glass-hover-a));
+}
+/* A card under the pointer lifts – brighter glass – instead of greying out. */
+[data-style='glass'] .bg-card:is(.hover\:bg-muted, .hover\:bg-muted\/70, .hover\:bg-muted\/60, .hover\:bg-muted\/50, .hover\:bg-muted\/40):not(.ui-btn):hover {
+  background-color: hsl(var(--glass-tile-hover));
+}
+[data-style='glass'] .hover\:border-border-strong:hover { border-color: hsl(var(--glass-line-strong)); }
+
+/* Engines without backdrop-filter get denser panes instead of see-through ones. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  [data-style='glass'] { --glass: 165 7% 11% / 0.94; --glass-float: 168 7% 13% / 0.98; }
+  [data-style='glass'][data-theme='light'] { --glass: 90 16% 96% / 0.94; --glass-float: 0 0% 100% / 0.98; }
+}
