@@ -221,6 +221,25 @@ body {
   }
 }
 
+/* Urbanist Cyrillic: Urbanist with Cyrillic added (OFL, see
+   assets/fonts/urbanist-cyrillic/OFL.txt), so a Ukrainian sentence with
+   English names in it stays in one typeface. Only Glass uses it, and the
+   browser fetches it only once something in Glass asks for it. */
+@font-face {
+  font-family: 'Urbanist Cyrillic';
+  src: url('./assets/fonts/urbanist-cyrillic/UrbanistCyrillic-wght.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Urbanist Cyrillic';
+  src: url('./assets/fonts/urbanist-cyrillic/UrbanistCyrillic-Italic-wght.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+
 /* ─────────────────────────────────────────────────────────────
    Glass style (data-style="glass" on <html>, lib/theme.tsx).
    A second axis next to light/dark: the same tokens and components,
@@ -345,7 +364,7 @@ body {
    left, a warm brick mass in the middle, dark olive ground – under a wash
    that sets the theme's brightness. */
 [data-style='glass'] body {
-  font-family: 'Manrope Variable', Manrope, 'Inter Variable', system-ui, sans-serif;
+  font-family: 'Urbanist Cyrillic', 'Inter Variable', system-ui, sans-serif;
   font-feature-settings: normal;
   font-weight: 500;
   background:
@@ -403,9 +422,8 @@ body {
 :where([data-style='glass']) .bg-card.border-border { border-color: hsl(var(--glass-rim)); }
 :where([data-style='glass']) .border-input { border-color: hsl(var(--glass-line-strong)); }
 
-/* Manrope runs lighter than Inter: one step up in weight keeps labels as
-   legible as in the classic style. It covers Latin and Cyrillic alike, so a
-   Ukrainian sentence with English names in it stays in one typeface. */
+/* Urbanist runs lighter than Inter: one step up in weight keeps labels as
+   legible as in the classic style. */
 :where([data-style='glass']) .font-medium { font-weight: 600; }
 
 /* Geometry: generous corners, pill controls. */
