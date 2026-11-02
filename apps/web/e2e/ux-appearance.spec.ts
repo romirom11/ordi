@@ -7,6 +7,11 @@ for (const theme of ['light', 'dark'] as const) {
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
+    // New installations default to Glass Dark; this test covers the System + Classic path.
+    await page.addInitScript(() => {
+      localStorage.setItem('ordi:theme', 'system');
+      localStorage.setItem('ordi:style', 'classic');
+    });
     await login(page);
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
     const companies = await api<{ data: { id: string; name: string }[] }>(page, 'get', '/companies');
