@@ -15,7 +15,7 @@ import {
   slackOAuthConfigured, buildSlackAuthorizeUrl, listSlackChannels,
 } from './oauth';
 import {
-  githubAppConfigured, buildAppManifest, manifestActionUrl, listInstallationRepos, githubAppWebhookUrl,
+  githubAppConfigured, buildAppManifest, manifestActionUrl, manifestLaunchUrl, listInstallationRepos, githubAppWebhookUrl,
 } from './github-app';
 
 /**
@@ -100,6 +100,8 @@ export function integrationsRoutes() {
     return c.json({
       actionUrl: manifestActionUrl(state, organization),
       manifest: JSON.stringify(buildAppManifest(ws?.name || 'ordi')),
+      // The same, as a page to open – for the desktop app's system browser.
+      launchUrl: manifestLaunchUrl(state, organization),
     });
   });
 

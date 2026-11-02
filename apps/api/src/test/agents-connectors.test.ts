@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getDb, schema, eq } from '@ordi/db';
-import { resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
+import { app, resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
 import { startTestMcpServer, type TestMcpServer, type Users } from './agents-helpers';
 import { decrypt } from '../lib/crypto';
 import { hasOAuthTokens } from '../domains/agents/connector-oauth';
@@ -133,7 +133,13 @@ describe('connector OAuth', () => {
     const code = 'code-abc';
     (upstream as unknown as { calls: unknown[] }).calls.length = 0;
     upstream.seedCode(code);
-    const cb = await owner.get(`/mcp-connectors/oauth/callback?code=${code}&state=${state}`);
+    // The consent may finish in a browser with no ordi session (the desktop
+    // app hands it to the system browser): the callback takes no cookie, and
+    // a state whose admin part was swapped is refused before the real one.
+    const forged = `${state.split('.')[0]}.${users.guest!.userId}`;
+    const refused = await app.request(`/api/v1/mcp-connectors/oauth/callback?code=${code}&state=${encodeURIComponent(forged)}`);
+    expect(refused.headers.get('location')).toContain('oauth=error');
+    const cb = await app.request(`/api/v1/mcp-connectors/oauth/callback?code=${code}&state=${encodeURIComponent(state)}`);
     expect(cb.status).toBe(302);
     expect(cb.headers.get('location')).toContain('oauth=connected');
     expect(upstream.calls.some((c) => c.path === '/token')).toBe(true);
