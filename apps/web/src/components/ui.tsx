@@ -650,7 +650,7 @@ export function Tooltip({ label, children, side = 'top' }: { label: ReactNode; c
   );
 }
 
-/* ───────────────────────── Tabs (sliding underline) ───────────────────────── */
+/* ─────────────── Tabs (the active tab is a filled item, like nav rows) ─────────────── */
 
 export function Tabs<T extends string>({ tabs, value, onChange, className }: {
   tabs: { key: T; label: ReactNode; icon?: ReactNode }[]; value: T; onChange: (t: T) => void; className?: string;
@@ -675,13 +675,10 @@ export function Tabs<T extends string>({ tabs, value, onChange, className }: {
           onClick={() => onChange(tb.key)}
           className={cn(
             'relative flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors duration-150',
-            value === tb.key ? 'font-medium text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+            value === tb.key ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
           )}
         >
           {tb.icon} {tb.label}
-          {value === tb.key && (
-            <span className="absolute inset-x-2 -bottom-[7px] h-0.5 rounded-full bg-primary" />
-          )}
         </button>
       ))}
     </nav>
