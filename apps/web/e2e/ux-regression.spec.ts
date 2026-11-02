@@ -75,6 +75,13 @@ test('a failed task save retains text and retry stores it', async ({ page }) => 
 });
 
 test('KB navigation restores the draft, conflict keeps both versions, and explicit choice saves', async ({ page }) => {
+  // This test is about the conflict found by Save (the 409). With realtime on,
+  // the other session's edit usually reaches the page first and the conflict
+  // banner replaces the Save bar before the click – that path is the
+  // "realtime … detects a KB conflict before Save" test below, and the race
+  // between the two is covered in draftSync.test.ts. Here the stream is cut so
+  // the 409 path runs every time.
+  await page.route('**/api/v1/stream', (route) => route.abort());
   const space = await api<{ id: string }>(page, 'post', '/spaces', { name: `UX conflict ${Date.now()}` });
   const first = await api<{ id: string }>(page, 'post', '/pages', { spaceId: space.id, title: 'UX first', body: doc('Baseline') });
   const second = await api<{ id: string }>(page, 'post', '/pages', { spaceId: space.id, title: 'UX second', body: doc('Other page') });
@@ -207,6 +214,39 @@ test('realtime updates an open task and detects a KB conflict before Save', asyn
   await api(page, 'patch', `/pages/${kb.id}`, { body: doc('Their remote edit'), version: kb.version });
   await expect(page.getByRole('alert').filter({ hasText: 'Someone else changed' })).toBeVisible();
   await expect(editor).toContainText('My unsaved draft');
+});
+
+// The order that used to strand the page on "Saving…": our Save is on the wire,
+// the other session's edit reaches the page by realtime first, and only then
+// does our write come back refused. Keep my version must still save.
+test('a Save refused after realtime already brought their edit still lets Keep my version save', async ({ page }) => {
+  const space = await api<{ id: string }>(page, 'post', '/spaces', { name: `Race ${Date.now()}` });
+  const kb = await api<any>(page, 'post', '/pages', { spaceId: space.id, title: 'Race page', body: doc('Baseline') });
+  await page.goto(`/kb/${space.id}/${kb.id}`);
+  const editor = page.locator('.tiptap[contenteditable="true"]').first();
+  await editor.fill('Draft racing realtime');
+
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  await page.route(`**/api/v1/pages/${kb.id}`, async (route) => {
+    if (route.request().method() === 'PATCH') await held;
+    await route.continue();
+  });
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await api(page, 'patch', `/pages/${kb.id}`, { body: doc('Their racing edit'), version: kb.version });
+  const banner = page.getByRole('alert').filter({ hasText: 'Someone else changed' });
+  await expect(banner).toBeVisible();
+
+  const refused = page.waitForResponse((r) => r.request().method() === 'PATCH' && r.url().endsWith(`/pages/${kb.id}`));
+  release();
+  expect((await refused).status()).toBe(409);
+  await expect(banner).toBeVisible();
+  await expect(editor).toContainText('Draft racing realtime');
+
+  await banner.getByRole('button', { name: 'Keep my version' }).click();
+  await expect.poll(async () => JSON.stringify((await api<any>(page, 'get', `/pages/${kb.id}`)).body)).toContain('Draft racing realtime');
+  await expect(banner).toHaveCount(0);
+  await expect(page.getByText('Saving…')).toHaveCount(0);
 });
 
 test('timer agrees with the API across reload and Stop can be resumed', async ({ page }) => {

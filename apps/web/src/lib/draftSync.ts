@@ -143,9 +143,21 @@ export function ack<F extends DraftFields>(s: DraftSyncState<F>, server?: F, ver
   return server ? receiveServer(acked, server, version) : acked;
 }
 
-/** The write did not land. A conflict waits for a fresher snapshot; anything else for a retry. */
-export function fail<F extends DraftFields>(s: DraftSyncState<F>, conflict: boolean): DraftSyncState<F> {
-  return { ...s, sending: null, stale: conflict, failed: !conflict };
+/**
+ * The write did not land. A conflict waits for a fresher snapshot; anything
+ * else for a retry.
+ *
+ * `sentVersion` is the version the refused write carried. A snapshot newer
+ * than it may already have arrived while the write was in flight – the
+ * realtime refetch after someone else's save usually beats the 409 back. The
+ * fresher snapshot is then already here: waiting for another one would wait
+ * forever ("Saving…" with Keep my version doing nothing), so the fields the
+ * write held back are settled against the snapshot we have instead.
+ */
+export function fail<F extends DraftFields>(s: DraftSyncState<F>, conflict: boolean, sentVersion?: number): DraftSyncState<F> {
+  const newerKnown = conflict && sentVersion !== undefined && s.version !== undefined && s.version > sentVersion;
+  const next: DraftSyncState<F> = { ...s, sending: null, stale: conflict && !newerKnown, failed: !conflict };
+  return newerKnown ? receiveServer(next, s.server, s.version) : next;
 }
 
 /**
