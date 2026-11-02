@@ -170,6 +170,18 @@ async function resolveCycle(client: OrdiClient, projectId: string, ref: string):
   return hit.id;
 }
 
+async function resolveMilestone(client: OrdiClient, projectId: string, ref: string): Promise<string> {
+  const wanted = ref.trim();
+  const milestones = (await client.get<{ data: Row[] }>(`/projects/${projectId}/milestones`)).data;
+  const hit = milestones.find((m) => m.id === wanted)
+    ?? milestones.find((m) => String(m.name).toLowerCase() === wanted.toLowerCase());
+  if (!hit) {
+    const known = milestones.map((m) => String(m.name)).join(', ');
+    throw new Error(`Unknown milestone "${ref}". This project has: ${known || '(none)'} – see get_project_schema, or create one with create_milestone.`);
+  }
+  return hit.id;
+}
+
 // ── Shapes ──
 
 function nameOf(rows: Row[], id: unknown): string | null {
@@ -190,6 +202,7 @@ function compact(task: Row, vocab: Vocab | null, labelIds?: string[]) {
     type: vocab && task.typeId ? nameOf(vocab.types, task.typeId) : undefined,
     parentId: task.parentId ?? null,
     cycleId: task.cycleId ?? null,
+    milestoneId: task.milestoneId ?? null,
     priority: task.priority,
     dueDate: task.dueDate ?? null,
     startDate: task.startDate ?? null,
@@ -318,6 +331,7 @@ interface WriteArgs {
   customFields?: Record<string, unknown>;
   parentId?: string | null;
   cycle?: string | null;
+  milestone?: string | null;
 }
 
 /** Where a write lands: the project names resolve in, and the task itself once it exists. */
@@ -342,6 +356,9 @@ async function writeBody(args: WriteArgs, vocab: () => Promise<Vocab>, target: W
   if (args.cycle !== undefined) {
     body.cycleId = args.cycle === null ? null : await resolveCycle(target.client, target.projectId, args.cycle);
   }
+  if (args.milestone !== undefined) {
+    body.milestoneId = args.milestone === null ? null : await resolveMilestone(target.client, target.projectId, args.milestone);
+  }
   return body;
 }
 
@@ -360,7 +377,8 @@ const writeSchema = {
   assigneeIds: z.array(z.string()).optional().describe('User ids (see list_users)'),
   customFields: z.record(z.string(), z.unknown()).optional().describe('Keyed by custom field key, e.g. { platform: "linkedin", rubric: "case-study" } (see list_custom_fields); merged by key on update, null clears one'),
   parentId: z.string().nullable().optional().describe('Id of the parent task (see list_tasks / get_task) – makes this a subtask; the parent must be in the same project. null makes it a top-level task again'),
-  cycle: z.string().nullable().optional().describe('Cycle id or name (see get_project_schema) to put the task in; null takes it out of its cycle'),
+  cycle: z.string().nullable().optional().describe('Cycle id or name (see get_project_schema) to put the task in; null takes it out of its cycle. Only for projects with cyclesEnabled.'),
+  milestone: z.string().nullable().optional().describe('Milestone id or name (see get_project_schema) – the stage of the project this task delivers; null takes it out'),
 };
 
 export function registerTaskTools(server: McpServer, client: OrdiClient): void {
@@ -370,38 +388,100 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
   const toAgent = (text: string): string => absolutizeImageSrcs(text, client.publicUrl);
   const fromAgent = (text: string): string => relativizeImageSrcs(text, client.publicUrl);
 
-  server.tool('get_project_schema', 'The writable structure of one project: its statuses, task types, task labels, cycles and task custom fields – everything create_task / update_task / list_tasks accept as a name. Takes a project key ("CONTENT") or id, so this is also how a project is looked up by key.', {
+  server.tool('get_project_schema', 'The writable structure of one project: its statuses, task types, task labels, milestones (stages: what is delivered by when), cycles (time-boxed sprints, only when cyclesEnabled) and task custom fields – everything create_task / update_task / list_tasks accept as a name. Takes a project key ("CONTENT") or id, so this is also how a project is looked up by key.', {
     project: z.string().describe('Project key (e.g. CONTENT) or id'),
   }, ({ project }) => wrap(async () => {
     const p = await resolveProject(client, project);
     const vocab = await vocabLoader(client, p.id)();
     const fields = await client.get<{ data: Row[] }>('/custom-fields?entityType=tasks');
-    const cycles = await client.get<{ data: Row[] }>(`/projects/${p.id}/cycles`);
+    const [cycles, milestones, full] = await Promise.all([
+      client.get<{ data: Row[] }>(`/projects/${p.id}/cycles`),
+      client.get<{ data: Row[] }>(`/projects/${p.id}/milestones`),
+      client.get<Row>(`/projects/${p.id}`),
+    ]);
     return {
-      project: { id: p.id, key: p.key, name: p.name, status: p.status },
+      project: { id: p.id, key: p.key, name: p.name, status: p.status, cyclesEnabled: !!full.cyclesEnabled },
       statuses: vocab.statuses.map((s) => ({ id: s.id, name: s.name, category: s.category, isDefault: s.isDefault, position: s.position })),
       taskTypes: vocab.types.map((t) => ({ id: t.id, name: t.name, scope: t.projectId ? 'project' : 'workspace' })),
       labels: vocab.labels.map((l) => ({ id: l.id, name: l.name, color: l.color })),
-      cycles: cycles.data.map((c) => ({ id: c.id, name: c.name, status: c.status, startDate: c.startDate, endDate: c.endDate })),
+      milestones: milestones.data.map((m) => ({
+        id: m.id, name: m.name, targetDate: m.targetDate ?? null, done: !!m.done, position: m.position,
+        taskCount: m.taskCount ?? 0, doneCount: m.doneCount ?? 0,
+      })),
+      cycles: cycles.data.map((c) => ({ id: c.id, name: c.name, status: c.status, startDate: c.startDate, endDate: c.endDate, goal: c.goal ?? null })),
       customFields: fields.data
         .filter((f) => !f.deprecated)
         .map((f) => ({ key: f.key, label: f.label, type: f.type, options: f.options, required: f.required })),
     };
   }));
 
-  server.tool('list_tasks', 'List tasks of a project – the calendar view an agent plans from. Filters by due-date window (the publication date), status, labels, type, parent task, cycle, title text and custom fields (e.g. platform). Statuses, labels, types and cycles may be passed by name.', {
+  // ── Plan: milestones (what, by when) and cycles (time boxes) ──
+
+  server.tool('create_milestone', 'Add a milestone – a stage of the project such as "Design sign-off" or "Launch", with an optional target date. Tasks join it through create_task / update_task `milestone`. A milestone is about scope; for a time box use a cycle.', {
+    project: z.string().describe('Project key or id'),
+    name: z.string().min(1),
+    targetDate: z.string().nullable().optional().describe('YYYY-MM-DD the stage should be reached by'),
+  }, ({ project, name, targetDate }) => wrap(async () => {
+    const projectId = await resolveProjectId(client, project);
+    const created = await client.post<Row>(`/projects/${projectId}/milestones`, { name, targetDate: targetDate ?? null });
+    return { action: 'created', milestone: { id: created.id, name: created.name, targetDate: created.targetDate ?? null, done: !!created.done } };
+  }));
+
+  server.tool('update_milestone', 'Rename a milestone, move its target date, mark it done or reopen it, or change its place in the plan (position: lower comes first).', {
+    milestoneId: z.string(),
+    name: z.string().min(1).optional(),
+    targetDate: z.string().nullable().optional().describe('YYYY-MM-DD; null clears it'),
+    done: z.boolean().optional(),
+    position: z.number().int().optional(),
+  }, ({ milestoneId, ...patch }) => wrap(async () => {
+    const body = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+    if (!Object.keys(body).length) throw new Error('Nothing to update – pass name, targetDate, done or position.');
+    const updated = await client.patch<Row>(`/milestones/${milestoneId}`, body);
+    return { action: 'updated', milestone: { id: updated.id, name: updated.name, targetDate: updated.targetDate ?? null, done: !!updated.done, position: updated.position } };
+  }));
+
+  server.tool('create_cycle', 'Start a cycle – a time box (usually one or two weeks) the team commits a set of tasks to. Put tasks in it with create_task / update_task `cycle`. Refused where the project has cycles switched off.', {
+    project: z.string().describe('Project key or id'),
+    name: z.string().min(1).describe('e.g. "Sprint 12" or "Week 46"'),
+    startDate: z.string().describe('YYYY-MM-DD'),
+    endDate: z.string().describe('YYYY-MM-DD, inclusive'),
+    goal: z.string().optional().describe('What the cycle should achieve, one line'),
+  }, ({ project, name, startDate, endDate, goal }) => wrap(async () => {
+    const projectId = await resolveProjectId(client, project);
+    const full = await client.get<Row>(`/projects/${projectId}`);
+    if ((full.settings as { cycles?: boolean } | undefined)?.cycles === false) {
+      throw new Error('Cycles are switched off for this project (project settings). Plan with milestones instead, or ask an admin to turn cycles on.');
+    }
+    if (endDate < startDate) throw new Error('endDate is before startDate.');
+    const created = await client.post<Row>('/cycles', { projectId, name, startDate, endDate, goal: goal ?? null });
+    return { action: 'created', cycle: { id: created.id, name, startDate, endDate, goal: goal ?? null } };
+  }));
+
+  server.tool('complete_cycle', 'Close a cycle. Its unfinished tasks move to the backlog, or into another cycle when nextCycle is given.', {
+    cycleId: z.string(),
+    nextCycle: z.string().optional().describe('Cycle id or name to roll unfinished tasks into; omit to send them to the backlog'),
+  }, ({ cycleId, nextCycle }) => wrap(async () => {
+    const cycle = await client.get<Row>(`/cycles/${cycleId}`);
+    const projectId = String(cycle.projectId ?? (cycle.cycle as Row | undefined)?.projectId ?? '');
+    const nextCycleId = nextCycle ? await resolveCycle(client, projectId, nextCycle) : null;
+    await client.post(`/cycles/${cycleId}/complete`, nextCycleId ? { moveTo: 'next_cycle', nextCycleId } : { moveTo: 'backlog' });
+    return { action: 'completed', cycleId, movedTo: nextCycleId ? { cycleId: nextCycleId } : 'backlog' };
+  }));
+
+  server.tool('list_tasks', 'List tasks of a project – the calendar view an agent plans from. Filters by due-date window (the publication date), status, labels, type, parent task, milestone, cycle, title text and custom fields (e.g. platform). Statuses, labels, types, milestones and cycles may be passed by name.', {
     project: z.string().optional().describe('Project key or id; omit to search every project the token can reach (then statuses/labels must be ids)'),
     status: z.string().optional().describe('Status id, name or category'),
     labels: z.array(z.string()).optional().describe('Label ids or names – a task must carry all of them'),
     type: z.string().optional().describe('Task type id or name'),
     parentId: z.string().optional().describe('Only the subtasks of this task'),
     cycle: z.string().optional().describe('Cycle id or name (a name needs `project`)'),
+    milestone: z.string().optional().describe('Milestone id or name (a name needs `project`)'),
     dueFrom: z.string().optional().describe('YYYY-MM-DD, inclusive'),
     dueTo: z.string().optional().describe('YYYY-MM-DD, inclusive'),
     q: z.string().optional().describe('Substring of the title'),
     customFields: z.record(z.string(), z.unknown()).optional().describe('Exact match per key, e.g. { platform: "linkedin" }; an array value matches any of its members'),
     limit: z.number().int().min(1).max(200).optional().describe('Defaults to 50'),
-  }, ({ project, status, labels, type, parentId, cycle, dueFrom, dueTo, q, customFields, limit }) => wrap(async () => {
+  }, ({ project, status, labels, type, parentId, cycle, milestone, dueFrom, dueTo, q, customFields, limit }) => wrap(async () => {
     const projectId = project ? await resolveProjectId(client, project) : null;
     const vocab = projectId ? vocabLoader(client, projectId) : async (): Promise<Vocab> => {
       throw new Error('Statuses, labels and types can only be resolved by name inside one project – pass `project`, or pass ids.');
@@ -414,6 +494,7 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
     if (labels?.length) qs.set('label', resolveLabels(await vocab(), labels).join(','));
     if (parentId) qs.set('parentId', parentId);
     if (cycle) qs.set('cycleId', projectId ? await resolveCycle(client, projectId, cycle) : cycle);
+    if (milestone) qs.set('milestoneId', projectId ? await resolveMilestone(client, projectId, milestone) : milestone);
     if (dueFrom) qs.set('dueFrom', dueFrom);
     if (dueTo) qs.set('dueTo', dueTo);
     if (q) qs.set('q', q);
@@ -457,7 +538,7 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
     };
   }, VERSIONED));
 
-  server.tool('create_task', 'Create a task with everything a planned item needs: title, body text, calendar date, status, type, labels, custom fields and source links – or a subtask, with parentId, and straight into a cycle. '
+  server.tool('create_task', 'Create a task with everything a planned item needs: title, body text, calendar date, status, type, labels, custom fields and source links – or a subtask, with parentId, and straight into a milestone or a cycle. '
     + 'For rich descriptions with images at specific positions, upload each image first with upload_attachment → src, then interleave `![alt](src)` lines inside text at the exact spots you want (images are block-level, one per line). '
     + 'Pass externalKey to keep re-runs identifiable – the tool then refuses to file a second task under the same key. Use upsert_task when the run is meant to be repeatable.', {
     projectId: z.string().describe('Project id or key (see list_projects)'),
@@ -504,7 +585,7 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
     return { action: 'created', task: await readBack(client, created.id, vocab), links: added };
   }, VERSIONED));
 
-  server.tool('update_task', 'Rewrite a task: text, calendar date, status, type, labels, priority, custom fields, parent task, cycle, plus links to append. '
+  server.tool('update_task', 'Rewrite a task: text, calendar date, status, type, labels, priority, custom fields, parent task, milestone, cycle, plus links to append. '
     + 'For images, text fully replaces the body – read the current text with get_task, keep existing `![…](…)` lines you want, insert new ones (from upload_attachment) at the positions you want, then write back with expectedVersion. '
     + 'Send the version you read with get_task as expectedVersion and the call refuses instead of overwriting an edit someone made in ordi meanwhile.', {
     taskId: z.string(),
