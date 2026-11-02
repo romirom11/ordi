@@ -70,6 +70,7 @@ jobs:
               major="${version%%.*}"
               minor="${version%.*}"
               tags="$tags,$image:$minor,$image:$major,$image:latest"
+              latest=true
             fi
           else
             version="$pkg"
@@ -80,6 +81,7 @@ jobs:
             echo "version=$version"
             echo "tags=$tags"
             echo "check_tag=${tags%%,*}"
+            echo "latest=${latest:-false}"
           } >> "$GITHUB_OUTPUT"
           echo "Publishing $tags"
 
@@ -194,3 +196,37 @@ jobs:
             echo
             echo "Tags: $(echo "$TAGS" | tr ',' ' ')"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # The deploy goes last, once the image it names exists. Dokploy's own
+      # auto-deploy fires on the push to master – minutes before this job has
+      # moved `latest` – so it redeploys the previous image and the release
+      # only went live after a second, manual Redeploy. Switch Dokploy's
+      # Autodeploy off for the compose and let this step deploy instead.
+      #
+      # Only for a run that moved `latest` (a stable release), which is the
+      # tag the compose pulls when ORDI_VERSION is not pinned. Optional: a
+      # fork or a self-hoster without these secrets simply skips it.
+      #   DOKPLOY_URL         https://dokploy.example.com (no trailing /api)
+      #   DOKPLOY_API_KEY     Dokploy → Settings → Profile → API/CLI → Generate
+      #   DOKPLOY_COMPOSE_ID  the id in the compose's URL in Dokploy
+      - name: Deploy the release on Dokploy
+        if: steps.meta.outputs.latest == 'true'
+        env:
+          DOKPLOY_URL: ${{ secrets.DOKPLOY_URL }}
+          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
+          DOKPLOY_COMPOSE_ID: ${{ secrets.DOKPLOY_COMPOSE_ID }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          if [ -z "$DOKPLOY_URL" ] || [ -z "$DOKPLOY_API_KEY" ] || [ -z "$DOKPLOY_COMPOSE_ID" ]; then
+            echo "::notice::Dokploy secrets are not set – skipping the deploy."
+            exit 0
+          fi
+          body=$(jq -n --arg id "$DOKPLOY_COMPOSE_ID" --arg v "$VERSION" \
+            '{composeId: $id, title: ("ordi v" + $v), description: "Deployed by the Image workflow after publishing the release image"}')
+          status=$(curl -sS -o response.txt -w '%{http_code}' -X POST "${DOKPLOY_URL%/}/api/compose.deploy" \
+            -H "Content-Type: application/json" -H "x-api-key: $DOKPLOY_API_KEY" -d "$body")
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            echo "::error::Dokploy answered $status:"; cat response.txt; exit 1
+          fi
+          echo "Dokploy deploy of v$VERSION queued ($status)."
+          echo "Dokploy: deploy of v$VERSION queued." >> "$GITHUB_STEP_SUMMARY"

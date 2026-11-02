@@ -149,6 +149,22 @@ docker compose -f docker-compose.prod.yml up -d
 `ORDI_VERSION=1.36.0 docker compose -f docker-compose.prod.yml up -d`. Теги
 кожного релізу: `1.36.1`, `1.36`, `1`, `latest`.
 
+**Автодеплой релізу на Dokploy.** Не вмикайте в Dokploy **Autodeploy** для
+compose: він спрацьовує на push у `master`, тобто за кілька хвилин до того,
+як workflow «Image» опублікує новий `latest`. Тоді Dokploy перезапускає
+**старий** образ, і нова версія з'являється лише після ручного Redeploy.
+Натомість деплой запускає сам workflow «Image», останнім кроком, коли образ
+уже опубліковано й перевірено. Для цього потрібні три secrets у репозиторії
+(GitHub → Settings → Secrets and variables → Actions):
+
+- `DOKPLOY_URL` – адреса панелі, напр. `https://dokploy.example.com`;
+- `DOKPLOY_API_KEY` – Dokploy → Settings → Profile → API/CLI → Generate;
+- `DOKPLOY_COMPOSE_ID` – id compose з його адреси в Dokploy.
+
+Без цих secrets крок пропускається. Він спрацьовує лише для стабільного
+релізу, який рухає `latest`; закріплений `ORDI_VERSION` так само треба
+змінити вручну.
+
 Міграції **адитивні** і запускаються автоматично в entrypoint API-контейнера
 перед стартом сервера – окремих кроків немає. Rollback безпечний: попередній
 образ працює зі схемою нового (руйнівних DDL немає). Zero-downtime на одному
