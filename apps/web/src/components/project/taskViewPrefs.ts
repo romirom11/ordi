@@ -17,6 +17,9 @@ extendDict({
     'tasksview.noLabel': 'No label',
     'tasksview.milestone': 'Milestone',
     'tasksview.noMilestone': 'No milestone',
+    'tasksview.cycle': 'Cycle',
+    'tasksview.noCycle': 'No cycle',
+    'tasksview.currentCycle': 'current',
     'tasksview.dueOverdue': 'Overdue',
     'tasksview.dueToday': 'Due today',
     'tasksview.dueWeek': 'Due this week',
@@ -62,8 +65,11 @@ extendDict({
     'tasksview.labels': 'Мітки',
     'tasksview.noAssignee': 'Без виконавця',
     'tasksview.noLabel': 'Без мітки',
-    'tasksview.milestone': 'Майлстоун',
-    'tasksview.noMilestone': 'Без майлстоуна',
+    'tasksview.milestone': 'Етап',
+    'tasksview.noMilestone': 'Без етапу',
+    'tasksview.cycle': 'Цикл',
+    'tasksview.noCycle': 'Без циклу',
+    'tasksview.currentCycle': 'поточний',
     'tasksview.dueOverdue': 'Протерміновані',
     'tasksview.dueToday': 'На сьогодні',
     'tasksview.dueWeek': 'На цьому тижні',
@@ -106,7 +112,7 @@ extendDict({
 export const TASK_VIEWS = ['list', 'board', 'calendar', 'timeline', 'spreadsheet'] as const;
 export type TaskView = typeof TASK_VIEWS[number];
 
-export const GROUPINGS = ['status', 'assignee', 'priority', 'label', 'milestone', 'none'] as const;
+export const GROUPINGS = ['status', 'assignee', 'priority', 'label', 'milestone', 'cycle', 'none'] as const;
 export type Grouping = typeof GROUPINGS[number];
 
 export const ORDERINGS = ['priority', 'dueDate', 'created', 'title'] as const;
@@ -196,14 +202,15 @@ export interface TaskFilters {
   assigneeIds: string[];
   labelIds: string[];
   milestoneIds: string[];
+  cycleIds: string[];
   due: DuePreset | null;
 }
 
-export const EMPTY_FILTERS: TaskFilters = { statusIds: [], priorities: [], assigneeIds: [], labelIds: [], milestoneIds: [], due: null };
+export const EMPTY_FILTERS: TaskFilters = { statusIds: [], priorities: [], assigneeIds: [], labelIds: [], milestoneIds: [], cycleIds: [], due: null };
 
 export function countFilters(f: TaskFilters): number {
   return f.statusIds.length + f.priorities.length + f.assigneeIds.length + f.labelIds.length
-    + f.milestoneIds.length + (f.due ? 1 : 0);
+    + f.milestoneIds.length + f.cycleIds.length + (f.due ? 1 : 0);
 }
 
 export function sanitizeFilters(raw: unknown): TaskFilters {
@@ -216,6 +223,7 @@ export function sanitizeFilters(raw: unknown): TaskFilters {
     assigneeIds: arr(o.assigneeIds),
     labelIds: arr(o.labelIds),
     milestoneIds: arr(o.milestoneIds),
+    cycleIds: arr(o.cycleIds),
     due: due === 'overdue' || due === 'today' || due === 'week' || due === 'none' ? due : null,
   };
 }
@@ -227,6 +235,7 @@ interface FilterableTask {
   assigneeIds?: string[];
   labelIds?: string[];
   milestoneId?: string | null;
+  cycleId?: string | null;
 }
 
 function startOfDay(d: Date): number {
@@ -258,6 +267,7 @@ export function applyFilters<T extends FilterableTask>(
     if (f.assigneeIds.length && !f.assigneeIds.some((id) => (t.assigneeIds ?? []).includes(id))) return false;
     if (f.labelIds.length && !f.labelIds.some((id) => (t.labelIds ?? []).includes(id))) return false;
     if (f.milestoneIds.length && !f.milestoneIds.includes(t.milestoneId ?? 'none')) return false;
+    if (f.cycleIds.length && !f.cycleIds.includes(t.cycleId ?? 'none')) return false;
     if (f.due && !dueMatches(f.due, t.dueDate, categoryOf(t.statusId))) return false;
     return true;
   });

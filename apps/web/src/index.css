@@ -221,6 +221,11 @@ body {
   }
 }
 
+/* The project description on the overview reads as flow text, like a task's
+   (task.css): no field chrome, a modest minimum height. */
+.project-description > div { border: none; box-shadow: none !important; border-radius: 0; background: transparent; }
+.project-description .ordi-prose { padding-left: 0; padding-right: 0; min-height: 3.5rem; }
+
 /* The task view controls float bottom-right (components/project/TasksToolbar);
    where the bulk-selection bar spans the width, they step up above it. */
 @media (max-width: 1023px) {
@@ -473,7 +478,7 @@ body {
 :where([data-style='glass']) .border-input.bg-transparent { background-color: hsl(var(--glass-ctl)); }
 /* …except where a page strips the field chrome to show flow text: the task
    description editor (task.css drops its border and radius, so drop the well). */
-:where([data-style='glass']) .task-desc > .border-input { background-color: transparent; }
+:where([data-style='glass']) :is(.task-desc, .project-description) > .border-input { background-color: transparent; }
 /* A soft halo instead of a solid lime ring around the focused field. */
 [data-style='glass'] .focus\:ring-ring:focus { --tw-ring-color: hsl(var(--ring) / 0.3); }
 

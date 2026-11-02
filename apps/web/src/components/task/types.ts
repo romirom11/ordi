@@ -110,6 +110,7 @@ export interface TaskPatch {
   labelIds?: string[];
   parentId?: string | null;
   milestoneId?: string | null;
+  cycleId?: string | null;
   customFields?: Record<string, unknown>;
 }
 

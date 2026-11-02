@@ -153,7 +153,6 @@ export function ProjectUpdates({ projectId, canWrite, isAdmin }: {
                 <span className="block font-medium">
                   {updates.length === 0 ? t('projects.firstUpdate') : t('projects.newUpdate')}
                 </span>
-                {updates.length === 0 && <span className="block text-xs text-faint">{t('projects.firstUpdateHint')}</span>}
               </span>
             </button>
           )}

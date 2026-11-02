@@ -81,6 +81,9 @@ function ProjectDealsList({ projectId, canReadCrm }: { projectId: string; canRea
     currency = d.currency ?? currency;
   }
 
+  // Leads are linked from the CRM side; a project nobody sells has no section.
+  if (!dealsQ.isLoading && deals.length === 0) return null;
+
   return (
     <section>
       <div className="mb-2 flex items-center justify-between gap-3">

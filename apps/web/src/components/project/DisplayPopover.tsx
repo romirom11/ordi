@@ -32,8 +32,10 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-export function DisplayPopover({ prefs, onChange, side = 'bottom' }: {
+export function DisplayPopover({ prefs, onChange, side = 'bottom', cyclesEnabled = false }: {
   prefs: TaskViewPrefs; onChange: (patch: Partial<TaskViewPrefs>) => void;
+  /** Offer grouping by cycle only where the project uses cycles. */
+  cyclesEnabled?: boolean;
   /** Which way the panel opens; `top` from a control docked at the bottom. */
   side?: 'top' | 'bottom';
 }) {
@@ -41,7 +43,7 @@ export function DisplayPopover({ prefs, onChange, side = 'bottom' }: {
 
   const groupingLabel: Record<Grouping, string> = {
     status: t('common.status'), assignee: t('tasksview.assignee'), priority: t('tasks.priority'),
-    label: t('tasksview.labels'), milestone: t('tasksview.milestone'), none: t('tasksview.none'),
+    label: t('tasksview.labels'), milestone: t('tasksview.milestone'), cycle: t('tasksview.cycle'), none: t('tasksview.none'),
   };
   const orderingLabel: Record<Ordering, string> = {
     priority: t('tasks.priority'), dueDate: t('tasks.dueDate'), created: t('tasksview.orderCreated'), title: t('common.title'),
@@ -86,7 +88,7 @@ export function DisplayPopover({ prefs, onChange, side = 'bottom' }: {
             onChange={(e) => onChange({ grouping: e.target.value as Grouping })}
             className="h-7 w-[130px] text-xs"
           >
-            {GROUPINGS.map((g) => <option key={g} value={g}>{groupingLabel[g]}</option>)}
+            {GROUPINGS.filter((g) => g !== 'cycle' || cyclesEnabled).map((g) => <option key={g} value={g}>{groupingLabel[g]}</option>)}
           </Select>
         </Row>
         <Row label={t('tasksview.ordering')}>
