@@ -185,8 +185,10 @@ body {
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes progress-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 
-/* Page content entrance – subtle rise+blur per transitions.dev page slide */
-.page-enter { animation: fade-in-up var(--duration-fast) var(--ease-smooth-out) both; }
+/* Page content entrance – a short rise. No blur: a filter over the whole page
+   (or over every row of a list) is re-rasterised each frame and stutters,
+   worst on Glass where the pane underneath is itself frosted. */
+.page-enter { animation: reveal-in var(--duration-fast) var(--ease-smooth-out) both; }
 .anim-fade-in { animation: fade-in var(--duration-fast) var(--ease-smooth-out) both; }
 .anim-pop-in { animation: pop-in var(--duration-fast) var(--ease-smooth-out) both; }
 /* Content arriving in place of a skeleton (components/ui Reveal). Shorter throw
@@ -194,7 +196,7 @@ body {
 .reveal-in { animation: reveal-in var(--duration-fast) var(--ease-smooth-out) both; }
 /* Staggered list rows: set --i per row */
 .row-enter {
-  animation: fade-in-up var(--duration-slow) var(--ease-smooth-out) both;
+  animation: reveal-in var(--duration-slow) var(--ease-smooth-out) both;
   animation-delay: calc(var(--i, 0) * var(--duration-stagger));
 }
 
@@ -212,6 +214,43 @@ body {
   color: transparent;
   animation: shimmer-sweep 2s var(--ease-linear) infinite;
 }
+
+/* ─── App sidebar ───
+   Desktop: the slot's width eases between 14rem and 0 while the sidebar keeps
+   its own 14rem and slides with it, so its contents never reflow mid-way.
+   Compact: a drawer sliding in from the left edge over a fading scrim.
+   Keyframes, not transitions: they also run on the frame the sidebar comes
+   back from display:none. Once the slide-out has played it is parked as
+   display:none (Shell), which takes its links out of the Tab order. Not
+   visibility:hidden – every descendant would then transition the inherited
+   value, and under the reduced-motion rule below the drawer would still be
+   hidden on the frame it has to take focus. */
+.app-sidebar-slot {
+  width: 14rem;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: width var(--duration-fast) var(--ease-smooth-out);
+}
+.app-sidebar-slot[data-hidden],
+.app-sidebar-slot[data-compact] { width: 0; }
+#app-sidebar { width: 14rem; height: 100%; }
+.app-sidebar-slot[data-compact] #app-sidebar { height: auto; }
+#app-sidebar[data-parked] { display: none; }
+#app-sidebar[data-motion='in'] { animation: sidebar-in var(--duration-fast) var(--ease-smooth-out) both; }
+#app-sidebar[data-motion='out'] { animation: sidebar-out var(--duration-fast) var(--ease-smooth-out) both; }
+.app-sidebar-slot[data-compact] #app-sidebar[data-motion='in'] { animation-name: drawer-in; }
+.app-sidebar-slot[data-compact] #app-sidebar[data-motion='out'] { animation-name: drawer-out; }
+@keyframes sidebar-in { from { transform: translateX(-2rem); opacity: 0; } }
+@keyframes sidebar-out { to { transform: translateX(-2rem); opacity: 0; } }
+@keyframes drawer-in { from { transform: translateX(-100%); } }
+@keyframes drawer-out { to { transform: translateX(-100%); } }
+.app-sidebar-scrim {
+  transition: opacity var(--duration-fast) var(--ease-smooth-out);
+}
+.app-sidebar-scrim[data-hidden] { opacity: 0; pointer-events: none; }
+/* The content column's left gutter and the macOS traffic-light inset follow
+   the sidebar instead of snapping. */
+.app-main, .tab-strip-row { transition: padding-left var(--duration-fast) var(--ease-smooth-out); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

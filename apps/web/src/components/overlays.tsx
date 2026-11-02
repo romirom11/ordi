@@ -109,6 +109,9 @@ function useModalLayer({ active, rootRef, panelRef, onEscape, returnTo }: {
 
 /* ───────────────────────── Side panel ───────────────────────── */
 
+/** Exit slide length; the panel unmounts right after it. */
+const SIDE_PANEL_OUT_MS = 220;
+
 /**
  * A full-height panel that slides in from the right edge – for settings that
  * want room without leaving the page (one integration at a time). Same layer
@@ -130,7 +133,7 @@ export function SidePanel({ open, onClose, children, width = 560, title, subtitl
     if (open) { setVisible(true); setClosing(false); return; }
     if (!visible) return;
     setClosing(true);
-    const id = setTimeout(() => { setVisible(false); setClosing(false); }, 200);
+    const id = setTimeout(() => { setVisible(false); setClosing(false); }, SIDE_PANEL_OUT_MS);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -139,29 +142,44 @@ export function SidePanel({ open, onClose, children, width = 560, title, subtitl
 
   if (!visible) return null;
 
+  // The panel travels in from past the right edge rather than nudging 24px
+  // and fading. The scrim is a sibling, not the panel's parent: an element
+  // animating its opacity cuts off the backdrop-filter of everything inside
+  // it, so the frosted panel would show the page through it unblurred. As a
+  // sibling the scrim only dims (no blur of its own, unlike Dialog's) – one
+  // backdrop-filter under the moving pane instead of two.
+  const motion = closing
+    ? `${SIDE_PANEL_OUT_MS}ms cubic-bezier(0.4, 0, 1, 1) both`
+    : 'var(--duration-medium) var(--ease-smooth-out) both';
   return createPortal(
     <div
       ref={rootRef}
       inert={closing}
       aria-hidden={closing || undefined}
-      className="modal-backdrop fixed inset-0 z-50 flex justify-end"
+      className="fixed inset-0 z-50 flex justify-end"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
-      style={{
-        background: 'hsl(var(--overlay) / 0.4)',
-        animation: `${closing ? 'overlay-out' : 'overlay-in'} ${closing ? 'var(--duration-quick)' : 'var(--duration-fast)'} var(--ease-smooth-out) both`,
-      }}
     >
-      <style>{`@keyframes overlay-out { from { opacity: 1 } to { opacity: 0 } } @keyframes side-in { from { transform: translateX(24px); opacity: 0 } to { transform: none; opacity: 1 } } @keyframes side-out { from { transform: none; opacity: 1 } to { transform: translateX(24px); opacity: 0 } }`}</style>
+      <div
+        aria-hidden
+        className="absolute inset-0"
+        onMouseDown={onClose}
+        style={{
+          background: 'hsl(var(--overlay) / 0.5)',
+          animation: `${closing ? 'overlay-out' : 'overlay-in'} ${motion}`,
+        }}
+      />
+      <style>{`@keyframes overlay-out { from { opacity: 1 } to { opacity: 0 } } @keyframes side-in { from { transform: translateX(calc(100% + 1rem)) } to { transform: none } } @keyframes side-out { from { transform: none } to { transform: translateX(calc(100% + 1rem)) } }`}</style>
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="side-panel m-2 flex h-[calc(100%-1rem)] w-full flex-col overflow-hidden rounded-xl border border-border bg-elevated shadow-modal focus-visible:outline-none"
+        className="side-panel relative m-2 flex h-[calc(100%-1rem)] w-full flex-col overflow-hidden rounded-xl border border-border bg-elevated shadow-modal focus-visible:outline-none"
         style={{
           maxWidth: width,
-          animation: `${closing ? 'side-out' : 'side-in'} ${closing ? 'var(--duration-quick)' : 'var(--duration-fast)'} var(--ease-smooth-out) both`,
+          animation: `${closing ? 'side-out' : 'side-in'} ${motion}`,
+          willChange: 'transform',
         }}
       >
         <div className="flex shrink-0 items-start gap-3 border-b border-border px-5 py-4">
