@@ -7,14 +7,14 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bookmark, CalendarDays, Diamond, Plus, X } from 'lucide-react';
+import { Bookmark, CalendarDays, Diamond, Plus, Repeat, X } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { useMe } from '../../lib/auth';
 import { Avatar, Button, IconButton, Input, PriorityIcon, Spinner, StatusIcon, Tooltip, cn } from '../ui';
 import { ConfirmDialog, Dialog, DropdownMenu, MenuLabel, MenuSeparator, toast, useMenuClose } from '../overlays';
 import { useT } from '../../lib/i18n';
 import type { SavedView } from '../views/SavedViewsBar';
-import { FilterPopover, type LabelLite, type MilestoneLite, type StatusLite } from './FilterPopover';
+import { FilterPopover, type CycleLite, type LabelLite, type MilestoneLite, type StatusLite } from './FilterPopover';
 import { DisplayPopover } from './DisplayPopover';
 import {
   DUE_LABEL_KEY, PRIORITY_LABEL_KEY, EMPTY_FILTERS,
@@ -42,9 +42,9 @@ function Chip({ icon, label, onRemove }: { icon: ReactNode; label: string; onRem
   );
 }
 
-function FilterChips({ filters, onFilters, statuses, labels, users, milestones }: {
+function FilterChips({ filters, onFilters, statuses, labels, users, milestones, cycles }: {
   filters: TaskFilters; onFilters: (f: TaskFilters) => void;
-  statuses: StatusLite[]; labels: LabelLite[]; users: UserLite[]; milestones: MilestoneLite[];
+  statuses: StatusLite[]; labels: LabelLite[]; users: UserLite[]; milestones: MilestoneLite[]; cycles?: CycleLite[];
 }) {
   const t = useT();
   const chips: ReactNode[] = [];
@@ -76,6 +76,12 @@ function FilterChips({ filters, onFilters, statuses, labels, users, milestones }
     if (!name) continue;
     chips.push(<Chip key={`m-${mid}`} icon={<Diamond size={12} className="text-muted-foreground" />} label={name}
       onRemove={() => onFilters({ ...filters, milestoneIds: filters.milestoneIds.filter((x) => x !== mid) })} />);
+  }
+  for (const cid of filters.cycleIds) {
+    const name = cid === 'none' ? t('tasksview.noCycle') : cycles?.find((x) => x.id === cid)?.name;
+    if (!name) continue;
+    chips.push(<Chip key={`c-${cid}`} icon={<Repeat size={12} className="text-muted-foreground" />} label={name}
+      onRemove={() => onFilters({ ...filters, cycleIds: filters.cycleIds.filter((x) => x !== cid) })} />);
   }
   if (filters.due) {
     chips.push(<Chip key="due" icon={<CalendarDays size={12} className="text-muted-foreground" />} label={t(DUE_LABEL_KEY[filters.due])}
@@ -155,7 +161,7 @@ function SavedViewsList({ views, loading, myId, onApply, onDelete, onSave }: {
 
 /* ───────────────────────── Toolbar ───────────────────────── */
 
-export function TasksToolbar({ projectId, prefs, onPrefs, filters, onFilters, statuses, labels, users, milestones }: {
+export function TasksToolbar({ projectId, prefs, onPrefs, filters, onFilters, statuses, labels, users, milestones, cycles }: {
   projectId: string;
   prefs: TaskViewPrefs;
   onPrefs: (patch: Partial<TaskViewPrefs>) => void;
@@ -165,6 +171,8 @@ export function TasksToolbar({ projectId, prefs, onPrefs, filters, onFilters, st
   labels: LabelLite[];
   users: UserLite[];
   milestones: MilestoneLite[];
+  /** The project's cycles where it uses them; undefined hides everything cycle-related. */
+  cycles?: CycleLite[];
 }) {
   const t = useT();
   const qc = useQueryClient();
@@ -234,7 +242,7 @@ export function TasksToolbar({ projectId, prefs, onPrefs, filters, onFilters, st
       {countFilters(filters) > 0 && (
         <div className="sticky top-0 z-20 border-b border-border bg-surface/95 px-4 backdrop-blur-sm">
           <div className="flex min-h-[38px] flex-wrap items-center gap-1.5 py-1">
-            <FilterChips filters={filters} onFilters={onFilters} statuses={statuses} labels={labels} users={users} milestones={milestones} />
+            <FilterChips filters={filters} onFilters={onFilters} statuses={statuses} labels={labels} users={users} milestones={milestones} cycles={cycles} />
           </div>
         </div>
       )}
@@ -265,8 +273,8 @@ export function TasksToolbar({ projectId, prefs, onPrefs, filters, onFilters, st
                 onSave={() => { setSaveName(''); setSaving(true); }}
               />
             </DropdownMenu>
-            <FilterPopover statuses={statuses} labels={labels} users={users} milestones={milestones} filters={filters} onChange={onFilters} side="top" />
-            <DisplayPopover prefs={prefs} onChange={onPrefs} side="top" />
+            <FilterPopover statuses={statuses} labels={labels} users={users} milestones={milestones} cycles={cycles} filters={filters} onChange={onFilters} side="top" />
+            <DisplayPopover prefs={prefs} onChange={onPrefs} side="top" cyclesEnabled={!!cycles} />
           </div>
         </div>,
         document.body,

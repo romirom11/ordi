@@ -4,7 +4,7 @@
  */
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowDown, ArrowUp, CalendarDays, Diamond, Plus, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowDownToLine, ArrowUp, CalendarDays, Diamond, Plus, Trash2, X } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { Checkbox, IconButton, ProgressRing, Skeleton, Tooltip, fmtDate, cn } from '../ui';
 import { DropdownMenu, MenuItem, MenuSeparator, toast, useMenuClose } from '../overlays';
@@ -28,17 +28,21 @@ extendDict({
     'projects.milestoneSaveFailed': 'Could not save the milestone.',
     'projects.milestoneTasks': 'Show its tasks',
     'projects.milestoneNoTasks': 'No tasks assigned yet',
+    'projects.milestoneInCycle': '{n} in {cycle}',
+    'projects.milestonePull': 'Pull {n} open tasks into {cycle}',
   },
   uk: {
-    'projects.milestones': 'Майлстоуни',
-    'projects.addMilestone': 'Додати майлстоун…',
+    'projects.milestones': 'Етапи',
+    'projects.addMilestone': 'Додати етап…',
     'projects.milestoneTarget': 'Цільова дата',
-    'projects.milestoneDelete': 'Видалити майлстоун',
+    'projects.milestoneDelete': 'Видалити етап',
     'projects.milestoneUp': 'Перемістити вгору',
     'projects.milestoneDown': 'Перемістити вниз',
-    'projects.milestoneSaveFailed': 'Не вдалося зберегти майлстоун.',
+    'projects.milestoneSaveFailed': 'Не вдалося зберегти етап.',
     'projects.milestoneTasks': 'Показати задачі',
     'projects.milestoneNoTasks': 'Задач ще не призначено',
+    'projects.milestoneInCycle': '{n} у {cycle}',
+    'projects.milestonePull': 'Взяти відкриті задачі ({n}) у {cycle}',
   },
 });
 
@@ -49,10 +53,12 @@ export interface Milestone {
   taskCount?: number; doneCount?: number;
 }
 
-export function ProjectMilestones({ projectId, canWrite, onOpenTasks }: {
+export function ProjectMilestones({ projectId, canWrite, onOpenTasks, cycle }: {
   projectId: string; canWrite: boolean;
   /** Jump to the Tasks tab grouped by milestone, scrolled to this one. */
   onOpenTasks?: (milestoneId: string) => void;
+  /** The running cycle, when the project uses cycles: how much of each milestone it carries, and pulling more in. */
+  cycle?: { name: string; inCycle: (milestoneId: string) => number; pullable?: (milestoneId: string) => number; onPull?: (milestoneId: string) => void };
 }) {
   const t = useT();
   const qc = useQueryClient();
@@ -152,6 +158,24 @@ export function ProjectMilestones({ projectId, canWrite, onOpenTasks }: {
                 </button>
               </Tooltip>
 
+              {cycle && cycle.inCycle(m.id) > 0 && (
+                <span className="shrink-0 rounded-full border border-border px-1.5 py-px text-[11px] tabular-nums text-muted-foreground">
+                  {t('projects.milestoneInCycle').replace('{n}', String(cycle.inCycle(m.id))).replace('{cycle}', cycle.name)}
+                </span>
+              )}
+              {cycle?.onPull && !m.done && (cycle.pullable?.(m.id) ?? 0) > 0 && (
+                <Tooltip label={t('projects.milestonePull').replace('{n}', String(cycle.pullable!(m.id))).replace('{cycle}', cycle.name)}>
+                  <IconButton
+                    size="sm"
+                    aria-label={t('projects.milestonePull').replace('{n}', String(cycle.pullable!(m.id))).replace('{cycle}', cycle.name)}
+                    onClick={() => cycle.onPull!(m.id)}
+                    className="opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-hover/ms:opacity-100"
+                  >
+                    <ArrowDownToLine size={13} />
+                  </IconButton>
+                </Tooltip>
+              )}
+
               {/* target date */}
               {canWrite ? (
                 <DropdownMenu
@@ -162,7 +186,9 @@ export function ProjectMilestones({ projectId, canWrite, onOpenTasks }: {
                       type="button"
                       className={cn(
                         'flex h-6 items-center gap-1 rounded px-1.5 text-xs tabular-nums transition-colors duration-150 hover:bg-muted',
-                        m.targetDate ? 'text-muted-foreground' : 'text-faint opacity-0 focus-visible:opacity-100 group-hover/ms:opacity-100',
+                        m.targetDate
+                          ? (!m.done && m.targetDate < new Date().toISOString().slice(0, 10) ? 'text-destructive' : 'text-muted-foreground')
+                          : 'text-faint opacity-0 focus-visible:opacity-100 group-hover/ms:opacity-100',
                       )}
                     >
                       <CalendarDays size={12} />

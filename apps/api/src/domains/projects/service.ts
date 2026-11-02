@@ -100,13 +100,26 @@ export async function listProjects(actor: Actor, filters: { typeId?: string; sta
   const { db } = getDb();
   const ids = await accessibleProjectIds(actor);
   if (!ids.length) return [];
-  return db.select().from(projects).where(and(
-    isNull(projects.deletedAt),
-    inArray(projects.id, ids),
-    filters.typeId ? eq(projects.projectTypeId, filters.typeId) : undefined,
-    filters.status ? eq(projects.status, filters.status) : undefined,
-    filters.companyId ? eq(projects.companyId, filters.companyId) : undefined,
-  )).orderBy(desc(projects.createdAt));
+  const [rows, latest] = await Promise.all([
+    db.select().from(projects).where(and(
+      isNull(projects.deletedAt),
+      inArray(projects.id, ids),
+      filters.typeId ? eq(projects.projectTypeId, filters.typeId) : undefined,
+      filters.status ? eq(projects.status, filters.status) : undefined,
+      filters.companyId ? eq(projects.companyId, filters.companyId) : undefined,
+    )).orderBy(desc(projects.createdAt)),
+    // Health as of each project's latest update (on_track | at_risk | off_track),
+    // so the list can say which projects need a look.
+    db.selectDistinctOn([schema.projectUpdates.projectId], {
+      projectId: schema.projectUpdates.projectId,
+      health: schema.projectUpdates.health,
+      at: schema.projectUpdates.createdAt,
+    }).from(schema.projectUpdates)
+      .where(inArray(schema.projectUpdates.projectId, ids))
+      .orderBy(schema.projectUpdates.projectId, desc(schema.projectUpdates.createdAt)),
+  ]);
+  const health = new Map(latest.map((r) => [r.projectId, { health: r.health, at: r.at }]));
+  return rows.map((p) => ({ ...p, health: health.get(p.id)?.health ?? null, healthAt: health.get(p.id)?.at ?? null }));
 }
 
 /**
@@ -210,9 +223,22 @@ export async function getProject(actor: Actor, id: string) {
   const { db } = getDb();
   const [project] = await db.select().from(projects).where(and(eq(projects.id, id), isNull(projects.deletedAt)));
   if (!project) throw err.notFound('Project not found');
-  const labelRows = await db.select({ labelId: schema.projectLabels.labelId })
-    .from(schema.projectLabels).where(eq(schema.projectLabels.projectId, id));
-  return { ...project, labelIds: labelRows.map((r) => r.labelId) };
+  const [labelRows, [anyCycle], [intake]] = await Promise.all([
+    db.select({ labelId: schema.projectLabels.labelId }).from(schema.projectLabels).where(eq(schema.projectLabels.projectId, id)),
+    db.select({ id: schema.cycles.id }).from(schema.cycles).where(eq(schema.cycles.projectId, id)).limit(1),
+    db.select({ formEnabled: schema.intakeSettings.formEnabled, mailbox: schema.intakeSettings.mailbox })
+      .from(schema.intakeSettings).where(eq(schema.intakeSettings.projectId, id)),
+  ]);
+  const settings = (project.settings ?? {}) as { cycles?: boolean };
+  return {
+    ...project,
+    labelIds: labelRows.map((r) => r.labelId),
+    // Cycles are opt-in per project. A project that already has cycles keeps
+    // them until someone switches them off explicitly.
+    cyclesEnabled: settings.cycles ?? !!anyCycle,
+    // Intake earns its tab only once a channel (public form or mailbox) is on.
+    intakeEnabled: !!intake?.formEnabled || !!(intake?.mailbox as { host?: string; user?: string } | null)?.host,
+  };
 }
 
 export async function updateProject(actor: Actor, id: string, input: any) {
@@ -1047,6 +1073,11 @@ export async function bulkUpdateTasks(actor: Actor, input: any) {
       await assertCycleInProject(input.cycleId, projectId);
     }
   }
+  if (input.milestoneId) {
+    for (const projectId of new Set(rows.map((t) => t.projectId).filter(canEdit))) {
+      await assertMilestoneInProject(input.milestoneId, projectId);
+    }
+  }
   let updated = 0;
   for (const t of rows) {
     const role = actor.access.projectMemberships.get(t.projectId);
@@ -1054,6 +1085,7 @@ export async function bulkUpdateTasks(actor: Actor, input: any) {
     const patch: Record<string, unknown> = {};
     if (input.statusId !== undefined) patch.statusId = input.statusId;
     if (input.cycleId !== undefined) patch.cycleId = input.cycleId;
+    if (input.milestoneId !== undefined) patch.milestoneId = input.milestoneId;
     if (input.priority !== undefined) patch.priority = input.priority;
     if (Object.keys(patch).length) await db.update(tasks).set(patch).where(eq(tasks.id, t.id));
     if (input.assigneeIds !== undefined) {

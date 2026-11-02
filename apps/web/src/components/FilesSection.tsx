@@ -31,10 +31,12 @@ function fmtSize(bytes?: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function FilesSection({ entityType, entityId, canWrite, variant = 'section' }: {
+export function FilesSection({ entityType, entityId, canWrite, variant = 'section', quietEmpty = false }: {
   entityType: FileEntity; entityId: string; canWrite: boolean;
   /** `rail` renders the compact form used in the record's properties rail. */
   variant?: 'section' | 'rail';
+  /** With no files, show just the header and its Upload button – no "no files yet" box. */
+  quietEmpty?: boolean;
 }) {
   const t = useT();
   const qc = useQueryClient();
@@ -175,7 +177,7 @@ export function FilesSection({ entityType, entityId, canWrite, variant = 'sectio
       {isLoading ? (
         <div className="space-y-1">{[0, 1].map((i) => <Skeleton key={i} className="h-10 rounded-md" />)}</div>
       ) : files.length === 0 ? (
-        <EmptySection icon={<Paperclip size={14} />} title={t('crm.noFiles')} />
+        quietEmpty ? null : <EmptySection icon={<Paperclip size={14} />} title={t('crm.noFiles')} />
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">
           {files.map((f, i) => (

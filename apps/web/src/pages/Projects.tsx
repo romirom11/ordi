@@ -26,6 +26,8 @@ import { QueryFeedback } from '../components/QueryFeedback';
 
 extendDict({
   en: {
+    'projects.listAtRisk': 'At risk',
+    'projects.listOffTrack': 'Off track',
     'projects.noClientsYet': 'No clients yet.',
     'projects.addClientFirst': 'Add one in CRM',
     'projects.filterAll': 'All',
@@ -50,6 +52,8 @@ extendDict({
     'projects.labels': 'Labels',
   },
   uk: {
+    'projects.listAtRisk': 'Є ризики',
+    'projects.listOffTrack': 'Поза планом',
     'projects.noClientsYet': 'Клієнтів ще немає.',
     'projects.addClientFirst': 'Додати в CRM',
     'projects.filterAll': 'Всі',
@@ -80,6 +84,8 @@ interface Project {
   status: string; companyId?: string | null; companyName?: string | null;
   leadId?: string | null; startDate?: string | null; targetDate?: string | null;
   visibility?: string; version?: number;
+  /** Health of the latest project update; null before the first one. */
+  health?: 'on_track' | 'at_risk' | 'off_track' | null;
 }
 interface ProjectTypeLite {
   id: string; name: string; icon?: string; color?: string;
@@ -269,6 +275,13 @@ export function ProjectsPage() {
                     <span className="truncate text-[13px] font-medium text-foreground">{p.name}</span>
                     {p.visibility === 'private' && <Lock size={12} className="shrink-0 text-faint" />}
                     {p.companyName && <span className="hidden truncate text-xs text-muted-foreground sm:inline">· {p.companyName}</span>}
+                    {/* Only trouble earns a mark: an on-track project needs no badge. */}
+                    {(p.health === 'at_risk' || p.health === 'off_track') && (
+                      <span className={cn('inline-flex shrink-0 items-center gap-1 text-xs font-medium', p.health === 'off_track' ? 'text-destructive' : 'text-warning')}>
+                        <span className={cn('h-1.5 w-1.5 rounded-full', p.health === 'off_track' ? 'bg-destructive' : 'bg-warning')} />
+                        {t(p.health === 'off_track' ? 'projects.listOffTrack' : 'projects.listAtRisk')}
+                      </span>
+                    )}
                   </div>
 
                   {ptype && (

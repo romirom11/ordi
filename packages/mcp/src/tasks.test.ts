@@ -40,6 +40,10 @@ const LABELS = [
 const TYPES = [{ id: 'ty-post', name: 'Post', projectId: null, icon: 'circle', color: '#6b7280' }];
 const PROJECT = { id: '01JBFAKEPROJECT00000000001', key: 'CONTENT', name: 'Content', status: 'active' };
 const OTHER_PROJECT_ID = '01JBFAKEPROJECT00000000002';
+const MILESTONES = [
+  { id: 'ms-design', projectId: '01JBFAKEPROJECT00000000001', name: 'Design sign-off', targetDate: '2026-10-15', done: false, position: 1000, taskCount: 3, doneCount: 1 },
+  { id: 'ms-launch', projectId: '01JBFAKEPROJECT00000000001', name: 'Launch', targetDate: null, done: false, position: 2000, taskCount: 0, doneCount: 0 },
+];
 const CYCLES = [
   { id: 'cy-oct', projectId: PROJECT.id, name: 'October', status: 'active', startDate: '2026-10-01', endDate: '2026-10-31', goal: null },
   { id: 'cy-nov', projectId: PROJECT.id, name: 'November', status: 'upcoming', startDate: '2026-11-01', endDate: '2026-11-30', goal: null },
@@ -70,6 +74,13 @@ function fakeOrdi(seed: Partial<{ tasks: Row[]; fields: Row[] }> = {}): Fake {
     if (route === `/projects/${PROJECT.id}`) return PROJECT as T;
     if (route === `/projects/${PROJECT.id}/task-statuses`) return { data: STATUSES } as T;
     if (route === `/projects/${PROJECT.id}/cycles`) return { data: CYCLES } as T;
+    if (route === `/projects/${PROJECT.id}/milestones`) return { data: MILESTONES } as T;
+    const cycleGet = /^\/cycles\/([^/]+)$/.exec(route ?? '');
+    if (cycleGet) {
+      const cycle = CYCLES.find((c) => c.id === cycleGet[1]);
+      if (!cycle) throw notFound('Cycle');
+      return { cycle, total: 0, done: 0 } as T;
+    }
     if (route === '/task-types') return { data: TYPES } as T;
     if (route === '/labels') return { data: LABELS.filter((l) => l.scope === (qs.get('scope') ?? l.scope)) } as T;
     if (route === '/custom-fields') return { data: state.fields } as T;
@@ -90,6 +101,7 @@ function fakeOrdi(seed: Partial<{ tasks: Row[]; fields: Row[] }> = {}): Fake {
         && (!qs.get('type') || t.typeId === qs.get('type'))
         && (!qs.get('parentId') || t.parentId === qs.get('parentId'))
         && (!qs.get('cycleId') || t.cycleId === qs.get('cycleId'))
+        && (!qs.get('milestoneId') || t.milestoneId === qs.get('milestoneId'))
         && (!qs.get('dueFrom') || (t.dueDate ?? '') >= qs.get('dueFrom')!)
         && (!qs.get('dueTo') || (t.dueDate ?? '') <= qs.get('dueTo')!)
         && wantLabels.every((id) => (t.labelIds ?? []).includes(id))
@@ -126,6 +138,7 @@ function fakeOrdi(seed: Partial<{ tasks: Row[]; fields: Row[] }> = {}): Fake {
         typeId: body.typeId ?? null,
         parentId: body.parentId ?? null,
         cycleId: body.cycleId ?? null,
+        milestoneId: body.milestoneId ?? null,
         priority: body.priority ?? 'none',
         dueDate: body.dueDate ?? null,
         startDate: body.startDate ?? null,
@@ -139,6 +152,11 @@ function fakeOrdi(seed: Partial<{ tasks: Row[]; fields: Row[] }> = {}): Fake {
       state.tasks.push(task);
       return withRef(task) as T;
     }
+    if (path === `/projects/${PROJECT.id}/milestones`) {
+      return { id: 'ms-new', projectId: PROJECT.id, name: body.name, targetDate: body.targetDate ?? null, done: false, position: 3000 } as T;
+    }
+    if (path === '/cycles') return { id: 'cy-new' } as T;
+    if (/^\/cycles\/[^/]+\/complete$/.test(path)) return { ok: true } as T;
     const link = /^\/tasks\/([^/]+)\/links$/.exec(path);
     if (link) {
       const rows = state.links.get(link[1]!) ?? [];
@@ -151,6 +169,12 @@ function fakeOrdi(seed: Partial<{ tasks: Row[]; fields: Row[] }> = {}): Fake {
 
   client.patch = async <T>(path: string, body?: any): Promise<T> => {
     state.patches.push({ path, body });
+    const ms = /^\/milestones\/([^/]+)$/.exec(path);
+    if (ms) {
+      const m = MILESTONES.find((x) => x.id === ms[1]);
+      if (!m) throw notFound('Milestone');
+      return { ...m, ...body } as T;
+    }
     const single = /^\/tasks\/([^/]+)$/.exec(path);
     if (!single) throw notFound(`PATCH ${path}`);
     const task = state.tasks.find((t) => t.id === single[1]);
@@ -195,15 +219,19 @@ describe('finding the project and its structure', () => {
     const api = fakeOrdi();
     const client = await connect(api.client);
     const schema = body(await client.callTool({ name: 'get_project_schema', arguments: { project: 'content' } }));
-    expect(schema.project).toEqual({ id: PROJECT.id, key: 'CONTENT', name: 'Content', status: 'active' });
+    expect(schema.project).toEqual({ id: PROJECT.id, key: 'CONTENT', name: 'Content', status: 'active', cyclesEnabled: false });
     expect(schema.statuses.map((s: Row) => s.name)).toEqual(['Idea', 'Scheduled', 'Published']);
     expect(schema.taskTypes).toEqual([{ id: 'ty-post', name: 'Post', scope: 'workspace' }]);
     // Project labels belong to the project picker, not to a task card.
     expect(schema.labels.map((l: Row) => l.name)).toEqual(['LinkedIn', 'Case study']);
     expect(schema.customFields).toEqual([{ key: 'platform', label: 'Platform', type: 'select', options: [{ value: 'linkedin', label: 'LinkedIn' }], required: false }]);
     expect(schema.cycles).toEqual([
-      { id: 'cy-oct', name: 'October', status: 'active', startDate: '2026-10-01', endDate: '2026-10-31' },
-      { id: 'cy-nov', name: 'November', status: 'upcoming', startDate: '2026-11-01', endDate: '2026-11-30' },
+      { id: 'cy-oct', name: 'October', status: 'active', startDate: '2026-10-01', endDate: '2026-10-31', goal: null },
+      { id: 'cy-nov', name: 'November', status: 'upcoming', startDate: '2026-11-01', endDate: '2026-11-30', goal: null },
+    ]);
+    expect(schema.milestones).toEqual([
+      { id: 'ms-design', name: 'Design sign-off', targetDate: '2026-10-15', done: false, position: 1000, taskCount: 3, doneCount: 1 },
+      { id: 'ms-launch', name: 'Launch', targetDate: null, done: false, position: 2000, taskCount: 0, doneCount: 0 },
     ]);
   });
 
@@ -602,5 +630,76 @@ describe('subtasks and cycles', () => {
     expect(children.data.map((t: Row) => t.id)).toEqual(['t2']);
     const inCycle = body(await client.callTool({ name: 'list_tasks', arguments: { project: 'CONTENT', cycle: 'October' } }));
     expect(inCycle.data.map((t: Row) => t.id)).toEqual(['t1']);
+  });
+});
+
+describe('milestones and the plan', () => {
+  const seeded = () => fakeOrdi({ tasks: [
+    { id: 't1', number: 1, projectId: PROJECT.id, title: 'Homepage mockup', statusId: 'st-idea', priority: 'none', parentId: null, cycleId: null, milestoneId: null, labelIds: [], customFields: {}, version: 1 },
+  ] });
+
+  it('files a task under a milestone named the way the plan shows it, and takes it out with null', async () => {
+    const api = seeded();
+    const client = await connect(api.client);
+    const res = body(await client.callTool({ name: 'create_task', arguments: { projectId: 'CONTENT', title: 'Pricing page', milestone: 'design sign-off' } }));
+    expect(api.posts.find((p) => p.path === '/tasks')!.body).toMatchObject({ milestoneId: 'ms-design' });
+    expect(res.task).toMatchObject({ milestoneId: 'ms-design' });
+
+    await client.callTool({ name: 'update_task', arguments: { taskId: 't1', milestone: 'ms-launch' } });
+    expect(api.patches[0]!.body).toEqual({ milestoneId: 'ms-launch', version: 1 });
+    await client.callTool({ name: 'update_task', arguments: { taskId: 't1', milestone: null } });
+    expect(api.patches[1]!.body).toEqual({ milestoneId: null, version: 2 });
+  });
+
+  it('refuses an unknown milestone by naming the ones that exist', async () => {
+    const api = seeded();
+    const client = await connect(api.client);
+    const res = await client.callTool({ name: 'update_task', arguments: { taskId: 't1', milestone: 'Beta' } });
+    expect(res.isError).toBe(true);
+    expect(errorText(res)).toContain('Design sign-off');
+    expect(api.patches).toEqual([]);
+  });
+
+  it('lists the tasks of a milestone', async () => {
+    const api = seeded();
+    api.tasks[0]!.milestoneId = 'ms-design';
+    const client = await connect(api.client);
+    const res = body(await client.callTool({ name: 'list_tasks', arguments: { project: 'CONTENT', milestone: 'Design sign-off' } }));
+    expect(res.data.map((t: Row) => t.id)).toEqual(['t1']);
+  });
+
+  it('creates and updates milestones', async () => {
+    const api = seeded();
+    const client = await connect(api.client);
+    const created = body(await client.callTool({ name: 'create_milestone', arguments: { project: 'CONTENT', name: 'Beta', targetDate: '2026-12-01' } }));
+    expect(api.posts.at(-1)).toEqual({ path: `/projects/${PROJECT.id}/milestones`, body: { name: 'Beta', targetDate: '2026-12-01' } });
+    expect(created.milestone).toMatchObject({ name: 'Beta', targetDate: '2026-12-01', done: false });
+
+    const updated = body(await client.callTool({ name: 'update_milestone', arguments: { milestoneId: 'ms-design', done: true } }));
+    expect(api.patches.at(-1)).toEqual({ path: '/milestones/ms-design', body: { done: true } });
+    expect(updated.milestone).toMatchObject({ id: 'ms-design', done: true });
+
+    const empty = await client.callTool({ name: 'update_milestone', arguments: { milestoneId: 'ms-design' } });
+    expect(empty.isError).toBe(true);
+  });
+
+  it('starts a cycle, refuses one where cycles are switched off, and completes one into the next', async () => {
+    const api = seeded();
+    const client = await connect(api.client);
+    await client.callTool({ name: 'create_cycle', arguments: { project: 'CONTENT', name: 'Week 46', startDate: '2026-11-09', endDate: '2026-11-15' } });
+    expect(api.posts.at(-1)).toEqual({ path: '/cycles', body: { projectId: PROJECT.id, name: 'Week 46', startDate: '2026-11-09', endDate: '2026-11-15', goal: null } });
+
+    const backwards = await client.callTool({ name: 'create_cycle', arguments: { project: 'CONTENT', name: 'X', startDate: '2026-11-15', endDate: '2026-11-09' } });
+    expect(backwards.isError).toBe(true);
+
+    const get = api.client.get.bind(api.client);
+    api.client.get = (async (path: string) => (path === `/projects/${PROJECT.id}` ? { ...PROJECT, settings: { cycles: false } } : get(path))) as typeof api.client.get;
+    const off = await client.callTool({ name: 'create_cycle', arguments: { project: 'CONTENT', name: 'Y', startDate: '2026-11-09', endDate: '2026-11-15' } });
+    expect(off.isError).toBe(true);
+    expect(errorText(off)).toContain('switched off');
+
+    const done = body(await client.callTool({ name: 'complete_cycle', arguments: { cycleId: 'cy-oct', nextCycle: 'November' } }));
+    expect(api.posts.at(-1)).toEqual({ path: '/cycles/cy-oct/complete', body: { moveTo: 'next_cycle', nextCycleId: 'cy-nov' } });
+    expect(done.movedTo).toEqual({ cycleId: 'cy-nov' });
   });
 });

@@ -115,28 +115,28 @@ export function ProjectAccessPanel({ projectId, canManage }: { projectId: string
   ];
 
   return (
-    <div className="space-y-8">
-      {/* Visibility */}
-      <section>
-        <h3 className="mb-1 text-[13px] font-semibold">{t('access.visibility')}</h3>
+    <div className="space-y-6">
+      {/* Visibility: one settings row in a card, like the rest of the settings. */}
+      <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">
+        <div className="min-w-0">
+          <h3 className="text-[13px] font-medium">{t('access.visibility')}</h3>
+          <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+            {setVisibility.isPending && <Spinner className="h-3 w-3" />}
+            {visibility === 'workspace' ? t('access.workspaceHint') : t('access.privateHint')}
+          </p>
+        </div>
         {project.isLoading ? (
-          <Skeleton className="h-9 w-56" />
+          <Skeleton className="h-8 w-48" />
         ) : (
-          <>
-            <SegmentedControl<'workspace' | 'private'>
-              value={visibility}
-              onChange={(v) => { if (canManage && v !== visibility) setVisibility.mutate(v); }}
-              className={cn('h-8', !canManage && 'pointer-events-none opacity-70')}
-              options={[
-                { key: 'workspace', label: t('access.workspace'), icon: <Globe size={13} /> },
-                { key: 'private', label: t('access.private'), icon: <Lock size={13} /> },
-              ]}
-            />
-            <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-              {setVisibility.isPending && <Spinner className="h-3 w-3" />}
-              {visibility === 'workspace' ? t('access.workspaceHint') : t('access.privateHint')}
-            </p>
-          </>
+          <SegmentedControl<'workspace' | 'private'>
+            value={visibility}
+            onChange={(v) => { if (canManage && v !== visibility) setVisibility.mutate(v); }}
+            className={cn('h-8', !canManage && 'pointer-events-none opacity-70')}
+            options={[
+              { key: 'workspace', label: t('access.workspace'), icon: <Globe size={13} /> },
+              { key: 'private', label: t('access.private'), icon: <Lock size={13} /> },
+            ]}
+          />
         )}
       </section>
 

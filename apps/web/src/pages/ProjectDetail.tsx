@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle, Ban, CalendarDays, Diamond, Inbox, Plus,
-  LayoutDashboard, ListChecks, Repeat, CalendarClock, Settings, ChevronRight,
+  LayoutDashboard, ListChecks, Milestone as MilestoneIcon, Repeat, Settings, ChevronRight,
 } from 'lucide-react';
 import { api, qs, getAllPages, ApiError } from '../lib/api';
 import { Link, useNavigate, useOpen, useSearchParams, type OpenIntent } from '../lib/router';
@@ -10,10 +10,10 @@ import { useCan, useProjectRole } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import {
   Button, IconButton, Input, Card, Badge, Skeleton, EmptyState, Spinner, Avatar, AvatarGroup,
-  StatusIcon, PriorityIcon, ProgressBar, ProgressRing, PageBody, Reveal,
+  StatusIcon, PriorityIcon, ProgressBar, ProgressRing, PageBody, Reveal, Switch,
   fmtDate, cn,
 } from '../components/ui';
-import { Dialog, ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, toast } from '../components/overlays';
+import { Dialog, ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, SidePanel, toast } from '../components/overlays';
 import { BulkBar, RowCheckbox, bulkMessage, runBulk, useSelection } from '../components/bulk';
 import { CalendarView } from '../components/views/CalendarView';
 import { TimelineView } from '../components/views/TimelineView';
@@ -27,17 +27,17 @@ import { ProjectIcon } from '../components/project/ProjectIcon';
 import { PropertiesRail } from '../components/project/PropertiesRail';
 import { ProjectResources, type ProjectLink } from '../components/project/ProjectResources';
 import { ProjectUpdates } from '../components/project/ProjectUpdates';
-import { ProjectMilestones, type Milestone } from '../components/project/ProjectMilestones';
+import { type Milestone } from '../components/project/ProjectMilestones';
 import { ProjectActivity } from '../components/project/ProjectActivity';
 import { ProjectDeals } from '../components/project/ProjectDeals';
 import { ProjectIntegrations } from '../components/project/ProjectIntegrations';
 import { ProjectContextMenu, TaskContextMenu } from '../components/project/contextMenus';
 import { ProjectIntakeTab, IntakeSettingsSection, useIntakeItems } from '../components/project/ProjectIntake';
 import { ProjectAutomationSection } from '../components/project/ProjectAutomation';
-import { CycleDetailsDialog } from '../components/project/CycleDetails';
+import { PlanTab, currentCycle, cyclePhase, useCycles } from '../components/project/PlanTab';
 import { PROJECT_STATUSES, STATUS_META, type UserLite } from '../components/project/pickers';
 import { TasksToolbar } from '../components/project/TasksToolbar';
-import type { LabelLite } from '../components/project/FilterPopover';
+import type { CycleLite, LabelLite } from '../components/project/FilterPopover';
 import { useLabels, useTaskStatuses } from '../lib/queries';
 import { TaskStatusPicker } from '../components/task/StatusPicker';
 import {
@@ -51,6 +51,7 @@ import { DateField } from '../components/DatePicker';
 
 extendDict({
   en: {
+    'projects.cyclesToggleHint': 'Time-boxed sprints in the Plan tab, a Cycle field on tasks and cycle filters. Off for projects that do not work in sprints.',
     'bulkTasks.status': 'Status',
     'bulkTasks.priority': 'Priority',
     'bulkTasks.deleteTitle': 'Delete tasks',
@@ -92,6 +93,7 @@ extendDict({
     'projects.blocked': 'Blocked by another task',
   },
   uk: {
+    'projects.cyclesToggleHint': 'Спринти у вкладці «План», поле «Цикл» у задачах і фільтр за циклом. Вимкніть, якщо проєкт не працює спринтами.',
     'bulkTasks.status': 'Статус',
     'bulkTasks.priority': 'Пріоритет',
     'bulkTasks.deleteTitle': 'Видалити задачі',
@@ -141,6 +143,8 @@ interface Project {
   visibility?: 'workspace' | 'private'; version?: number; settings?: Record<string, unknown>;
   summary?: string; priority?: string; links?: ProjectLink[]; labelIds?: string[];
   customFields?: Record<string, unknown>;
+  /** Derived by the API: cycles are opt-in per project; intake shows once a channel is on. */
+  cyclesEnabled?: boolean; intakeEnabled?: boolean;
 }
 interface TaskStatus {
   id: string; name: string; category?: string; color?: string; position?: number; isDefault?: boolean;
@@ -148,7 +152,7 @@ interface TaskStatus {
 interface Task {
   id: string; number?: number; ref?: string; title: string; statusId: string; priority?: string;
   dueDate?: string | null; startDate?: string | null; estimate?: number | string | null; version?: number;
-  parentId?: string | null; milestoneId?: string | null; assigneeIds?: string[]; labelIds?: string[];
+  parentId?: string | null; milestoneId?: string | null; cycleId?: string | null; assigneeIds?: string[]; labelIds?: string[];
   createdAt?: string; position?: string | number | null; blocked?: boolean;
 }
 interface Cycle {
@@ -166,7 +170,7 @@ function isOverdue(due: string | null | undefined, cat?: string): boolean {
 
 /* ───────────────────────── Page ───────────────────────── */
 
-const TABS = ['overview', 'tasks', 'cycles', 'intake', 'settings'] as const;
+const TABS = ['overview', 'tasks', 'plan', 'intake'] as const;
 type Tab = typeof TABS[number];
 
 export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
@@ -177,9 +181,18 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
   const qc = useQueryClient();
   const can = useCan();
 
+  // `cycles` was the plan tab's old name; `settings` opens the settings panel
+  // over the overview (it used to be a tab of its own).
   const rawSection = params.get('section') ?? '';
-  const tab: Tab = (TABS as readonly string[]).includes(rawSection) ? (rawSection as Tab) : 'overview';
+  const section = rawSection === 'cycles' ? 'plan' : rawSection;
+  const tab: Tab = (TABS as readonly string[]).includes(section) ? (section as Tab) : 'overview';
   const setTab = (next: Tab) => navigate(next === 'overview' ? `/projects/${id}` : `/projects/${id}?section=${next}`);
+  const [settingsOpen, setSettingsOpen] = useState(rawSection === 'settings');
+  useEffect(() => { if (rawSection === 'settings') setSettingsOpen(true); }, [rawSection]);
+  const closeSettings = () => {
+    setSettingsOpen(false);
+    if (rawSection === 'settings') navigate(`/projects/${id}`);
+  };
 
   const projectQ = useQuery<Project>({ queryKey: ['project', id], queryFn: () => api.get<Project>(`/projects/${id}`) });
   const statusesQ = useTaskStatuses(id);
@@ -237,7 +250,10 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
         onTab={setTab}
         onDeleted={() => navigate('/projects')}
         onPatch={(b) => patchProject.mutate(b)}
-        intakeCount={canWrite ? intakeCount : undefined}
+        // Intake earns a tab once it is switched on or something is waiting in it.
+        intakeCount={canWrite && (project?.intakeEnabled || intakeCount > 0 || tab === 'intake') ? intakeCount : undefined}
+        settingsOpen={settingsOpen}
+        onSettings={() => setSettingsOpen(true)}
       />
 
       <Reveal key={tab} className="flex-1 overflow-auto">
@@ -249,29 +265,40 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
             canWrite={canWrite}
             isAdmin={isAdmin}
             onPatch={(b) => patchProject.mutate(b)}
-            onManageMembers={() => setTab('settings')}
-            onOpenMilestoneTasks={(mid) => navigate(`/projects/${id}?section=tasks&milestone=${mid}`)}
+            onManageMembers={() => setSettingsOpen(true)}
           />
         )}
         {tab === 'tasks' && <TasksTab id={id} statuses={statuses} statusesLoading={statusesQ.isLoading} projectKey={project?.key} users={users} canWrite={canWrite} onOpen={openTask} />}
-        {tab === 'cycles' && <CyclesTab id={id} isAdmin={isAdmin} />}
+        {tab === 'plan' && (
+          <PlanTab
+            projectId={id}
+            cyclesEnabled={!!project?.cyclesEnabled}
+            canWrite={canWrite}
+            isAdmin={isAdmin}
+            onOpenMilestoneTasks={(mid) => navigate(`/projects/${id}?section=tasks&milestone=${mid}`)}
+          />
+        )}
         {tab === 'intake' && (canWrite
           ? <ProjectIntakeTab projectId={id} statuses={statuses} users={users} />
           : <EmptyState icon={<Inbox size={20} />} title={t('common.noAccess')} />)}
-        {tab === 'settings' && <SettingsTab project={project} isAdmin={isAdmin} onPatch={(b) => patchProject.mutate(b)} pending={patchProject.isPending} />}
       </Reveal>
+
+      <SidePanel open={settingsOpen} onClose={closeSettings} title={t('nav.settings')} subtitle={project?.name} icon={<Settings size={16} />} width={640}>
+        <SettingsTab project={project} isAdmin={isAdmin} onPatch={(b) => patchProject.mutate(b)} pending={patchProject.isPending} />
+      </SidePanel>
     </div>
   );
 }
 
 /* ───────────────────────── Header ───────────────────────── */
 
-function ProjectHeader({ project, loading, canWrite, canDelete, tab, onTab, onDeleted, onPatch, intakeCount }: {
+function ProjectHeader({ project, loading, canWrite, canDelete, tab, onTab, onDeleted, onPatch, intakeCount, settingsOpen, onSettings }: {
   project?: Project; loading: boolean; canWrite: boolean; canDelete: boolean;
   tab: Tab; onTab: (t: Tab) => void; onDeleted: () => void;
   onPatch: (body: Record<string, unknown>) => void;
   /** undefined hides the tab (viewer role); a number shows it with a badge. */
   intakeCount?: number;
+  settingsOpen: boolean; onSettings: () => void;
 }) {
   const t = useT();
   const [editingName, setEditingName] = useState(false);
@@ -301,7 +328,7 @@ function ProjectHeader({ project, loading, canWrite, canDelete, tab, onTab, onDe
   const sections: { key: Tab; label: string; icon: ReactNode; badge?: number }[] = [
     { key: 'overview', label: t('projects.overview'), icon: <LayoutDashboard size={14} /> },
     { key: 'tasks', label: t('common.tasks'), icon: <ListChecks size={14} /> },
-    { key: 'cycles', label: t('projects.cycles'), icon: <Repeat size={14} /> },
+    { key: 'plan', label: t('plan.title'), icon: <MilestoneIcon size={14} /> },
     ...(intakeCount !== undefined
       ? [{ key: 'intake' as Tab, label: t('intake.title'), icon: <Inbox size={14} />, badge: intakeCount }]
       : []),
@@ -370,8 +397,8 @@ function ProjectHeader({ project, loading, canWrite, canDelete, tab, onTab, onDe
           <IconButton
             size="sm"
             aria-label={t('nav.settings')}
-            onClick={() => onTab('settings')}
-            className={cn(tab === 'settings' && 'bg-muted text-foreground')}
+            onClick={onSettings}
+            className={cn(settingsOpen && 'bg-muted text-foreground')}
           >
             <Settings size={16} />
           </IconButton>
@@ -403,9 +430,28 @@ interface TaskGroup {
 
 function buildGroups(
   grouping: Grouping, tasks: Task[], statuses: TaskStatus[], users: UserLite[], labels: LabelLite[],
-  milestones: Milestone[], t: (k: string) => string,
+  milestones: Milestone[], cycles: CycleLite[] | undefined, t: (k: string) => string,
 ): TaskGroup[] {
+  // Grouping by cycle remembered from a project that has since turned cycles off.
+  if (grouping === 'cycle' && !cycles) grouping = 'status';
   switch (grouping) {
+    case 'cycle': {
+      // The running cycle first, then the next ones; finished cycles only while they still hold tasks.
+      const groups: TaskGroup[] = (cycles ?? [])
+        .map((c) => ({
+          key: `cycle:${c.id}`, label: c.current ? `${c.name} · ${t('tasksview.currentCycle')}` : c.name,
+          icon: <Repeat size={13} className={c.current ? 'text-foreground' : 'text-faint'} />,
+          items: tasks.filter((x) => x.cycleId === c.id),
+          seed: { cycleId: c.id },
+        }));
+      groups.push({
+        key: 'cycle:none', label: t('tasksview.noCycle'),
+        icon: <Repeat size={13} className="text-faint" />,
+        items: tasks.filter((x) => !x.cycleId),
+        seed: {},
+      });
+      return groups;
+    }
     case 'status':
       return statuses.map((s) => ({
         key: `status:${s.id}`, label: s.name,
@@ -503,6 +549,19 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, canWrite, 
   });
   const milestones = useMemo(() => milestonesQ.data ?? [], [milestonesQ.data]);
   const allTasks = useMemo(() => tasksQ.data ?? [], [tasksQ.data]);
+  // Cycles exist for this list only where the project uses them.
+  const projectRow = useQuery<{ cyclesEnabled?: boolean }>({ queryKey: ['project', id], queryFn: () => api.get(`/projects/${id}`) }).data;
+  const cyclesQ = useCycles(id, !!projectRow?.cyclesEnabled);
+  const cycles = useMemo<CycleLite[] | undefined>(() => {
+    if (!projectRow?.cyclesEnabled) return undefined;
+    const all = cyclesQ.data ?? [];
+    const running = currentCycle(all);
+    const used = new Set(allTasks.map((x) => x.cycleId).filter(Boolean));
+    return all
+      .filter((c) => cyclePhase(c) !== 'completed' || used.has(c.id))
+      .sort((a, b) => (a.id === running?.id ? -1 : b.id === running?.id ? 1 : (a.startDate ?? '').localeCompare(b.startDate ?? '')))
+      .map((c) => ({ id: c.id, name: c.name, current: c.id === running?.id }));
+  }, [projectRow?.cyclesEnabled, cyclesQ.data, allTasks]);
   // Task labels only: the project vocabulary never applies to a task list.
   const labelsQ = useLabels('task');
   const labels = useMemo(() => (labelsQ.data ?? []) as LabelLite[], [labelsQ.data]);
@@ -557,10 +616,10 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, canWrite, 
 
   const groups = useMemo(() => {
     const grouping = prefs.view === 'board' ? 'status' : prefs.grouping;
-    return buildGroups(grouping, visibleTasks, statuses, users, labels, milestones, t)
+    return buildGroups(grouping, visibleTasks, statuses, users, labels, milestones, cycles, t)
       .map((g) => ({ ...g, items: orderTasks(g.items, prefs.ordering, prefs.orderingDir) }))
       .filter((g) => g.items.length > 0 || (prefs.showEmptyGroups && canWrite) || g.key === 'all');
-  }, [prefs.view, prefs.grouping, prefs.ordering, prefs.orderingDir, prefs.showEmptyGroups, visibleTasks, statuses, users, labels, milestones, canWrite, t]);
+  }, [prefs.view, prefs.grouping, prefs.ordering, prefs.orderingDir, prefs.showEmptyGroups, visibleTasks, statuses, users, labels, milestones, cycles, canWrite, t]);
 
   const loading = statusesLoading || tasksQ.isLoading;
   const { view } = prefs;
@@ -579,6 +638,7 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, canWrite, 
         labels={labels}
         users={users}
         milestones={milestones}
+        cycles={cycles}
       />
 
       {loading ? (
@@ -605,6 +665,7 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, canWrite, 
         <ListView
           projectId={id} projectKey={projectKey} statuses={statuses} groups={groups} prefs={prefs}
           canWrite={canWrite} resolveUsers={resolveUsers} labelById={labelById} childStats={childStats} taskById={taskById}
+          milestones={milestones} cycles={cycles}
           onOpen={onOpen}
           onToggleCollapse={(key) => updatePrefs({
             collapsed: prefs.collapsed.includes(key) ? prefs.collapsed.filter((k) => k !== key) : [...prefs.collapsed, key],
@@ -703,10 +764,11 @@ function ProgressPill({ stats }: { stats: ChildStats }) {
 
 /* ---- List view (grouped, Linear-density rows) ---- */
 
-function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, resolveUsers, labelById, childStats, taskById, onOpen, onToggleCollapse, onAdd, onMove }: {
+function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, resolveUsers, labelById, childStats, taskById, milestones, cycles, onOpen, onToggleCollapse, onAdd, onMove }: {
   projectId: string; projectKey?: string; statuses: TaskStatus[]; groups: TaskGroup[]; prefs: TaskViewPrefs;
   canWrite: boolean; resolveUsers: (ids?: string[]) => UserLite[];
   labelById: Map<string, LabelLite>; childStats: Map<string, ChildStats>; taskById: Map<string, Task>;
+  milestones: Milestone[]; cycles?: CycleLite[];
   onOpen: (tid: string, e?: OpenIntent) => void; onToggleCollapse: (key: string) => void;
   onAdd: (title: string, seed?: Record<string, unknown>) => Promise<unknown>;
   onMove: (taskId: string, statusId: string, version?: number) => void;
@@ -914,6 +976,32 @@ function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, re
             </MenuItem>
           ))}
         </DropdownMenu>
+        {milestones.length > 0 && (
+          <DropdownMenu
+            side="top"
+            trigger={<Button size="xs" variant="outline" disabled={bulkPending}>{t('tasksview.milestone')}</Button>}
+          >
+            <MenuLabel>{t('tasksview.milestone')}</MenuLabel>
+            {milestones.map((m) => (
+              <MenuItem key={m.id} icon={<Diamond size={14} />} onSelect={() => bulkPatch({ milestoneId: m.id }, (x) => x.milestoneId === m.id)}>{m.name}</MenuItem>
+            ))}
+            <MenuItem icon={<Diamond size={14} className="text-faint" />} onSelect={() => bulkPatch({ milestoneId: null }, (x) => !x.milestoneId)}>{t('tasksview.noMilestone')}</MenuItem>
+          </DropdownMenu>
+        )}
+        {cycles && cycles.length > 0 && (
+          <DropdownMenu
+            side="top"
+            trigger={<Button size="xs" variant="outline" disabled={bulkPending}>{t('tasksview.cycle')}</Button>}
+          >
+            <MenuLabel>{t('tasksview.cycle')}</MenuLabel>
+            {cycles.map((c) => (
+              <MenuItem key={c.id} icon={<Repeat size={14} />} onSelect={() => bulkPatch({ cycleId: c.id }, (x) => x.cycleId === c.id)}>
+                {c.current ? `${c.name} · ${t('tasksview.currentCycle')}` : c.name}
+              </MenuItem>
+            ))}
+            <MenuItem icon={<Repeat size={14} className="text-faint" />} onSelect={() => bulkPatch({ cycleId: null }, (x) => !x.cycleId)}>{t('tasksview.noCycle')}</MenuItem>
+          </DropdownMenu>
+        )}
         <Button size="xs" variant="outline" disabled={bulkPending} onClick={() => setBulkDelete(true)}>
           {t('common.delete')}
         </Button>
@@ -1093,11 +1181,10 @@ function SummaryInput({ project, canWrite, onPatch }: {
   );
 }
 
-function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageMembers, onOpenMilestoneTasks }: {
+function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageMembers }: {
   id: string; project?: Project; users: UserLite[]; canWrite: boolean; isAdmin: boolean;
   onPatch: (body: Record<string, unknown>) => void;
   onManageMembers: () => void;
-  onOpenMilestoneTasks: (milestoneId: string) => void;
 }) {
   const t = useT();
   const rail = useRailWidth('project', 280);
@@ -1122,12 +1209,19 @@ function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageM
 
   return (
     <PageBody width="full" style={rail.railStyle} className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_var(--rail-w,280px)]">
-      {/* Left: summary, resources, updates, description, milestones, activity */}
+      {/* Left: what the project is (description, links), then what is
+          happening (updates, files), then its trail. Milestones live in the
+          Plan tab; empty blocks stay out of the way. */}
       <div className="order-2 min-w-0 space-y-7 lg:order-1">
         {project ? (
           <>
             <div className="space-y-3">
-              <SummaryInput project={project} canWrite={canWrite} onPatch={onPatch} />
+              {/* The one-line summary predates the description; it stays
+                  editable where one was written, new projects just describe. */}
+              {project.summary?.trim() && <SummaryInput project={project} canWrite={canWrite} onPatch={onPatch} />}
+              <div className="project-description">
+                <RichEditor key={project.id} value={doc} onChange={onDescChange} editable={canWrite} placeholder={t('projects.aboutPlaceholder')} compact />
+              </div>
               <ProjectResources
                 links={(project.links ?? []) as ProjectLink[]}
                 canWrite={canWrite}
@@ -1135,14 +1229,9 @@ function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageM
               />
             </div>
 
-            <FilesSection entityType="project" entityId={id} canWrite={canWrite} />
-
             <ProjectUpdates projectId={id} canWrite={canWrite} isAdmin={isAdmin} />
 
-            <section>
-              <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('projects.description')}</h2>
-              <RichEditor key={project.id} value={doc} onChange={onDescChange} editable={canWrite} placeholder={t('projects.aboutPlaceholder')} />
-            </section>
+            <FilesSection entityType="project" entityId={id} canWrite={canWrite} quietEmpty />
 
             <CustomFieldsSection
               entityType="projects"
@@ -1150,8 +1239,6 @@ function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageM
               editable={canWrite}
               onSave={(customFields) => onPatch({ customFields })}
             />
-
-            <ProjectMilestones projectId={id} canWrite={canWrite} onOpenTasks={onOpenMilestoneTasks} />
 
             <ProjectDeals projectId={id} />
 
@@ -1186,136 +1273,6 @@ function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageM
   );
 }
 
-/* ───────────────────────── Cycles tab ───────────────────────── */
-
-function cyclePercent(c: Cycle): number | null {
-  if (typeof c.progress === 'number') return Math.max(0, Math.min(100, c.progress));
-  if (typeof c.completedCount === 'number' && typeof c.totalCount === 'number' && c.totalCount > 0) {
-    return Math.round((c.completedCount / c.totalCount) * 100);
-  }
-  return null;
-}
-
-function CyclesTab({ id, isAdmin }: { id: string; isAdmin: boolean }) {
-  const t = useT();
-  const qc = useQueryClient();
-  const can = useCan();
-  const canWrite = can('projects.write') || can('projects.create');
-  const { data, isLoading } = useQuery<Cycle[]>({ queryKey: ['cycles', id], queryFn: () => api.get<{ data: Cycle[] }>(`/projects/${id}/cycles`).then((r) => r.data) });
-  const [details, setDetails] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
-  const [name, setName] = useState('');
-  const [start, setStart] = useState('');
-  const [end, setEnd] = useState('');
-  const [goal, setGoal] = useState('');
-  const [error, setError] = useState<string | null>(null);
-
-  const reset = () => { setName(''); setStart(''); setEnd(''); setGoal(''); setError(null); };
-  // Prefill a sensible two-week window when the dialog opens.
-  useEffect(() => {
-    if (!adding) return;
-    const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    setStart((s) => s || iso(new Date()));
-    setEnd((s) => s || iso(new Date(Date.now() + 13 * 86_400_000)));
-  }, [adding]);
-  const mut = useMutation({
-    mutationFn: () => api.post('/cycles', { projectId: id, name, startDate: start || undefined, endDate: end || undefined, goal: goal || undefined }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cycles', id] }); setAdding(false); reset(); },
-    onError: (e) => { setError(e instanceof ApiError ? e.message : t('projects.createCycleFailed')); },
-  });
-
-  const cycles = data ?? [];
-
-  return (
-    <PageBody width="wide">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-sm font-semibold">{t('projects.cycles')}</h2>
-        {canWrite && <Button size="sm" variant="outline" onClick={() => setAdding(true)}><Plus size={14} /> {t('projects.newCycle')}</Button>}
-      </div>
-
-      {isLoading ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-28" />)}</div>
-      ) : cycles.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border py-16">
-          <EmptyState icon={<CalendarClock size={20} />} title={t('projects.noCycles')} hint={t('projects.noCyclesHint')}
-            action={canWrite ? <Button size="sm" variant="outline" onClick={() => setAdding(true)}><Plus size={14} /> {t('projects.newCycle')}</Button> : undefined} />
-        </div>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {cycles.map((c) => {
-            const pct = cyclePercent(c);
-            return (
-              // The card opens the cycle: progress, burndown and (for admins) completion.
-              <Card
-                key={c.id}
-                className="cursor-pointer p-4 transition-colors hover:border-border-strong"
-                onClick={() => setDetails(c.id)}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate font-medium">{c.name}</span>
-                  {c.status && <Badge className="bg-muted capitalize text-muted-foreground">{c.status}</Badge>}
-                </div>
-                <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <CalendarDays size={12} className="text-faint" />
-                  {fmtDate(c.startDate)} – {fmtDate(c.endDate)}
-                </p>
-                {c.goal && <p className="mt-1.5 line-clamp-2 text-[13px] text-muted-foreground">{c.goal}</p>}
-                {pct != null && (
-                  <div className="mt-3">
-                    <div className="mb-1 flex justify-between text-xs text-muted-foreground">
-                      <span>{t('projects.progress')}</span>
-                      <span className="tabular-nums">
-                        {c.completedCount != null && c.totalCount != null ? `${c.completedCount}/${c.totalCount} · ` : ''}{pct}%
-                      </span>
-                    </div>
-                    <ProgressBar value={pct} />
-                  </div>
-                )}
-              </Card>
-            );
-          })}
-        </div>
-      )}
-
-      {details && (
-        <CycleDetailsDialog
-          cycleId={details}
-          cycles={cycles}
-          isAdmin={isAdmin}
-          onClose={() => setDetails(null)}
-          onCompleted={() => setDetails(null)}
-        />
-      )}
-
-      <Dialog open={adding} onClose={() => { setAdding(false); reset(); }} title={t('projects.newCycle')} width={440}>
-        <form
-          onSubmit={(e: FormEvent) => {
-            e.preventDefault();
-            setError(null);
-            if (!name.trim()) { setError(t('common.nameRequired')); return; }
-            if (!start || !end) { setError(t('projects.cycleDatesRequired')); return; }
-            if (end < start) { setError(t('projects.cycleDatesOrder')); return; }
-            mut.mutate();
-          }}
-          className="space-y-3 px-4 pb-4 pt-1"
-        >
-          <Input autoFocus placeholder={t('projects.cycleNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} />
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1"><label className="text-xs text-muted-foreground">{t('projects.start')}</label><DateField value={start} onChange={(v) => setStart(v ?? '')} clearable={false} /></div>
-            <div className="space-y-1"><label className="text-xs text-muted-foreground">{t('projects.end')}</label><DateField value={end} onChange={(v) => setEnd(v ?? '')} clearable={false} min={start || undefined} /></div>
-          </div>
-          <Input placeholder={t('projects.goalPlaceholder')} value={goal} onChange={(e) => setGoal(e.target.value)} />
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" size="sm" variant="ghost" onClick={() => { setAdding(false); reset(); }}>{t('common.cancel')}</Button>
-            <Button type="submit" size="sm" disabled={mut.isPending}>{mut.isPending ? <Spinner /> : t('common.create')}</Button>
-          </div>
-        </form>
-      </Dialog>
-    </PageBody>
-  );
-}
-
 /* ───────────────────────── Settings tab ───────────────────────── */
 
 function SettingRow({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
@@ -1344,7 +1301,7 @@ function SettingsTab({ project, isAdmin, onPatch, pending }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project?.id]);
 
-  if (!project) return <PageBody><Skeleton className="h-40" /></PageBody>;
+  if (!project) return <Skeleton className="h-40" />;
 
   const saveName = () => {
     setError(null);
@@ -1353,7 +1310,7 @@ function SettingsTab({ project, isAdmin, onPatch, pending }: {
   };
 
   return (
-    <PageBody className="space-y-8">
+    <div className="space-y-8">
       {/* General */}
       <section>
         <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('projects.general')}</h2>
@@ -1378,6 +1335,12 @@ function SettingsTab({ project, isAdmin, onPatch, pending }: {
                   {t(STATUS_META[s]!.key)}
                 </button>
               ))}
+            </div>
+          </SettingRow>
+          {/* Cycles are opt-in: projects that do not work in sprints never see them. */}
+          <SettingRow label={t('plan.cycles')} hint={t('projects.cyclesToggleHint')}>
+            <div className="flex justify-end">
+              <Switch checked={!!project.cyclesEnabled} disabled={!isAdmin} onChange={(v) => onPatch({ settings: { cycles: v } })} label={t('plan.cycles')} />
             </div>
           </SettingRow>
         </div>
@@ -1410,6 +1373,6 @@ function SettingsTab({ project, isAdmin, onPatch, pending }: {
         version={project.version}
         canManage={canManageIntegrations}
       />
-    </PageBody>
+    </div>
   );
 }

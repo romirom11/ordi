@@ -1,9 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import { Rocket, Tag, Target } from 'lucide-react';
+import { Diamond, Rocket, Tag, Target } from 'lucide-react';
+import { Link } from '../../lib/router';
+import type { Milestone } from './ProjectMilestones';
 import { api } from '../../lib/api';
 import { useCan } from '../../lib/auth';
 import { useLabels, type LabelLookup } from '../../lib/queries';
-import { PriorityIcon, cn } from '../ui';
+import { PriorityIcon, cn, fmtDate } from '../ui';
 import { DropdownMenu, MenuItem, MenuLabel } from '../overlays';
 import { LabelsMenu } from '../LabelsMenu';
 import { MembersRailPicker } from './MembersRail';
@@ -16,6 +18,8 @@ import { useT, extendDict } from '../../lib/i18n';
 
 extendDict({
   en: {
+    'projects.nextMilestone': 'Milestone',
+    'projects.planMilestones': 'Plan milestones',
     'projects.type': 'Type',
     'projects.priority': 'Priority',
     'projects.priorityNone': 'No priority',
@@ -29,6 +33,8 @@ extendDict({
     'projects.manageMembers': 'Manage members',
   },
   uk: {
+    'projects.nextMilestone': 'Етап',
+    'projects.planMilestones': 'Спланувати етапи',
     'projects.type': 'Тип',
     'projects.priority': 'Пріоритет',
     'projects.priorityNone': 'Без пріоритету',
@@ -111,6 +117,9 @@ export function PropertiesRail({ project, users, canWrite, canManageMembers, onP
         <RailField label={t('projects.targetDate')}>
           <DateRailPicker value={project.targetDate} disabled={!canWrite} placeholder={t('projects.setTarget')}
             icon={<Target size={14} className="text-faint" />} onChange={(v) => onPatch({ targetDate: v })} />
+        </RailField>
+        <RailField label={t('projects.nextMilestone')}>
+          <NextMilestone projectId={project.id} />
         </RailField>
         <RailField label={t('projects.type')}>
           <ProjectTypeRailPicker
@@ -239,5 +248,36 @@ function ProjectTypeRailPicker({ value, types, onSelect, disabled }: {
         </MenuItem>
       ))}
     </DropdownMenu>
+  );
+}
+
+/**
+ * The milestone the project is heading for now – the first one not done, in
+ * plan order – as one line: the whole milestone list lives in the Plan tab.
+ */
+function NextMilestone({ projectId }: { projectId: string }) {
+  const t = useT();
+  const { data } = useQuery<Milestone[]>({
+    queryKey: ['milestones', projectId],
+    queryFn: () => api.get<{ data: Milestone[] }>(`/projects/${projectId}/milestones`).then((r) => r.data),
+  });
+  const next = (data ?? []).filter((m) => !m.done).sort((a, b) => a.position - b.position)[0];
+  const overdue = !!next?.targetDate && next.targetDate < new Date().toISOString().slice(0, 10);
+  return (
+    <Link
+      to={`/projects/${projectId}?section=plan`}
+      className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-[13px] transition-colors duration-150 hover:bg-muted"
+    >
+      <Diamond size={13} className="shrink-0 text-faint" />
+      {next ? (
+        <>
+          <span className="min-w-0 truncate">{next.name}</span>
+          {next.targetDate && <span className={cn('shrink-0 text-xs tabular-nums', overdue ? 'text-destructive' : 'text-faint')}>{fmtDate(next.targetDate)}</span>}
+          {!!next.taskCount && <span className="shrink-0 text-xs tabular-nums text-faint">{next.doneCount ?? 0}/{next.taskCount}</span>}
+        </>
+      ) : (
+        <span className="text-muted-foreground">{t('projects.planMilestones')}</span>
+      )}
+    </Link>
   );
 }

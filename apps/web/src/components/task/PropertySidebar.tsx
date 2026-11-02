@@ -6,7 +6,8 @@
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, CalendarDays, CalendarPlus, Diamond, Gauge, Tag, UserPlus2, X } from 'lucide-react';
+import { AlertTriangle, CalendarDays, CalendarPlus, Diamond, Gauge, Repeat, Tag, UserPlus2, X } from 'lucide-react';
+import { currentCycle, cyclePhase, useCycles } from '../project/PlanTab';
 import { api } from '../../lib/api';
 import {
   Avatar, AvatarGroup, Badge, PriorityIcon, StatusIcon, cn, fmtDate,
@@ -29,6 +30,10 @@ extendDict({
     'task.milestone': 'Milestone',
     'task.setMilestone': 'No milestone',
     'task.noMilestones': 'No milestones in this project yet',
+    'task.cycle': 'Cycle',
+    'task.setCycle': 'No cycle',
+    'task.noCycles': 'No open cycles – create one in the Plan tab',
+    'task.cycleCurrent': 'current',
     'task.unassigned': 'Unassigned',
     'task.deactivatedUser': 'deactivated',
     'task.addLabel': 'Add label',
@@ -54,9 +59,13 @@ extendDict({
     'task.labels': 'Мітки',
     'task.startDate': 'Дата початку',
     'task.estimate': 'Оцінка',
-    'task.milestone': 'Майлстоун',
-    'task.setMilestone': 'Без майлстоуна',
-    'task.noMilestones': 'У проєкті ще немає майлстоунів',
+    'task.milestone': 'Етап',
+    'task.setMilestone': 'Без етапу',
+    'task.noMilestones': 'У проєкті ще немає етапів',
+    'task.cycle': 'Цикл',
+    'task.setCycle': 'Без циклу',
+    'task.noCycles': 'Немає відкритих циклів – створіть у вкладці «План»',
+    'task.cycleCurrent': 'поточний',
     'task.unassigned': 'Не призначено',
     'task.deactivatedUser': 'деактивовано',
     'task.addLabel': 'Додати мітку',
@@ -211,6 +220,21 @@ export function PropertySidebar({ task, statuses, users, onPatch, hasRepos }: {
   });
   const milestones = milestoneRows ?? [];
   const milestone = milestones.find((m) => m.id === task.milestoneId);
+
+  // Cycles, only where the project uses them (the project query is shared with the project page).
+  const { data: projectRow } = useQuery<{ cyclesEnabled?: boolean }>({
+    queryKey: ['project', task.projectId],
+    queryFn: () => api.get<{ cyclesEnabled?: boolean }>(`/projects/${task.projectId}`),
+    staleTime: 60_000,
+  });
+  const cyclesQ = useCycles(task.projectId, !!projectRow?.cyclesEnabled);
+  const allCycles = cyclesQ.data ?? [];
+  const cycle = allCycles.find((c) => c.id === task.cycleId);
+  const running = currentCycle(allCycles);
+  // Offer what can still take work; a completed cycle stays visible only as the current value.
+  const cycleChoices = allCycles
+    .filter((c) => cyclePhase(c) !== 'completed')
+    .sort((a, b) => (a.startDate ?? '').localeCompare(b.startDate ?? ''));
 
   const status = statuses.find((s) => s.id === task.statusId);
   const assigneeIds = task.assignees.map((a) => a.userId);
@@ -395,6 +419,39 @@ export function PropertySidebar({ task, statuses, users, onPatch, hasRepos }: {
           )}
         </DropdownMenu>
       </Row>
+
+      {projectRow?.cyclesEnabled && (
+        <Row label={t('task.cycle')}>
+          <DropdownMenu
+            className="w-full"
+            width={240}
+            trigger={
+              <Chip empty={!cycle}>
+                <Repeat size={14} />
+                <span className="truncate">{cycle?.name ?? t('task.setCycle')}</span>
+              </Chip>
+            }
+          >
+            {cycleChoices.length === 0 && <MenuLabel>{t('task.noCycles')}</MenuLabel>}
+            {cycleChoices.map((c) => (
+              <MenuItem
+                key={c.id}
+                icon={<Repeat size={14} />}
+                checked={c.id === task.cycleId}
+                onSelect={() => onPatch({ cycleId: c.id === task.cycleId ? null : c.id })}
+              >
+                {c.name}{c.id === running?.id ? ` · ${t('task.cycleCurrent')}` : ''}
+              </MenuItem>
+            ))}
+            {task.cycleId && (
+              <>
+                <MenuSeparator />
+                <MenuItem icon={<X size={14} />} danger onSelect={() => onPatch({ cycleId: null })}>{t('task.clear')}</MenuItem>
+              </>
+            )}
+          </DropdownMenu>
+        </Row>
+      )}
 
       <div className="mx-3 my-2 h-px bg-border" />
 
