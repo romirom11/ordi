@@ -11,16 +11,6 @@ import { useT, extendDict } from '../lib/i18n';
 import { openExternal } from '../lib/desktop';
 import { InlineEdit } from '../components/crm/detail';
 
-/**
- * The PDF endpoint authenticates with the browser cookie. Inside the desktop
- * shell a relative URL points at tauri://localhost and carries no credential
- * at all, so build the instance address and hand it to the real browser – its
- * session exists whenever browser sign-in was used, and the login page is an
- * honest fallback when it was not.
- */
-function openPdf(id: string): void {
-  openExternal(`${appOrigin()}/api/v1/invoices/${id}/pdf`);
-}
 import { useWorkspaceSettings } from '../components/finance/workspace';
 import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
 import { DateField } from '../components/DatePicker';
@@ -72,6 +62,7 @@ extendDict({
     'finance.addNotes': 'Add notes…',
     'finance.addTerms': 'Add terms…',
     'finance.invoiceUpdated': 'Invoice updated',
+    'finance.pdfFailed': 'Could not download the PDF',
     'finance.noDueDate': 'No due date',
     'finance.method.bank': 'Bank transfer',
     'finance.method.card': 'Card',
@@ -122,6 +113,7 @@ extendDict({
     'finance.addNotes': 'Додати примітки…',
     'finance.addTerms': 'Додати умови…',
     'finance.invoiceUpdated': 'Рахунок оновлено',
+    'finance.pdfFailed': 'Не вдалося завантажити PDF',
     'finance.noDueDate': 'Без терміну оплати',
     'finance.method.bank': 'Банківський переказ',
     'finance.method.card': 'Картка',
@@ -225,6 +217,15 @@ export function InvoiceDetailPage({ id }: { id: string }) {
     onSuccess: invalidate,
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
   });
+  // The PDF comes through fetch with the app's own credential (cookie, or the
+  // bearer token on desktop). Opening the URL in the system browser instead
+  // relied on that browser having its own ordi session, and answered
+  // "Not authenticated" whenever it did not.
+  const pdf = useMutation({
+    mutationFn: () => api.download(`/invoices/${id}/pdf`, `${invoice.data?.number ?? 'invoice'}.pdf`),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('finance.pdfFailed')),
+  });
+
   // Dates, currency, language, tax and discount stay editable at any status;
   // the API refuses item changes once the invoice has been sent.
   const edit = useMutation({
@@ -372,7 +373,7 @@ export function InvoiceDetailPage({ id }: { id: string }) {
               </Button>
             )
           )}
-          <Button size="sm" variant="outline" onClick={() => openPdf(id)}><Download size={14} /> PDF</Button>
+          <Button size="sm" variant="outline" onClick={() => pdf.mutate()} disabled={pdf.isPending}>{pdf.isPending ? <Spinner className="h-3.5 w-3.5" /> : <Download size={14} />} PDF</Button>
           {can('finance.payments') && outstanding > 0 && (
             <Button
               size="sm"
