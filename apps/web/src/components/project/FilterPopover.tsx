@@ -178,18 +178,21 @@ function FilterPanel({ statuses, labels, users, milestones, filters, onChange }:
   );
 }
 
-export function FilterPopover({ statuses, labels, users, milestones, filters, onChange }: {
+export function FilterPopover({ statuses, labels, users, milestones, filters, onChange, side = 'bottom' }: {
   statuses: StatusLite[]; labels: LabelLite[]; users: UserLite[]; milestones: MilestoneLite[];
   filters: TaskFilters; onChange: (f: TaskFilters) => void;
+  /** Which way the panel opens; `top` from a control docked at the bottom. */
+  side?: 'top' | 'bottom';
 }) {
   const t = useT();
   const active = countFilters(filters) > 0;
   return (
     <DropdownMenu
       align="end"
+      side={side}
       width={252}
       trigger={
-        <Tooltip label={t('tasksview.filter')} side="bottom">
+        <Tooltip label={t('tasksview.filter')} side={side}>
           <IconButton size="md" aria-label={t('tasksview.filter')} className={cn(active && 'bg-muted text-foreground')}>
             <Filter size={15} />
           </IconButton>

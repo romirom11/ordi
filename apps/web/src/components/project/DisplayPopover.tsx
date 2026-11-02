@@ -32,8 +32,10 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-export function DisplayPopover({ prefs, onChange }: {
+export function DisplayPopover({ prefs, onChange, side = 'bottom' }: {
   prefs: TaskViewPrefs; onChange: (patch: Partial<TaskViewPrefs>) => void;
+  /** Which way the panel opens; `top` from a control docked at the bottom. */
+  side?: 'top' | 'bottom';
 }) {
   const t = useT();
 
@@ -57,9 +59,10 @@ export function DisplayPopover({ prefs, onChange }: {
   return (
     <DropdownMenu
       align="end"
+      side={side}
       width={300}
       trigger={
-        <Tooltip label={t('tasksview.display')} side="bottom">
+        <Tooltip label={t('tasksview.display')} side={side}>
           <IconButton size="md" aria-label={t('tasksview.display')}>
             <SlidersHorizontal size={15} />
           </IconButton>

@@ -148,7 +148,7 @@ export function BulkBar({ count, onClear, children }: { count: number; onClear: 
   const t = useT();
   if (count === 0) return null;
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-5 z-30 flex justify-center px-4">
+    <div className="bulk-bar pointer-events-none fixed inset-x-0 bottom-5 z-30 flex justify-center px-4">
       <div className="anim-pop-in pointer-events-auto flex max-w-full items-center gap-2 overflow-x-auto rounded-lg border border-border bg-elevated px-2.5 py-2 shadow-pop">
         <span className="shrink-0 px-1 text-[13px] font-medium tabular-nums">
           {t('bulk.selected').replace('{n}', String(count))}

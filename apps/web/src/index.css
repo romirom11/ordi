@@ -221,6 +221,12 @@ body {
   }
 }
 
+/* The task view controls float bottom-right (components/project/TasksToolbar);
+   where the bulk-selection bar spans the width, they step up above it. */
+@media (max-width: 1023px) {
+  body:has(.bulk-bar) .tasks-fab { bottom: 4.75rem; }
+}
+
 /* Urbanist Cyrillic: Urbanist with Cyrillic added (OFL, see
    assets/fonts/urbanist-cyrillic/OFL.txt), so a Ukrainian sentence with
    English names in it stays in one typeface. Only Glass uses it, and the

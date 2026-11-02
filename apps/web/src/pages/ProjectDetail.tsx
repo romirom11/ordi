@@ -567,7 +567,8 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, canWrite, 
   const filtered = allTasks.length > 0 && visibleTasks.length === 0;
 
   return (
-    <div className="flex min-h-full flex-col">
+    // pb-16: room under the last row for the floating view controls.
+    <div className="flex min-h-full flex-col pb-16">
       <TasksToolbar
         projectId={id}
         prefs={prefs}

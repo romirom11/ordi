@@ -5,6 +5,7 @@
  * Display popover, so this row stays a single quiet line.
  */
 import { useState, type FormEvent, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bookmark, CalendarDays, Diamond, Plus, X } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
@@ -225,17 +226,30 @@ export function TasksToolbar({ projectId, prefs, onPrefs, filters, onFilters, st
     if (f && 'taskFilters' in (f as object)) onFilters(sanitizeFilters(f.taskFilters));
   };
 
+  // The view controls float at the bottom right instead of owning a row at the
+  // top: with no filters set that row held three icons and nothing else. The
+  // row comes back only to show the active filters as removable chips.
   return (
     <>
-      <div className="sticky top-0 z-20 border-b border-border bg-surface/95 px-4 backdrop-blur-sm">
-        <div className="flex min-h-[38px] flex-wrap items-center gap-1.5 py-1">
-          <FilterChips filters={filters} onFilters={onFilters} statuses={statuses} labels={labels} users={users} milestones={milestones} />
-          <div className="ml-auto flex items-center gap-0.5 pl-2">
+      {countFilters(filters) > 0 && (
+        <div className="sticky top-0 z-20 border-b border-border bg-surface/95 px-4 backdrop-blur-sm">
+          <div className="flex min-h-[38px] flex-wrap items-center gap-1.5 py-1">
+            <FilterChips filters={filters} onFilters={onFilters} statuses={statuses} labels={labels} users={users} milestones={milestones} />
+          </div>
+        </div>
+      )}
+
+      {/* Portalled so no transformed ancestor (page entrance animation) can
+          capture the fixed position. */}
+      {createPortal(
+        <div className="tasks-fab pointer-events-none fixed bottom-5 right-6 z-30">
+          <div className="anim-pop-in pointer-events-auto flex items-center gap-0.5 rounded-full border border-border bg-elevated p-1 shadow-pop">
             <DropdownMenu
               align="end"
+              side="top"
               width={224}
               trigger={
-                <Tooltip label={t('tasksview.views')} side="bottom">
+                <Tooltip label={t('tasksview.views')} side="top">
                   <IconButton size="md" aria-label={t('tasksview.views')} className={cn(views.length > 0 && 'text-foreground')}>
                     <Bookmark size={15} />
                   </IconButton>
@@ -251,11 +265,12 @@ export function TasksToolbar({ projectId, prefs, onPrefs, filters, onFilters, st
                 onSave={() => { setSaveName(''); setSaving(true); }}
               />
             </DropdownMenu>
-            <FilterPopover statuses={statuses} labels={labels} users={users} milestones={milestones} filters={filters} onChange={onFilters} />
-            <DisplayPopover prefs={prefs} onChange={onPrefs} />
+            <FilterPopover statuses={statuses} labels={labels} users={users} milestones={milestones} filters={filters} onChange={onFilters} side="top" />
+            <DisplayPopover prefs={prefs} onChange={onPrefs} side="top" />
           </div>
-        </div>
-      </div>
+        </div>,
+        document.body,
+      )}
 
       <Dialog open={saving} onClose={() => setSaving(false)} title={t('tasksview.saveView')} width={380}>
         <form
