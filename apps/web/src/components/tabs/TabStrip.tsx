@@ -244,7 +244,7 @@ export function TabStrip({ leading, trafficLightInset = false }: {
   return (
     <div className="shrink-0" data-tauri-drag-region={isMacDesktop || undefined}>
       <div
-        className={cn('flex items-center gap-1 pb-1 pr-1 pt-1.5', trafficLightInset ? 'pl-[78px]' : 'pl-2.5')}
+        className={cn('tab-strip-row flex items-center gap-1 pb-1 pr-1 pt-1.5', trafficLightInset ? 'pl-[78px]' : 'pl-2.5')}
         data-tauri-drag-region={isMacDesktop || undefined}
       >
         {leading}

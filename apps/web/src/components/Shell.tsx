@@ -101,6 +101,8 @@ const SIDEBAR_HIDDEN_KEY = 'ordi:sidebarHidden';
  * reaches compact mode – there the sidebar can only be hidden by choice.
  */
 const COMPACT_QUERY = '(max-width: 899px)';
+/** Sidebar slide length: --duration-fast, which the index.css keyframes use. */
+const SIDEBAR_SLIDE_MS = 250;
 
 function useMediaQuery(query: string): boolean {
   const [matches, setMatches] = useState(() => typeof window !== 'undefined' && window.matchMedia(query).matches);
@@ -190,6 +192,24 @@ function ShellInner({ children }: { children: ReactNode }) {
   const sidebarInline = !compact && !sidebarHidden;
   const sidebarShown = sidebarInline || (compact && drawerOpen);
   const asideRef = useRef<HTMLElement>(null);
+  /* Sidebar motion (index.css "App sidebar"): it slides only once it has
+   * actually been toggled – not on page load – and is parked as display:none
+   * after sliding out. Both are adjusted during render so the sidebar is
+   * already displayed in the commit that opens it (the drawer moves focus
+   * into itself right then). */
+  const [prevShown, setPrevShown] = useState(sidebarShown);
+  const [sidebarMoved, setSidebarMoved] = useState(false);
+  const [sidebarParked, setSidebarParked] = useState(!sidebarShown);
+  if (prevShown !== sidebarShown) {
+    setPrevShown(sidebarShown);
+    setSidebarMoved(true);
+    if (sidebarShown) setSidebarParked(false);
+  }
+  useEffect(() => {
+    if (sidebarShown) return;
+    const id = setTimeout(() => setSidebarParked(true), SIDEBAR_SLIDE_MS);
+    return () => clearTimeout(id);
+  }, [sidebarShown]);
   const toggleRef = useRef<HTMLButtonElement>(null);
   /** Where focus was when the drawer opened – it goes back there on close. */
   const drawerOpener = useRef<HTMLElement | null>(null);
@@ -502,23 +522,35 @@ function ShellInner({ children }: { children: ReactNode }) {
         {t('nav.skipToContent', 'Skip to content')}
       </a>
 
-      {compact && drawerOpen && (
-        <div className="fixed inset-0 z-40 bg-black/40" aria-hidden onClick={() => setDrawerOpen(false)} />
+      {compact && (
+        <div
+          className="app-sidebar-scrim fixed inset-0 z-40 bg-black/40"
+          data-hidden={drawerOpen ? undefined : ''}
+          aria-hidden
+          onClick={() => setDrawerOpen(false)}
+        />
       )}
-      {/* display:none (not just off-screen) when it is not shown, so none of
-        * its links stay in the Tab order. It stays mounted so the timer and
-        * notification state survive hiding it. A `hidden` attribute would
-        * lose to the `flex` utility, hence the class. */}
+      {/* Slides rather than pops (index.css "App sidebar"). Inert while it
+        * slides out, then display:none, so none of its links stay in the Tab
+        * order. It stays mounted so the timer and notification state survive
+        * hiding it. */}
+      <div
+        className="app-sidebar-slot"
+        data-hidden={sidebarShown ? undefined : ''}
+        data-compact={compact ? '' : undefined}
+      >
       <aside
         id="app-sidebar"
         ref={asideRef}
         role={compact ? 'dialog' : undefined}
         aria-modal={compact ? true : undefined}
         aria-label={compact ? t('nav.sidebar', 'Sidebar') : undefined}
+        inert={!sidebarShown || undefined}
+        data-parked={!sidebarShown && sidebarParked ? '' : undefined}
+        data-motion={sidebarMoved ? (sidebarShown ? 'in' : 'out') : undefined}
         onKeyDown={onDrawerKeyDown}
         className={cn(
-          'w-56 shrink-0 flex-col',
-          sidebarShown ? 'flex' : 'hidden',
+          'flex flex-col',
           compact && 'fixed inset-y-0 left-0 z-50 max-w-[85vw] border-r border-border bg-background shadow-pop',
         )}
       >
@@ -713,11 +745,12 @@ function ShellInner({ children }: { children: ReactNode }) {
           <TimerIndicator />
         </div>
       </aside>
+      </div>
 
       {/* Content column: tab strip above the Linear-style inset surface */}
       <main
         inert={(compact && drawerOpen) || undefined}
-        className={cn('flex min-w-0 flex-1 flex-col overflow-hidden pb-2 pr-2 pt-1.5', !sidebarInline && 'pl-2')}
+        className={cn('app-main flex min-w-0 flex-1 flex-col overflow-hidden pb-2 pr-2 pt-1.5', sidebarInline ? 'pl-0' : 'pl-2')}
       >
         <TabStrip
           trafficLightInset={isMacDesktop && !sidebarInline}
