@@ -9,6 +9,18 @@ export const gitConnectionInputSchema = z.object({
   instanceUrl: z.string().url().nullable().optional(),
 });
 
+/**
+ * A Bitbucket Cloud connection: one workspace, reached with either an
+ * Atlassian API token (with the account email, Basic auth) or a workspace /
+ * project / repository access token (no email, Bearer auth).
+ */
+export const bitbucketConnectionInputSchema = z.object({
+  workspace: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9_.-]+$/, 'Use the workspace slug from the Bitbucket URL'),
+  email: z.string().trim().email().optional().or(z.literal('').transform(() => undefined)),
+  token: z.string().trim().min(1),
+});
+export type BitbucketConnectionInput = z.infer<typeof bitbucketConnectionInputSchema>;
+
 export const gitRepositoryInputSchema = z.object({
   connectionId: idSchema,
   externalId: z.string(),

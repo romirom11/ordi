@@ -138,6 +138,9 @@ and expense posts balanced entries, so the books actually balance.
   task hands you a branch name, and branches, commits and pull requests that
   mention the task key attach themselves to it, with automation rules that move
   the task as the PR moves.
+- **Bitbucket too** – connect a Bitbucket Cloud workspace with a token; binding a
+  repository to a project registers its webhook, and branches, commits and pull
+  requests link to tasks the same way. AI agents push there and open the PR.
 - **Realtime** – assignments and mentions arrive over SSE with a toast and a sound.
   No refresh.
 - **Rich text everywhere** – `@` to mention people, `#` to reference tasks, KB pages,

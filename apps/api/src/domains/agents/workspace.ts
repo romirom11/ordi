@@ -22,6 +22,7 @@ import { buildBranchName } from '@ordi/shared';
 import { env } from '../../env';
 import { logger } from '../../lib/logger';
 import { githubApiBase } from '../../lib/github-api';
+import { openBitbucketPullRequest } from '../integrations/bitbucket';
 
 const execFileAsync = promisify(execFile);
 
@@ -35,6 +36,10 @@ export interface RepoBinding {
   token: string;
   /** Web/API base for the provider. */
   htmlUrl: string;
+  /** Username git sends with the token; the provider's default when absent. */
+  gitUser?: string;
+  /** Basic-auth user for REST calls (Bitbucket API token: the account email); Bearer when absent. */
+  apiUser?: string;
 }
 
 export interface Workspace {
@@ -52,7 +57,7 @@ function cloneUrl(repo: RepoBinding): string {
 
 /** `Authorization: basic base64(x-access-token:TOKEN)` – what GitHub expects for app tokens; PATs work the same. */
 function authHeader(repo: RepoBinding): string {
-  const user = repo.provider === 'github' ? 'x-access-token' : 'oauth2';
+  const user = repo.gitUser ?? (repo.provider === 'github' ? 'x-access-token' : 'oauth2');
   return `AUTHORIZATION: basic ${Buffer.from(`${user}:${repo.token}`).toString('base64')}`;
 }
 
@@ -327,11 +332,17 @@ export async function publishWorkspace(ws: Workspace, input: {
   if (commits === 0) return { pushed: false, prUrl: input.existingPrUrl, commits: 0 };
   await git(['push', '-u', 'origin', branch], { cwd: dir, repo });
   if (input.existingPrUrl || !openPr) return { pushed: true, prUrl: input.existingPrUrl, commits };
-  if (repo.provider !== 'github') return { pushed: true, prUrl: null, commits };
-  const prUrl = await openGithubPullRequest(repo, {
+  if (repo.provider !== 'github' && repo.provider !== 'bitbucket') return { pushed: true, prUrl: null, commits };
+  const pr = {
     head: branch, base: repo.defaultBranch, title: pullRequestTitle(input.ref, input.title),
     body: buildPullRequestBody({ summary: input.summary, verification: input.verification ?? null, risks: input.risks ?? null, taskUrl: input.taskUrl ?? null, ref: input.ref }),
-  });
+  };
+  const prUrl = repo.provider === 'bitbucket'
+    ? await openBitbucketPullRequest({ token: repo.token, email: repo.apiUser }, repo.fullName, pr).catch((e: unknown) => {
+      logger.warn({ err: e instanceof Error ? e.message : e, repo: repo.fullName }, 'pull request creation failed');
+      return null;
+    })
+    : await openGithubPullRequest(repo, pr);
   return { pushed: true, prUrl, commits };
 }
 

@@ -9,6 +9,8 @@
 import { getDb, schema, eq } from '@ordi/db';
 import { decrypt } from '../../lib/crypto';
 import { githubAppConfigured, installationToken } from '../integrations/github-app';
+import { BITBUCKET_WEB, bitbucketGitUser } from '../integrations/bitbucket';
+import { openBitbucketCredentials } from '../integrations/bitbucket-sync';
 import type { RepoBinding } from './workspace';
 
 const { projectRepositories, gitRepositories, gitConnections } = schema;
@@ -37,6 +39,15 @@ export async function resolveRepository(projectId: string): Promise<RepoBinding 
       const token = legacyToken(r.credentials);
       if (token) return { repositoryId: r.repositoryId, fullName: r.fullName, defaultBranch: r.defaultBranch, provider: 'github', instanceUrl: r.instanceUrl, token, htmlUrl };
       continue;
+    }
+    if (r.provider === 'bitbucket') {
+      const creds = openBitbucketCredentials(r.credentials);
+      if (!creds) continue;
+      return {
+        repositoryId: r.repositoryId, fullName: r.fullName, defaultBranch: r.defaultBranch, provider: 'bitbucket',
+        instanceUrl: null, token: creds.token, htmlUrl: BITBUCKET_WEB,
+        gitUser: bitbucketGitUser(creds), ...(creds.email ? { apiUser: creds.email } : {}),
+      };
     }
     const token = legacyToken(r.credentials);
     if (token && r.instanceUrl) {
