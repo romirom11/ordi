@@ -63,7 +63,14 @@ export class ConnectorOAuthProvider implements OAuthClientProvider {
   /** Set by `redirectToAuthorization` during `startAuthorization`. */
   pendingAuthorizationUrl: URL | null = null;
 
-  constructor(private readonly connectorId: string, private readonly serverUrl: string) {}
+  /**
+   * `startedBy` – the admin starting consent – is carried in the state, so the
+   * callback knows who authorized without a session: the provider sends the
+   * browser back by redirect, which carries no bearer header, and the desktop
+   * app has no cookie either. The callback trusts it only because the whole
+   * state must equal the one stored here, written by the guarded start route.
+   */
+  constructor(private readonly connectorId: string, private readonly serverUrl: string, private readonly startedBy?: string) {}
 
   get redirectUrl(): string {
     return connectorCallbackUrl();
@@ -81,7 +88,8 @@ export class ConnectorOAuthProvider implements OAuthClientProvider {
   }
 
   async state(): Promise<string> {
-    const state = generateToken(24);
+    const nonce = generateToken(24);
+    const state = this.startedBy ? `${nonce}.${this.startedBy}` : nonce;
     const { db } = getDb();
     await ensureRow(this.connectorId);
     await db.update(mcpConnectorOauth).set({ pendingState: state, pendingStartedAt: new Date() })
@@ -153,7 +161,7 @@ export async function startConnectorOAuth(actor: Actor, connectorId: string): Pr
   const [connector] = await db.select().from(mcpConnectors).where(eq(mcpConnectors.id, connectorId));
   if (!connector) throw err.notFound('Connector not found');
   if (connector.authMode !== 'oauth' || !connector.url) throw err.domain('This connector does not use OAuth');
-  const provider = new ConnectorOAuthProvider(connectorId, connector.url);
+  const provider = new ConnectorOAuthProvider(connectorId, connector.url, actor.userId ?? undefined);
   // A stale in-flight consent must not block a fresh start.
   await provider.invalidateCredentials('verifier');
   let result: 'AUTHORIZED' | 'REDIRECT';
@@ -176,11 +184,18 @@ export async function startConnectorOAuth(actor: Actor, connectorId: string): Pr
   return { authorizationUrl: url.toString() };
 }
 
-/** The browser comes back with code + state; exchange it and record who authorized. */
-export async function completeConnectorOAuth(actor: Actor, code: string, state: string): Promise<{ connectorId: string; slug: string }> {
+/**
+ * The browser comes back with code + state; exchange it and record who
+ * authorized. Public (no session): the state is the credential – unguessable,
+ * single-use, bound to one connector, minutes-old, and naming the admin who
+ * started the consent (ConnectorOAuthProvider).
+ */
+export async function completeConnectorOAuth(code: string, state: string): Promise<{ connectorId: string; slug: string }> {
   const { db } = getDb();
   const [oauth] = await db.select().from(mcpConnectorOauth).where(eq(mcpConnectorOauth.pendingState, state));
   if (!oauth) throw err.notFound('Unknown or expired authorization state');
+  const authorizedBy = state.split('.')[1];
+  if (!authorizedBy) throw err.notFound('Unknown or expired authorization state');
   if (oauth.pendingStartedAt && Date.now() - oauth.pendingStartedAt.getTime() > PENDING_TTL_MS) {
     await db.update(mcpConnectorOauth).set({ pendingState: null, pendingVerifier: null }).where(eq(mcpConnectorOauth.connectorId, oauth.connectorId));
     throw err.domain('The authorization took too long; start again');
@@ -197,12 +212,12 @@ export async function completeConnectorOAuth(actor: Actor, code: string, state: 
   }
   await db.update(mcpConnectorOauth).set({
     pendingState: null, pendingVerifier: null, pendingStartedAt: null,
-    authorizedBy: actor.userId, authorizedAt: new Date(),
+    authorizedBy, authorizedAt: new Date(),
   }).where(eq(mcpConnectorOauth.connectorId, connector.id));
   await db.update(mcpConnectors).set({ status: 'active', lastError: null }).where(eq(mcpConnectors.id, connector.id));
   await writeActivity(db, {
     entityType: 'mcp_connector', entityId: connector.id, action: 'authorized',
-    actorId: actor.userId, actorType: actor.actorType,
+    actorId: authorizedBy, actorType: 'user',
   });
   return { connectorId: connector.id, slug: connector.slug };
 }
