@@ -1,699 +1,724 @@
-# Фічі
+# Features
 
-Робочий реєстр фіч: що плануємо, що в роботі, що вже відвантажено. Деталі
-відвантаженого — у [CHANGELOG](../CHANGELOG.md) та [docs/releases](releases/);
-тут — картина одним поглядом.
+A working register of features: what we're planning, what's in flight and
+what has already shipped. The details of what shipped are in the
+[CHANGELOG](../CHANGELOG.md) and [docs/releases](releases/); here is the
+picture at a glance.
 
-Як користуватись: нова ідея → рядок у «Беклозі». Взяли в роботу → перенесіть в
-«У роботі» з посиланням на PR. Змержили → в «Готово» з версією релізу.
+How to use it: a new idea → a row in "Backlog". Picked up → move it to
+"In flight" with a link to the PR. Merged → into "Shipped" with the release
+version.
 
-## Беклог
+## Backlog
 
-| Фіча | Навіщо | Нотатки |
+| Feature | Why | Notes |
 |---|---|---|
-| Серверні bulk-ендпоінти | Масові дії зараз ідуть запитом на кожен рядок з клієнта; на сотнях записів потрібна транзакційність і один запит | Ліди вже мають серверний `POST /leads/bulk` (v1.18.0); лишаються клієнти й задачі (клієнти ≤200, задачі в межах проєкту) |
-| Relation-тип кастомного поля | Довільні звʼязки між сутностями без зміни схеми («задача → клієнт» тощо) | Свідомо відкладено: значення в jsonb не мають FK-цілісності, тож ключові звʼязки (deal → project) живуть колонками в схемі. Relation — для довгого хвоста |
-| Фільтр канбана по select-полях | Зрізи пайплайну по будь-якому кастомному виміру, не лише по проєкту | `GET /deals` вже вміє cf-фільтри у компаній — перенести патерн |
-| Виграна угода → проєкт одним кліком | Конверсія продажу в доставку без ручного створення проєкту | Переносити companyId, назву, суму як бюджет; лінк угоди лишається |
-| Звіт: пайплайн по проєктах | Скільки лідів/грошей у воронці на кожен продукт (Solovei vs послуги), конверсія по напрямах | База вже є: `deals.project_id` + `deal_stages` |
-| Кілька клієнтів на проєкт (m2m) | Спільні проєкти двох замовників зі спліт-білінгом | Під питанням: рідкісний кейс, тягне за собою зміну фінансової моделі |
-| Нативний файловий дроп у десктопі | Перетягування файлів з ОС у задачі/нотатки | Потребує акуратності: `dragDropEnabled` вимкнено заради внутрішнього DnD; HTML5-дроп через DOM-події працює і так |
+| Server-side bulk endpoints | Bulk actions currently go out as one request per row from the client; at hundreds of records we need transactionality and a single request | Leads already have a server-side `POST /leads/bulk` (v1.18.0); clients and tasks remain (clients ≤200, tasks within a project) |
+| Relation custom field type | Arbitrary links between entities without changing the schema ("task → client" and so on) | Deliberately deferred: values in jsonb have no FK integrity, so key relations (deal → project) live as columns in the schema. Relation is for the long tail |
+| Kanban filter by select fields | Pipeline slices by any custom dimension, not just by project | `GET /deals` already handles cf filters on companies – carry the pattern over |
+| Won deal → project in one click | Turning a sale into delivery without creating the project by hand | Carry over companyId, the name, the amount as the budget; the deal link stays |
+| Report: pipeline by project | How many leads/how much money is in the funnel for each product (Solovei vs services), conversion by line of business | The groundwork is already there: `deals.project_id` + `deal_stages` |
+| Several clients per project (m2m) | Joint projects for two customers with split billing | Open question: a rare case that drags a change to the financial model along with it |
+| Native file drop on desktop | Dragging files from the OS into tasks/notes | Needs care: `dragDropEnabled` is off for the sake of internal DnD; HTML5 drop via DOM events works anyway |
 
-## У роботі
+## In flight
 
-Зараз нічого.
+Nothing at the moment.
 
-## Готово
+## Shipped
 
 ### v1.41.0
 
-- Інтеграція з Bitbucket Cloud: воркспейс підключається токеном (API-токен
-  Atlassian + email або access-токен), вебхук реєструється на репозиторії
-  при привʼязці до проєкту, гілки/коміти/PR лінкуються до задач, AI-агенти
-  пушать і відкривають PR ([PR #130](https://github.com/romirom11/ordi/pull/130)).
-- Сторінка KB / опис задачі більше не зависає на «Saving…», коли Save
-  відхилено після того, як realtime уже приніс чужу версію.
-- Десктоп: вхід у GitHub App, GitHub OAuth, Slack і MCP-конектори
-  відкривається в системному браузері (`startExternalFlow`), а не у вікні
-  застосунку; MCP-конектор нарешті авторизується з десктопу. Свайп двома
-  пальцями назад/вперед на macOS і Linux.
-- Нові інсталяції стартують на Glass Dark; сайдбар і бокові панелі
-  виїжджають, а не зʼявляються стрибком; налаштування Intake показують лише
-  те, що стосується.
+- Bitbucket Cloud integration: a workspace connects with a token (an
+  Atlassian API token + email, or an access token), the webhook is registered
+  on the repository when it's linked to a project, branches/commits/PRs are
+  linked to tasks, AI agents push and open PRs ([PR #130](https://github.com/romirom11/ordi/pull/130)).
+- A KB page / task description no longer hangs on "Saving…" when Save is
+  rejected after realtime has already brought in someone else's version.
+- Desktop: sign-in for the GitHub App, GitHub OAuth, Slack and MCP connectors
+  opens in the system browser (`startExternalFlow`) rather than in the app
+  window; the MCP connector finally authorises from the desktop. Two-finger
+  swipe back/forward on macOS and Linux.
+- New installs start on Glass Dark; the sidebar and side panels slide in
+  rather than popping into place; the Intake settings show only what's
+  relevant.
 
 ### v1.40.0
 
-- Вкладка «План» замість «Циклів»: етапи (milestones) з прогресом,
-  дедлайнами і «Затягнути відкриті задачі в цикл», поточний цикл з
-  розбивкою по етапах. Цикли вмикаються на проєкті окремо; у задачі є поле
-  «Цикл», список фільтрує і групує за ним, bulk-панель ставить етап чи цикл.
-- Сторінка проєкту: налаштування в боковій панелі, огляд починається з
-  опису без порожніх блоків, вкладка Intake лише коли intake увімкнено,
-  список проєктів позначає *At risk* / *Off track*.
-- Кілька відправників пошти (Settings → Email): свій From, Reply-To і
-  SMTP-логін; системний і для рахунків; вибір From при відправці рахунку
-  (міграція `0042_email_delivery_sender`).
-- Інтеграції списком, налаштування кожної — у боковій панелі.
-- Glass: Urbanist Cyrillic, плаваючі контролі вигляду задач, одна заливка
-  для вибраного.
+- A "Plan" tab instead of "Cycles": milestones with progress, due dates and
+  "Pull open tasks into cycle", the current cycle broken down by milestone.
+  Cycles are switched on per project; tasks have a "Cycle" field, the list
+  filters and groups by it, and the bulk panel sets a milestone or a cycle.
+- Project page: settings in a side panel, the overview starts with the
+  description and no empty blocks, the Intake tab appears only when intake is
+  enabled, the project list flags *At risk* / *Off track*.
+- Multiple email senders (Settings → Email): each with its own From, Reply-To
+  and SMTP login; a system sender and one for invoices; choosing the From when
+  sending an invoice (migration `0042_email_delivery_sender`).
+- Integrations as a list, with each one's settings in a side panel.
+- Glass: Urbanist Cyrillic, floating task view controls, a single fill for
+  the selection.
 - MCP: `create_milestone`, `update_milestone`, `create_cycle`,
-  `complete_cycle`; `milestone` у задачних тулах.
+  `complete_cycle`; `milestone` in the task tools.
 
 ### v1.39.0
 
-- Другий стиль інтерфейсу — Glass (меню воркспейсу → Style), у світлій і
-  темній темах; Classic лишається.
-- Кредит-ноти враховуються в балансі рахунку всюди; місячні розклади на 31-ше
-  лишаються у своєму місяці.
-- Безпека: API-токени не керують токенами, read-only токени не пишуть,
-  вимкнення 2FA лише з кодом, cost rates лише з правом на витрати, MCP
-  `upload_attachment` тягне лише публічні URL.
+- A second interface style – Glass (workspace menu → Style), in light and
+  dark themes; Classic stays.
+- Credit notes count towards the invoice balance everywhere; monthly schedules
+  on the 31st stay in their own month.
+- Security: API tokens can't manage tokens, read-only tokens don't write,
+  turning off 2FA requires a code, cost rates require the expenses permission,
+  MCP `upload_attachment` fetches only public URLs.
 
 ### v1.38.0
 
-- MCP створює підзадачі й кладе задачі в цикли (`parentId`, `cycle`);
-  `get_project_schema` віддає цикли.
-- Статус задачі змінюється прямо з рядка в «Моїх задачах».
+- MCP creates subtasks and puts tasks into cycles (`parentId`, `cycle`);
+  `get_project_schema` returns cycles.
+- Task status can be changed straight from the row in "My tasks".
 
 ### v1.37.0
 
-- Рантайм Codex для AI-агентів поруч із Claude Code: OpenAI API-ключ (з
-  довільним OpenAI-сумісним Base URL) або підписка ChatGPT (міграція
+- A Codex runtime for AI agents alongside Claude Code: an OpenAI API key (with
+  any OpenAI-compatible Base URL) or a ChatGPT subscription (migration
   `0041_codex_base_url`).
 
 ### v1.36.2
 
-- MCP `upload_attachment`: картинки всередині тексту задачі або файл у
-  розділі Files запису.
+- MCP `upload_attachment`: images inside the task text, or a file in the
+  record's Files section.
 
 ### v1.36.1
 
-- Блок підсумків рахунку без повторів: проміжна сума лише поруч зі знижкою
-  чи податком, «Разом» лише поруч з оплатою, інакше один рядок «До сплати»
-  («Оплачено повністю», коли рахунок закрито). Так само в PDF, на публічних
-  сторінках і на сторінці рахунку в застосунку.
+- The invoice totals block without repetition: the subtotal only alongside a
+  discount or tax, "Total" only alongside a payment, otherwise a single
+  "Amount due" line ("Paid in full" once the invoice is closed). The same in
+  the PDF, on the public pages and on the invoice page in the app.
 
 ### v1.36.0
 
-- Рахунки редагуються: одна форма (створення і редагування, кнопка «Edit»
-  на сторінці рахунку) з датою виставлення, необов'язковим терміном оплати,
-  валютою, мовою документа, податковою ставкою для всіх позицій, знижкою і
-  позиціями; позиції блокуються після відправки, решта редагується завжди.
-  Термін оплати необов'язковий (`invoices.due_date` nullable, міграція 0040):
-  рахунок без терміну відкритий, але ніколи не прострочений, без нагадувань і
-  поза календарем очікуваних оплат. Дати в документі словами мовою документа
-  («28 вересня 2026 р.»), внутрішній статус з PDF прибрано, рядок податку
-  лише коли податок є, з назвою ставки («Tax (VAT 20%)»), плюс рядок знижки.
+- Invoices are editable: one form (create and edit, an "Edit" button on the
+  invoice page) with the issue date, an optional due date, currency, document
+  language, a tax rate for all line items, a discount and line items; line
+  items lock once the invoice is sent, everything else can always be edited.
+  The due date is optional (`invoices.due_date` nullable, migration 0040): an
+  invoice without a due date is open but never overdue, gets no reminders and
+  stays out of the expected-payments calendar. Dates in the document are
+  written out in words in the document's language ("28 вересня 2026 р.", i.e.
+  28 September 2026), the internal status has been removed from the PDF, the
+  tax line appears only when there is tax, with the rate's name
+  ("Tax (VAT 20%)"), plus a discount line.
 
 ### v1.35.1
 
-- Вбудоване сховище файлів більше не залежить від образів MinIO, які
-  перестали віддаватися анонімно (спершу Docker Hub, тепер і quay.io, через
-  що деплой із профілем `minio` падав на `minio/mc: unauthorized`): сервіси
-  `minio` і `minio-init` замінено одним сервісом `s3` з RustFS (Apache-2.0,
-  сумісний S3 API, публікується на Docker Hub). Бакет тепер створює сам API
-  при старті, чекаючи, поки контейнер сховища піднімається; старі
-  `COMPOSE_PROFILES=minio` і `http://ordi-minio:9000` працюють далі. Дані
-  MinIO переносяться одноразовим `rclone sync` (docs/deployment.md §4).
+- Built-in file storage no longer depends on the MinIO images, which stopped
+  being served anonymously (first on Docker Hub, now on quay.io too, which
+  made deploys with the `minio` profile fail on `minio/mc: unauthorized`): the
+  `minio` and `minio-init` services have been replaced by a single `s3`
+  service running RustFS (Apache-2.0, S3-compatible API, published on Docker
+  Hub). The API now creates the bucket itself at startup, waiting while the
+  storage container comes up; the old `COMPOSE_PROFILES=minio` and
+  `http://ordi-minio:9000` keep working. MinIO data is moved over with a
+  one-off `rclone sync` (docs/deployment.md §4).
 
 ### v1.35.0
 
-- Рахунки й комерційні пропозиції: PDF рендериться самим API через pdfkit
-  замість необовʼязкового бінарника Typst, якого не було в жодному образі
-  (тож кожен рахунок виходив моноширинним фолбеком без логотипа, кольору,
-  платіжних реквізитів і з битою кирилицею). Брендований документ: акцентна
-  смуга і колір, логотип, реквізити обох сторін, таблиця з переносом рядків і
-  розбиттям на сторінки, підсумки з блоком «До сплати», платіжні реквізити,
-  примітки, умови, футер, нумерація сторінок; шрифт Liberation Sans (OFL) у
-  `apps/api/assets/fonts`, підписи мовою документа (uk/en).
-- Публічна сторінка рахунку відкривається: посилання з листа і PDF
-  (`/i/<token>`) віддавало сирий JSON, бо публічний API в корені перекривав
-  зібраний SPA; браузерна навігація на `/i/`, `/q/`, `/portal/`, `/intake/`,
-  `/careers/` тепер отримує сторінку, fetch – JSON. Публічний
-  `/i/:token/pdf` віддає документ замість 501, додано `/q/:token/pdf`.
-  Публічна сторінка пропозиції читала структуру, якої API не віддавав, і була
-  порожня – виправлено, показує бренд, сторони і кнопку PDF.
-- Реквізити задаються один раз: свої – у Налаштування → Рахунки (юридична
-  назва, ЄДРПОУ/ІПН, адреса, email, телефон → `legal_details`), клієнта – на
-  сторінці компанії (юр. назва, код, адреса → `companies.address` фіксованої
-  форми). Там же типові примітки й умови, з яких стартує кожен новий рахунок і
-  пропозиція; примітки та умови редагуються на сторінці рахунку, яка також
-  показує блоки «Постачальник» і «Платник». Логотип зберігається як PNG
-  (pdfkit не вбудовує WebP); панель підказує перезалити старий WebP-логотип.
-- Відправка рахунку або справді відправляє, або каже чому ні: раніше «Send»
-  ставив статус sent і показував успіх, навіть коли лист не пішов (без SMTP
-  API лише писав рядок у лог, без email компанії пропускав відправку).
-  Кнопка неактивна з поясненням, доки пошта не налаштована; діалог
-  підтвердження показує від кого, кому (редагується, підставляється email
-  компанії), тему, текст і вкладення; API відмовляє без адресата чи поштового
-  сервера, помилку транспорту повертає як є, і рахунок лишається чернеткою;
-  кожна відправка записується з адресою і видна в хронології.
-  `GET /invoices/:id/send-preview`; пропозиції з тими ж відмовами.
+- Invoices and quotes: the PDF is rendered by the API itself via pdfkit
+  instead of the optional Typst binary, which wasn't in any image (so every
+  invoice came out as a monospace fallback with no logo, colour or payment
+  details, and with broken Cyrillic). A branded document: an accent stripe and
+  colour, the logo, both parties' details, a table with line wrapping and page
+  breaks, totals with an "Amount due" block, payment details, notes, terms,
+  a footer, page numbers; the Liberation Sans font (OFL) in
+  `apps/api/assets/fonts`, labels in the document's language (uk/en).
+- The public invoice page opens: the link from the email and the PDF
+  (`/i/<token>`) returned raw JSON because the public API at the root shadowed
+  the built SPA; browser navigation to `/i/`, `/q/`, `/portal/`, `/intake/`,
+  `/careers/` now gets the page, fetch gets JSON. The public
+  `/i/:token/pdf` serves the document instead of a 501, and `/q/:token/pdf`
+  has been added. The public quote page read a structure the API didn't
+  return and was empty – fixed; it shows the branding, the parties and a PDF
+  button.
+- Details are set once: your own in Settings → Invoices (legal name,
+  EDRPOU/IPN tax ID, address, email, phone → `legal_details`), the client's on
+  the company page (legal name, code, address → a fixed-shape
+  `companies.address`). The same places hold the default notes and terms that
+  every new invoice and quote starts from; notes and terms are edited on the
+  invoice page, which also shows the "From" and "Bill to" blocks. The logo is
+  stored as PNG (pdfkit doesn't embed WebP); the panel prompts you to
+  re-upload an old WebP logo.
+- Sending an invoice either really sends it or says why not: previously "Send"
+  set the status to sent and showed success even when the email didn't go out
+  (without SMTP the API only wrote a line to the log; without a company email
+  it skipped sending). The button is disabled with an explanation until email
+  is set up; the confirmation dialog shows the sender, the recipient (editable,
+  pre-filled with the company email), the subject, body and attachments; the
+  API refuses without a recipient or a mail server, returns a transport error
+  as is, and the invoice stays a draft; every send is recorded with the
+  address and visible in the timeline.
+  `GET /invoices/:id/send-preview`; quotes get the same refusals.
 
 ### v1.34.0
 
-- Запуски агентів виконуються в окремому контейнері з коробки: сервіс
-  `agent-worker` більше не закоментований блок у `docker-compose.prod.yml`,
-  а частина обох compose-файлів, і вбудований воркер API там вимкнений
-  (`AGENT_WORKER_ENABLED=0`). Контейнер, який виконує написаний моделлю код,
-  ніколи не тримає `DATABASE_URL`, `ENCRYPTION_KEY` чи `AUTH_SECRET`, і на
-  свіжій інсталяції теж. `AGENT_WORKER_SECRET` тепер обовʼязковий у
-  `docker-compose.prod.yml` (quick-start файл має заглушку), том `agent_work`
-  змонтований лише воркеру, `api` отримав healthcheck на `/healthz`, на який
-  воркер чекає, і доступний воркеру як `ordi-api`. Settings → Agents
-  попереджає про відсутній воркер лише тоді, коли жоден не онлайн.
-- Питання від агента більше не губить роботу: запуск зі статусом
-  `needs_input` нічого не пушив, а checkout з комітами, зробленими до
-  питання, видалявся наприкінці запуску, тож follow-up після відповіді
-  резюмував сесію з файлами, яких уже не було на диску, і створював гілку з
-  іншою назвою. Тепер зроблене йде WIP-комітом на гілку задачі, як і при
-  зупинці за лімітом, таймаутом чи скасуванням, і follow-up продовжує на ній.
-- `CLAUDE.md` у корені репозиторію з правилом іменування гілок
+- Agent runs execute in a separate container out of the box: the
+  `agent-worker` service is no longer a commented-out block in
+  `docker-compose.prod.yml` but part of both compose files, and the API's
+  built-in worker is switched off there (`AGENT_WORKER_ENABLED=0`). The
+  container that runs model-written code never holds `DATABASE_URL`,
+  `ENCRYPTION_KEY` or `AUTH_SECRET`, on a fresh install too.
+  `AGENT_WORKER_SECRET` is now required in `docker-compose.prod.yml` (the
+  quick-start file has a placeholder), the `agent_work` volume is mounted only
+  on the worker, `api` gained a healthcheck on `/healthz` that the worker
+  waits for, and is reachable from the worker as `ordi-api`. Settings → Agents
+  warns about a missing worker only when none is online.
+- A question from an agent no longer loses work: a run in the `needs_input`
+  status pushed nothing, and the checkout with the commits made before the
+  question was deleted at the end of the run, so the follow-up after the
+  answer resumed a session with files that were no longer on disk and created
+  a branch with a different name. Now the work done goes as a WIP commit to
+  the task branch, just as on a stop for a limit, a timeout or a cancellation,
+  and the follow-up continues on it.
+- `CLAUDE.md` at the repository root with the branch naming rule
   (`feature/`, `fix/`, `docs/`, `release/`).
 
 ### v1.33.1
 
-- Воркер агентів лишається онлайн: кожен heartbeat після першого падав з
-  `operator does not exist: text + integer`, бо колонка
-  `agent_workers.version` зберігала рядок версії ordi, а тригер
-  оптимістичного блокування, що чіпляється до кожної колонки з такою
-  назвою, намагався додати до неї одиницю. Через 35 секунд після старту
-  Settings → Agents показували воркер офлайн, а винесений воркер писав
-  `agent worker heartbeat failed` кожні 15 секунд. Колонка тепер
-  `app_version` (міграція `0039_agent_workers_app_version`, яка також знімає
-  тригер з таблиці), а `triggers.sql` вішає тригер лише на цілочисельні
-  колонки `version`.
+- The agent worker stays online: every heartbeat after the first failed with
+  `operator does not exist: text + integer`, because the
+  `agent_workers.version` column stored the ordi version string, and the
+  optimistic locking trigger, which attaches to every column with that name,
+  tried to add one to it. 35 seconds after startup Settings → Agents showed
+  the worker as offline, and a separate worker logged
+  `agent worker heartbeat failed` every 15 seconds. The column is now
+  `app_version` (migration `0039_agent_workers_app_version`, which also drops
+  the trigger from the table), and `triggers.sql` attaches the trigger only to
+  integer `version` columns.
 
 ### v1.33.0
 
-- Воркер агентів працює без бази: процес, що виконує написаний моделлю код,
-  більше не потребує `DATABASE_URL`, `ENCRYPTION_KEY`, `AUTH_SECRET`, S3 чи
-  SMTP. Винесений в окремий контейнер, він говорить з API лише через
-  `/api/v1/agent-worker/*` зі спільним секретом `AGENT_WORKER_SECRET` і
-  тримає тільки те, що потрібно поточному запуску: доступ Claude, токен
-  репозиторію і власний токен запуску, який відкликається наприкінці.
-  Захоплення запуску, бриф, лог подій і наслідки завершення для задачі
-  переїхали на бік API (`run-service.ts`); воркер усередині `api` викликає
-  ті самі функції напряму, тож `docker compose up` не змінився. Готовий
-  сервіс `agent-worker` у `docker-compose.prod.yml`, том робочих копій тепер
-  на ньому.
-- Запуск переживає власний лог і пуш у гілку, що зрушила: NUL-байти
-  вирізаються з подій, невдалий запис події лише попереджає, а перед пушем
-  локальні коміти переграються поверх origin замість відмови
-  non-fast-forward; `commit --amend`, `rebase`, `reset` і `branch -f`
-  заборонені агенту.
-- Один завершальний коментар на запуск, мовою треду, адресований людині:
-  платформа дублює summary лише коли агент сам нічого не написав; бриф
-  називає, кому відповідати, `comment_on_task` приймає `mentionUserIds`,
-  і `@Ім'я` стає справжньою згадкою.
+- The agent worker runs without the database: the process that runs
+  model-written code no longer needs `DATABASE_URL`, `ENCRYPTION_KEY`,
+  `AUTH_SECRET`, S3 or SMTP. Moved out into its own container, it talks to the
+  API only through `/api/v1/agent-worker/*` with the shared secret
+  `AGENT_WORKER_SECRET` and holds only what the current run needs: Claude
+  access, the repository token and the run's own token, which is revoked at
+  the end. Claiming a run, the brief, the event log and the effects of
+  completion on the task moved to the API side (`run-service.ts`); the worker
+  inside `api` calls the same functions directly, so `docker compose up`
+  hasn't changed. A ready-made `agent-worker` service in
+  `docker-compose.prod.yml`; the working copies volume now sits on it.
+- A run survives its own log and a push to a branch that has moved on: NUL
+  bytes are stripped from events, a failed event write only warns, and before
+  the push local commits are replayed on top of origin instead of a
+  non-fast-forward refusal; `commit --amend`, `rebase`, `reset` and
+  `branch -f` are forbidden to the agent.
+- One closing comment per run, in the thread's language, addressed to a
+  person: the platform duplicates the summary only when the agent wrote
+  nothing itself; the brief names whom to reply to, `comment_on_task` accepts
+  `mentionUserIds`, and `@Name` becomes a real mention.
 
 ### v1.32.0
 
-- Git-лінки: єдиний шлях запису через вебхук форжа (для агента так само,
-  як для людини; дубль PR у `task_links`, який ніде не рендерився, прибрано),
-  унікальний індекс (task, type, ref) з міграцією 0038, подія раз на
-  перехід стану (Redeliver не відкриває PR двічі). Вебхук логує причину,
-  коли доставка нічого не привʼязала, а Settings → Integrations показує
-  Webhook URL, який очікує цей інстанс – щоб звірити з GitHub, де інший
-  URL означає 404 на кожній доставці.
-- Образ публікується на кожному релізі: `ghcr.io/romirom11/ordi` (API,
-  воркери і зібраний веб в одному контейнері, `linux/amd64`) з тегами
-  `1.32.0`, `1.32`, `1`, `latest`, `sha-<commit>`. Сервер більше нічого не
-  збирає – `pnpm install` і збірка веба лишаються в CI. Зелений воркфлоу
-  означає саме «pull працює»: після пушу джоба розлогінюється, тягне тег
-  анонімно, звіряє дайджест, піднімає образ з Postgres і вимагає, щоб
-  `/healthz` віддав цю версію, а веб віддавався з того ж порту.
-- Nginx-образ веба прибрано (breaking для тих, хто на нього закріплений):
-  `docker/Dockerfile.web` і `docker/nginx.conf.template` видалені –
-  задепрекейчені з v1.6.0, коли образ API сам почав віддавати SPA,
-  `/assets/*`, SSE і OAuth discovery. Якщо ще крутите `ordi-web`: домен на
-  сервіс `api`, порт 3000, шлях `/`.
-- README описує те, що продукт реально вміє: секція Features продавала
-  приблизно дві третини ordi (не було Slack, GitHub App, інтейку, CRM-аналітики
-  й плейбуків, receivables aging, календаря команди, груп полів і анкети,
-  файлів, реакцій, візарда) – тепер дзеркалить лендинг, кожен рядок звірено
-  з API і схемою.
+- Git links: a single write path via the forge webhook (the same for an agent
+  as for a person; the duplicate PR in `task_links`, which was never rendered
+  anywhere, is gone), a unique index (task, type, ref) with migration 0038,
+  one event per state transition (Redeliver doesn't open a PR twice). The
+  webhook logs the reason when a delivery linked nothing, and Settings →
+  Integrations shows the Webhook URL this instance expects – to check against
+  GitHub, where a different URL means a 404 on every delivery.
+- The image is published on every release: `ghcr.io/romirom11/ordi` (the API,
+  the workers and the built web app in one container, `linux/amd64`) with the
+  tags `1.32.0`, `1.32`, `1`, `latest`, `sha-<commit>`. The server no longer
+  builds anything – `pnpm install` and the web build stay in CI. A green
+  workflow means exactly "pull works": after the push the job logs out, pulls
+  the tag anonymously, checks the digest, brings the image up with Postgres
+  and requires `/healthz` to report this version and the web app to be served
+  from the same port.
+- The web Nginx image is gone (breaking for anyone pinned to it):
+  `docker/Dockerfile.web` and `docker/nginx.conf.template` have been deleted –
+  deprecated since v1.6.0, when the API image started serving the SPA,
+  `/assets/*`, SSE and OAuth discovery itself. If you still run `ordi-web`:
+  point the domain at the `api` service, port 3000, path `/`.
+- The README describes what the product really does: the Features section
+  was selling roughly two thirds of ordi (Slack, GitHub App, intake, CRM
+  analytics and playbooks, receivables aging, the team calendar, field groups
+  and the questionnaire, files, reactions and the wizard were missing) – now
+  it mirrors the landing page, with every line checked against the API and the
+  schema.
 
 ### v1.31.0
 
-- Нотифікації доходять тим, кого стосуються: кожен рядок стрімиться особисто
-  адресату як `notification.created`, а не їде на подію всього проєкту — «вам
-  призначено задачу» більше не прилітає всій команді (і не піднімає OS-сповіщення
-  на кожному десктопі). Автор події, деактивовані акаунти й агенти
-  відкидаються; коментар доходить автору задачі, виконавцям і тим, хто вже
-  відповідав, не лише згаданим; оплачений рахунок, зафіксована оплата та
-  прийнятий/відхилений кошторис нарешті мають адресатів; згадка на сторінці
-  читається як згадка на сторінці й відкриває сторінку. Коментарі, згадки на
-  сторінках, злиті PR, оплати й відхилені кошториси мають власні перемикачі в
-  email-налаштуваннях ([PR #81](https://github.com/romirom11/ordi/pull/81)).
-- Експорт лідів з усіма полями: `/export/leads.csv` пише один рядок на лід з
-  усіма колонками, повʼязаними назвами (компанія, контакт, власник, лейбли,
-  наступна дія, угода) та кастомними полями лідів; кнопка Export біля фільтрів
-  віддає рівно те, що на екрані, без ліміту в 200 рядків; UTF-8 BOM, щоб Excel
-  не ламав кирилицю ([PR #84](https://github.com/romirom11/ordi/pull/84)).
-- Markdown-файли у прев'ю показуються документом, а не сирим текстом: конвертер
-  `markdownToDoc` у `@ordi/shared` парсить підмножину CommonMark/GFM (заголовки,
-  код-блоки, цитати, списки, таблиці, інлайн-марки) у tiptap-документ, який
-  рендериться тим самим read-only рендерером, що нотатки й KB. Raw HTML на
-  сторінку не потрапляє, лінки лише http/https/mailto, картинки стають
-  посиланнями ([PR #86](https://github.com/romirom11/ordi/pull/86)).
-- «Мої відпустки» показують лише свої заявки: картка ходила в нескоупований
-  `GET /leave-requests`, який з `people.read` віддає весь workspace — у HR на
-  власній сторінці висіли чужі відсутності з кнопкою скасування; доданий
-  `?scope=mine`. Залишки не зачеплені
+- Notifications reach the people they concern: each row is streamed
+  personally to its recipient as `notification.created` instead of riding on
+  the whole project's event – "you've been assigned a task" no longer reaches
+  the whole team (nor raises an OS notification on every desktop). The event's
+  author, deactivated accounts and agents are dropped; a comment reaches the
+  task's author, its assignees and everyone who has already replied, not just
+  those mentioned; a paid invoice, a recorded payment and an
+  accepted/declined quote finally have recipients; a mention on a page reads
+  as a mention on a page and opens the page. Comments, page mentions, merged
+  PRs, payments and declined quotes have their own toggles in the email
+  settings ([PR #81](https://github.com/romirom11/ordi/pull/81)).
+- Lead export with every field: `/export/leads.csv` writes one row per lead
+  with all the columns, related names (company, contact, owner, labels, next
+  action, deal) and lead custom fields; the Export button next to the filters
+  returns exactly what's on screen, without the 200-row limit; a UTF-8 BOM so
+  that Excel doesn't mangle Cyrillic ([PR #84](https://github.com/romirom11/ordi/pull/84)).
+- Markdown files in the preview are shown as a document rather than raw text:
+  the `markdownToDoc` converter in `@ordi/shared` parses a subset of
+  CommonMark/GFM (headings, code blocks, quotes, lists, tables, inline marks)
+  into a tiptap document, which is rendered by the same read-only renderer as
+  notes and the KB. Raw HTML never reaches the page, links are
+  http/https/mailto only, images become links
+  ([PR #86](https://github.com/romirom11/ordi/pull/86)).
+- "My leave" shows only your own requests: the card called the unscoped
+  `GET /leave-requests`, which with `people.read` returns the whole workspace –
+  in HR, other people's absences sat on your own page with a cancel button;
+  `?scope=mine` has been added. Balances are untouched
   ([PR #85](https://github.com/romirom11/ordi/pull/85)).
-- Образи MinIO з Quay: анонімний pull `minio/mc` і `minio/minio` на Docker Hub
-  тепер 401, через що падав деплой з профілем `minio`; обидва запінені на
-  релізи `quay.io/minio/…` ([PR #83](https://github.com/romirom11/ordi/pull/83)).
-- Лендинг наздогнав v1.30: агенти-співробітники, вхід у десктоп через браузер,
-  прибрано «погодження таймшитів», якого в продукті немає
-  ([PR #82](https://github.com/romirom11/ordi/pull/82)).
+- MinIO images from Quay: anonymous pulls of `minio/mc` and `minio/minio` on
+  Docker Hub now return 401, which broke deploys with the `minio` profile;
+  both are pinned to `quay.io/minio/…` releases ([PR #83](https://github.com/romirom11/ordi/pull/83)).
+- The landing page caught up with v1.30: agents as team members, desktop
+  sign-in via the browser, and "timesheet approval", which the product doesn't
+  have, removed ([PR #82](https://github.com/romirom11/ordi/pull/82)).
 
 ### v1.30.0
 
-- Залишок відпустки видно і не можна перевитратити: `GET /leave-entitlements`
-  рахує allocated/carried/used/pending/remaining per тип, до accrue бере
-  річну квоту типу; заявка довша за залишок відхиляється при поданні
-  (pending уже враховані) і повторно при апруві, під локом на співробітника;
-  картка показує залишок на своїй сторінці й на чужій із `people.read`,
-  діалог заявки показує робочі дні діапазону і блокує перевитрату
+- The leave balance is visible and can't be overspent: `GET /leave-entitlements`
+  computes allocated/carried/used/pending/remaining per type, and before
+  accrual it uses the type's annual quota; a request longer than the balance
+  is rejected on submission (pending ones already counted) and again on
+  approval, under a per-employee lock; the card shows the balance on your own
+  page and on someone else's with `people.read`, and the request dialog shows
+  the working days in the range and blocks overspending
   ([PR #75](https://github.com/romirom11/ordi/pull/75)).
-- Редагування коментарів у задачі: олівець на власному коментарі – і тільки
-  на власному, чужий не редагує ніхто, адмін проєкту модерує видаленням –
-  відкриває той самий редактор на місці, відредагований коментар має позначку
-  "(відредаговано)"; `PATCH /comments/:id` вимагає непорожнє тіло, нотифікує
-  лише нові mention і пише в activity
+- Editing comments on a task: the pencil on your own comment – and only on
+  your own, nobody edits someone else's, a project admin moderates by deleting –
+  opens the same editor in place, and an edited comment is marked
+  "(edited)"; `PATCH /comments/:id` requires a non-empty body, notifies only
+  new mentions and writes to the activity log
   ([PR #77](https://github.com/romirom11/ordi/pull/77)).
-- Валюта у Finance: пікери пропонують USD/EUR/UAH з одного спільного списку,
-  збережений інший код лишається в пікері; income, підписки, нова компанія й
-  угода стартують з валюти workspace, а не з USD
+- Currency in Finance: the pickers offer USD/EUR/UAH from a single shared
+  list, and a different stored code stays in the picker; income, subscriptions,
+  a new company and a deal start in the workspace currency rather than USD
   ([PR #78](https://github.com/romirom11/ordi/pull/78)).
-- PR від агентів за шаблоном репозиторію: опис збирається зі звіту агента
-  (зміна, перевірка, ризики) з лінком на задачу, коміти несуть ключ задачі
-  там, де дозволяє конвенція, інакше трейлером `Refs:`
+- PRs from agents follow the repository's template: the description is built
+  from the agent's report (change, verification, risks) with a link to the
+  task, and commits carry the task key where the convention allows, otherwise
+  as a `Refs:` trailer
   ([PR #79](https://github.com/romirom11/ordi/pull/79)).
 
 ### v1.29.4
 
-- Англійські назви гілок для задач будь-якою мовою: перед клоном воркер
-  просить у haiku (один хід, без тулз, через Agent SDK, тож працює з
-  підпискою) слаг із 3–6 слів з назви й опису задачі; без відповіді лишається
-  транслітерація; Retry перейменовує гілку, яка так і не дійшла до origin
+- English branch names for tasks in any language: before cloning, the worker
+  asks haiku (one turn, no tools, via the Agent SDK, so it works with a
+  subscription) for a 3–6-word slug from the task's title and description;
+  with no answer, transliteration remains; Retry renames a branch that never
+  made it to origin
   ([PR #76](https://github.com/romirom11/ordi/pull/76)).
 
 ### v1.29.3
 
-- Назви гілок для кириличних назв задач: слаг транслітерує кирилицю й
-  прибирає діакритику замість викидати всі не-ASCII літери, тож задача з
-  українською назвою більше не отримує гілку `feature/ord-26-` без хвоста;
-  без хвостового дефіса, коли від назви нічого не лишається
+- Branch names for Cyrillic task titles: the slug transliterates Cyrillic and
+  strips diacritics instead of throwing away every non-ASCII letter, so a task
+  with a Ukrainian title no longer gets a `feature/ord-26-` branch with no
+  tail; no trailing hyphen when nothing is left of the title
   ([PR #74](https://github.com/romirom11/ordi/pull/74)).
 
 ### v1.29.2
 
-- Сесії живуть між запусками: домівка Claude Code лежить у
-  `tasks/<taskId>/harness` на томі `agent_work`, тож follow-up і Retry
-  справді продовжують розмову; якщо сесії нема, запуск стартує заново з гілки
-  задачі, а не падає; директорії задач без запусків 30 днів прибираються.
-- Ранній стоп нічого не губить: rate limit пушить роботу й продовжує ту ж
-  сесію, sessionId і гілка пишуться одразу, помилка на фіналізації пушить перед
-  failed, push зі свіжим installation token, невдалий `rev-list` не означає
-  «нема що пушити»; у коміт іде лише реальна робота (без `node_modules`,
-  `dist`, `.env*`, логів).
-- Рани і задачі: один активний ран на задачу й агента (міграція 0037),
-  follow-up/Retry несуть гілку, коментар під час черги не губиться, закриті
-  задачі не запускають агента й лишаються закритими, коментарі інших агентів
-  не тригерять, токен рану не може скасовувати/ретраїти.
-- Рантайм: вантажиться `CLAUDE.md` репозиторію, тули `ordi` в промпті з
-  першого ходу, дозволені `BashOutput`/`KillShell`/`Skill`.
-- Сторінка задачі: лог показує останні 500 подій і дописує стрім, рани
-  опитуються поки активні, Retry лише на найновішому, переклади й лінки в
-  нотифікаціях агента, форма профілю до 2000 ходів з підказками.
+- Sessions live on between runs: the Claude Code home lives in
+  `tasks/<taskId>/harness` on the `agent_work` volume, so follow-up and Retry
+  really do continue the conversation; if there's no session, the run starts
+  afresh from the task branch rather than failing; task directories with no
+  runs for 30 days are cleaned up.
+- An early stop loses nothing: a rate limit pushes the work and continues the
+  same session, the sessionId and branch are written straight away, an error
+  during finalisation pushes before failed, the push uses a fresh installation
+  token, a failed `rev-list` doesn't mean "nothing to push"; only real work
+  goes into the commit (no `node_modules`, `dist`, `.env*`, logs).
+- Runs and tasks: one active run per task and agent (migration 0037),
+  follow-up/Retry carry the branch, a comment made while queued isn't lost,
+  closed tasks don't start an agent and stay closed, other agents' comments
+  don't trigger runs, a run token can't cancel/retry.
+- Runtime: the repository's `CLAUDE.md` is loaded, the `ordi` tools are in the
+  prompt from the first turn, `BashOutput`/`KillShell`/`Skill` are allowed.
+- Task page: the log shows the last 500 events and appends the stream, runs
+  are polled while active, Retry only on the newest one, translations and
+  links in agent notifications, a profile form allowing up to 2000 turns, with
+  hints.
 
 ### v1.29.1
 
-- Незавершена робота агента не губиться: ран, що вперся в ліміт кроків,
-  таймаут чи скасування, пушить закомічене на гілку задачі без PR, записує
-  гілку в ран і в коментарі називає ліміт; Retry продовжує ту ж сесію з тієї
-  ж гілки. Дефолт `max_turns` 60 → 200, міграція 0036
+- An agent's unfinished work isn't lost: a run that hits the step limit, a
+  timeout or a cancellation pushes what it has committed to the task branch
+  without a PR, records the branch on the run and names the limit in its
+  comment; Retry continues the same session from the same branch. The
+  `max_turns` default goes from 60 → 200, migration 0036
   ([PR #71](https://github.com/romirom11/ordi/pull/71)).
 
 ### v1.29.0
 
-- AI-агенти як співробітники: агента додають у команду, призначають задачу
-  як людині, воркер усередині `api` клонує репозиторій, запускає Claude Code
-  через Agent SDK з ordi MCP і дозволеними конекторами, стрімить лог на
-  сторінку задачі й доводить роботу до pull request; Claude підключається
-  раз на робочу область (токен підписки або API-ключ), конектори – бібліотека
-  з allowlist на агента через шлюз ordi, нове право `agents.manage`, роль
-  `Agent`, міграція 0035
+- AI agents as team members: an agent is added to the team and assigned a
+  task like a person, a worker inside `api` clones the repository, runs Claude
+  Code via the Agent SDK with the ordi MCP and the allowed connectors, streams
+  the log to the task page and takes the work through to a pull request;
+  Claude is connected once per workspace (a subscription token or an API key),
+  connectors are a library with a per-agent allowlist via the ordi gateway, a
+  new `agents.manage` permission, an `Agent` role, migration 0035
   ([PR #69](https://github.com/romirom11/ordi/pull/69)).
-- Деактивація передає роботу: діалог питає, кому віддати відкриті задачі,
-  або лишає без виконавця; закриті не чіпаються
+- Deactivation hands work over: the dialog asks whom to give the open tasks
+  to, or leaves them unassigned; closed ones aren't touched
   ([PR #70](https://github.com/romirom11/ordi/pull/70)).
-- Деактивованого асайні можна зняти з задачі: пікер лишає його в списку з
-  позначкою ([PR #70](https://github.com/romirom11/ordi/pull/70)).
-- Перенос задачі в інший проєкт з контекстного меню рядка: новий номер з
-  редіректом, статус за назвою, custom fields за визначеннями цільового
-  проєкту, лише для admin обох проєктів
+- A deactivated assignee can be removed from a task: the picker keeps them in
+  the list with a marker ([PR #70](https://github.com/romirom11/ordi/pull/70)).
+- Moving a task to another project from the row's context menu: a new number
+  with a redirect, status matched by name, custom fields by the target
+  project's definitions, only for admins of both projects
   ([PR #70](https://github.com/romirom11/ordi/pull/70)).
-- Швидке створення задачі підставляє відкритий проєкт
+- Quick task creation pre-fills the open project
   ([PR #70](https://github.com/romirom11/ordi/pull/70)).
-- Валюта витрати – список з дефолтом робочої області
+- The expense currency is a list that defaults to the workspace's currency
   ([PR #70](https://github.com/romirom11/ordi/pull/70)).
 
 ### v1.28.0
 
-- Одна людина = одне імʼя: лукап віддає імʼя з привʼязаної HR-картки,
-  запис картки і перейменування в профілі синхронізують обидва боки,
-  міграція 0034 бекфілить існуючі звʼязки; інвайт привʼязує/створює картку,
-  картка з email існуючого акаунта привʼязується сама, розриви видно банером
-  в Employees ([PR #68](https://github.com/romirom11/ordi/pull/68)).
-- Профіль худне: анкета і відпустки переїхали на власну картку співробітника,
-  профіль лінкує через "Моя HR-картка"
+- One person = one name: the lookup returns the name from the linked HR card,
+  writing the card and renaming in the profile keep both sides in sync,
+  migration 0034 backfills existing links; an invite links/creates a card, a
+  card with an existing account's email links itself, and gaps show up in a
+  banner in Employees ([PR #68](https://github.com/romirom11/ordi/pull/68)).
+- The profile slims down: the questionnaire and leave moved to the employee's
+  own card, and the profile links to it via "My HR card"
   ([PR #68](https://github.com/romirom11/ordi/pull/68)).
-- MCP бачить картинки в описах: image-ноди ходять текстом як `![назва](url)`
-  з підписаними лінками і переживають read-edit-write
+- MCP sees images in descriptions: image nodes travel as text, as
+  `![title](url)` with signed links, and survive read-edit-write
   ([PR #68](https://github.com/romirom11/ordi/pull/68)).
-- Мітки редагуються з пікера: назва, колір, видалення
+- Labels can be edited from the picker: name, colour, deletion
   ([PR #68](https://github.com/romirom11/ordi/pull/68)).
-- Статус задачі міняється прямо зі списку кліком по іконці
+- Task status changes straight from the list with a click on the icon
   ([PR #68](https://github.com/romirom11/ordi/pull/68)).
-- Реакції-емодзі в коментарях задач, як у Slack
+- Emoji reactions on task comments, as in Slack
   ([PR #68](https://github.com/romirom11/ordi/pull/68)).
-- HR-календар: назви свят у два рядки + попап дня з повним списком подій
-  ([PR #68](https://github.com/romirom11/ordi/pull/68)).
+- HR calendar: holiday names on two lines + a day popup with the full list of
+  events ([PR #68](https://github.com/romirom11/ordi/pull/68)).
 
 ### v1.27.0
 
-- Аватарки скрізь, де показується людина: історичні записи (коментарі, аудит,
-  стрічки активності) не втрачають імʼя і фото деактивованих користувачів,
-  API віддають фото разом з імʼям, ресорсинг працює для не-адмінів
+- Avatars everywhere a person is shown: historical records (comments, audit,
+  activity feeds) don't lose the name and photo of deactivated users, the APIs
+  return the photo along with the name, resourcing works for non-admins
   ([PR #63](https://github.com/romirom11/ordi/pull/63)).
-- Вкладка рекрутингу вміє створити вакансію і додати кандидата з UI
+- The recruiting tab can create a job opening and add a candidate from the UI
   ([PR #63](https://github.com/romirom11/ordi/pull/63)).
-- Slack-інтеграція в один клік: створення застосунку через Manifest API з
-  токена конфігурації + гайд з готовим маніфестом для ручного шляху
+- One-click Slack integration: the app is created via the Manifest API from a
+  configuration token + a guide with a ready-made manifest for the manual route
   ([PR #64](https://github.com/romirom11/ordi/pull/64)).
-- Пікер Slack-каналів: алфавітний порядок, замочок на приватних, підказка
-  про `/invite @ordi` ([PR #65](https://github.com/romirom11/ordi/pull/65)).
-- Пікери компаній відсортовані за алфавітом і з пошуком; ліміт вибірки 200
-  замість 50 найновіших ([PR #66](https://github.com/romirom11/ordi/pull/66)).
+- Slack channel picker: alphabetical order, a padlock on private channels, a
+  hint about `/invite @ordi` ([PR #65](https://github.com/romirom11/ordi/pull/65)).
+- Company pickers are sorted alphabetically and searchable; a fetch limit of
+  200 instead of the 50 newest ([PR #66](https://github.com/romirom11/ordi/pull/66)).
 
 ### v1.26.0
 
-- Запити: UI поштової скриньки в налаштуваннях проєкту, вкладення з листів
-  (показуються на картці запиту й переїжджають у створену задачу), slash-команда
-  `/ordi` у Slack ([PR #62](https://github.com/romirom11/ordi/pull/62)).
-- People відкрито: каталог і публічний зріз картки для всіх залогінених,
-  відпустки самообслуговуванням у профілі + блок погоджень для менеджера,
-  панель свят у налаштуваннях + свята не списують дні відпустки, окремий
-  пермішен на документи, робочі write-гранти груп полів
+- Intake requests: a mailbox UI in the project settings, attachments from
+  emails (shown on the request card and carried over into the created task), a
+  `/ordi` slash command in Slack ([PR #62](https://github.com/romirom11/ordi/pull/62)).
+- People opened up: the directory and a public slice of the card for everyone
+  signed in, self-service leave in the profile + an approvals block for the
+  manager, a holidays panel in settings + holidays don't use up leave days, a
+  separate permission for documents, working write grants for field groups
   ([PR #62](https://github.com/romirom11/ordi/pull/62)).
-- Кастомні поля на рівні проєкту (керує адмін проєкту в налаштуваннях
-  проєкту); блок кастомних полів задачі згортається
+- Project-level custom fields (managed by the project admin in the project
+  settings); the task's custom fields block collapses
   ([PR #62](https://github.com/romirom11/ordi/pull/62)).
-- Ресайз правої панелі на картках задач/проєктів/CRM зі збереженням ширини;
-  поле «Локація» в картці співробітника; аватарки в десктопі та в історіях
+- Resizable right panel on task/project/CRM cards with the width remembered;
+  a "Location" field on the employee card; avatars on desktop and in histories
   ([PR #62](https://github.com/romirom11/ordi/pull/62)).
-- Реліз публікується лише після збірки всіх десктоп-бандлів
+- A release is published only after all the desktop bundles have been built
   ([PR #62](https://github.com/romirom11/ordi/pull/62)).
 
 ### v1.25.0
 
-- Уніфікований дашборд для всіх ролей: плитки особистої роботи + картка
-  «Команда: найближчі два тижні» (відсутності, свята, ДР) з дип-лінком у
-  HR-календар; фінансові/пайплайн-віджети переїхали у Finance і кастомні
-  дашборди ([PR #61](https://github.com/romirom11/ordi/pull/61)).
-- Особисті контакти співробітника — через кастомні поля замість хардкод-рядків
-  картки; іконки для полів і груп полів
+- A unified dashboard for every role: personal work tiles + a "Team, next two
+  weeks" card (absences, holidays, birthdays) with a deep link into the HR
+  calendar; the finance/pipeline widgets moved to Finance and custom
+  dashboards ([PR #61](https://github.com/romirom11/ordi/pull/61)).
+- An employee's personal contacts – via custom fields instead of hard-coded
+  card rows; icons for fields and field groups
   ([PR #61](https://github.com/romirom11/ordi/pull/61)).
-- Датапікер: сітки років/місяців за кліком по заголовку; аватарки авторів у
-  коментарях; каталог людей бере повне ім'я з HR-картки
+- Date picker: year/month grids on a click on the header; author avatars in
+  comments; the people directory takes the full name from the HR card
   ([PR #61](https://github.com/romirom11/ordi/pull/61)).
 
 ### v1.24.0
 
-- База знань приймає PDF: тип сторінки (стаття/PDF) у діалозі створення,
-  файл через існуючий пайплайн вкладень, вбудований перегляд, заміна файлу,
-  експорт лінком ([PR #59](https://github.com/romirom11/ordi/pull/59)).
-- Стан списків переживає навігацію: сортування, фільтри, пошук і вкладки в
-  CRM/проєктах/фінансах/часі/HR через localStorage з валідацією
+- The knowledge base accepts PDFs: a page type (article/PDF) in the create
+  dialog, the file goes through the existing attachments pipeline, a built-in
+  viewer, file replacement, export as a link ([PR #59](https://github.com/romirom11/ordi/pull/59)).
+- List state survives navigation: sorting, filters, search and tabs in
+  CRM/projects/finance/time/HR via localStorage with validation
   ([PR #59](https://github.com/romirom11/ordi/pull/59)).
-- Листи-сповіщення більше не порожні (назва задачі, статус, актор із
-  поточного стану БД), логотип у листах через публічний роут
+- Notification emails are no longer empty (task name, status, actor from the
+  current DB state), the logo in emails via a public route
   ([PR #59](https://github.com/romirom11/ordi/pull/59)).
-- People → HR з вкладкою «Календар»: відсутності, свята, дні народження
-  (нове поле картки, щорічна подія)
+- People → HR with a "Calendar" tab: absences, holidays, birthdays (a new
+  card field, a yearly event)
   ([PR #60](https://github.com/romirom11/ordi/pull/60)).
-- Групи полів як одиниці доступу: матриця «групи × ролі + Сам співробітник»
-  у Налаштування → Ролі, серверний enforcement, самозаповнювані групи =
-  HR-анкета в профілі зі статусом заповнення
+- Field groups as units of access: a "groups × roles + the employee
+  themselves" matrix in Settings → Roles, server-side enforcement, self-filled
+  groups = an HR questionnaire in the profile with a completion status
   ([PR #60](https://github.com/romirom11/ordi/pull/60)).
-- Розширена картка співробітника: робоча/особиста пошта, телефон, телеграм,
-  документи з вбудованим PDF-переглядом; кастомні поля видно на всіх
-  сутностях із детальною карткою
+- Extended employee card: work/personal email, phone, Telegram, documents
+  with a built-in PDF viewer; custom fields are visible on every entity with a
+  detail card
   ([PR #60](https://github.com/romirom11/ordi/pull/60)).
-- Перший e2e-сьют (Playwright: KB PDF, HR-календар, анкета) з окремою
-  CI-джобою ([PR #60](https://github.com/romirom11/ordi/pull/60)).
+- The first e2e suite (Playwright: KB PDF, HR calendar, questionnaire) with a
+  separate CI job ([PR #60](https://github.com/romirom11/ordi/pull/60)).
 
 ### v1.23.0
 
-- Менеджмент кастомних полів у налаштуваннях: редагування (мітка, прапорці,
-  депрекація), видалення з підтвердженням і редактор опцій для
-  select/multiselect — API вмів це давно, UI вмів лише створювати
+- Custom field management in settings: editing (label, flags, deprecation),
+  deletion with confirmation and an options editor for
+  select/multiselect – the API has been able to do this for a long time, the
+  UI could only create them
   ([PR #58](https://github.com/romirom11/ordi/pull/58)).
-- Мітки лідів: третій словник міток (scope `lead`) у спільній таблиці,
-  `lead_labels`, пікер у рейлі ліда як у задач, чипи в таблиці лідів,
-  `labelIds` в API з записом у журнал активності
+- Lead labels: a third label vocabulary (scope `lead`) in the shared table,
+  `lead_labels`, a picker in the lead's rail as for tasks, chips in the leads
+  table, `labelIds` in the API with an entry in the activity log
   ([PR #58](https://github.com/romirom11/ordi/pull/58)).
-- Фільтр по компанії на вкладці лідів; черга «Робота» на всю ширину сторінки
+- A company filter on the leads tab; the "Work" queue spans the full page width
   ([PR #58](https://github.com/romirom11/ordi/pull/58)).
 
 ### v1.22.1
 
-- Випадаючі меню в CRM беруть ширину свого поля замість фіксованих 240px —
-  довгі назви (наприклад, секвенцій) більше не ламаються на два рядки поруч
-  із порожнім місцем ([PR #57](https://github.com/romirom11/ordi/pull/57)).
-- Відкриття наступного селекта закриває попередній: слухач кліку назовні
-  перейшов у фазу захоплення, яку раніше глушив `stopPropagation` діалогу
+- CRM dropdown menus take their field's width instead of a fixed 240px –
+  long names (of sequences, for example) no longer break onto two lines next
+  to empty space ([PR #57](https://github.com/romirom11/ordi/pull/57)).
+- Opening the next select closes the previous one: the click-outside listener
+  moved to the capture phase, which the dialog's `stopPropagation` used to swallow
   ([PR #57](https://github.com/romirom11/ordi/pull/57)).
 
 ### v1.22.0
 
-- Усі нативні браузерні селекти в CRM замінені компонентом SearchSelect:
-  дропдаун у стилі застосунку з пошуком від 8 опцій, клавіатурною навігацією
-  та діями в меню (вибір контакта ліда вміє створити контакт на місці);
-  рядки компанії й контакта в рейці ліда ведуть на запис компанії
+- Every native browser select in the CRM has been replaced with the
+  SearchSelect component: an app-styled dropdown with search from 8 options
+  up, keyboard navigation and actions in the menu (the lead's contact picker
+  can create a contact on the spot); the company and contact rows in the
+  lead's rail lead to the company record
   ([PR #54](https://github.com/romirom11/ordi/pull/54)).
-- Сортування по колонках: таблиці лідів і клієнтів (статуси в порядку
-  воронки, порожні значення в кінці), списки інвойсів/квоут отримали шапку,
-  що водночас є контролами сортування, прибутковість і звіти часу теж;
-  у лідів — фільтр по відповідальному
+- Column sorting: the leads and clients tables (statuses in funnel order,
+  empty values last), the invoice/quote lists got a header that doubles as the
+  sort controls, and so did profitability and the time reports; leads got a
+  filter by owner
   ([PR #54](https://github.com/romirom11/ordi/pull/54)).
-- Картки ліда, угоди й компанії на одній розкладці: контент на всю ширину,
-  рейка гнучка 280–400px, значення переносяться замість обрізатись, порожні
-  поля ховаються на read-only записах, історія продажу — 8 рядків із
-  «Показати всі», картка наступної дії пропонує Завершити/Запланувати
+- Lead, deal and company cards on a single layout: content at full width, a
+  flexible 280–400px rail, values wrap instead of being truncated, empty
+  fields are hidden on read-only records, sales history – 8 rows with
+  "Show all", the next action card offers Complete/Schedule
   ([PR #54](https://github.com/romirom11/ordi/pull/54)).
-- MCP `update_lead`/`create_lead` більше не гублять suggestedChannel та інші
-  рісерч-поля; кастомні поля відкриті для лідів наскрізно — API, MCP,
-  налаштування і картка ліда
+- MCP `update_lead`/`create_lead` no longer lose suggestedChannel and the
+  other research fields; custom fields are open for leads end to end – API,
+  MCP, settings and the lead card
   ([PR #54](https://github.com/romirom11/ordi/pull/54)).
 
 ### v1.21.0
 
-- Текстові поля ліда (продукт, сигнал, джерело, канал, оцінка) переїхали з
-  вузького сайдбара в картку «Деталі» в основній колонці: значення
-  переносяться замість обрізатись, лейбли більше не ламаються на два рядки,
-  лінк джерела показується доменом з датою перевірки під ним
+- The lead's text fields (product, signal, source, channel, score) moved from
+  the narrow sidebar to a "Details" card in the main column: values wrap
+  instead of being truncated, labels no longer break onto two lines, the
+  source link is shown as a domain with the check date beneath it
   ([PR #53](https://github.com/romirom11/ordi/pull/53)).
-- Кастомні поля угоди — так само карткою в основній колонці; сайдбар обох
-  сторінок лишає короткі факти: статус/етап, клієнт, контакт, проєкт,
-  власник, гроші, дати, файли
+- Deal custom fields – likewise as a card in the main column; the sidebar on
+  both pages keeps the short facts: status/stage, client, contact, project,
+  owner, money, dates, files
   ([PR #53](https://github.com/romirom11/ordi/pull/53)).
 
 ### v1.20.0
 
-- Створена KB-сторінка — видима KB-сторінка: нові сторінки народжуються
-  published (чернетка — свідомий вибір при створенні або «зняти з
-  публікації»), наявні сторінки опубліковані міграцією, на сторінці — бейдж
-  Draft з кнопкою Publish, у дереві — іконка чернетки замість зеленої крапки
-  на всьому ([PR #52](https://github.com/romirom11/ordi/pull/52)).
-- Правило видимості сторінки (чернетка → редактори; приватна → автор і
-  редактори) діє скрізь, де сторінка спливає, а не лише в дереві: пошук,
-  стрічка активності та audit-трейл, історія версій, беклінки, дублювання й
-  SSE-події більше не виказують заголовків і тіл сторінок, яких актор не
-  може відкрити ([PR #52](https://github.com/romirom11/ordi/pull/52)).
+- A created KB page is a visible KB page: new pages are born published (a
+  draft is a deliberate choice at creation or via "unpublish"), existing
+  pages were published by a migration, the page shows a Draft badge with a
+  Publish button, and the tree shows a draft icon instead of a green dot on
+  everything ([PR #52](https://github.com/romirom11/ordi/pull/52)).
+- The page visibility rule (draft → editors; private → author and editors)
+  applies everywhere a page surfaces, not just in the tree: search, the
+  activity feed and audit trail, version history, backlinks, duplication and
+  SSE events no longer give away the titles and bodies of pages the actor
+  can't open ([PR #52](https://github.com/romirom11/ordi/pull/52)).
 
 ### v1.19.0
 
-- Файли ходять через API: `POST /attachments` приймає сам файл (multipart) і
-  генерує ключ на сервері, `GET /files/:id/:token` віддає байти стрімом
-  замість редіректу на сховище. Presigned-URL більше не потрапляє в браузер,
-  тож self-hosted інсталяція не потребує публічного входу в MinIO, CORS і
-  проброшеного назовні порту ([PR #47](https://github.com/romirom11/ordi/pull/47)).
-- Прев'ю файлів у застосунку: зображення, PDF, відео, аудіо і текстові типи;
-  скриптовані типи (html, svg, xml) віддаються з `Content-Security-Policy:
+- Files go through the API: `POST /attachments` accepts the file itself
+  (multipart) and generates the key on the server, `GET /files/:id/:token`
+  streams the bytes instead of redirecting to the storage. A presigned URL no
+  longer reaches the browser, so a self-hosted install doesn't need public
+  access to MinIO, CORS or a port exposed to the outside ([PR #47](https://github.com/romirom11/ordi/pull/47)).
+- In-app file previews: images, PDF, video, audio and text types; scriptable
+  types (html, svg, xml) are served with `Content-Security-Policy:
   sandbox` ([PR #47](https://github.com/romirom11/ordi/pull/47)).
-- Завантаження кількох файлів за раз; відмови сховища відповідають 422 з
-  назвою змінної оточення замість 500
+- Uploading several files at once; storage failures respond with a 422 naming
+  the environment variable instead of a 500
   ([PR #48](https://github.com/romirom11/ordi/pull/48)).
-- Вбудований MinIO у прод-стеку за `COMPOSE_PROFILES=minio`: ті самі
-  креденшели, що й у api, і одноразова ініціалізація бакета
+- Built-in MinIO in the prod stack behind `COMPOSE_PROFILES=minio`: the same
+  credentials as the api, and a one-off bucket initialisation
   ([PR #48](https://github.com/romirom11/ordi/pull/48)).
-- Унікальні мережеві аліаси `ordi-db` / `ordi-minio` — на спільній мережі PaaS
-  generic-імена резолвились у чужі контейнери
+- Unique network aliases `ordi-db` / `ordi-minio` – on a shared PaaS network,
+  generic names resolved to other people's containers
   ([PR #49](https://github.com/romirom11/ordi/pull/49)).
-- Контекстне меню на рядках лідів (нова вкладка, копіювати посилання,
-  компанія, статус, власник, видалення)
+- A context menu on lead rows (new tab, copy link, company, status, owner,
+  delete)
   ([PR #47](https://github.com/romirom11/ordi/pull/47)).
-- Кольори статусів лідів: тон за тим, чий зараз хід, а не за глибиною воронки;
-  завершені й відкладені лишаються сірими
+- Lead status colours: the tone follows whose move it is now, not how deep
+  into the funnel the lead is; finished and postponed leads stay grey
   ([PR #50](https://github.com/romirom11/ordi/pull/50)).
 
 ### v1.18.0
 
-- Робота з лідами пачками: чекбокси і bulk-панель у таблиці лідів
-  (переназначити власника / змінити статус до 200 лідів разом, з правилами
-  одиночного ліда і по-лідовим звітом про помилки), CSV імпорт лідів з
-  автостворенням компаній та dry run, CSV експорт, чесне попередження про
-  обрізаний список ([PR #45](https://github.com/romirom11/ordi/pull/45)).
-- Вкладка «Аналітика» в CRM: воронка лідів, тренд за 30 днів, конверсія
-  лід → угода, пайплайн за етапами (сирий і зважений), win rate і причини
-  програшів; частина по угодах прихована без `deals.read`
+- Working with leads in batches: checkboxes and a bulk panel in the leads
+  table (reassign the owner / change the status of up to 200 leads at once,
+  with the single-lead rules and a per-lead error report), CSV import of leads
+  with automatic company creation and a dry run, CSV export, an honest warning
+  about a truncated list ([PR #45](https://github.com/romirom11/ordi/pull/45)).
+- An "Analytics" tab in the CRM: the lead funnel, a 30-day trend, lead → deal
+  conversion, the pipeline by stage (raw and weighted), win rate and loss
+  reasons; the deals part is hidden without `deals.read`
   ([PR #45](https://github.com/romirom11/ordi/pull/45)).
-- Тріаж intake-запитів: вкладка «Запити» з лічильником, прийняти-як-задачу /
-  відхилити з причиною і листом автору; у налаштуваннях проєкту — вмикання
-  публічної форми і посилання на неї
+- Intake request triage: a "Requests" tab with a counter, accept as a task /
+  reject with a reason and an email to the author; in the project settings –
+  switching on the public form and a link to it
   ([PR #45](https://github.com/romirom11/ordi/pull/45)).
-- Цикли завершуються: деталі циклу з прогресом і burndown зі щоденних
-  знімків, відкриті задачі їдуть у беклог або наступний цикл
+- Cycles can be completed: cycle details with progress and a burndown from
+  daily snapshots, open tasks move to the backlog or the next cycle
   ([PR #45](https://github.com/romirom11/ordi/pull/45)).
-- Перенесення задачі між проєктами тягне все піддерево, коментарі, звʼязки,
-  посилання, вкладення, залогований час і запущений таймер
+- Moving a task between projects brings along the whole subtree, comments,
+  relations, links, attachments, logged time and a running timer
   ([PR #45](https://github.com/romirom11/ordi/pull/45)).
-- Шаблони задач і повторювані правила отримали UI у налаштуваннях проєкту;
-  списки задач показують індикатор блокування; список проєктів рахує
-  прогрес одним агрегатним запитом
+- Task templates and recurrence rules got a UI in the project settings; task
+  lists show a blocked indicator; the project list counts progress with a
+  single aggregate query
   ([PR #45](https://github.com/romirom11/ordi/pull/45)).
-- Milestone-и тримають задачі: milestone на задачі, групування і фільтр у
-  вʼю задач, реальні лічильники виконаного в огляді; файли проєкту з
-  доступом за членством; пагінація повного списку задач і стабільне
-  сортування ([PR #44](https://github.com/romirom11/ordi/pull/44)).
+- Milestones hold tasks: a milestone on the task, grouping and a filter in the
+  task views, real completed counts in the overview; project files with
+  membership-based access; pagination of the full task list and stable
+  sorting ([PR #44](https://github.com/romirom11/ordi/pull/44)).
 
 ### v1.17.0
 
-- CRM очима нового продавця: лід знову заповнюється руками (усі поля
-  кваліфікації редагуються на місці, власник вибирається), у Work-черзі
-  зʼявився бакет «заплановано наперед», а дія рядка залежить від бакета;
-  компанія і контакт створюються прямо з ліда; кнопка конверсії видима завжди
-  і пояснює, чого чекає; дашборд рахує продажі поруч із задачами
+- The CRM through a new salesperson's eyes: a lead can be filled in by hand
+  again (all the qualification fields are editable in place, the owner can be
+  chosen), the Work queue gained a "scheduled ahead" bucket, and the row's
+  action depends on the bucket; a company and a contact can be created
+  straight from the lead; the conversion button is always visible and explains
+  what it's waiting for; the dashboard counts sales alongside tasks
   ([PR #43](https://github.com/romirom11/ordi/pull/43)).
-- Прибрано імпорт research JSON: він заморожував формат виводу одного
-  зовнішнього інструмента в схемі БД і публічному API (snake_case-поля,
-  блокліст хостів job-бордів у коді). Разом із ним пішли `research_batches`,
-  чотири колонки `leads`, `POST /leads/import*` і MCP-інструменти
-  `import_research` / `preview_research_import`. Ліди лишились
+- The research JSON import is gone: it froze one external tool's output
+  format into the DB schema and the public API (snake_case fields, a blocklist
+  of job board hosts in the code). Along with it went `research_batches`, four
+  `leads` columns, `POST /leads/import*` and the MCP tools
+  `import_research` / `preview_research_import`. Leads stayed
   ([PR #43](https://github.com/romirom11/ordi/pull/43)).
-- Нова пресет-роль Sales: уся CRM плюс читання проєктів і фінансів. Playbooks
-  сідаються стартовим набором — три шаблони і триетапна послідовність
+- A new Sales preset role: the whole CRM plus read access to projects and
+  finance. Playbooks are seeded with a starter set – three templates and a
+  three-step sequence
   ([PR #43](https://github.com/romirom11/ordi/pull/43)).
-- Втрачені записи в CRM: застарілий PATCH клієнта/контакту/угоди відповідає
-  409 замість тихого 200 з чужими даними; видалення ліда прибирає його
-  заплановані активності й зупиняє послідовність; `GET /deals` і
-  `GET /companies` обмежені й пагінуються по ULID; прямий URL без права
-  показує сторінку «немає доступу»
+- Lost writes in the CRM: a stale PATCH of a client/contact/deal responds
+  with 409 instead of a silent 200 with someone else's data; deleting a lead
+  removes its scheduled activities and stops its sequence; `GET /deals` and
+  `GET /companies` are capped and paginated by ULID; a direct URL without the
+  permission shows a "no access" page
   ([PR #43](https://github.com/romirom11/ordi/pull/43)).
-- Rich text редактор доведено до кінця: підкреслення, колір і виділення,
-  вирівнювання, таблиці, callout-и в чотирьох тонах, згортання, код із
-  підсвіткою 17 мов, зображення, ручка блока з drag-reorder. Блоки оголошені
-  один раз, тож slash-меню, тулбар і меню ручки більше не розходяться.
-- Зображення в документах: вставка, drop і діалог. Документ зберігає
-  підписаний безстроковий шлях `/api/v1/files/<id>/<token>` замість
-  presigned-URL, що протухає за годину. `/attachments/presign` підписує ключ,
-  який видає, а `/register` без підпису його не бере.
-- Модифікаторні кліки на рядках списків (Cmd/Ctrl і середня кнопка), єдина
-  схема шорткатів із довідкою на `Shift+?`, і зовнішні посилання, що нарешті
-  відкриваються в десктопі.
-- Лендинг на [romirom11.github.io/ordi](https://romirom11.github.io/ordi)
-  ([PR #42](https://github.com/romirom11/ordi/pull/42)). Відтоді сайт переїхав
-  на [ordi.one](https://ordi.one) (репозиторій `ordi-cloud`); у цьому
-  репозиторії його більше немає.
+- The rich text editor brought to completion: underline, colour and
+  highlight, alignment, tables, callouts in four tones, collapsible blocks,
+  code with highlighting for 17 languages, images, a block handle with
+  drag-reorder. Blocks are declared once, so the slash menu, the toolbar and
+  the handle menu no longer drift apart.
+- Images in documents: paste, drop and a dialog. The document stores a signed
+  non-expiring `/api/v1/files/<id>/<token>` path instead of a presigned URL
+  that goes stale within an hour. `/attachments/presign` signs the key it
+  issues, and `/register` won't accept it without the signature.
+- Modifier clicks on list rows (Cmd/Ctrl and the middle button), a single
+  shortcut scheme with a help sheet on `Shift+?`, and external links that
+  finally open on desktop.
+- The landing page at [romirom11.github.io/ordi](https://romirom11.github.io/ordi)
+  ([PR #42](https://github.com/romirom11/ordi/pull/42)). The site has since
+  moved to [ordi.one](https://ordi.one) (the `ordi-cloud` repository); it's no
+  longer in this repository.
 
 ### v1.16.0
 
-- CRM sales workspace: Work-черга (overdue / сьогодні / чекаємо відповідь /
-  nurture / без наступної дії), окремі leads до кваліфікації, sales-активності
-  як першокласні записи, прев'ю та імпорт research JSON, конверсія lead → deal
-  зі збереженням історії
+- CRM sales workspace: the Work queue (overdue / today / awaiting reply /
+  nurture / no next action), separate leads until qualification, sales
+  activities as first-class records, research JSON preview and import, lead →
+  deal conversion that keeps the history
   ([PR #37](https://github.com/romirom11/ordi/pull/37)).
-- Playbooks: шаблони повідомлень зі змінними та послідовності ручних кроків —
-  планують наступну дію, але нічого не надсилають; ранковий дайджест роботи в
-  таймзоні продавця; надійна доставка пошти через чергу з ретраями
-  ([PR #40](https://github.com/romirom11/ordi/pull/40)).
-- MCP: контент-календар з ordi — `get_project_schema`, `list_tasks` по вікну
-  дат, `get_task` з тілом і коментарями, `create_task` / `update_task` /
-  `upsert_task` / `add_task_link`, оптимістичні блокування версією та
-  `externalKey` замість дублів
+- Playbooks: message templates with variables and sequences of manual steps –
+  they schedule the next action but send nothing; a morning work digest in the
+  salesperson's time zone; reliable email delivery through a queue with
+  retries ([PR #40](https://github.com/romirom11/ordi/pull/40)).
+- MCP: a content calendar from ordi – `get_project_schema`, `list_tasks` by
+  date window, `get_task` with the body and comments, `create_task` /
+  `update_task` / `upsert_task` / `add_task_link`, optimistic locking by
+  version and `externalKey` instead of duplicates
   ([PR #39](https://github.com/romirom11/ordi/pull/39)).
 
 ### v1.11.0
 
-- CRM-модуль, повна переробка у два раунди
+- The CRM module, a complete rework in two rounds
   ([PR #24](https://github.com/romirom11/ordi/pull/24),
-  [PR #25](https://github.com/romirom11/ordi/pull/25)): інлайн-редагування
-  всього на картках компанії та угоди, файли (S3), редаговані кастомні
-  поля, Notion-style нотатки, створення/привʼязка проєктів з картки
-  клієнта, чесні заголовки вкладок, тултіпи без обрізання, DateField
-  замість нативних дат, декодування HTML-entities від агентів.
+  [PR #25](https://github.com/romirom11/ordi/pull/25)): inline editing of
+  everything on the company and deal cards, files (S3), editable custom
+  fields, Notion-style notes, creating/linking projects from the client card,
+  honest tab titles, tooltips without truncation, DateField instead of
+  native date inputs, decoding of HTML entities from agents.
 
 ### v1.10.0
 
-- GitHub App: створення застосунку в один клік через manifest,
-  автореєстрація вебхука, синк репозиторіїв при інсталяції, JWT-авторизація
-  без SDK ([PR #23](https://github.com/romirom11/ordi/pull/23), відновлено
-  з забутої гілки).
-- Фікс: верифікація вебхук-підписів тепер справжній HMAC-SHA256 (було
-  sha256(secret+body) — підписи GitHub ніколи б не пройшли).
-- Фікс: гілки з lowercase-ключем задачі (як генерує «Copy branch name»)
-  тепер лінкуються до задач.
+- GitHub App: one-click app creation via a manifest, automatic webhook
+  registration, repository sync on installation, JWT authorisation without an
+  SDK ([PR #23](https://github.com/romirom11/ordi/pull/23), recovered
+  from a forgotten branch).
+- Fix: webhook signature verification is now real HMAC-SHA256 (it used to be
+  sha256(secret+body) – GitHub signatures would never have passed).
+- Fix: branches with a lowercase task key (as "Copy branch name" generates
+  them) now link to tasks.
 
 ### v1.9.0
 
-- Звʼязок угода → проєкт (`deals.project_id`, справжній FK): фільтр-чипи на
-  канбані, пікер на картці угоди, підтримка в MCP
+- Deal → project relation (`deals.project_id`, a real FK): filter chips on the
+  kanban, a picker on the deal card, support in MCP
   ([PR #22](https://github.com/romirom11/ordi/pull/22)).
-- Масове виділення в списках клієнтів і задач (shift-діапазони, масові
-  статус/пріоритет/видалення) + перетягування вкладок + фікс DnD у десктопі
+- Bulk selection in the client and task lists (shift ranges, bulk
+  status/priority/delete) + tab dragging + a DnD fix on desktop
   ([PR #21](https://github.com/romirom11/ordi/pull/21)).
-- CRM-крихти за патерном застосунку (без ехо заголовка), обрізання довгих
-  назв.
-- Цей реєстр фіч.
+- CRM breadcrumbs following the app's pattern (no echo of the title),
+  truncation of long names.
+- This feature register.
 
 ### v1.8.0
 
-- Сторінка угоди `/deals/:id`: стадія, суми, кастомні поля, нотатки, activity;
-  повні breadcrumbs у CRM.
-- MCP: повний CRM-набір — `create_company` / `create_contact` / `create_deal`,
+- Deal page `/deals/:id`: stage, amounts, custom fields, notes, activity;
+  full breadcrumbs in the CRM.
+- MCP: the full CRM set – `create_company` / `create_contact` / `create_deal`,
   `list_contacts` / `list_deals` / `list_deal_stages`.
-- MCP: кастомні поля — `create_custom_field` / `list_custom_fields` +
-  `customFields` у create-інструментах.
-- Багаторядковий текст агентів зберігає структуру (нотатки, коментарі,
-  KB-сторінки); `create_note` чіпляється до контакту чи угоди.
-- Стрічка активності дашборда фільтрується за доменними правами; власні дії
-  видно завжди.
-- Аудит: нотатки та визначення кастомних полів пишуть activity-записи.
+- MCP: custom fields – `create_custom_field` / `list_custom_fields` +
+  `customFields` in the create tools.
+- Multi-line text from agents keeps its structure (notes, comments,
+  KB pages); `create_note` attaches to a contact or a deal.
+- The dashboard activity feed is filtered by domain permissions; your own
+  actions are always visible.
+- Audit: notes and custom field definitions write activity records.
 
 ### v1.7.0
 
-- MCP: `list_projects` / `list_companies` — агенти можуть дізнаватись id.
-- Глобальний пошук покриває проєкти.
-- Відповіді MCP-інструментів проходять scrub (секрети та службові поля не
-  потрапляють у контекст моделі).
+- MCP: `list_projects` / `list_companies` – agents can look up ids.
+- Global search covers projects.
+- MCP tool responses are scrubbed (secrets and internal fields don't reach
+  the model's context).
 
-### Раніше
+### Earlier
 
-Див. [CHANGELOG](../CHANGELOG.md) — від v1.0.0 до v1.6.1: контейнер-все-в-одному,
-OAuth для MCP-клієнтів, десктоп (Tauri), фінанси з леджером, People/HR, KB,
-цикли, автоматизації на шині подій.
+See the [CHANGELOG](../CHANGELOG.md) – from v1.0.0 to v1.6.1: the all-in-one
+container, OAuth for MCP clients, desktop (Tauri), finance with a ledger,
+People/HR, KB, cycles, automations on the event bus.
