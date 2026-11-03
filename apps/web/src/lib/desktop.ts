@@ -45,42 +45,57 @@ interface DesktopHandlers {
   onQuickAdd: () => void;
   onMenu: (command: string) => void;
   onNavigate: (to: string) => void;
-  /** A newer version was downloaded and installed; it applies on restart. */
-  onUpdateReady: (version: string) => void;
-}
-
-/** Restart into the version staged by the updater. */
-export async function restartDesktop(): Promise<boolean> {
-  if (!isTauri) return false;
-  // The plugin's injected global is the nice path, but it is not guaranteed to
-  // exist – falling back to a raw invoke is what makes the button reliable.
-  try {
-    const relaunch = t()?.process?.relaunch;
-    if (typeof relaunch === 'function') { await relaunch(); return true; }
-  } catch { /* fall through */ }
-  try {
-    const invoke = t()?.core?.invoke;
-    if (typeof invoke === 'function') { await invoke('plugin:process|restart'); return true; }
-  } catch { /* no way to restart */ }
-  return false;
 }
 
 /**
- * Ask the shell to check for a desktop build and stage it if one is out.
- * Resolves to 'staged' (restart applies it), 'none' (the release is not
- * published yet – routine right after a server update, builds take a while)
- * or 'error' (offline, GitHub unreachable, not a packaged build).
+ * Desktop updates run in the shell: it looks for a new build at launch and
+ * every half hour, downloads it silently and only then tells the web layer,
+ * which shows a quiet "Update" row in the sidebar. Installing waits for that
+ * click (or, on macOS, for quitting the app).
  */
-export async function checkDesktopUpdate(): Promise<'staged' | 'none' | 'error'> {
-  if (!isTauri) return 'error';
+
+/** Ask the shell to look for a new build right now (the server just moved
+ *  ahead). Resolves to the downloaded version, or null when there is none yet. */
+export async function checkDesktopUpdate(): Promise<string | null> {
+  if (!isTauri) return null;
   try {
-    const invoke = t()?.core?.invoke;
-    if (typeof invoke !== 'function') return 'error';
-    const res = await invoke('check_update') as string;
-    if (typeof res === 'string' && res.startsWith('staged')) return 'staged';
-    return res === 'none' ? 'none' : 'error';
+    const res = await t()?.core?.invoke?.('check_update');
+    return typeof res === 'string' && res.startsWith('ready:') ? res.slice('ready:'.length) : null;
   } catch {
-    return 'error';
+    return null;
+  }
+}
+
+/** The version downloaded and waiting to be installed, if any. */
+export async function pendingDesktopUpdate(): Promise<string | null> {
+  if (!isTauri) return null;
+  try {
+    const res = await t()?.core?.invoke?.('update_status');
+    return typeof res === 'string' && res ? res : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Fires with the version whenever the shell finishes downloading a build. */
+export function onDesktopUpdateReady(cb: (version: string) => void): () => void {
+  if (!isTauri) return () => {};
+  let un: Promise<() => void> | undefined;
+  try {
+    un = t()?.event?.listen?.('ordi://update-ready', (e: { payload: unknown }) => cb(String(e?.payload ?? '')));
+  } catch { /* event API absent */ }
+  return () => { un?.then((f) => f()).catch(() => {}); };
+}
+
+/** Install the downloaded build and relaunch into it. Resolves only on
+ *  failure – on success the app is gone. */
+export async function installDesktopUpdate(): Promise<boolean> {
+  if (!isTauri) return false;
+  try {
+    await t()?.core?.invoke?.('install_update');
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -368,10 +383,6 @@ export function initDesktop(handlers: DesktopHandlers): () => void {
       unlisteners.push(ev.listen('deep-link://new-url', (e: { payload: unknown }) => {
         const urls = Array.isArray(e?.payload) ? (e.payload as string[]) : [String(e?.payload ?? '')];
         for (const u of urls) void resolveDeepLink(u, handlers.onNavigate);
-      }));
-      // The Rust side stages updates on launch and announces the staged version.
-      unlisteners.push(ev.listen('ordi://update-ready', (e: { payload: unknown }) => {
-        handlers.onUpdateReady(String(e?.payload ?? ''));
       }));
     }
   } catch { /* best-effort */ }

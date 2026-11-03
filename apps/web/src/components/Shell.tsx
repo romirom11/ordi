@@ -13,7 +13,7 @@ import { appOrigin, api, setSessionToken } from '../lib/api';
 import { useRealtime } from '../lib/sse';
 import { useT, extendDict } from '../lib/i18n';
 import { useTheme, type StylePref, type ThemePref } from '../lib/theme';
-import { initDesktop, restartDesktop, isTauri, isMacDesktop } from '../lib/desktop';
+import { initDesktop, isTauri, isMacDesktop } from '../lib/desktop';
 import { TabsProvider, useTabs } from '../lib/tabs';
 import { Avatar, cn, Kbd, Tooltip, IconButton } from './ui';
 import { ContextMenu, DropdownMenu, MenuItem, MenuSeparator, MenuLabel, Toaster, toast, type ContextMenuEntry } from './overlays';
@@ -25,7 +25,7 @@ import { TabStrip } from './tabs/TabStrip';
 import { ShortcutsDialog } from './ShortcutsDialog';
 import { GO_TO, MOD, SHORTCUTS, isTypingTarget } from '../lib/shortcuts';
 import { isNavActive } from '../lib/navSection';
-import { VersionGuard } from './VersionGuard';
+import { UpdateIndicator } from './UpdateIndicator';
 import { useActiveTimer, useStopTimer } from '../lib/timer';
 import { useScrollRestoration } from '../lib/scrollRestoration';
 
@@ -246,11 +246,7 @@ function ShellInner({ children }: { children: ReactNode }) {
       else if (command === 'shortcuts') setKeysOpen(true);
     },
     onNavigate: navigate,
-    onUpdateReady: (version) => toast.action(
-      t('desktop.updateReady', 'Update installed').replace('{version}', version),
-      { label: t('desktop.restart'), onSelect: restartDesktop },
-    ),
-  }), [navigate, t, toggleSidebar]);
+  }), [navigate, toggleSidebar]);
 
   // App-wide keyboard scheme (PRD §17.1). Declared in lib/shortcuts; tab keys
   // live in TabStrip, which reads the same table.
@@ -716,6 +712,9 @@ function ShellInner({ children }: { children: ReactNode }) {
             click (the old row only had a right-click menu, which nobody
             finds), and the bell sits beside it instead of owning a row. */}
         <div className="space-y-1 p-2.5">
+          {/* A new version waiting (or a server older than the app): one
+              quiet row, nothing at all until there is something to do. */}
+          <UpdateIndicator />
           {/* Settings is a destination, so it reads as one: a nav row at the
               foot of the nav rather than an item inside a dropdown. */}
           {(can('settings.manage') || can('users.manage') || can('roles.manage')) && (
@@ -770,7 +769,6 @@ function ShellInner({ children }: { children: ReactNode }) {
             </Tooltip>
           )}
         />
-        <VersionGuard />
         {realtime.reconnecting && <p role="status" className="px-3 py-1 text-xs text-muted-foreground">{t('common.reconnecting')}</p>}
         <div className="app-surface flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-sm">
           <div
