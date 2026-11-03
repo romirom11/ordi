@@ -107,8 +107,8 @@ export function UpdateIndicator() {
     if (path === startPath.current) return;
     const mark = `reload:${server}`;
     try {
-      if (sessionStorage.getItem(RELOAD_KEY) === mark) return;
-      sessionStorage.setItem(RELOAD_KEY, mark);
+      if (localStorage.getItem(RELOAD_KEY) === mark) return;
+      localStorage.setItem(RELOAD_KEY, mark);
     } catch { return; }
     window.location.reload();
   }, [path, cmp, server]);
