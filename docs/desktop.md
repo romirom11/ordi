@@ -66,9 +66,12 @@ Windows/Linux додайте `http://tauri.localhost` в `CORS_ORIGINS` інст
 | Зовнішні посилання | `lib/desktop.ts` → `installExternalLinkHandler()` | делегований клік на `document` → `plugin:opener\|open_url` у системному браузері; вебв'ю ігнорує `target="_blank"`, тому без цього обробника посилання просто мертві |
 | Автозапуск | плагін `autostart` (Rust) | ініціалізований; вмикання – стандартний viклик плагіна |
 | Автооновлення | плагін `updater` + CI | підписані артефакти з релізів; endpoint і pubkey – у `tauri.conf.json → plugins.updater` |
+| Вхід у сторонні сервіси (GitHub App, GitHub OAuth, Slack, MCP-конектори) | `lib/desktop.ts` → `startExternalFlow()` | у вебі вкладка сама йде до провайдера; у десктопі флоу відкривається в системному браузері, вікно показує «Continue in your browser» і перезапитує змінене, коли повертається фокус (15 хв). Колбеки провайдерів публічні й автентифікуються підписаним `state`, бо redirect не несе bearer-токен десктопу. Маніфест GitHub App браузер отримує зі сторінки `GET /integrations/github-app/manifest/launch`, яка сама постить форму |
+| Свайп назад/вперед двома пальцями | Rust `main.rs` → `enable_swipe_navigation()` | wry вимикає жест, а в Tauri немає ключа конфігу, тож при старті вмикається напряму: macOS – `WKWebView.allowsBackForwardNavigationGestures` (з нативною анімацією), Linux – WebKitGTK `enable-back-forward-navigation-gestures`. Windows не чіпаємо: у WebView2 це лише для тачскрінів |
+| Меню «Workspace» (macOS) | Rust `main.rs` | New Task `⌘N`, Search `⌘K`, Toggle Sidebar `⌘\`, Settings… `⌘,`, Keyboard Shortcuts `⌘/` – пункти емітять `ordi://menu` з id команди, далі все робить веб-шар |
 
 Rust-код (`apps/desktop/src-tauri/src/main.rs`) свідомо мінімальний: ініт
-плагінів + реєстрація хоткея з обробником. Уся логіка – у веб-шарі, щоб
+плагінів, реєстрація хоткея з обробником, меню macOS і ввімкнення свайпу. Уся логіка – у веб-шарі, щоб
 дифи не потребували перекомпіляції нативної частини.
 
 ## 5. Іконки

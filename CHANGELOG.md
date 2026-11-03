@@ -3,6 +3,120 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## v1.41.0
+
+- **Bitbucket Cloud**: Settings → Integrations → Bitbucket connects a
+  workspace with an Atlassian API token (plus the account email) or a
+  workspace, project or repository access token, checked by listing the
+  workspace's repositories before anything is stored. Binding a repository
+  to a project registers a signed webhook on it – nothing to copy by hand –
+  and **Sync** refreshes the repository list and the bound webhooks.
+  Branches, commits and pull requests that mention a task key link to the
+  task (the key is also read from the pull request's source branch), a pull
+  request's state drives the automation rules, and AI agents clone, push
+  and open the pull request on Bitbucket too. Bitbucket Server / Data
+  Center is not covered.
+- **Desktop sign-ins open in the browser**: installing the GitHub App,
+  GitHub OAuth, Slack and MCP connector authorization took over the app
+  window and stranded it on the web build. They now go to the system
+  browser, the app says "Continue in your browser" and refetches when it
+  regains focus. MCP connector sign-in completes from the desktop app for
+  the first time (its callback no longer needs a session cookie; a consent
+  started before the upgrade has to be started again).
+- **Two-finger swipe** goes back and forward in the desktop app on macOS
+  (with the native slide) and Linux.
+- **New installations start on Glass Dark**; a stored theme or style wins.
+  The sidebar and side panels slide instead of popping in; the GitHub
+  button reads **Choose repositories** once the app is installed; intake
+  settings show only what applies.
+- **A page stuck on "Saving…"**: a save refused after realtime had already
+  brought someone else's version waited forever and **Keep my version** did
+  nothing. The conflict now shows at once and Keep my version saves.
+
+No migrations.
+
+## v1.40.0
+
+- **Plan: milestones and cycles on one tab** (the Cycles tab is renamed):
+  milestones with progress and target dates, **Pull open tasks into the
+  cycle** for a milestone's unfinished work, the current cycle with a
+  breakdown by milestone, upcoming cycles below. Cycles are **opt-in per
+  project**; projects that already have them keep them. Tasks gain a
+  **Cycle** field, the list filters and groups by cycle, and the bulk bar
+  sets a milestone or cycle on many tasks at once.
+- **Project page**: settings open in a side panel from the gear, the
+  overview leads with the description and drops empty blocks, the Intake
+  tab appears only when intake is on or something waits in it, and the
+  projects list flags *At risk* and *Off track* projects.
+- **Several mail senders**: Settings → Email (moved out of Integrations)
+  lists senders, each with its From, optional Reply-To and SMTP login, one
+  for system mail and one default for invoices and quotes. The invoice Send
+  dialog has a **From** picker and reminders follow up from the address the
+  invoice went out from. The old SMTP setting becomes the sender "Default";
+  `SMTP_URL` shows as a read-only sender. Migration
+  `0042_email_delivery_sender`.
+- **Integrations as a list** – GitHub, Slack, webhooks with their state –
+  each one's setup in a side panel.
+- **Glass polish**: Urbanist Cyrillic, so mixed Ukrainian and English reads
+  as one font; task view controls float bottom-right; one fill for every
+  selected thing; settings sections in cards.
+- **Desktop fixes**: the invoice PDF and CSV exports download with the
+  app's own sign-in instead of opening "Not authenticated".
+- **MCP**: `get_project_schema` lists milestones and whether the project
+  uses cycles; task tools take `milestone`; new `create_milestone`,
+  `update_milestone`, `create_cycle`, `complete_cycle`; `send_invoice` uses
+  the invoice sender.
+
+## v1.39.0
+
+- **Glass**: a second look for the whole app (Workspace menu → **Style**),
+  in light and dark – frosted panes over a soft landscape, warm graphite
+  neutrals, a lime accent, pill-shaped controls and the Urbanist typeface.
+  Classic stays available; the choice is stored per browser.
+- **Credit notes count toward every balance** – the public invoice page,
+  the PDF ("Credited" row), the invoice page and company receivables.
+- **Month-end schedules stay in their month**: a schedule due on the 31st
+  lands on the last day of a shorter month instead of rolling over.
+- **Security**: API tokens can no longer list, create or revoke tokens
+  (token management, 2FA setup and desktop/OAuth approvals need a signed-in
+  session); turning 2FA off needs a code; read-only tokens are refused on
+  every mutating request; cost rates need the "read costs" permission;
+  dangerous OAuth redirect URI schemes are refused; MCP `upload_attachment`
+  fetches public URLs only, with a size cap and a 20 s timeout.
+- Keyboard and overlay behaviour, draft recovery in editors, responsive
+  layouts, realtime updates of task and KB edits in open tabs, and
+  workspace actions in the macOS menu bar.
+
+No migrations.
+
+## v1.38.0
+
+- **MCP files subtasks and plans cycles**: `create_task`, `update_task` and
+  `upsert_task` take `parentId` and `cycle` (id or name);
+  `get_project_schema` lists cycles; `list_tasks` filters by both.
+- **Status from the row on My tasks**: the circle opens the same status
+  picker as the project list.
+- A task's parent and cycle must belong to its own project, and a task can
+  no longer become its own ancestor; the depth limit counts the subtasks
+  that move with it.
+
+No migrations.
+
+## v1.37.0
+
+- **Codex runtime for agents**: an agent runs on **Claude Code** or
+  **Codex**, chosen per agent. A Codex credential is an OpenAI API key –
+  optionally with a **Base URL** for any OpenAI-compatible gateway
+  (LiteLLM, OpenRouter, Ollama, Azure OpenAI, a corporate proxy) – or a
+  ChatGPT subscription (`~/.codex/auth.json`). `OPENAI_API_KEY` joins
+  `ANTHROPIC_API_KEY` as an env fallback. Migration `0041_codex_base_url`.
+
+## v1.36.2
+
+- **Images in a task from MCP**: `upload_attachment` stores a file from
+  base64 or a URL and returns a `src` to interleave as `![alt](src)` in a
+  task's text, or attaches it to a record's Files.
+
 ## v1.36.1
 
 - **No more three rows saying 187.00**: an untaxed, unpaid invoice printed
