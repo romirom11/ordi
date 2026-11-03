@@ -10,44 +10,91 @@ use tauri::{Emitter, Manager};
 #[cfg(any(windows, target_os = "linux"))]
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_global_shortcut::{ShortcutState, GlobalShortcutExt};
-use tauri_plugin_updater::UpdaterExt;
+use std::sync::Mutex;
+use tauri_plugin_updater::{Update, UpdaterExt};
 
-/// Look for a newer release and stage it in the background. The web layer is
-/// told once the update is installed so it can offer a restart; a failure here
-/// (offline, GitHub unreachable, no release yet) must stay silent.
-async fn stage_update(app: tauri::AppHandle) {
-    let _ = check_and_stage(app).await;
-}
+/// How often a running app looks for a new desktop build. The web layer also
+/// asks right away when it sees the server move ahead, so this is the backstop.
+const UPDATE_CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
-/// Check + stage, reporting what happened: "staged:<version>", "none" (no
-/// newer release published yet) or "error". Shared by the silent launch check
-/// and the on-demand command the web layer calls from the version banner.
-async fn check_and_stage(app: tauri::AppHandle) -> String {
+/// A desktop build that is downloaded and verified but not installed yet.
+/// Installing is deferred to the person's click (or quitting on macOS): on
+/// Windows the installer exits the app and a .deb asks for a password, neither
+/// of which may happen out of the blue in the background.
+#[derive(Default)]
+struct PendingUpdate(Mutex<Option<(Update, Vec<u8>)>>);
+
+/// Check for a newer build and download it, reporting what happened:
+/// "ready:<version>", "none" (nothing newer published yet) or "error". A build
+/// already downloaded is reported as ready without touching the network.
+/// Every successful download is announced to the web layer, which shows the
+/// quiet "Update" row in the sidebar.
+async fn check_and_download(app: tauri::AppHandle) -> String {
+    if let Some(version) = pending_version(&app) {
+        return format!("ready:{version}");
+    }
     let updater = match app.updater() {
         Ok(updater) => updater,
         Err(_) => return "error".into(),
     };
     match updater.check().await {
-        Ok(Some(update)) => {
-            let version = update.version.clone();
-            if update.download_and_install(|_, _| {}, || {}).await.is_ok() {
+        Ok(Some(update)) => match update.download(|_, _| {}, || {}).await {
+            Ok(bytes) => {
+                let version = update.version.clone();
+                if let Ok(mut slot) = app.state::<PendingUpdate>().0.lock() {
+                    *slot = Some((update, bytes));
+                }
                 let _ = app.emit("ordi://update-ready", version.clone());
-                format!("staged:{version}")
-            } else {
-                "error".into()
+                format!("ready:{version}")
             }
-        }
+            Err(_) => "error".into(),
+        },
         Ok(None) => "none".into(),
         Err(_) => "error".into(),
     }
 }
 
-/// On-demand update check for the web layer: the version banner shows
-/// "server is newer" and this answers whether a matching desktop build is
-/// actually published and staged, or not out yet.
+fn pending_version(app: &tauri::AppHandle) -> Option<String> {
+    let slot = app.state::<PendingUpdate>();
+    let guard = slot.0.lock().ok()?;
+    guard.as_ref().map(|(update, _)| update.version.clone())
+}
+
+/// Install the downloaded build, if any. Taking it out of the slot makes a
+/// second call (the click, then the exit hook) a no-op.
+fn install_pending(app: &tauri::AppHandle) -> Result<bool, String> {
+    let pending = app
+        .state::<PendingUpdate>()
+        .0
+        .lock()
+        .map_err(|e| e.to_string())?
+        .take();
+    match pending {
+        Some((update, bytes)) => update.install(bytes).map(|_| true).map_err(|e| e.to_string()),
+        None => Ok(false),
+    }
+}
+
+/// On-demand check for the web layer, called when it sees the server run a
+/// newer version than this build.
 #[tauri::command]
 async fn check_update(app: tauri::AppHandle) -> String {
-    check_and_stage(app).await
+    check_and_download(app).await
+}
+
+/// The version downloaded and waiting for a restart, for a webview that
+/// loaded after the "update-ready" event went out.
+#[tauri::command]
+fn update_status(app: tauri::AppHandle) -> Option<String> {
+    pending_version(&app)
+}
+
+/// The sidebar's "Update" row: install and start the new build. On Windows
+/// the installer quits the app itself and relaunches it when done.
+#[tauri::command]
+fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    install_pending(&app)?;
+    app.restart();
 }
 
 /// Two-finger trackpad swipes go back / forward through the workspace's
@@ -125,7 +172,8 @@ fn main() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .invoke_handler(tauri::generate_handler![check_update])
+        .manage(PendingUpdate::default())
+        .invoke_handler(tauri::generate_handler![check_update, update_status, install_update])
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
             if let Some(command) = id.strip_prefix("ordi-") {
@@ -164,10 +212,26 @@ fn main() {
             // installs handle deep links as well.
             #[cfg(any(windows, target_os = "linux"))]
             let _ = app.deep_link().register_all();
+            // Look for a new build at launch and then every half hour. Failures
+            // (offline, GitHub unreachable, nothing published yet) stay silent;
+            // the next round simply tries again.
             let handle = app.handle().clone();
-            tauri::async_runtime::spawn(stage_update(handle));
+            std::thread::spawn(move || loop {
+                let _ = tauri::async_runtime::block_on(check_and_download(handle.clone()));
+                std::thread::sleep(UPDATE_CHECK_EVERY);
+            });
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running ordi desktop");
+        .build(tauri::generate_context!())
+        .expect("error while building ordi desktop")
+        .run(|_app, _event| {
+            // Quitting with a build downloaded applies it, so the next launch
+            // is already up to date. macOS only: replacing the bundle there is
+            // silent, while Windows would show its installer and a .deb would
+            // ask for a password on the way out.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Exit = _event {
+                let _ = install_pending(_app);
+            }
+        });
 }
