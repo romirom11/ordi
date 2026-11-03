@@ -1,228 +1,228 @@
-# ordi desktop – як це працює (внутрішня документація)
+# ordi desktop – how it works (internal documentation)
 
-Десктоп-застосунок (Tauri 2, PRD §18) – це **той самий веб-SPA без жодного
-окремого UI-коду**. Tauri лише загортає збірку `apps/web/dist` у нативне вікно
-і додає системні можливості. Все «десктопне» у веб-коді ізольовано в одному
-модулі – `apps/web/src/lib/desktop.ts` – і вмикається тільки коли застосунок
-реально працює всередині Tauri.
+The desktop app (Tauri 2, PRD §18) is **the same web SPA with no separate
+UI code at all**. Tauri only wraps the `apps/web/dist` build in a native window
+and adds system capabilities. Everything "desktop" in the web code is isolated in a single
+module – `apps/web/src/lib/desktop.ts` – and only switches on when the app is
+actually running inside Tauri.
 
-## 1. Як SPA розуміє, що вона в десктопі
+## 1. How the SPA knows it is on the desktop
 
-У `tauri.conf.json` увімкнено `app.withGlobalTauri: true` – Tauri інʼєктить
-`window.__TAURI__` (core invoke, events, window API) прямо в сторінку, тому
-**жодних npm-залежностей Tauri у веб-пакеті немає**. Детекція:
+`tauri.conf.json` enables `app.withGlobalTauri: true` – Tauri injects
+`window.__TAURI__` (core invoke, events, window API) straight into the page, so
+**there are no Tauri npm dependencies in the web package**. Detection:
 
 ```ts
 // apps/web/src/lib/desktop.ts
 export const isTauri = '__TAURI__' in window || '__TAURI_INTERNALS__' in window;
 ```
 
-Кожен нативний виклик – best-effort у `try/catch`: відсутній плагін чи стара
-версія рантайму ніколи не ламає застосунок (і тим більше не впливає на веб).
+Every native call is best-effort inside a `try/catch`: a missing plugin or an old
+runtime version never breaks the app (let alone affects the web).
 
-## 2. Перший запуск: URL інстансу
+## 2. First launch: the instance URL
 
-У браузері SPA ходить на same-origin `/api/v1` (той самий контейнер віддає
-і SPA, і API). У Tauri same-origin API немає, тому:
+In the browser the SPA talks to the same-origin `/api/v1` (the same container serves
+both the SPA and the API). In Tauri there is no same-origin API, so:
 
-1. `main.tsx` при `isTauri && !getInstanceUrl()` рендерить **InstanceGate** –
-   екран «Підключіться до вашого інстансу ordi» (локалізований uk/en).
-2. Введений URL валідується запитом `GET {url}/healthz` (таймаут 8 с).
-3. Успіх → URL зберігається в `localStorage['ordi:apiUrl']` → reload.
-4. API-клієнт (`apps/web/src/lib/api.ts`) будує базу як
-   `{збережений URL}/api/v1`; у браузері значення порожнє і все працює
-   same-origin, як і раніше.
+1. `main.tsx`, when `isTauri && !getInstanceUrl()`, renders **InstanceGate** –
+   the "Connect to your ordi instance" screen (localised uk/en).
+2. The URL entered is validated with a `GET {url}/healthz` request (8 s timeout).
+3. Success → the URL is saved to `localStorage['ordi:apiUrl']` → reload.
+4. The API client (`apps/web/src/lib/api.ts`) builds the base as
+   `{saved URL}/api/v1`; in the browser the value is empty and everything works
+   same-origin, as before.
 
-Змінити інстанс = очистити `ordi:apiUrl` у localStorage (або дані застосунку).
+Changing the instance = clearing `ordi:apiUrl` in localStorage (or the app data).
 
-## 3. Автентифікація: чому Bearer, а не cookie
+## 3. Authentication: why Bearer and not a cookie
 
-Сесійна cookie має `SameSite=Lax` – з origin `tauri://localhost` (macOS) або
-`http://tauri.localhost` (Windows/Linux) вона крос-сайтова і **не буде
-надіслана**. Тому:
+The session cookie is `SameSite=Lax` – from the `tauri://localhost` (macOS) or
+`http://tauri.localhost` (Windows/Linux) origin it is cross-site and **will not be
+sent**. Therefore:
 
-- `POST /auth/login` повертає в тілі `sessionToken` (той самий токен, що йде в
-  cookie). Веб його ігнорує; десктоп (Login.tsx, лише при `isTauri`) зберігає в
+- `POST /auth/login` returns `sessionToken` in the body (the same token that goes into
+  the cookie). The web ignores it; the desktop (Login.tsx, only when `isTauri`) stores it in
   `localStorage['ordi:sessionToken']`.
-- API-клієнт додає `Authorization: Bearer <token>` до кожного запиту, коли
-  токен збережений.
-- Бекенд (`apps/api/src/core/auth.ts`): Bearer спершу шукається серед
-  API-токенів (SHA-256-хеш), а якщо не знайдено – серед **сесій** (це і є
-  десктопний випадок). Права – повний скоуп ролі, як у cookie-сесії.
-- `POST /auth/logout` відкликає сесію і з cookie, і з Bearer-заголовка;
-  Shell при виході чистить `ordi:sessionToken`.
+- The API client adds `Authorization: Bearer <token>` to every request when
+  a token is stored.
+- Backend (`apps/api/src/core/auth.ts`): the Bearer is first looked up among
+  API tokens (SHA-256 hash), and if not found – among **sessions** (that is the
+  desktop case). Permissions are the role's full scope, as with a cookie session.
+- `POST /auth/logout` revokes the session from both the cookie and the Bearer header;
+  on sign-out the Shell clears `ordi:sessionToken`.
 
-CORS: origin десктопа вже у дефолтному allowlist (`tauri://localhost`); для
-Windows/Linux додайте `http://tauri.localhost` в `CORS_ORIGINS` інстансу.
+CORS: the desktop origin is already in the default allowlist (`tauri://localhost`); for
+Windows/Linux add `http://tauri.localhost` to the instance's `CORS_ORIGINS`.
 
-## 4. Нативні можливості: де що живе
+## 4. Native features: where everything lives
 
-| Фіча (PRD §18) | Реалізація | Потік |
+| Feature (PRD §18) | Implementation | Flow |
 |---|---|---|
-| OS-нотифікації | `lib/sse.ts` → `notifyDesktop()` | SSE-подія з каталогу (призначення, згадка, оплата, quote accepted, рішення по відпустці, PR merged) → `plugin:notification\|notify` |
-| Бейдж непрочитаних | `NotificationsBell.tsx` → `setBadge()` | зміна `unread` → `Window.setBadgeCount` (dock/таскбар; трей-іконка і тултіп – з конфігу) |
-| Глобальний хоткей quick-add | Rust `main.rs` + `Shell.tsx` | `Cmd/Ctrl+Shift+O` зареєстрований у Rust (`setup`, best-effort) → показ/фокус вікна + emit `ordi://quick-add` → Shell відкриває модалку швидкого створення задачі |
-| Deep links `ordi://task/KLD-42` | конфіг `deep-link` + `lib/desktop.ts` | плагін емітить `deep-link://new-url` → парсинг `KEY-N` → `GET /search?q=KEY-N` → навігація на задачу |
-| Зовнішні посилання | `lib/desktop.ts` → `installExternalLinkHandler()` | делегований клік на `document` → `plugin:opener\|open_url` у системному браузері; вебв'ю ігнорує `target="_blank"`, тому без цього обробника посилання просто мертві |
-| Автозапуск | плагін `autostart` (Rust) | ініціалізований; вмикання – стандартний viклик плагіна |
-| Автооновлення | плагін `updater` + CI | підписані артефакти з релізів; endpoint і pubkey – у `tauri.conf.json → plugins.updater` |
-| Вхід у сторонні сервіси (GitHub App, GitHub OAuth, Slack, MCP-конектори) | `lib/desktop.ts` → `startExternalFlow()` | у вебі вкладка сама йде до провайдера; у десктопі флоу відкривається в системному браузері, вікно показує «Continue in your browser» і перезапитує змінене, коли повертається фокус (15 хв). Колбеки провайдерів публічні й автентифікуються підписаним `state`, бо redirect не несе bearer-токен десктопу. Маніфест GitHub App браузер отримує зі сторінки `GET /integrations/github-app/manifest/launch`, яка сама постить форму |
-| Свайп назад/вперед двома пальцями | Rust `main.rs` → `enable_swipe_navigation()` | wry вимикає жест, а в Tauri немає ключа конфігу, тож при старті вмикається напряму: macOS – `WKWebView.allowsBackForwardNavigationGestures` (з нативною анімацією), Linux – WebKitGTK `enable-back-forward-navigation-gestures`. Windows не чіпаємо: у WebView2 це лише для тачскрінів |
-| Меню «Workspace» (macOS) | Rust `main.rs` | New Task `⌘N`, Search `⌘K`, Toggle Sidebar `⌘\`, Settings… `⌘,`, Keyboard Shortcuts `⌘/` – пункти емітять `ordi://menu` з id команди, далі все робить веб-шар |
+| OS notifications | `lib/sse.ts` → `notifyDesktop()` | SSE event from the catalogue (assignment, mention, payment, quote accepted, leave decision, PR merged) → `plugin:notification\|notify` |
+| Unread badge | `NotificationsBell.tsx` → `setBadge()` | `unread` change → `Window.setBadgeCount` (dock/taskbar; tray icon and tooltip come from the config) |
+| Global quick-add hotkey | Rust `main.rs` + `Shell.tsx` | `Cmd/Ctrl+Shift+O` registered in Rust (`setup`, best-effort) → show/focus the window + emit `ordi://quick-add` → Shell opens the quick task creation modal |
+| Deep links `ordi://task/KLD-42` | `deep-link` config + `lib/desktop.ts` | the plugin emits `deep-link://new-url` → parse `KEY-N` → `GET /search?q=KEY-N` → navigate to the task |
+| External links | `lib/desktop.ts` → `installExternalLinkHandler()` | delegated click on `document` → `plugin:opener\|open_url` in the system browser; the webview ignores `target="_blank"`, so without this handler links are simply dead |
+| Autostart | `autostart` plugin (Rust) | initialised; enabling it is a standard plugin call |
+| Auto-update | `updater` plugin + CI | signed artefacts from releases; endpoint and pubkey are in `tauri.conf.json → plugins.updater` |
+| Signing in to third-party services (GitHub App, GitHub OAuth, Slack, MCP connectors) | `lib/desktop.ts` → `startExternalFlow()` | on the web the tab itself goes to the provider; on the desktop the flow opens in the system browser, the window shows "Continue in your browser" and re-fetches what changed when focus returns (15 min). Provider callbacks are public and authenticated with a signed `state`, because the redirect does not carry the desktop bearer token. The browser gets the GitHub App manifest from the `GET /integrations/github-app/manifest/launch` page, which posts the form itself |
+| Two-finger swipe back/forward | Rust `main.rs` → `enable_swipe_navigation()` | wry disables the gesture and Tauri has no config key for it, so it is enabled directly at startup: macOS – `WKWebView.allowsBackForwardNavigationGestures` (with the native animation), Linux – WebKitGTK `enable-back-forward-navigation-gestures`. Windows is left alone: in WebView2 this is for touchscreens only |
+| "Workspace" menu (macOS) | Rust `main.rs` | New Task `⌘N`, Search `⌘K`, Toggle Sidebar `⌘\`, Settings… `⌘,`, Keyboard Shortcuts `⌘/` – the items emit `ordi://menu` with the command id, and the web layer does the rest |
 
-Rust-код (`apps/desktop/src-tauri/src/main.rs`) свідомо мінімальний: ініт
-плагінів, реєстрація хоткея з обробником, меню macOS і ввімкнення свайпу. Уся логіка – у веб-шарі, щоб
-дифи не потребували перекомпіляції нативної частини.
+The Rust code (`apps/desktop/src-tauri/src/main.rs`) is deliberately minimal: plugin
+initialisation, hotkey registration with its handler, the macOS menu and enabling swipe. All the logic is in the web layer, so that
+diffs do not require recompiling the native part.
 
-## 5. Іконки
+## 5. Icons
 
 `apps/desktop/src-tauri/icons/` (32/128/128@2x/512 PNG, `icon.ico`,
-`icon.icns`) – згенеровані і **закомічені**; бандлеру нічого не треба
-довантажувати. Перегенерація (чистий Node, без залежностей):
+`icon.icns`) – generated and **committed**; the bundler does not need to
+fetch anything. Regeneration (plain Node, no dependencies):
 
 ```bash
 node scripts/gen-desktop-icons.mjs
 ```
 
-## 6. Збірка і релізи
+## 6. Build and releases
 
-- **Dev** (потрібен Rust + системні GTK/WebKit-залежності):
-  `pnpm --filter @ordi/desktop tauri dev` (сам підніме vite dev-сервер).
-- **Релізні білди**: пуш тега `v*` → `.github/workflows/desktop.yml` →
-  tauri-action збирає **macOS universal / Windows msi / Linux AppImage+deb**
-  і кладе їх у draft-реліз GitHub.
-## 5a. Вхід через браузер
+- **Dev** (requires Rust + the system GTK/WebKit dependencies):
+  `pnpm --filter @ordi/desktop tauri dev` (starts the vite dev server itself).
+- **Release builds**: pushing a `v*` tag → `.github/workflows/desktop.yml` →
+  tauri-action builds **macOS universal / Windows msi / Linux AppImage+deb**
+  and puts them in a draft GitHub release.
+## 5a. Signing in through the browser
 
-Замість вводити пошту й пароль удруге, застосунок відкриває браузер, де
-користувач уже залогінений. Схема – PKCE, щоб чужий застосунок, який
-перехопить `ordi://`, не міг обміняти код на сесію:
+Instead of entering the email and password a second time, the app opens the browser, where
+the user is already signed in. The scheme is PKCE, so that another app that
+intercepts `ordi://` cannot exchange the code for a session:
 
-1. Десктоп генерує `verifier` (лишає в себе) і `state`, шле на
-   `POST /auth/desktop/start` тільки `sha256(verifier)`, потім відкриває в
-   системному браузері `{instance}/desktop-auth?state=…`.
-2. Сторінка `/desktop-auth` вимагає логіну (якщо ні – кидає на
-   `/login?next=…` і повертає назад), показує назву пристрою та акаунт і
-   просить підтвердження.
-3. `POST /auth/desktop/approve` (з кукою браузера) створює одноразовий код.
-4. Браузер віддає код через `ordi://auth?code=…&state=…`; код також показано
-   на екрані, бо deep links спрацьовують не на кожному Linux-десктопі.
-5. Десктоп шле `POST /auth/desktop/exchange` з кодом і `verifier`; сервер
-   звіряє хеш, створює сесію і **видаляє** запит – код одноразовий.
+1. The desktop generates a `verifier` (keeps it to itself) and a `state`, sends only
+   `sha256(verifier)` to `POST /auth/desktop/start`, then opens
+   `{instance}/desktop-auth?state=…` in the system browser.
+2. The `/desktop-auth` page requires sign-in (if not signed in, it sends the user to
+   `/login?next=…` and back again), shows the device name and the account, and
+   asks for confirmation.
+3. `POST /auth/desktop/approve` (with the browser cookie) creates a one-time code.
+4. The browser hands the code over via `ordi://auth?code=…&state=…`; the code is also shown
+   on screen, because deep links do not fire on every Linux desktop.
+5. The desktop sends `POST /auth/desktop/exchange` with the code and the `verifier`; the server
+   checks the hash, creates a session and **deletes** the request – the code is single-use.
 
-Запити живуть 10 хвилин; прострочені чистяться при кожному новому старті.
-Слухач deep link для цього флоу живе в `pages/Login.tsx`, а не в `Shell`,
-бо на екрані входу шел ще не змонтований.
+Requests live for 10 minutes; expired ones are cleaned up on every new start.
+The deep link listener for this flow lives in `pages/Login.tsx`, not in `Shell`,
+because on the sign-in screen the shell is not mounted yet.
 
-Чотири речі, без яких вхід зривається з «Вхід через браузер не завершився»:
+Four things without which sign-in fails with "Browser sign-in did not complete":
 
-- **PKCE-хеш не залежить від `crypto.subtle`.** Він існує лише в secure
-  context, а десктоп працює на origin `tauri://localhost`, який частина
-  платформ таким не вважає – тоді падав найперший крок і браузер навіть не
-  відкривався. Є власна реалізація SHA-256 (`lib/sha256.ts`) як запасна.
+- **The PKCE hash does not depend on `crypto.subtle`.** It only exists in a secure
+  context, and the desktop runs on the `tauri://localhost` origin, which some
+  platforms do not consider secure – then the very first step failed and the browser did not even
+  open. There is our own SHA-256 implementation (`lib/sha256.ts`) as a fallback.
 
-- **`tauri-plugin-single-instance` реєструється першим.** На Windows і Linux
-  `ordi://…` запускає *новий* процес; плагін перехоплює його, віддає argv
-  запущеному екземпляру і той емітить `deep-link://new-url`. Без нього вікно,
-  яке чекає на код, не дізнається про нього ніколи.
-- **`verifier` лежить у `localStorage`, не в `sessionStorage`.** Deep link
-  може перезапустити застосунок, а новий webview не побачив би
-  `sessionStorage` попереднього – і не мав би чим викупити код.
-- **Холодний старт читає URL запуску** (`plugin:deep-link|get_current`):
-  якщо застосунок був закритий, посилання приходить аргументом, а не подією.
+- **`tauri-plugin-single-instance` is registered first.** On Windows and Linux
+  `ordi://…` launches a *new* process; the plugin intercepts it, hands the argv to
+  the running instance, and that instance emits `deep-link://new-url`. Without it the window
+  waiting for the code would never find out about it.
+- **The `verifier` is kept in `localStorage`, not in `sessionStorage`.** A deep link
+  may restart the app, and a new webview would not see the previous one's
+  `sessionStorage` – and would have nothing to redeem the code with.
+- **A cold start reads the launch URL** (`plugin:deep-link|get_current`):
+  if the app was closed, the link arrives as an argument, not as an event.
 
-Плюс на екрані входу є поле «вставте код» – остання лінія оборони, якщо
-deep link усе одно не спрацював (типово для частини Linux-десктопів).
+On top of that, the sign-in screen has a "paste the code" field – the last line of defence if
+the deep link still did not work (typical for some Linux desktops).
 
-## 5c. Кастомна титульна смуга (macOS)
+## 5c. Custom title bar (macOS)
 
-`titleBarStyle: "Overlay"` ховає нативну смугу, і «світлофори» лягають
-**поверх лівого верхнього кута вікна** – це сайдбар, а не смужка вкладок у
-правій колонці.
+`titleBarStyle: "Overlay"` hides the native bar, and the "traffic lights" sit
+**on top of the top-left corner of the window** – that is the sidebar, not the tab strip in the
+right column.
 
-Кнопки малює система, тож «покласти їх у div» не можна – але їхню позицію
-задає `trafficLightPosition` у `tauri.conf.json` (потребує `titleBarStyle:
-Overlay` і `decorations: true`). У нас вони на `{x:16, y:12}` – по центру
-порожньої смуги `h-9`, якою сайдбар починається **тільки на macOS**
-(`isMacDesktop`). Назва воркспейсу йде під нею, від лівого краю сайдбару, на
-всіх платформах однаково. Смужка вкладок при цьому в правій колонці, тож
-вкладки все одно в одному рядку з кнопками вікна.
+The buttons are drawn by the system, so you cannot "put them in a div" – but their position
+is set by `trafficLightPosition` in `tauri.conf.json` (requires `titleBarStyle:
+Overlay` and `decorations: true`). Ours are at `{x:16, y:12}` – centred in the
+empty `h-9` strip the sidebar starts with **on macOS only**
+(`isMacDesktop`). The workspace name goes below it, from the left edge of the sidebar, the same on
+all platforms. The tab strip, meanwhile, is in the right column, so the
+tabs are still on the same row as the window buttons.
 
-Спроба замість смуги зсунути назву вправо (`pl-[84px]`, як було у v1.5.4)
-виглядає компактніше, але з'їдає третину вузького сайдбару і має сенс лише
-на macOS – відкинуто у v1.5.5.
+The attempt to shift the name to the right instead of the strip (`pl-[84px]`, as in v1.5.4)
+looks more compact, but eats a third of the narrow sidebar and only makes sense
+on macOS – dropped in v1.5.5.
 
-Головне: **`data-tauri-drag-region` не працює без дозволу
-`core:window:allow-start-dragging`** у `capabilities/default.json`. Він не
-входить у `core:default`, і без нього вікно просто неможливо перетягнути –
-мовчки, без жодної помилки. Перевірити, що дозвіл на місці, можна в
-згенерованому `src-tauri/gen/schemas/capabilities.json`.
+The main thing: **`data-tauri-drag-region` does not work without the
+`core:window:allow-start-dragging` permission** in `capabilities/default.json`. It is not
+part of `core:default`, and without it the window simply cannot be dragged –
+silently, with no error at all. You can check that the permission is in place in the
+generated `src-tauri/gen/schemas/capabilities.json`.
 
-Швидка перевірка змін титульної смуги без релізу: `pnpm --filter @ordi/desktop dev`
-(потрібен Rust) – збірка секунди, а не повний CI-реліз.
+A quick check of title bar changes without a release: `pnpm --filter @ordi/desktop dev`
+(requires Rust) – a build takes seconds, not a full CI release.
 
-## 5b. Завантаження застосунку з вебу
+## 5b. Downloading the app from the web
 
-`GET /api/v1/desktop/latest` віддає версію і посилання на інсталятори,
-беручи їх з GitHub Releases і кешуючи на годину. Сторінка `/download`
-(пункт «Завантажити застосунок» у меню воркспейсу вгорі сайдбару, приховано
-в самому десктопі) визначає платформу й ставить потрібну кнопку першою.
+`GET /api/v1/desktop/latest` returns the version and the installer links,
+taking them from GitHub Releases and caching them for an hour. The `/download` page
+(the "Download desktop app" item in the workspace menu at the top of the sidebar, hidden
+in the desktop app itself) detects the platform and puts the right button first.
 
-Репозиторій налаштовується через `DESKTOP_RELEASES_REPO` – форк вкаже свій.
-Якщо інстанс без вихідної мережі, ендпоінт віддає порожній список і сторінка
-показує посилання на сторінку релізів.
+The repository is configured via `DESKTOP_RELEASES_REPO` – a fork points to its own.
+If the instance has no outbound network, the endpoint returns an empty list and the page
+shows a link to the releases page.
 
-## 6a. Автооновлення
+## 6a. Auto-update
 
-Увімкнене і працює через GitHub-релізи:
+Enabled and working through GitHub releases:
 
-- `bundle.createUpdaterArtifacts: true` – tauri-action кладе в реліз підписані
-  артефакти оновлення разом із `latest.json`.
-- **`app` обовʼязково має бути в `bundle.targets`**: на macOS пакет оновлення
-  робиться саме з `.app`-бандла. Без нього збірка дає лише `.dmg` для ручної
-  установки, а в `latest.json` не буде платформ `darwin-*` – і Mac-клієнти
-  мовчки ніколи не побачать оновлення. Перевірка після релізу:
+- `bundle.createUpdaterArtifacts: true` – tauri-action puts signed
+  update artefacts into the release along with `latest.json`.
+- **`app` must be in `bundle.targets`**: on macOS the update package
+  is built from the `.app` bundle specifically. Without it the build produces only a `.dmg` for manual
+  installation, and `latest.json` will have no `darwin-*` platforms – and Mac clients
+  will silently never see an update. Check after a release:
   `curl -sSL .../releases/latest/download/latest.json | jq '.platforms | keys'`
-  має містити `darwin-aarch64` і `darwin-x86_64`.
-- `plugins.updater.endpoints` вказує на
+  must contain `darwin-aarch64` and `darwin-x86_64`.
+- `plugins.updater.endpoints` points to
   `https://github.com/romirom11/ordi/releases/latest/download/latest.json`
-  (працює, бо репозиторій публічний).
-- `plugins.updater.pubkey` – публічний ключ; приватний лежить у секреті
-  репозиторію `TAURI_SIGNING_PRIVATE_KEY` (без пароля, тому
-  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` порожній). Оновлення без валідного
-  підпису застосунок відхиляє.
-- Потік: на старті Rust (`stage_update` у `src/main.rs`) фоново перевіряє
-  оновлення, завантажує і встановлює його, після чого емітить подію
-  `ordi://update-ready`. Веб-шар показує тост із кнопкою «Перезапустити»,
-  яка викликає `process.relaunch()`.
+  (works because the repository is public).
+- `plugins.updater.pubkey` – the public key; the private one is in the repository secret
+  `TAURI_SIGNING_PRIVATE_KEY` (no password, so
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` is empty). The app rejects updates without a valid
+  signature.
+- Flow: at startup Rust (`stage_update` in `src/main.rs`) checks for an
+  update in the background, downloads and installs it, then emits the
+  `ordi://update-ready` event. The web layer shows a toast with a "Restart" button,
+  which calls `process.relaunch()`.
 
-Ротація ключа: `pnpm --filter @ordi/desktop exec tauri signer generate`,
-новий публічний ключ у `tauri.conf.json`, новий приватний – у секрет.
-Клієнти зі старим ключем перестануть приймати оновлення, тому нову версію
-доведеться поставити вручну.
+Key rotation: `pnpm --filter @ordi/desktop exec tauri signer generate`,
+the new public key goes into `tauri.conf.json`, the new private one – into the secret.
+Clients with the old key will stop accepting updates, so the new version
+will have to be installed manually.
 
-## 6b. Дозволи (capabilities)
+## 6b. Permissions (capabilities)
 
-Tauri 2 не дає веб-шару нічого без capability-файлу, тому
-`src-tauri/capabilities/default.json` явно дозволяє: `core:default` (події),
-`core:window:allow-set-badge-count` (бейдж), `notification:default`,
-`updater:default`, `process:allow-restart`, `deep-link:default`. Без цього
-файлу нативні сповіщення, бейдж і deep links мовчки не працюють.
+Tauri 2 gives the web layer nothing without a capability file, so
+`src-tauri/capabilities/default.json` explicitly allows: `core:default` (events),
+`core:window:allow-set-badge-count` (badge), `notification:default`,
+`updater:default`, `process:allow-restart`, `deep-link:default`. Without this
+file native notifications, the badge and deep links silently do not work.
 
-Відкриття посилань потребує **двох** записів: `opener:allow-open-url` вмикає
-саму команду, а `opener:allow-default-urls` дає їй scope (`http://*`,
-`https://*`, `mailto:*`, `tel:*`). Сам лише `allow-open-url` залишає scope
-порожнім, і `open_url` відхиляє **будь-яку** адресу з `ForbiddenUrl` – кнопка
-натискається, браузер не відкривається.
+Opening links requires **two** entries: `opener:allow-open-url` enables
+the command itself, and `opener:allow-default-urls` gives it a scope (`http://*`,
+`https://*`, `mailto:*`, `tel:*`). `allow-open-url` on its own leaves the scope
+empty, and `open_url` rejects **any** address with `ForbiddenUrl` – the button
+can be clicked, but the browser does not open.
 
-## 7. Статус верифікації
+## 7. Verification status
 
-Перевірено наживо в цьому репозиторії (без компіляції Rust):
-- bearer-цикл: login → `/me` 200 → logout → 401 (curl);
-- повна симуляція Tauri-рантайму в headless-Chromium (інʼєкція
-  `window.__TAURI__` до завантаження): InstanceGate → валідація → логін →
-  токен збережено → застосунок працює крос-оріджн, 0 помилок консолі.
+Verified live in this repository (without compiling Rust):
+- bearer cycle: login → `/me` 200 → logout → 401 (curl);
+- full simulation of the Tauri runtime in headless Chromium (injecting
+  `window.__TAURI__` before load): InstanceGate → validation → login →
+  token saved → the app works cross-origin, 0 console errors.
 
-**Не перевірено тут** (немає GTK/WebKit-тулчейна): компіляція Rust і самі
-бінарники – це робить CI на тегу. Якщо перший прогін workflow десь
-спіткнеться, правки очікуються точкові (версії плагінів/сигнатури), не
-архітектурні.
+**Not verified here** (no GTK/WebKit toolchain): compiling Rust and the
+binaries themselves – CI does that on a tag. If the first workflow run
+stumbles somewhere, the fixes are expected to be targeted (plugin versions/signatures), not
+architectural.

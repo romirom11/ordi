@@ -1,7 +1,7 @@
 # ordi desktop (Tauri 2)
 
-> Повна внутрішня документація механіки (перший запуск, bearer-auth, нативні
-> фічі, релізи): **[`docs/desktop.md`](../../docs/desktop.md)**.
+> Full internal documentation of the mechanics (first launch, bearer auth, native
+> features, releases): **[`docs/desktop.md`](../../docs/desktop.md)**.
 
 Wraps `apps/web` with no separate UI code (PRD §18). Native additions, all wired
 through `apps/web/src/lib/desktop.ts` (via `withGlobalTauri`, no extra npm deps):

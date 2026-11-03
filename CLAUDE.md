@@ -1,5 +1,13 @@
 # Working in this repository
 
+## Language
+
+Write all documentation in English: READMEs, everything under `docs/`, the
+changelog, release notes, plans, code comments, commit messages and PR
+descriptions. This holds even when the conversation is in another language.
+Ukrainian appears only as literal data, such as a quoted UI string from the
+Ukrainian locale or a Cyrillic example name.
+
 ## Branches
 
 Name every branch you push `<type>/<what-it-does>`, in kebab-case, from the
