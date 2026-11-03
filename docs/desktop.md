@@ -190,10 +190,21 @@ Enabled and working through GitHub releases:
   `TAURI_SIGNING_PRIVATE_KEY` (no password, so
   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` is empty). The app rejects updates without a valid
   signature.
-- Flow: at startup Rust (`stage_update` in `src/main.rs`) checks for an
-  update in the background, downloads and installs it, then emits the
-  `ordi://update-ready` event. The web layer shows a toast with a "Restart" button,
-  which calls `process.relaunch()`.
+- Flow: Rust (`check_and_download` in `src/main.rs`) quietly checks for an
+  update at startup, then every 30 minutes, and also right away when the web
+  layer sees that the server is newer (the `check_update` command). It only
+  **downloads** the new build and keeps it in memory, then emits
+  `ordi://update-ready`. Until a build is ready, the user sees nothing.
+- Once the build is ready, an "Update to vX" row appears in the sidebar
+  footer above Settings (`UpdateIndicator.tsx`). Clicking it calls
+  `install_update`: install and relaunch. Installing deliberately does not
+  happen in the background: on Windows the installer closes the app, and
+  the `.deb` asks for a password. On macOS the downloaded build is also
+  installed when the app quits.
+- If the server is older than the app, the same spot shows a yellow
+  "Server needs an update" row with a link to the instructions; it can be
+  dismissed for a specific pair of versions. On the web, a new bundle is
+  picked up by a full reload on the next page navigation.
 
 Key rotation: `pnpm --filter @ordi/desktop exec tauri signer generate`,
 the new public key goes into `tauri.conf.json`, the new private one – into the secret.
