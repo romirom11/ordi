@@ -1,254 +1,254 @@
-# Технічне завдання: ordi
+# Product requirements document: ordi
 
-Операційна платформа агенції: CRM, проєкти й задачі, knowledge base, тайм-трекінг, фінанси. Референси за модулями: Twenty (CRM, кастомізація даних), Plane (проєкти, цикли, pages, інтеграції), Invoice Ninja (рахунки, quotes, оплати, нагадування). Продукт розробляється одразу як production-ready, без проміжного MVP-скоупу: всі описані модулі входять у реліз 1.0.
+Agency operations platform: CRM, projects and tasks, knowledge base, time tracking, finance. References per module: Twenty (CRM, data customisation), Plane (projects, cycles, pages, integrations), Invoice Ninja (invoices, quotes, payments, reminders). The product is built production-ready from the start, with no intermediate MVP scope: every module described here is part of the 1.0 release.
 
-Версія документа: 3.2. Назва продукту: ordi. Розділи, що спираються на дослідження референсів, зведені в Додатку A (мапа покриття Plane / Twenty / Invoice Ninja / Frappe HR / Productive). Зміни 3.2: CRM розділено на research leads і кваліфіковані deals; Work став основною робочою поверхнею; sales activities, manual playbooks, ранковий digest і durable email delivery зафіксовані як продуктовий та операційний контракт. Зміни 3.1: усунено суперечність по Resourcing; internal-проєкти через nullable company_id + kind (без фіктивного клієнта); повна механіка кастомних полів (5.5); redaction і політика зберігання чутливого аудиту (14.4); optimistic locking через version (не updated_at); формальні RPO/RTO і PITR (19.2); повна специфікація доставки подій outbox (3.3).
-
----
-
-## 1. Мета і призначення
-
-### 1.1. Проблема
-
-Операційні дані агенції розкидані по незвʼязаних інструментах: клієнти в CRM, задачі в трекері, документація у вікі, час у таймері, рахунки в білінгу. Наслідки: перемикання контексту, дублювання даних, відсутність наскрізної картини "клієнт → угода → проєкт → задачі → час → рахунок → оплата", крихкий glue-код між чужими API, неможливість контролювати доступ наскрізно (хто бачить фінанси, хто бачить конкретний проєкт).
-
-### 1.2. Рішення
-
-Один застосунок з однією базою, який покриває шість доменів:
-
-1. **CRM**: leads, компанії, контакти, Work-черга, sales activities, playbooks, угоди, нотатки, історія.
-2. **Projects**: проєкти, задачі, цикли, звʼязки, воркфлоу, intake.
-3. **Knowledge Base**: простори, сторінки, версії, привʼязка до проєктів.
-4. **Time**: тайм-трекінг по задачах, ставки, білінг часу.
-5. **Finance**: quotes, рахунки, оплати, повторювані, нагадування, витрати, собівартість і прибутковість.
-6. **People (HR)**: співробітники, lifecycle, відпустки/відсутності, хайринг, компенсація як cost rate.
-
-Плюс наскрізні: RBAC, git-інтеграції, автоматизації на шині подій, пошук, нотифікації, аудит, MCP-агент.
-
-### 1.3. Ключові принципи
-
-- **Один API як єдиний контракт.** Веб, десктоп (Tauri) і MCP-агент є рівноправними клієнтами одного REST API. Бізнес-логіка живе тільки в доменних сервісах.
-- **Модульні домени.** Кожен домен самодостатній: свій зріз схеми, сервіс, ендпоінти, події. Міжмодульна взаємодія: FK у БД, шина подій, спільні контракти. Новий домен не модифікує наявні.
-- **RBAC як наскрізний шар.** Права перевіряються на бекенді для кожного запиту; UI лише приховує недоступне. Доступ керується на двох рівнях: можливості (permissions через ролі) і ресурси (членство в проєктах/просторах).
-- **Agent-first.** Кожна дія, доступна людині, доступна агенту через API/MCP у межах прав його токена.
-- **Кастомізація без міграцій.** Статуси, типи задач, типи проєктів, етапи угод, кастомні поля, ролі, шаблони: все конфігурується даними, а не кодом.
-- **Мінімалістичний UX.** Щільний, клавіатурний, command palette, peek-панелі, без візуального шуму.
-- **Self-hosted** на Dokploy; зовнішні залежності тільки SMTP і S3-сумісне сховище.
-
-### 1.4. Масштаб
-
-Single-tenant, до 50 користувачів (включно з guest-доступами), до ~1000 клієнтів, ~500 проєктів, ~50 000 задач, ~10 000 рахунків сукупно. Архітектура свідомо не оптимізується під більше: пріоритет у простоті підтримки.
+Document version: 3.2. Product name: ordi. Sections based on research into the references are summarised in Appendix A (coverage map of Plane / Twenty / Invoice Ninja / Frappe HR / Productive). Changes in 3.2: CRM split into research leads and qualified deals; Work became the main working surface; sales activities, manual playbooks, the morning digest and durable email delivery are fixed as a product and operational contract. Changes in 3.1: resolved the contradiction around Resourcing; internal projects via nullable company_id + kind (no fictitious client); full custom field mechanics (5.5); redaction and a retention policy for sensitive audit records (14.4); optimistic locking via version (not updated_at); formal RPO/RTO and PITR (19.2); full specification of outbox event delivery (3.3).
 
 ---
 
-## 2. Технологічний стек
+## 1. Goal and purpose
 
-| Шар | Технологія | Обґрунтування |
+### 1.1. Problem
+
+The agency's operational data is scattered across unconnected tools: clients in a CRM, tasks in a tracker, documentation in a wiki, time in a timer, invoices in billing. Consequences: context switching, duplicated data, no end-to-end picture of "client → deal → project → tasks → time → invoice → payment", brittle glue code between third-party APIs, and no way to control access end to end (who sees finance, who sees a specific project).
+
+### 1.2. Solution
+
+One application with one database covering six domains:
+
+1. **CRM**: leads, companies, contacts, the Work queue, sales activities, playbooks, deals, notes, history.
+2. **Projects**: projects, tasks, cycles, relations, workflows, intake.
+3. **Knowledge Base**: spaces, pages, versions, linking to projects.
+4. **Time**: time tracking against tasks, rates, time billing.
+5. **Finance**: quotes, invoices, payments, recurring invoices, reminders, expenses, cost and profitability.
+6. **People (HR)**: employees, lifecycle, leave/absences, hiring, compensation as a cost rate.
+
+Plus cross-cutting concerns: RBAC, git integrations, automations on the event bus, search, notifications, audit, MCP agent.
+
+### 1.3. Key principles
+
+- **One API as the single contract.** The web app, the desktop app (Tauri) and the MCP agent are equal clients of one REST API. Business logic lives only in domain services.
+- **Modular domains.** Each domain is self-contained: its own slice of the schema, service, endpoints, events. Cross-module interaction: FKs in the DB, the event bus, shared contracts. A new domain does not modify existing ones.
+- **RBAC as a cross-cutting layer.** Permissions are checked on the backend for every request; the UI only hides what is unavailable. Access is controlled at two levels: capabilities (permissions via roles) and resources (membership in projects/spaces).
+- **Agent-first.** Every action available to a human is available to an agent via the API/MCP, within the permissions of its token.
+- **Customisation without migrations.** Statuses, task types, project types, deal stages, custom fields, roles, templates: everything is configured through data, not code.
+- **Minimalist UX.** Dense, keyboard-driven, command palette, peek panels, no visual noise.
+- **Self-hosted** on Dokploy; the only external dependencies are SMTP and S3-compatible storage.
+
+### 1.4. Scale
+
+Single-tenant, up to 50 users (including guest access), up to ~1,000 clients, ~500 projects, ~50,000 tasks, ~10,000 invoices in total. The architecture is deliberately not optimised for more: the priority is ease of maintenance.
+
+---
+
+## 2. Technology stack
+
+| Layer | Technology | Rationale |
 |---|---|---|
-| БД | PostgreSQL 16+ | JSONB, FTS, тригери, надійність |
-| ORM / міграції | Drizzle ORM + drizzle-kit | Типобезпека, адитивні міграції |
-| API | Hono (Node.js 22 LTS, TS) | Легкий, типізовані маршрути, OpenAPI |
-| Валідація | Zod (спільні схеми в packages/shared) | Один source of truth для API, UI, MCP |
-| Auth | Better Auth | Сесії, 2FA, інтеграція з Drizzle |
-| Веб | React 19 + Vite + TanStack Router/Query | Стандартна SPA |
-| UI | shadcn/ui + Tailwind | Мінімалізм, повний контроль |
-| Rich text | Tiptap (JSON у БД) | Задачі, нотатки, KB-сторінки, коментарі |
-| Десктоп | Tauri 2 | Той самий фронт, нативні білди |
-| MCP | TypeScript MCP SDK | Агент поверх API |
-| PDF | Typst (серверний рендер) | Рахунки, quotes |
-| Email | Nodemailer + SMTP | Відправка документів і нагадувань |
-| Файли | S3-сумісне (MinIO / R2) | Вкладення, PDF-артефакти |
-| Черга | pg-boss поверх Postgres | Нагадування, recurring, вебхуки, email; без Redis |
-| Монорепо | pnpm workspaces + Turborepo | Спільні пакети, один CI |
-| Деплой | Docker (api, web) на Dokploy | Наявна інфраструктура |
+| DB | PostgreSQL 16+ | JSONB, FTS, triggers, reliability |
+| ORM / migrations | Drizzle ORM + drizzle-kit | Type safety, additive migrations |
+| API | Hono (Node.js 22 LTS, TS) | Lightweight, typed routes, OpenAPI |
+| Validation | Zod (shared schemas in packages/shared) | A single source of truth for the API, UI and MCP |
+| Auth | Better Auth | Sessions, 2FA, Drizzle integration |
+| Web | React 19 + Vite + TanStack Router/Query | Standard SPA |
+| UI | shadcn/ui + Tailwind | Minimalism, full control |
+| Rich text | Tiptap (JSON in the DB) | Tasks, notes, KB pages, comments |
+| Desktop | Tauri 2 | The same frontend, native builds |
+| MCP | TypeScript MCP SDK | Agent on top of the API |
+| PDF | Typst (server-side rendering) | Invoices, quotes |
+| Email | Nodemailer + SMTP | Sending documents and reminders |
+| Files | S3-compatible (MinIO / R2) | Attachments, PDF artefacts |
+| Queue | pg-boss on top of Postgres | Reminders, recurring jobs, webhooks, email; no Redis |
+| Monorepo | pnpm workspaces + Turborepo | Shared packages, one CI |
+| Deployment | Docker (api, web) on Dokploy | Existing infrastructure |
 
-**Архітектурні межі.** Технології нижче не використовуються не тому, що вони погані, а тому, що на цільовому масштабі й за соло-підтримки їхня операційна ціна перевищує користь. Для кожної зафіксовано тригер перегляду й шлях міграції, який не ламає доменні модулі:
+**Architectural boundaries.** The technologies below are left out not because they are bad, but because at the target scale and with solo maintenance their operational cost outweighs the benefit. For each one, a review trigger and a migration path that does not break the domain modules are recorded:
 
-| Технологія | Чому не зараз | Тригер перегляду | Шлях міграції |
+| Technology | Why not now | Review trigger | Migration path |
 |---|---|---|---|
-| Redis | pg-boss покриває черги; гарячий кеш не потрібен на цих обсягах; мінус один stateful-сервіс в опіці (бекапи, версії, моніторинг) | Горизонтальне масштабування API: SSE fan-out між репліками, або потреба кешу | Redis pub/sub підключається за інтерфейсом EventBroadcaster; черга лишається на pg-boss або мігрує на BullMQ |
-| Мікросервіси | Вигода мікросервісів: незалежні релізні цикли кількох команд; ціна: розподілений дебаг, версіонування контрактів, мережеві failure modes. Соло-оператор платить усю ціну без вигоди | Кілька команд з незалежними циклами релізів | Модульний моноліт вже тримає межі доменів: модуль виноситься в сервіс по наявних контрактах |
-| GraphQL | REST+OpenAPI дає типізований клієнт кодогенерацією; guard-на-маршрут простіший за field-level authz (RBAC у нас центральний); MCP, вебхуки й публічні сторінки природно RESTові | Треті сторони з потребою гнучких клієнтських запитів | GraphQL-шар поверх тих самих доменних сервісів |
-| Окремий realtime-сервер | SSE з API достатній для інвалідації кешу й нотифікацій; окремий WS-процес це ще один деплой і авторизаційний шар | Співредагування/presence (CRDT) або тисячі одночасних зʼєднань | WS-сервіс поверх шини подій |
-| Kubernetes | Dokploy+Docker покриває один хост; k8s це податок на оркестрацію без потреби в оркестрації | Мультихост / HA-вимоги | Compose-сервіси мапляться в Helm 1:1 |
+| Redis | pg-boss covers queues; a hot cache is not needed at these volumes; one fewer stateful service to look after (backups, versions, monitoring) | Horizontal scaling of the API: SSE fan-out across replicas, or a need for a cache | Redis pub/sub plugs in behind the EventBroadcaster interface; the queue stays on pg-boss or migrates to BullMQ |
+| Microservices | The benefit of microservices: independent release cycles for several teams; the cost: distributed debugging, contract versioning, network failure modes. A solo operator pays the full cost with none of the benefit | Several teams with independent release cycles | The modular monolith already holds the domain boundaries: a module is extracted into a service along the existing contracts |
+| GraphQL | REST+OpenAPI gives a typed client through code generation; a per-route guard is simpler than field-level authz (our RBAC is centralised); MCP, webhooks and public pages are naturally RESTful | Third parties needing flexible client-side queries | A GraphQL layer on top of the same domain services |
+| Separate realtime server | SSE from the API is enough for cache invalidation and notifications; a separate WS process is one more deployment and one more authorisation layer | Co-editing/presence (CRDT) or thousands of concurrent connections | A WS service on top of the event bus |
+| Kubernetes | Dokploy+Docker covers a single host; k8s is an orchestration tax with no need for orchestration | Multi-host / HA requirements | Compose services map to Helm 1:1 |
 
-### 2.1. Монорепозиторій
+### 2.1. Monorepo
 
 ```
 agency-os/
 ├── apps/
-│   ├── api/          # Hono API, доменні модулі, воркери pg-boss
+│   ├── api/          # Hono API, domain modules, pg-boss workers
 │   ├── web/          # React SPA
-│   └── desktop/      # Tauri-обгортка apps/web
+│   └── desktop/      # Tauri wrapper for apps/web
 ├── packages/
-│   ├── db/           # Drizzle-схема, міграції
-│   ├── shared/       # Zod-схеми, типи, каталог permissions, константи
-│   └── mcp/          # MCP-сервер (клієнт API)
+│   ├── db/           # Drizzle schema, migrations
+│   ├── shared/       # Zod schemas, types, permissions catalogue, constants
+│   └── mcp/          # MCP server (API client)
 ├── docker/
 └── turbo.json
 ```
 
 ---
 
-## 3. Загальна архітектура
+## 3. Overall architecture
 
-### 3.1. Шари
+### 3.1. Layers
 
 ```
 ┌──────────┐ ┌───────────────┐ ┌───────────┐ ┌─────────────────┐
-│ Web SPA  │ │ Desktop(Tauri)│ │ MCP-агент │ │ Git-провайдери  │
-└────┬─────┘ └──────┬────────┘ └─────┬─────┘ │ (вх. вебхуки)   │
+│ Web SPA  │ │ Desktop(Tauri)│ │ MCP agent │ │ Git providers   │
+└────┬─────┘ └──────┬────────┘ └─────┬─────┘ │ (inbound hooks) │
      └──────────────┼────────────────┘       └───────┬─────────┘
                     ▼                                ▼
           ┌───────────────────────────────────────────────┐
           │              REST API (Hono)                  │
-          │  auth → RBAC guard → валідація → маршрут      │
+          │  auth → RBAC guard → validation → route       │
           └──────────────────────┬────────────────────────┘
                                  ▼
      ┌────────────────────────────────────────────────────┐
-     │                 Доменні модулі                     │
+     │                 Domain modules                     │
      │ core │ crm │ projects │ kb │ time │ finance │ integ│
      └──────────────────────┬─────────────────────────────┘
                             ▼
                  ┌─────────────────────┐        ┌─────────┐
                  │ Drizzle → Postgres  │◄──────►│ pg-boss │
-                 └─────────────────────┘        │ воркери │
+                 └─────────────────────┘        │ workers │
                                                 └─────────┘
 ```
 
-Правила шарів (обовʼязкові):
+Layer rules (mandatory):
 
-1. Клієнти не містять бізнес-логіки і не є джерелом прав: RBAC на бекенді, UI лише відображає.
-2. Доменний модуль не імпортує сервіс іншого модуля напряму: взаємодія через FK, шину подій або read-контракти в shared.
-3. SQL тільки в доменних сервісах через Drizzle.
-4. Кожен маршрут декларує required permission; кожен сервісний метод, що працює з ресурсом обмеженого доступу, викликає resource-check (див. розділ 4).
+1. Clients contain no business logic and are not a source of permissions: RBAC lives on the backend, the UI only displays.
+2. A domain module does not import another module's service directly: interaction goes through FKs, the event bus or read contracts in shared.
+3. SQL only in domain services, via Drizzle.
+4. Every route declares a required permission; every service method that works with a restricted-access resource calls a resource check (see section 4).
 
-### 3.2. Структура доменного модуля
+### 3.2. Domain module structure
 
 ```
 projects/
-├── schema.ts        # таблиці домену
-├── service.ts       # бізнес-логіка
-├── access.ts        # ресурсні перевірки домену (canAccessProject тощо)
-├── routes.ts        # тонкі маршрути: guard → валідація → сервіс
-├── events.ts        # published/subscribed події
-├── automations.ts   # обробники подій (напр. git → статус)
+├── schema.ts        # domain tables
+├── service.ts       # business logic
+├── access.ts        # domain resource checks (canAccessProject etc.)
+├── routes.ts        # thin routes: guard → validation → service
+├── events.ts        # published/subscribed events
+├── automations.ts   # event handlers (e.g. git → status)
 └── *.test.ts
 ```
 
-### 3.3. Шина подій (outbox)
+### 3.3. Event bus (outbox)
 
-Публікація події в одній транзакції зі зміною даних (таблиця `events`): подія й зміна коммітяться атомарно, тому втратити подію при успішному записі даних неможливо. Окремий воркер (relay) читає неопубліковані події й передає їх обробникам через pg-boss. Типізований каталог подій у shared: кожна подія несе `type`, `aggregate_type`, `aggregate_id` (напр. project:KLD), `payload`, `occurred_at`.
+An event is published in the same transaction as the data change (the `events` table): the event and the change are committed atomically, so an event cannot be lost when the data write succeeds. A separate worker (relay) reads unpublished events and hands them to handlers via pg-boss. A typed event catalogue lives in shared: each event carries `type`, `aggregate_type`, `aggregate_id` (e.g. project:KLD), `payload`, `occurred_at`.
 
-**Гарантія доставки: at-least-once, не exactly-once.** Наслідок обовʼязковий: усі обробники ідемпотентні. Дедуплікація через таблицю `processed_events (consumer, event_id)`: перед обробкою consumer перевіряє, чи вже обробляв цей event_id; повторна доставка стає no-op. Це базовий захист від повторної обробки, а не покладання на "рівно один раз".
+**Delivery guarantee: at-least-once, not exactly-once.** The consequence is mandatory: all handlers are idempotent. Deduplication via the `processed_events (consumer, event_id)` table: before processing, a consumer checks whether it has already processed this event_id; a repeated delivery becomes a no-op. This is the baseline protection against reprocessing, rather than relying on "exactly once".
 
-**Retry і dead-letter:** невдала обробка ретраїться з експоненційним backoff (напр. 5 спроб: ~10с, 1хв, 5хв, 30хв, 2год). Після вичерпання подія переходить у dead-letter стан (не губиться), пишеться помилка і піднімається алерт у моніторинг. Отруйна подія не блокує чергу для інших.
+**Retry and dead-letter:** a failed handling attempt is retried with exponential backoff (e.g. 5 attempts: ~10s, 1min, 5min, 30min, 2h). Once the attempts are exhausted, the event moves to a dead-letter state (it is not lost), the error is logged and an alert is raised in monitoring. A poison event does not block the queue for others.
 
-**Ручний replay:** адмінка (audit.read + settings.manage) показує dead-letter чергу з деталями помилки; дія replay повертає подію в обробку (після фіксу коду/даних). Можливий і повторний прогін уже обробленої події (напр. після багфіксу обробника): виконується через скидання відповідного запису в processed_events, свідома адмінська операція.
+**Manual replay:** the admin area (audit.read + settings.manage) shows the dead-letter queue with error details; the replay action returns the event to processing (after the code/data has been fixed). An already processed event can also be re-run (e.g. after a handler bug fix): this is done by resetting the corresponding record in processed_events, a deliberate admin operation.
 
-**Порядок подій:** глобального total order немає (він дорогий і не потрібен). Гарантується per-aggregate ordering: події з однаковим `aggregate_id` обробляються строго послідовно (серіалізація за ключем агрегату), різні агрегати паралельно. Обробники НЕ покладаються на порядок між різними агрегатами. Для агенційного масштабу серіалізація в межах агрегату не впливає на пропускну здатність. (Крос-агрегатний глобальний порядок свідомо не гарантується, зафіксовано в компромісах 22.)
+**Event ordering:** there is no global total order (it is expensive and not needed). Per-aggregate ordering is guaranteed: events with the same `aggregate_id` are processed strictly sequentially (serialised by aggregate key), different aggregates in parallel. Handlers do NOT rely on ordering across different aggregates. At agency scale, serialisation within an aggregate has no effect on throughput. (A cross-aggregate global order is deliberately not guaranteed; recorded in the trade-offs, 22.)
 
-Ключові події: `deal.stage_changed`, `deal.won`, `project.completed`, `task.created`, `task.status_changed`, `task.assigned`, `comment.mentioned`, `cycle.completed`, `page.published`, `time.entry_created`, `quote.accepted`, `invoice.sent`, `invoice.viewed`, `invoice.overdue`, `payment.recorded`, `git.pr_opened`, `git.pr_merged`, `employee.onboarded`, `employee.exited`, `leave.requested`, `leave.decided`, `applicant.hired`.
+Key events: `deal.stage_changed`, `deal.won`, `project.completed`, `task.created`, `task.status_changed`, `task.assigned`, `comment.mentioned`, `cycle.completed`, `page.published`, `time.entry_created`, `quote.accepted`, `invoice.sent`, `invoice.viewed`, `invoice.overdue`, `payment.recorded`, `git.pr_opened`, `git.pr_merged`, `employee.onboarded`, `employee.exited`, `leave.requested`, `leave.decided`, `applicant.hired`.
 
-Споживачі: нотифікації, activity log, автоматизації (розділ 13.3), зовнішні вебхуки (та сама retry/DLQ-механіка), SSE.
+Consumers: notifications, activity log, automations (section 13.3), external webhooks (the same retry/DLQ mechanics), SSE.
 
 ### 3.4. Realtime
 
-SSE-ендпоінт `/api/v1/stream`: сервер пушить події, відфільтровані за правами користувача (подія по приватному проєкту йде тільки його членам). Фронт інвалідовує кеш TanStack Query. Конфлікти редагування: optimistic locking через окреме монотонне числове поле `version` (int, стартує з 1, інкрементиться тригером БД на кожному UPDATE, незалежно від годинника). Клієнт передає відому version у мутації; розбіжність → 409 з поточним станом сутності для перезавантаження. `updated_at` лишається виключно для відображення й сортування, ніколи для контролю конкурентності. Колаборативні курсори/CRDT не реалізуються: одночасне редагування одного rich-text поля вирішується блокуванням "хтось редагує" (advisory lock на 60 с з heartbeat) для KB-сторінок і описів задач.
+SSE endpoint `/api/v1/stream`: the server pushes events filtered by the user's permissions (an event about a private project goes only to its members). The frontend invalidates the TanStack Query cache. Edit conflicts: optimistic locking via a separate monotonic numeric `version` field (int, starts at 1, incremented by a DB trigger on every UPDATE, independent of the clock). The client sends the version it knows with the mutation; a mismatch → 409 with the entity's current state for reloading. `updated_at` remains purely for display and sorting, never for concurrency control. Collaborative cursors/CRDT are not implemented: simultaneous editing of the same rich-text field is resolved by a "someone is editing" lock (an advisory lock for 60 s with a heartbeat) for KB pages and task descriptions.
 
 ---
 
-## 4. RBAC: модель доступу
+## 4. RBAC: access model
 
-Наскрізний шар. Проєктується перш за домени, бо всі домени від нього залежать.
+A cross-cutting layer. It is designed before the domains, because all domains depend on it.
 
-### 4.1. Дворівнева модель
+### 4.1. Two-level model
 
-**Рівень 1: Permissions (що користувач вміє робити).** Каталог permissions зафіксований у коді (shared), ролі є конфігурованими наборами permissions. Користувач має рівно одну глобальну роль.
+**Level 1: Permissions (what a user can do).** The permissions catalogue is fixed in code (shared); roles are configurable sets of permissions. A user has exactly one global role.
 
-**Рівень 2: Resource access (до яких обʼєктів має доступ).** Окремі ресурси мають власні списки доступу: проєкти (private/workspace) і KB-простори (private/workspace). Доступ до підлеглих сутностей успадковується від ресурсу: задачі, коментарі, час, сторінки видимі тільки тим, хто має доступ до проєкту/простору.
+**Level 2: Resource access (which objects they can access).** Certain resources have their own access lists: projects (private/workspace) and KB spaces (private/workspace). Access to child entities is inherited from the resource: tasks, comments, time and pages are visible only to those who have access to the project/space.
 
-Фінальне правило авторизації запиту:
+The final authorisation rule for a request:
 
 ```
 allowed = hasPermission(user.role, required_permission)
        AND (resource is unrestricted OR isResourceMember(user, resource))
 ```
 
-### 4.2. Каталог permissions
+### 4.2. Permissions catalogue
 
-Формат `domain.action`. Повний каталог (версіонується в shared, UI редактора ролей рендериться з нього):
+Format `domain.action`. The full catalogue (versioned in shared; the role editor UI is rendered from it):
 
-| Домен | Permissions |
+| Domain | Permissions |
 |---|---|
 | crm | `crm.read`, `crm.write`, `crm.delete`, `crm.export` |
 | deals | `deals.read`, `deals.write`, `deals.delete` |
-| projects | `projects.read` (бачити workspace-проєкти), `projects.create`, `projects.write` (налаштування проєктів, де член з роллю admin), `projects.delete`, `projects.export` |
+| projects | `projects.read` (see workspace projects), `projects.create`, `projects.write` (settings of projects where the user is a member with the admin role), `projects.delete`, `projects.export` |
 | kb | `kb.read`, `kb.write`, `kb.manage_spaces` |
-| time | `time.track` (вести свій час), `time.read_all` (бачити чужий час), `time.manage` (редагувати чужі записи, ставки) |
-| finance | `finance.read`, `finance.write` (створення/редагування документів), `finance.send`, `finance.payments` (фіксація оплат), `finance.delete`, `finance.settings` (ставки податків, номерація, нагадування), `finance.export`, `finance.read_costs` (собівартість, прибутковість, витрати на ЗП) |
+| time | `time.track` (track your own time), `time.read_all` (see other people's time), `time.manage` (edit other people's entries, rates) |
+| finance | `finance.read`, `finance.write` (creating/editing documents), `finance.send`, `finance.payments` (recording payments), `finance.delete`, `finance.settings` (tax rates, numbering, reminders), `finance.export`, `finance.read_costs` (cost, profitability, payroll costs) |
 | people | `people.read`, `people.read_sensitive`, `people.read_compensation`, `people.write`, `people.manage_leave`, `people.approve_leave`, `people.recruit` |
 | integrations | `integrations.manage` |
-| settings | `settings.manage` (реквізити, шаблони, кастомні поля, типи), `users.manage`, `roles.manage`, `audit.read` |
+| settings | `settings.manage` (business details, templates, custom fields, types), `users.manage`, `roles.manage`, `audit.read` |
 
-Правило безпеки: невідомий permission = заборонено. Read не мається на увазі write-ом: набори явні.
+Security rule: an unknown permission = denied. Read is not implied by write: the sets are explicit.
 
-### 4.3. Ролі
+### 4.3. Roles
 
-Таблиці `roles` (id, name, description, is_system) і `role_permissions` (role_id, permission). Системні (нередаговані, is_system=true):
+Tables `roles` (id, name, description, is_system) and `role_permissions` (role_id, permission). System roles (not editable, is_system=true):
 
-- **Owner**: всі permissions, не можна видалити останнього Owner.
-- **Admin**: всі, крім managementу Owner.
+- **Owner**: all permissions; the last Owner cannot be removed.
+- **Admin**: everything except managing Owners.
 
-Преднастроєні редаговані ролі (сід, admin може змінювати/створювати власні через UI-редактор ролей: матриця domain × action):
+Preconfigured editable roles (seeded; an admin can change them or create their own through the role editor UI: a domain × action matrix):
 
-- **Manager**: все по crm/deals/projects/kb/time включно з read_all, фінанси read+write+send без settings/delete.
-- **Member**: crm.read, deals.read/write, projects.read/create, kb.read/write, time.track. Фінансів не бачить взагалі: розділ відсутній у навігації, ендпоінти повертають 403, фінансові поля (сума угоди видима, але таб "Рахунки" у проєкті/клієнті прихований).
-- **Finance**: crm.read, finance.* повністю (включно з read_costs), projects.read, time.read_all (для білінгу часу і собівартості), people.read_compensation видається вибірково.
-- **HR**: people.* повністю, крім read_compensation (видається окремо вибірково); projects.read для онбординг-задач.
-- **Guest** (зовнішній: підрядник або клієнт): жодних глобальних permissions, крім неявних; бачить виключно проєкти і KB-простори, куди доданий членом, у них: задачі read/write (конфігурується на членстві), коментарі, свої time entries. CRM, deals, finance, people, налаштування недоступні повністю.
+- **Manager**: everything in crm/deals/projects/kb/time, including read_all; finance read+write+send without settings/delete.
+- **Member**: crm.read, deals.read/write, projects.read/create, kb.read/write, time.track. Does not see finance at all: the section is absent from navigation, the endpoints return 403, financial fields (the deal amount is visible, but the "Invoices" tab in a project/client is hidden).
+- **Finance**: crm.read, finance.* in full (including read_costs), projects.read, time.read_all (for time billing and cost), people.read_compensation granted selectively.
+- **HR**: people.* in full, except read_compensation (granted separately and selectively); projects.read for onboarding tasks.
+- **Guest** (external: a contractor or a client): no global permissions apart from implicit ones; sees only the projects and KB spaces they have been added to as a member, and within them: tasks read/write (configured on the membership), comments, their own time entries. CRM, deals, finance, people and settings are entirely unavailable.
 
-### 4.4. Ресурсний доступ
+### 4.4. Resource access
 
-**Проєкти.** `projects.visibility`: `workspace` (усі з projects.read) або `private` (тільки члени). Таблиця `project_members` (project_id, user_id, role: admin | member | viewer, can_write_tasks bool для guest-нюансу). Ролі членства:
+**Projects.** `projects.visibility`: `workspace` (everyone with projects.read) or `private` (members only). Table `project_members` (project_id, user_id, role: admin | member | viewer, can_write_tasks bool for the guest nuance). Membership roles:
 
-- **admin**: налаштування проєкту (воркфлоу, типи, члени, git-привʼязка), все з задачами.
-- **member**: створення/редагування задач, коментарі, час.
+- **admin**: project settings (workflow, types, members, git linking), everything to do with tasks.
+- **member**: creating/editing tasks, comments, time.
 - **viewer**: read-only.
 
-Guest завжди взаємодіє тільки через членство. Створювач проєкту автоматично admin.
+A guest always interacts only through membership. The project creator automatically becomes an admin.
 
-`workspace` — це і є "unrestricted" з правила 4.1, тому на такому проєкті рівень задають самі permissions ролі: `projects.read` → viewer, `projects.write` → admin (і, отже, все, що може member). Членство потрібне для `private` і для того, щоб дати доступ вужче, ніж роль. `projects.read` лишається підлогою: без нього проєкт не потрапляє в `accessibleProjectIds`, а отже не відкривається — те, що видно в списку, і те, що відкривається, завжди збігається.
+`workspace` is exactly the "unrestricted" case from rule 4.1, so on such a project the level is set by the role's permissions themselves: `projects.read` → viewer, `projects.write` → admin (and therefore everything a member can do). Membership is needed for `private` and for granting access narrower than the role. `projects.read` remains the floor: without it the project does not get into `accessibleProjectIds` and therefore does not open – what is visible in the list and what opens always match.
 
-**KB-простори.** `kb_spaces.visibility`: workspace | private; `space_members` (space_id, user_id, role: editor | viewer). Простір, привʼязаний до проєкту, успадковує ефективну роль на проєкті (project admin → editor, member → editor, viewer → viewer) плюс власні додаткові члени. Аналогічно проєктам, на `workspace`-просторі рівень дають permissions: `kb.read` → viewer, `kb.write` → editor.
+**KB spaces.** `kb_spaces.visibility`: workspace | private; `space_members` (space_id, user_id, role: editor | viewer). A space linked to a project inherits the effective role on the project (project admin → editor, member → editor, viewer → viewer) plus its own additional members. As with projects, on a `workspace` space the level comes from permissions: `kb.read` → viewer, `kb.write` → editor.
 
-Рівня, якого не вистачає на ресурсі, який користувач бачить, — це 403 з поясненням, не 404: 404 лишається тільки для ресурсів поза видимістю (без витоку існування).
+A level that is missing on a resource the user can see is a 403 with an explanation, not a 404: 404 is reserved for resources outside the user's visibility (no leaking of existence).
 
-Ресурсний доступ діє скрізь, де рядок належить проєкту або простору, а не лише в списках самих проєктів: домашня стрічка активності і трейл конкретної сутності (`/audit/entity/:type/:id`), "мої задачі", алокації Resourcing і пошук по KB-сторінках фільтруються через `accessibleProjectIds` / `accessibleSpaceIds`. Permission домену відповідає на питання "чи бачить ця роль активність по задачах взагалі", але не "по яких саме" — тому обидві перевірки обовʼязкові. Виняток — `audit.read`: бачити все і є його призначенням.
+Resource access applies everywhere a row belongs to a project or space, not only in the project lists themselves: the home activity feed and a specific entity's trail (`/audit/entity/:type/:id`), "my tasks", Resourcing allocations and KB page search are filtered through `accessibleProjectIds` / `accessibleSpaceIds`. A domain permission answers the question "can this role see task activity at all", but not "for which tasks" – so both checks are mandatory. The exception is `audit.read`: seeing everything is its purpose.
 
-**Фінанси.** Ресурсних списків немає: доступ керується виключно permissions (finance.*). Обґрунтування: фінанси або довірені цілком, або приховані цілком; пер-клієнтний фінансовий доступ не реалізується (компроміс у розділі 22).
+**Finance.** There are no resource lists: access is controlled solely by permissions (finance.*). Rationale: finance is either trusted entirely or hidden entirely; per-client financial access is not implemented (trade-off in section 22).
 
-**CRM.** Аналогічно: permission-рівень без пер-записних ACL. Поле owner на компанії/угоді є організаційним, не обмежувальним.
+**CRM.** Likewise: permission level, without per-record ACLs. The owner field on a company/deal is organisational, not restrictive.
 
-### 4.5. Механіка виконання
+### 4.5. Enforcement mechanics
 
-1. Auth-middleware резолвить користувача (сесія або API-токен) → `ctx.user`.
-2. RBAC-middleware вантажить permission set ролі (кеш у памʼяті процесу, інвалідація подією `role.updated`).
-3. Маршрут декларативно: `guard('finance.read')`. Відсутність декларації валить CI-тест (лінт-правило: кожен маршрут має guard або явний `public()`).
-4. Сервіс для ресурсних сутностей викликає `access.assertProject(user, projectId, minRole)`; списки будуються через `accessibleProjectIds(user)` (один кешований запит на реквест).
-5. API-токени мають власний скоуп: підмножина permissions власника токена (не можна видати токен ширший за свою роль) плюс прапор read_only.
-6. UI отримує permission set і membership у `/api/v1/me` і ховає недоступні розділи/дії; сервер лишається джерелом правди.
-7. Кожна відмова 403 пишеться в audit з required permission: полегшує налагодження ролей.
+1. Auth middleware resolves the user (session or API token) → `ctx.user`.
+2. RBAC middleware loads the role's permission set (in-process memory cache, invalidated by the `role.updated` event).
+3. Routes declare the permission declaratively: `guard('finance.read')`. A missing declaration fails a CI test (lint rule: every route has a guard or an explicit `public()`).
+4. For resource entities the service calls `access.assertProject(user, projectId, minRole)`; lists are built via `accessibleProjectIds(user)` (one cached query per request).
+5. API tokens have their own scope: a subset of the token owner's permissions (you cannot issue a token wider than your own role) plus a read_only flag.
+6. The UI receives the permission set and memberships in `/api/v1/me` and hides unavailable sections/actions; the server remains the source of truth.
+7. Every 403 denial is written to the audit log with the required permission: this makes debugging roles easier.
 
-### 4.6. UI управління
+### 4.6. Management UI
 
-Налаштування → Ролі: список ролей, редактор-матриця permissions, лічильник користувачів на ролі. Налаштування → Користувачі: інвайт з роллю, зміна ролі, деактивація. Проєкт → Налаштування → Доступ: visibility, члени, ролі членства. KB-простір → Доступ: аналогічно.
+Settings → Roles: list of roles, permissions matrix editor, user count per role. Settings → Users: invite with a role, change role, deactivate. Project → Settings → Access: visibility, members, membership roles. KB space → Access: likewise.
 
 ---
 
-## 5. Модель даних
+## 5. Data model
 
-### 5.1. Ядро звʼязків
+### 5.1. Relationship core
 
 ```
                         users ──< project_members >── projects >── companies <── contacts
@@ -264,804 +264,804 @@ roles ──< role_permissions│              │      cycles ──┘  │   
         └─< task_labels >── labels          └──< kb_pages (tree) ──< kb_page_versions
 ```
 
-### 5.2. Наскрізні конвенції
+### 5.2. Cross-cutting conventions
 
-- PK: ULID. Усі таблиці: `created_at`, `updated_at`, `created_by` (nullable для системних).
-- **Конкурентність:** усі редаговані бізнес-сутності мають поле `version INTEGER NOT NULL DEFAULT 1`, що інкрементиться тригером БД на кожному UPDATE. Це джерело optimistic locking (3.4), а не `updated_at`.
-- Soft delete: `deleted_at` на бізнес-сутностях; кошик у налаштуваннях; hard delete тільки Owner/Admin.
-- Кастомні поля: `custom_fields JSONB` на companies, contacts, deals, projects, tasks, invoices, quotes, employees, applicants + реєстр `custom_field_definitions`. Повна механіка (індексація, фільтрація, сортування, зміна типу, дашборди): підрозділ 5.5.
-- Гроші: NUMERIC(14,2); валюта ISO-кодом на документі.
-- Впорядкування: `position` NUMERIC, fractional indexing.
-- FTS: tsvector-колонки з тригерами на companies, contacts, projects, tasks, kb_pages, invoices(number), quotes(number); trigram-індекси на номерах.
+- PK: ULID. All tables: `created_at`, `updated_at`, `created_by` (nullable for system records).
+- **Concurrency:** all editable business entities have a `version INTEGER NOT NULL DEFAULT 1` field, incremented by a DB trigger on every UPDATE. This is the source of optimistic locking (3.4), not `updated_at`.
+- Soft delete: `deleted_at` on business entities; a trash bin in settings; hard delete only by Owner/Admin.
+- Custom fields: `custom_fields JSONB` on companies, contacts, deals, projects, tasks, invoices, quotes, employees, applicants + the `custom_field_definitions` registry. Full mechanics (indexing, filtering, sorting, type changes, dashboards): subsection 5.5.
+- Money: NUMERIC(14,2); currency as an ISO code on the document.
+- Ordering: `position` NUMERIC, fractional indexing.
+- FTS: tsvector columns with triggers on companies, contacts, projects, tasks, kb_pages, invoices(number), quotes(number); trigram indexes on numbers.
 
-### 5.3. Таблиці за доменами
+### 5.3. Tables by domain
 
-**core:** users (email, name, role_id, avatar, timezone, locale, is_active), sessions/accounts/verifications (Better Auth), api_tokens (user_id, name, hash, scopes JSONB, read_only, last_used_at, revoked_at), roles, role_permissions, custom_field_definitions (entity_type, key, label, type: text/number/date/select/multiselect/checkbox/url/user, options, required, position, show_in_list, is_sortable, indexed), activity_log (entity_type, entity_id, actor_id, actor_type: user|agent|system|integration, action, diff JSONB – з redaction чутливих полів, див. 14.4, sensitivity: normal|sensitive для політики зберігання), notifications (user_id, type, dedupe_key, entity_ref, payload, read_at, emailed_at), email_deliveries (idempotency_key, to, subject, body/html, status: pending|sending|sent|dead, attempts, next_attempt_at, sent_at, last_error), events (outbox: type, aggregate_type, aggregate_id, payload, occurred_at, published_at), processed_events (consumer, event_id – дедуплікація обробки), attachments (entity_type, entity_id, file_key, filename, size, mime), saved_views (user_id nullable для shared, entity_type, name, filters JSONB, sort, layout, is_shared), webhook_subscriptions (url, secret, event_types[], active), webhook_deliveries (лог з retry-статусом, attempt, next_retry_at, status: pending/delivered/failed/dead), dashboards (owner_id, name, visibility: private|workspace), dashboard_widgets (dashboard_id, widget_type, source, config JSONB: фільтри/groupby/метрика, layout: x/y/w/h).
+**core:** users (email, name, role_id, avatar, timezone, locale, is_active), sessions/accounts/verifications (Better Auth), api_tokens (user_id, name, hash, scopes JSONB, read_only, last_used_at, revoked_at), roles, role_permissions, custom_field_definitions (entity_type, key, label, type: text/number/date/select/multiselect/checkbox/url/user, options, required, position, show_in_list, is_sortable, indexed), activity_log (entity_type, entity_id, actor_id, actor_type: user|agent|system|integration, action, diff JSONB – with redaction of sensitive fields, see 14.4, sensitivity: normal|sensitive for the retention policy), notifications (user_id, type, dedupe_key, entity_ref, payload, read_at, emailed_at), email_deliveries (idempotency_key, to, subject, body/html, status: pending|sending|sent|dead, attempts, next_attempt_at, sent_at, last_error), events (outbox: type, aggregate_type, aggregate_id, payload, occurred_at, published_at), processed_events (consumer, event_id – processing deduplication), attachments (entity_type, entity_id, file_key, filename, size, mime), saved_views (user_id nullable for shared views, entity_type, name, filters JSONB, sort, layout, is_shared), webhook_subscriptions (url, secret, event_types[], active), webhook_deliveries (log with retry status, attempt, next_retry_at, status: pending/delivered/failed/dead), dashboards (owner_id, name, visibility: private|workspace), dashboard_widgets (dashboard_id, widget_type, source, config JSONB: filters/groupby/metric, layout: x/y/w/h).
 
 **crm:** companies (name, domain, status: lead/active/paused/archived, owner_id, billing_email, address JSONB, default_currency, payment_terms_days, portal_token, custom_fields), contacts (company_id, first/last name, email, phone, position, is_primary, custom_fields), leads (company_id, contact_id?, title, product, status, score, signal/evidence/fit/timing, sources, suggested_channel, opener, caution, nurture_until, owner_id, source links), deal_stages (name, position, probability, is_won, is_lost), deals (company_id, source_lead_id?, title, stage_id, amount nullable, currency, expected_close_date, owner_id, lost_reason, custom_fields), sales_activities (exactly one lead_id/deal_id, company_id, contact_id?, type, status, channel, subject, context, outcome, due_at, owner_id, message_template_id?, sequence links), sales_message_templates, sales_sequences, sales_sequence_steps, sales_sequence_enrollments, sales_digest_runs (user_id + local_date), notes (company_id, contact_id?, lead_id?, deal_id?, body JSON, pinned).
 
-**projects:** project_types (name, icon, color), project_templates (name, definition JSONB: статуси, типи задач, дефолтні мітки, KB-простір, saved views), projects (company_id nullable, kind: client|internal, name, key, project_type_id?, template_source_id?, status: active/paused/completed/archived, visibility, lead_id, start_date, target_date, description, settings JSONB: estimate_unit hours|points, custom_fields, version), project_members, task_statuses (project_id, name, category: backlog/todo/in_progress/done/canceled, color, position, is_default), task_types (project_id nullable = workspace-рівень, name, icon, color, position), tasks (project_id, number, title, description JSON, status_id, type_id?, priority: none/low/medium/high/urgent, parent_id, due_date, start_date, estimate NUMERIC, cycle_id?, position, custom_fields), task_assignees, task_relations (task_id, related_task_id, type: blocks/duplicates/relates; blocked_by зберігається як інверсія blocks), labels (workspace-рівень: name, color, scope: task|project – окремі словники для задач і проєктів), task_labels, project_labels, comments (task_id, author_id, body JSON, edited_at), cycles (project_id, name, start_date, end_date, status: upcoming/active/completed, goal), cycle_snapshots (cycle_id, date, open_count, open_estimate), task_drafts (user_id, project_id?, payload JSONB), task_links (task_id, url, title), task_templates (project_id nullable = воркспейс, name, definition JSONB: поля + підзадачі), recurring_tasks (project_id, template_id, frequency/cron, next_run, active), intake_items (project_id, source: form/email, requester_name, requester_email, title, description, attachments, status: pending/accepted/declined, decline_reason, created_task_id), intake_settings (project_id, form_token, form_enabled, mailbox JSONB encrypted).
+**projects:** project_types (name, icon, color), project_templates (name, definition JSONB: statuses, task types, default labels, KB space, saved views), projects (company_id nullable, kind: client|internal, name, key, project_type_id?, template_source_id?, status: active/paused/completed/archived, visibility, lead_id, start_date, target_date, description, settings JSONB: estimate_unit hours|points, custom_fields, version), project_members, task_statuses (project_id, name, category: backlog/todo/in_progress/done/canceled, color, position, is_default), task_types (project_id nullable = workspace level, name, icon, color, position), tasks (project_id, number, title, description JSON, status_id, type_id?, priority: none/low/medium/high/urgent, parent_id, due_date, start_date, estimate NUMERIC, cycle_id?, position, custom_fields), task_assignees, task_relations (task_id, related_task_id, type: blocks/duplicates/relates; blocked_by is stored as the inverse of blocks), labels (workspace level: name, color, scope: task|project – separate vocabularies for tasks and projects), task_labels, project_labels, comments (task_id, author_id, body JSON, edited_at), cycles (project_id, name, start_date, end_date, status: upcoming/active/completed, goal), cycle_snapshots (cycle_id, date, open_count, open_estimate), task_drafts (user_id, project_id?, payload JSONB), task_links (task_id, url, title), task_templates (project_id nullable = workspace, name, definition JSONB: fields + subtasks), recurring_tasks (project_id, template_id, frequency/cron, next_run, active), intake_items (project_id, source: form/email, requester_name, requester_email, title, description, attachments, status: pending/accepted/declined, decline_reason, created_task_id), intake_settings (project_id, form_token, form_enabled, mailbox JSONB encrypted).
 
-**kb:** kb_spaces (name, icon, project_id nullable, visibility, position), space_members, kb_pages (space_id, parent_id, title, body JSON, icon, position, is_template, published bool, visibility: public|private, locked_by/locked_at), kb_page_comments (page_id, author_id, body JSON), kb_page_versions (page_id, body JSON, title, version_no, author_id, created_at), kb_page_links (page_id, target_type: page/task/company, target_id) для backlinks.
+**kb:** kb_spaces (name, icon, project_id nullable, visibility, position), space_members, kb_pages (space_id, parent_id, title, body JSON, icon, position, is_template, published bool, visibility: public|private, locked_by/locked_at), kb_page_comments (page_id, author_id, body JSON), kb_page_versions (page_id, body JSON, title, version_no, author_id, created_at), kb_page_links (page_id, target_type: page/task/company, target_id) for backlinks.
 
-**time:** time_entries (task_id, user_id, project_id денормалізовано, started_at, duration_seconds, note, billable bool, hourly_rate NUMERIC знімок ставки клієнту, cost_rate NUMERIC знімок собівартості години з compensation+overhead на момент запису, invoice_item_id nullable = чим виставлено), project_rates (project_id, user_id nullable = дефолт проєкту, hourly_rate, currency).
+**time:** time_entries (task_id, user_id, project_id denormalised, started_at, duration_seconds, note, billable bool, hourly_rate NUMERIC snapshot of the client rate, cost_rate NUMERIC snapshot of the hourly cost from compensation+overhead at the time of the entry, invoice_item_id nullable = what it was billed on), project_rates (project_id, user_id nullable = project default, hourly_rate, currency).
 
-**finance:** number_sequences (doc_type, period_key, last_value; атомарно FOR UPDATE), tax_rates (name, rate_percent), quotes (company_id, project_id?, number, status: draft/sent/viewed/accepted/declined/expired, currency, issue_date, valid_until, subtotal, tax_total, total, public_token, accepted_at, converted_invoice_id, custom_fields), quote_items, invoices (company_id, project_id?, quote_id?, number, status: draft/sent/viewed/partially_paid/paid/canceled, is_overdue computed, currency, issue_date, due_date, discount_type/value, subtotal, tax_total, total, amount_paid, notes, terms, public_token, sent_at, reminders_paused bool, language uk|en, custom_fields), invoice_items (description, quantity, unit_price, tax_rate_id?, amount, position, source: manual|time|quote), payments (invoice_id, amount, currency, date, method, reference, notes), recurring_invoices (company_id, project_id?, frequency, next_issue_date, items_template JSONB, auto_send, status), credit_notes (invoice_id, amount, reason, date), expenses (company_id?, project_id?, category_id, amount, currency, date, description, attachment_id), expense_categories, reminder_rules (offset_days signed, template_id, active), email_templates (type, subject, body з плейсхолдерами), reminder_log (invoice_id, rule_id, sent_at).
+**finance:** number_sequences (doc_type, period_key, last_value; atomically, FOR UPDATE), tax_rates (name, rate_percent), quotes (company_id, project_id?, number, status: draft/sent/viewed/accepted/declined/expired, currency, issue_date, valid_until, subtotal, tax_total, total, public_token, accepted_at, converted_invoice_id, custom_fields), quote_items, invoices (company_id, project_id?, quote_id?, number, status: draft/sent/viewed/partially_paid/paid/canceled, is_overdue computed, currency, issue_date, due_date, discount_type/value, subtotal, tax_total, total, amount_paid, notes, terms, public_token, sent_at, reminders_paused bool, language uk|en, custom_fields), invoice_items (description, quantity, unit_price, tax_rate_id?, amount, position, source: manual|time|quote), payments (invoice_id, amount, currency, date, method, reference, notes), recurring_invoices (company_id, project_id?, frequency, next_issue_date, items_template JSONB, auto_send, status), credit_notes (invoice_id, amount, reason, date), expenses (company_id?, project_id?, category_id, amount, currency, date, description, attachment_id), expense_categories, reminder_rules (offset_days signed, template_id, active), email_templates (type, subject, body with placeholders), reminder_log (invoice_id, rule_id, sent_at).
 
-**integrations:** git_connections (provider: github/gitlab/gitea, installation/credentials JSONB encrypted, webhook_secret, installation_id + account_login для GitHub App, status: connected/revoked/suspended), git_repositories (connection_id, external_id, full_name, default_branch), project_repositories (project_id, repository_id), git_links (task_id, repository_id, type: branch/commit/pr/mr, external_ref, title, url, state: open/merged/closed, author, updated_at), git_automation_rules (project_id, trigger: pr_opened/pr_merged/pr_closed/branch_created, target_status_id).
+**integrations:** git_connections (provider: github/gitlab/gitea, installation/credentials JSONB encrypted, webhook_secret, installation_id + account_login for the GitHub App, status: connected/revoked/suspended), git_repositories (connection_id, external_id, full_name, default_branch), project_repositories (project_id, repository_id), git_links (task_id, repository_id, type: branch/commit/pr/mr, external_ref, title, url, state: open/merged/closed, author, updated_at), git_automation_rules (project_id, trigger: pr_opened/pr_merged/pr_closed/branch_created, target_status_id).
 
-### 5.4. Зафіксовані кардинальності (найдорожчі рішення)
+### 5.4. Fixed cardinalities (the most expensive decisions)
 
-- **project N–1 company, nullable + `kind: client | internal`.** Клієнтський проєкт має company_id і kind=client. Внутрішній проєкт має company_id=NULL і kind=internal (без фіктивного клієнта). `kind` (не наявність company_id) є канонічним прапорцем для фільтрів, прав і звітів; company_id NULL просто відображає відсутність клієнта. Наслідки, зафіксовані явно: CRM-списки, aging і profitability-виручка працюють лише над kind=client (internal ніколи не протікає в клієнтські звіти); фінансова аналітика собівартості (11.10) враховує kind=internal проєкти як чисту вартість без revenue (саме це потрібно для overhead-обліку: внутрішній час це небіллабельна собівартість). Рахунок не можна привʼязати до internal-проєкту (валідація: invoice.project_id повинен вести на kind=client).
-- **project 1–N tasks; безпроєктних задач немає.** Оперативка й задачі, не привʼязані до клієнтської роботи, живуть у internal-проєкті (напр. "Inbox" або "Operations"), який є звичайним kind=internal проєктом без company_id, а не службовим винятком.
-- task parent_id: дерево підзадач, максимум 5 рівнів (перевірка сервісом).
-- task N–N users (виконавці); task N–N labels; task N–N tasks (relations).
-- invoice N–1 company, N–1 project (nullable), N–1 quote (nullable); payment N–N немає: payment N–1 invoice, часткові оплати списком платежів.
-- contact N–1 company (людина у двох клієнтах = два записи; компроміс у 22).
-- kb_space N–1 project (nullable: workspace-простори існують без проєкту).
+- **project N–1 company, nullable + `kind: client | internal`.** A client project has a company_id and kind=client. An internal project has company_id=NULL and kind=internal (no fictitious client). `kind` (not the presence of company_id) is the canonical flag for filters, permissions and reports; a NULL company_id simply reflects the absence of a client. Consequences, stated explicitly: CRM lists, aging and profitability revenue operate only on kind=client (internal never leaks into client reports); cost analytics (11.10) counts kind=internal projects as pure cost with no revenue (exactly what overhead accounting needs: internal time is non-billable cost). An invoice cannot be linked to an internal project (validation: invoice.project_id must point to kind=client).
+- **project 1–N tasks; there are no project-less tasks.** Day-to-day operations and tasks not tied to client work live in an internal project (e.g. "Inbox" or "Operations"), which is an ordinary kind=internal project without a company_id, not a special-case exception.
+- task parent_id: subtask tree, at most 5 levels (checked by the service).
+- task N–N users (assignees); task N–N labels; task N–N tasks (relations).
+- invoice N–1 company, N–1 project (nullable), N–1 quote (nullable); there is no payment N–N: payment N–1 invoice, partial payments as a list of payments.
+- contact N–1 company (a person at two clients = two records; trade-off in 22).
+- kb_space N–1 project (nullable: workspace spaces exist without a project).
 
-### 5.5. Кастомні поля: механіка
+### 5.5. Custom fields: mechanics
 
-Кастомні поля зберігаються в `custom_fields JSONB` на сутності, а їхня схема (тип, опції, прапорці) у реєстрі `custom_field_definitions`. JSONB обрано за гнучкість без міграцій, але це вимагає явних правил для індексації, запитів, зміни типу й агрегації, інакше "динамічні поля" стають нехтованою дірою в продуктивності й коректності.
+Custom fields are stored in `custom_fields JSONB` on the entity, and their schema (type, options, flags) in the `custom_field_definitions` registry. JSONB was chosen for flexibility without migrations, but it requires explicit rules for indexing, querying, type changes and aggregation; otherwise "dynamic fields" become a neglected hole in performance and correctness.
 
-**Індексація.** Два рівні. (1) Базовий GIN-індекс на колонці `custom_fields` кожної сутності: покриває existence- і containment-фільтри (`custom_fields ? 'key'`, `custom_fields @> '{"key":val}'`), достатньо для нечастих фільтрів. (2) Для полів, які реально фільтрують/сортують часто (definition має прапорець `indexed`), створюється точковий B-tree expression-індекс на витягнутому й типізованому значенні, напр. `CREATE INDEX ON tasks (((custom_fields->>'budget')::numeric))`. Створення/зняття такого індексу керується прапорцем у реєстрі й виконується міграційним воркером асинхронно (CONCURRENTLY), а не в запиті користувача.
+**Indexing.** Two levels. (1) A base GIN index on the `custom_fields` column of each entity: it covers existence and containment filters (`custom_fields ? 'key'`, `custom_fields @> '{"key":val}'`), which is enough for infrequent filters. (2) For fields that really are filtered/sorted on often (the definition has the `indexed` flag), a targeted B-tree expression index is created on the extracted and typed value, e.g. `CREATE INDEX ON tasks (((custom_fields->>'budget')::numeric))`. Creating/dropping such an index is controlled by the flag in the registry and performed asynchronously by the migration worker (CONCURRENTLY), not within the user's request.
 
-**Сортування.** JSONB-значення без типу сортуються як текст, що ламає числа й дати. Тому для полів з прапорцем `is_sortable` значення проєктується в типізований вираз на рівні запиту (`(custom_fields->>'key')::numeric | ::date | ::text` за типом з реєстру), і саме за ним іде ORDER BY; expression-індекс (вище) робить це дешевим. Сортування дозволене лише для типів number/date/select/text; multiselect/checkbox/url/user як ключ сортування недоступні (валідація на рівні API).
+**Sorting.** Untyped JSONB values sort as text, which breaks numbers and dates. So for fields with the `is_sortable` flag the value is projected into a typed expression at query level (`(custom_fields->>'key')::numeric | ::date | ::text` according to the type in the registry), and ORDER BY uses that expression; the expression index (above) makes it cheap. Sorting is allowed only for the number/date/select/text types; multiselect/checkbox/url/user are not available as a sort key (validated at API level).
 
-**Фільтрація.** Клієнт ніколи не шле сирий SQL. API приймає структурований фільтр `{ field_key, op, value }`; сервіс звіряє field_key з реєстром, бере тип, валідує op під тип (number: eq/gt/lt/between; select: in; text: contains; date: before/after/between; checkbox: eq) і будує параметризований предикат над JSONB. Невідомий ключ або невалідний під тип op → 400. Це закриває і продуктивність (через indexed-поля), і інʼєкції.
+**Filtering.** The client never sends raw SQL. The API accepts a structured filter `{ field_key, op, value }`; the service checks field_key against the registry, takes the type, validates op for that type (number: eq/gt/lt/between; select: in; text: contains; date: before/after/between; checkbox: eq) and builds a parameterised predicate over the JSONB. An unknown key or an op that is invalid for the type → 400. This addresses both performance (via indexed fields) and injection.
 
-**Зміна типу поля.** Руйнівна зміна семантики типу на льоту заборонена (не буває "ALTER поля text→number" над наявними даними). Дозволено: (а) редагувати label, опції select (додавання; видалення опції, що використовується, блокується або веде через міграцію значень), порядок, required, показ у списку, прапорці indexed/sortable; (б) для фактичної зміни типу створюється НОВЕ поле потрібного типу, дані переносяться керованою міграцією (з валідацією і звітом про непереносні значення), старе поле деприкейтиться й ховається. Тобто той самий принцип, що й усюди в ТЗ: адитивно, а не хірургія над семантикою. `required` вмикається лише після заповнення наявних записів (інакше валідація ретроактивно ламає старі сутності): майстер показує, скільки записів порожні.
+**Changing a field's type.** Destructively changing a type's semantics on the fly is forbidden (there is no "ALTER field text→number" over existing data). Allowed: (a) editing the label, select options (adding; removing an option that is in use is blocked or goes through a value migration), order, required, showing in the list, the indexed/sortable flags; (b) for an actual type change, a NEW field of the required type is created, the data is moved by a managed migration (with validation and a report on values that cannot be transferred), and the old field is deprecated and hidden. In other words, the same principle as everywhere else in this PRD: additive, not surgery on semantics. `required` can be enabled only once existing records have been filled in (otherwise validation retroactively breaks old entities): the wizard shows how many records are empty.
 
-**Дашборди й агрегація.** Віджет може групувати/агрегувати лише за кастомними полями агрегованих типів: number (сума/середнє/мін/макс), select/multiselect (кількість за значенням), date (кількість за періодом), checkbox (кількість true/false). Text/url/user як метрика недоступні (лише як фільтр). Значення для агрегації беруться через той самий типізований каст; віджет над polем без прапорця indexed на великому обсязі попереджає про можливу вартість. Права: кастомне поле сутності, недоступної користувачу (напр. поле на employees без people.read), у конструкторі віджета не пропонується.
+**Dashboards and aggregation.** A widget can group/aggregate only by custom fields of aggregatable types: number (sum/average/min/max), select/multiselect (count by value), date (count by period), checkbox (count of true/false). Text/url/user are not available as a metric (only as a filter). Values for aggregation are taken through the same typed cast; a widget over a field without the indexed flag on a large volume warns about the possible cost. Permissions: a custom field of an entity the user cannot access (e.g. a field on employees without people.read) is not offered in the widget builder.
 
-**Реєстр (доповнення до 5.3):** `custom_field_definitions` несе, окрім entity_type/key/label/type/options/required/position/show_in_list, ще `is_sortable` і `indexed` (керують поведінкою вище). Ключ незмінний після створення (перейменування = новий ключ + міграція), бо на нього зіпертий JSONB-доступ і індекси.
-
----
-
-## 6. Auth і користувачі
-
-- Вхід email + пароль; користувачів створює Admin (інвайт-лінк на email, встановлення пароля). Опційна TOTP 2FA. Self-signup відсутній.
-- Сесії cookie-based (web/desktop); API-токени для MCP/інтеграцій: створюються в профілі, скоуп ⊆ permissions власника, read_only-прапор, показ секрету один раз, відкликання, last_used_at.
-- Профіль: імʼя, аватар, часовий пояс, мова (uk/en), налаштування email-нотифікацій за типами, активні сесії з можливістю завершити, зміна власного пароля (з підтвердженням поточного; завершує всі інші сесії, гасить невикористаний reset-лінк і недоступна для API-токенів — інакше read-only токен давав би повний доступ до акаунта).
-- Відновлення пароля: «Забули пароль?» на екрані входу і кнопка «Скинути пароль» у Settings → Users (users.manage). Обидва шляхи видають однаковий одноразовий лінк на годину — токен зберігається хешем, новий лінк гасить попередній, адмін пароля не бачить і не задає. Використання лінка скидає лічильник невдач і завершує всі сесії користувача; лінк повертається і в відповіді API, щоб інсталяція без SMTP могла передати його вручну. Відповідь на запит однакова для існуючої і неіснуючої адреси (без перелічуваності).
-- Rate limit на auth: 10 спроб/хв/IP; блокування акаунта після 20 невдач з розблокуванням адміном або за часом. Запит на відновлення пароля: 10/15 хв/IP і 5/15 хв на адресу.
-- Деактивація користувача: сесії і токени відкликаються, історичні записи лишаються (FK не рвуться), задачі пропонується переасайнити майстром деактивації.
+**Registry (addendum to 5.3):** besides entity_type/key/label/type/options/required/position/show_in_list, `custom_field_definitions` also carries `is_sortable` and `indexed` (they control the behaviour above). The key is immutable after creation (renaming = a new key + migration), because JSONB access and the indexes rely on it.
 
 ---
 
-## 7. Модуль CRM (референс: Twenty)
+## 6. Auth and users
 
-### 7.1. Призначення
+- Sign-in with email + password; users are created by an Admin (invite link by email, password setup). Optional TOTP 2FA. No self-signup.
+- Cookie-based sessions (web/desktop); API tokens for MCP/integrations: created in the profile, scope ⊆ the owner's permissions, read_only flag, the secret is shown once, revocation, last_used_at.
+- Profile: name, avatar, time zone, language (uk/en), email notification settings by type, active sessions with the option to end them, changing your own password (with confirmation of the current one; it ends all other sessions, invalidates an unused reset link and is unavailable to API tokens – otherwise a read-only token would give full access to the account).
+- Password recovery: "Forgot password?" on the sign-in screen and a "Reset password" button in Settings → Users (users.manage). Both paths issue the same one-time link valid for an hour – the token is stored as a hash, a new link invalidates the previous one, and the admin neither sees nor sets the password. Using the link resets the failure counter and ends all of the user's sessions; the link is also returned in the API response, so that an installation without SMTP can pass it on manually. The response to a request is the same for an existing and a non-existent address (no enumeration).
+- Rate limit on auth: 10 attempts/min/IP; account lockout after 20 failures, unlocked by an admin or after a timeout. Password recovery requests: 10/15 min/IP and 5/15 min per address.
+- User deactivation: sessions and tokens are revoked, historical records remain (FKs do not break), and the deactivation wizard offers to reassign tasks.
 
-Джерело правди про шлях від знайденого prospect до клієнта. Компанія лишається стабільним хабом для контактів, leads, угод, проєктів, документів і рахунків; lead описує ще не кваліфікований sales pursuit, а deal — підтверджену комерційну можливість. CRM за замовчуванням відкриває Work і відповідає не лише «що є», а й «що робити далі».
+---
 
-### 7.2. Компанії
+## 7. CRM module (reference: Twenty)
 
-- CRUD; статуси lead → active → paused → archived (перехід вільний, пишеться в activity).
-- Картка: шапка (назва, домен з фавіконом, статус, owner, теги-мітки), таби: Огляд / Контакти / Leads / Угоди / Проєкти / Рахунки і Quotes (видимі тільки з finance.read) / Нотатки / Файли / Активність.
-- Огляд: обчислені бекендом показники: виставлено/сплачено/дебіторка (за валютами), активні проєкти й відкриті задачі, незабільлений час (з time, для finance.read), останні події; для користувача без finance.read фінансові плитки відсутні у відповіді API (не приховані на фронті, а не віддані).
-- Реквізити: billing_email, адреса, валюта, платіжні умови (днів), portal_token (розділ 11.8).
-- Кастомні поля з реєстру; конфігуровані колонки списку включно з кастомними.
+### 7.1. Purpose
 
-### 7.3. Контакти
+The source of truth for the path from a discovered prospect to a client. The company remains the stable hub for contacts, leads, deals, projects, documents and invoices; a lead describes a not-yet-qualified sales pursuit, and a deal a confirmed commercial opportunity. By default CRM opens Work and answers not only "what is there" but also "what to do next".
 
-CRUD у межах компанії; is_primary (дефолтний отримувач документів); швидке створення з картки; пошук по контактах у глобальній палеті.
+### 7.2. Companies
 
-### 7.4. Leads і Work
+- CRUD; statuses lead → active → paused → archived (transitions are unrestricted and written to activity).
+- Card: header (name, domain with favicon, status, owner, tag labels), tabs: Overview / Contacts / Leads / Deals / Projects / Invoices and Quotes (visible only with finance.read) / Notes / Files / Activity.
+- Overview: metrics computed by the backend: invoiced/paid/receivables (per currency), active projects and open tasks, unbilled time (from time, for finance.read), recent events; for a user without finance.read the financial tiles are absent from the API response (not hidden on the frontend, but never sent).
+- Billing details: billing_email, address, currency, payment terms (days), portal_token (section 11.8).
+- Custom fields from the registry; configurable list columns, including custom ones.
 
-- Lead належить компанії, може мати запропонований контакт і owner, зберігає product/service pursuit та нотатки кваліфікації: signal, evidence, fit, timing, score, джерела й дату перевірки, suggested channel, opener і caution. Заводиться вручну через UI, REST або MCP.
-- Статуси lead: `new`, `needs_review`, `ready`, `waiting_reply`, `engaged`, `nurture`, `converted`, `disqualified`, `no_response`. `nurture` вимагає валідну дату повернення `YYYY-MM-DD`; планування нової активності атомарно повертає lead у `ready`.
-- Sales activity належить рівно одному lead або deal і має тип, status `planned|completed|cancelled`, канал, тему/context, owner, обовʼязковий `due_at`, outcome та звʼязки з template/sequence. Complete може змінити lead status і створити наступну активність в одній транзакції.
-- `/crm` відкриває Work: `overdue`, `dueToday`, `upcoming`, `waitingReply`, `nurtureDue`, `noNextAction` — саме в такому порядку, бо це порядок робочого дня. `upcoming` тримає записи із запланованою наступною дією пізніше сьогодні: без нього повністю розпланований тиждень показував порожню чергу. Дію на рядку визначає bucket: завершити прострочене й сьогоднішнє, запланувати нерозплановане, решту лише читати. Ранковий дайджест шле тільки те, що потребує дії (`overdue + dueToday + nurtureDue + noNextAction`). Межі «сьогодні» рахуються у timezone користувача. Дефолтний scope — власні та ніким не призначені записи; team scope явний. Кожен bucket повертає точний total незалежно від ліміту рядків.
-- Конверсія lead → deal і зворотна демоція legacy Lead-stage deal виконуються транзакційно та переносять notes, files, activities, active sequence і source links без втрати історії.
+### 7.3. Contacts
 
-### 7.5. Угоди (пайплайн)
+CRUD within a company; is_primary (the default recipient of documents); quick creation from the card; contact search in the global palette.
 
-- deal_stages конфігуруються: назва, порядок, probability %, прапорці won/lost (мінімум по одному won і lost).
-- Kanban містить лише кваліфіковані можливості, має drag-and-drop, список із фільтрами та сумарні значення й weighted-суми (amount × probability) по етапах. `amount` може бути невідомим; змішані валюти не підсумовуються в одне число.
-- Угода: назва, компанія, сума+валюта, очікувана дата, owner, кастомні поля, нотатки, файли, активність.
-- Перенос у lost: обовʼязкова причина. Перенос у won: подія `deal.won` → автоматизація пропонує створити проєкт (pre-filled клієнт/назва) і/або quote.
-- Конверсія: кнопки "Створити проєкт з угоди", "Створити quote з угоди" (з сумою одним рядком).
+### 7.4. Leads and Work
+
+- A lead belongs to a company, can have a suggested contact and an owner, and stores the product/service pursuit and qualification notes: signal, evidence, fit, timing, score, sources and the date they were checked, suggested channel, opener and caution. Leads are created manually via the UI, REST or MCP.
+- Lead statuses: `new`, `needs_review`, `ready`, `waiting_reply`, `engaged`, `nurture`, `converted`, `disqualified`, `no_response`. `nurture` requires a valid return date `YYYY-MM-DD`; scheduling a new activity atomically returns the lead to `ready`.
+- A sales activity belongs to exactly one lead or deal and has a type, status `planned|completed|cancelled`, channel, subject/context, owner, a mandatory `due_at`, outcome and links to a template/sequence. Completing it can change the lead status and create the next activity in a single transaction.
+- `/crm` opens Work: `overdue`, `dueToday`, `upcoming`, `waitingReply`, `nurtureDue`, `noNextAction` – in exactly this order, because it is the order of the working day. `upcoming` holds records whose next action is scheduled after today: without it, a fully scheduled week showed an empty queue. The action on a row is determined by its bucket: complete overdue and today's items, schedule unscheduled ones, the rest are read-only. The morning digest sends only what needs action (`overdue + dueToday + nurtureDue + noNextAction`). The boundaries of "today" are calculated in the user's time zone. The default scope is the user's own records plus unassigned ones; team scope is explicit. Each bucket returns an exact total regardless of the row limit.
+- Lead → deal conversion and the reverse demotion of a legacy Lead-stage deal are transactional and carry over notes, files, activities, the active sequence and source links without losing history.
+
+### 7.5. Deals (pipeline)
+
+- deal_stages are configurable: name, order, probability %, won/lost flags (at least one won and one lost).
+- The Kanban contains only qualified opportunities and has drag-and-drop, a list with filters, and totals and weighted totals (amount × probability) per stage. `amount` may be unknown; mixed currencies are not summed into a single number.
+- Deal: title, company, amount+currency, expected date, owner, custom fields, notes, files, activity.
+- Moving to lost: a reason is mandatory. Moving to won: the `deal.won` event → an automation offers to create a project (client/name pre-filled) and/or a quote.
+- Conversion: "Create project from deal" and "Create quote from deal" buttons (with the amount as a single line item).
 
 ### 7.6. Playbooks
 
-- Message templates зберігають activity type, channel, subject і body. Доступні змінні: `{{companyName}}`, `{{contactFirstName}}`, `{{contactName}}`, `{{ownerName}}`, `{{leadTitle}}`.
-- Sequence — впорядкований список ручних кроків із delay у днях та optional template. Enrollment дозволений лише для одного lead або deal і створює першу planned activity; complete поточного кроку планує наступний, terminal/nurture state або закриття deal зупиняє enrollment.
-- Sequence ніколи не надсилає email або LinkedIn-повідомлення автоматично. Вона лише створює контрольовану наступну дію для людини.
-- Після першого використання steps immutable; назву, description і active-прапорець можна змінювати з optimistic locking.
+- Message templates store the activity type, channel, subject and body. Available variables: `{{companyName}}`, `{{contactFirstName}}`, `{{contactName}}`, `{{ownerName}}`, `{{leadTitle}}`.
+- A sequence is an ordered list of manual steps with a delay in days and an optional template. An enrollment is allowed for only one lead or deal and creates the first planned activity; completing the current step schedules the next one, and a terminal/nurture state or closing the deal stops the enrollment.
+- A sequence never sends an email or a LinkedIn message automatically. It only creates a controlled next action for a person.
+- After first use, steps are immutable; the name, description and active flag can be changed with optimistic locking.
 
-### 7.7. Нотатки й активність
+### 7.7. Notes and activity
 
-Rich-text нотатки на компанії/контакті/lead/угоді, pinned. Активність: автоматична стрічка з activity_log: зміни статусів та етапів, sales activity lifecycle, sequence enrollment, конверсії, створення проєктів, документи, оплати, нотатки. Audit diff містить лише поля, які реально змінювались, і не дублює message context без потреби.
-
----
-
-## 8. Модуль Projects (референс: Plane)
-
-### 8.1. Проєкти
-
-- Обовʼязкові: назва, key (2-5 літер, унікальний), kind (client|internal). Для kind=client клієнт обовʼязковий; для kind=internal клієнта немає (company_id NULL). Опційно: тип проєкту (project_types: конфігурований довідник з іконкою/кольором: Website, Retainer…), шаблон.
-- Створення з шаблону (project_templates): шаблон розгортає воркфлоу статусів, типи задач, мітки, привʼязаний KB-простір зі стартовими сторінками, дефолтні saved views. Шаблони створюються з нуля або "зберегти поточний проєкт як шаблон".
-- Статуси проєкту: active/paused/completed/archived. `project.completed` → автоматизації: підказка "є незабільлений час / немає рахунку → створити рахунок?", пропозиція закрити активний цикл.
-- Visibility: workspace | private (розділ 4.4). Сторінка: шапка (клієнт, lead, тип, дати, прогрес), таби: Задачі / Цикли / Огляд / Сторінки (KB-простір проєкту) / Час (з time.read_all або свої) / Рахунки (finance.read) / Файли / Налаштування (project admin).
-
-### 8.2. Воркфлоу статусів задач
-
-- task_statuses пер-проєкт: створення/перейменування/колір/порядок/видалення (з міграцією задач у вказаний статус). Кожен статус у категорії backlog/todo/in_progress/done/canceled: категорії дають системі семантику (прогрес, фільтри "відкриті", автоматизації), назви й кількість статусів довільні.
-- Дефолтний воркфлоу нового проєкту: з шаблону або воркспейс-дефолт (Налаштування → Проєкти → Дефолтний воркфлоу).
-
-### 8.3. Задачі
-
-- Номер `KEY-42` (тригер БД, per-project sequence). Поля: назва, опис (rich text), статус, тип (task_types: конфігуровані, воркспейс-рівень + пер-проєктні перевизначення: Task/Bug/Feature/Request…), пріоритет (none/low/medium/high/urgent: фіксований набір), виконавці (множинні), дати start/due, estimate (одиниця з налаштувань проєкту: години або поінти), цикл, мітки, підзадачі (дерево до 5 рівнів, прогрес батька рахується по дітях), звʼязки, вкладення, кастомні поля.
-- **Звʼязки і залежності (task_relations):** розділені за семантикою, як у Plane. Залежності планування: blocks / blocked by: впливають на порядок робіт, рендеряться конекторами в Timeline, порушені залежності (блокер завершується пізніше за залежну задачу) підсвічуються; blocked-задача маркується у списках, закриття з незакритими блокерами дає попередження (не заборону). Контекстні звʼязки: relates to / duplicates: лише навігаційний контекст у панелі. Кастомні типи звʼязків не реалізуються (компроміс, 22).
-- **Зовнішні лінки:** довільні URL на задачі (title + url): специфікації, дизайни, тікети клієнта.
-- **Вигляди:** List (групування статус/пріоритет/виконавець/тип/мітка, inline quick-add рядок: назва + Enter створює задачу з дефолтами), Board (kanban за статусами або виконавцями, drag-and-drop), Calendar (за due), Timeline (Gantt: смуги start→due, drag для змін дат, конектори залежностей), Spreadsheet (грід з инлайн-редагуванням полів у клітинках, масове редагування колонки). Вигляд+фільтри+групування зберігаються в saved_views: особисті, shared і workspace-рівня (крос-проєктні, для projects.read).
-- **Драфти:** недописана задача (закрив модалку, обірвався звʼязок) автозберігається в чернетки користувача (без номера); розділ Drafts у сайдбарі, продовження редагування або відкидання. Номер видається при публікації.
-- **Активність задачі:** таби Все / Коментарі / Історія (системні зміни полів з actor) / Worklogs (записи часу з модуля Time).
-- Фільтри: статус (і категорія), тип, пріоритет, виконавець, мітки, цикл, дати (прострочені, цей тиждень…), текст. В API `GET /tasks` вікно дат — це `dueFrom`/`dueTo` за due_date (задача без дати в нього не потрапляє, як і має бути для календарного зрізу), а `label` приймає список через кому і звужує: задача повинна нести всі перелічені мітки. Масові дії: статус, виконавець, мітки, цикл, пріоритет.
-- Peek-панель справа + повна сторінка `/projects/KEY/tasks/42`. Коментарі rich text зі згадками @user (нотифікація), реакціями-емодзі, edited-позначкою.
-- Швидке створення: глобальний хоткей C, парсинг швидкого синтаксису в назві (`!high`, `#label`, `@user`, `%type`), створення прямо в колонці борда, конвертація коментаря в задачу.
-- Дублювання задачі; переміщення задачі між проєктами (номер видається новий, старий лишається редиректом); архів задач (окремий фільтр).
-
-### 8.4. Цикли
-
-- Пер-проєктні таймбокси: назва, start/end, goal. Одночасно один active цикл на проєкт; upcoming → active автоматично за датою (воркер) або вручну.
-- Задача належить максимум одному циклу. Борд/список фільтруються за циклом; сторінка циклу: прогрес (done/усі, за estimate якщо ведеться), burndown-графік (знімок відкритого обсягу щодня: таблиця cycle_snapshots, воркер опівночі), розбивка за виконавцями.
-- Завершення циклу: підсумок + майстер перенесення незакритих задач (у наступний цикл / у backlog). `cycle.completed` подія.
-
-### 8.5. Крос-проєктні екрани
-
-- **Мої задачі:** всі проєкти, групування прострочені/сьогодні/тиждень/пізніше + свої створені без виконавця.
-- **Всі задачі** (для projects.read): глобальний список з фільтром за проєктами, збережені вигляди.
-
-### 8.6. Intake (вхідні запити)
-
-Референс: Plane Intake. Канал структурованого входу запитів від клієнтів і команди без прямого доступу до проєкту:
-
-- **Джерела:** публічна форма `/intake/{form_token}` (пер-проєктний токен, вмикається в налаштуваннях проєкту: поля назва/опис/email/вкладення, брендінг з реквізитів воркспейсу) і опційна поштова скринька (IMAP-полінг воркером: лист → intake-запит, вкладення переносяться).
-- **Тріаж:** черга Intake у проєкті (бачать project admin/member): pending-запити з превʼю; дії: Accept (відкривається пре-заповнена модалка створення задачі: тип, статус, виконавець; запит отримує created_task_id) або Decline (з причиною; за наявності email запитувача: опційний лист-відповідь з шаблону).
-- Запитувач за email отримує підтвердження прийому і, опційно, нотифікацію про прийняття (без деталей внутрішньої задачі).
-- Anti-abuse: rate limit на форму, honeypot-поле, регенерація токена.
-
-### 8.7. Шаблони задач і повторювані задачі
-
-- **Шаблони задач** (воркспейс + пер-проєктні): пре-заповнені назва-патерн, опис, тип, пріоритет, мітки, естімейт, набір підзадач. Використання: з модалки створення, з intake-accept, з повторюваних.
-- **Повторювані задачі:** правило: проєкт + шаблон + частота (daily/weekly/monthly/custom cron) + наступний запуск + активність. Щоденний воркер створює задачу із шаблону (ідемпотентно), зсуває next_run. Кейси: регулярні чеклісти підтримки, щомісячні звіти клієнтам.
+Rich-text notes on a company/contact/lead/deal, which can be pinned. Activity: an automatic feed from activity_log: status and stage changes, sales activity lifecycle, sequence enrollment, conversions, project creation, documents, payments, notes. The audit diff contains only the fields that actually changed and does not duplicate message context unnecessarily.
 
 ---
 
-## 9. Модуль Knowledge Base (референс: Plane Pages)
+## 8. Projects module (reference: Plane)
 
-### 9.1. Призначення
+### 8.1. Projects
 
-Документація агенції і проєктів: брифи, процеси, онбординги, специфікації. Живе поруч із задачами, привʼязується до проєктів, з контролем доступу.
+- Mandatory: name, key (2-5 letters, unique), kind (client|internal). For kind=client a client is mandatory; for kind=internal there is no client (company_id NULL). Optional: project type (project_types: a configurable list with an icon/colour: Website, Retainer…), template.
+- Creation from a template (project_templates): the template sets up the status workflow, task types, labels, a linked KB space with starter pages, and default saved views. Templates are created from scratch or via "save the current project as a template".
+- Project statuses: active/paused/completed/archived. `project.completed` → automations: a prompt "there is unbilled time / no invoice → create an invoice?", an offer to close the active cycle.
+- Visibility: workspace | private (section 4.4). Page: header (client, lead, type, dates, progress), tabs: Tasks / Cycles / Overview / Pages (the project's KB space) / Time (with time.read_all, or your own) / Invoices (finance.read) / Files / Settings (project admin).
 
-### 9.2. Простори
+### 8.2. Task status workflow
 
-- kb_spaces: воркспейс-рівня (напр. "Процеси агенції", "HR") і проєктні (створюється автоматично разом з проєктом за прапорцем шаблону або вручну; project_id заповнений).
-- Доступ: workspace-простори за visibility+space_members; проєктні успадковують членство проєкту (4.4). kb.manage_spaces: створення/видалення просторів воркспейс-рівня.
+- task_statuses per project: create/rename/colour/order/delete (with tasks migrated to a specified status). Each status belongs to a category backlog/todo/in_progress/done/canceled: the categories give the system its semantics (progress, "open" filters, automations), while the status names and their number are arbitrary.
+- Default workflow for a new project: from a template or the workspace default (Settings → Projects → Default workflow).
 
-### 9.3. Сторінки
+### 8.3. Tasks
 
-- Дерево сторінок у просторі (вкладеність без жорсткого ліміту, drag-переміщення в дереві, переміщення між просторами з перевіркою прав).
-- Редактор Tiptap: заголовки, списки, чекбокси, таблиці, код-блоки з підсвіткою, callout, зображення (S3), вбудовування файлів, роздільники, toggle-блоки.
-- **Згадки:** `@user` (нотифікація), `#KEY-42` (лінк на задачу з живим статусом), `[[назва сторінки]]` (лінк на сторінку). Всі згадки пишуться в kb_page_links → секція Backlinks на задачі і сторінці ("де це згадується").
-- **Версії:** кожні збереження (дебаунс 30 с) створює kb_page_versions; історія версій з diff-переглядом і відновленням. Redo-safe: відновлення створює нову версію.
-- **Блокування:** відкриття в режимі редагування ставить soft-lock (locked_by, heartbeat); інший користувач бачить "редагує X", може відкрити read-only або перехопити (lock старіший 2 хв).
-- Шаблони сторінок (is_template): "Створити з шаблону"; шаблони в межах простору і глобальні.
-- Публікація: draft/published прапорець: draft бачать editor-и простору, published усі, хто має доступ до простору. Нова сторінка створюється published; draft — свідомий стан (зняти з публікації / створити як чернетку), інакше база знань для viewer-ролей стоїть порожньою.
-- **Видимість на рівні сторінки** (модель Plane): public (усі з доступом до простору) або private (автор + admin-и простору). Видимість не успадковується автоматично: приватна дочірня сторінка невидима читачам публічного батька; дерево рендериться з фільтрацією прав.
-- **Коментарі до сторінки:** тред коментарів під сторінкою (rich text, згадки), для обговорення без правок тіла.
-- **Конвертація в задачу:** виділений блок сторінки → "Створити задачу" (модалка з пре-заповненим описом і зворотним лінком на сторінку): нотатки зустрічі стають задачами без виходу з документа.
-- Експорт сторінки в Markdown; повнотекстовий пошук по тілу (tsvector з JSON-тіла) інтегрований у глобальну палету з ранжуванням.
+- Number `KEY-42` (DB trigger, per-project sequence). Fields: title, description (rich text), status, type (task_types: configurable, workspace level + per-project overrides: Task/Bug/Feature/Request…), priority (none/low/medium/high/urgent: a fixed set), assignees (multiple), start/due dates, estimate (unit from the project settings: hours or points), cycle, labels, subtasks (a tree up to 5 levels; the parent's progress is calculated from its children), relations, attachments, custom fields.
+- **Relations and dependencies (task_relations):** separated by semantics, as in Plane. Scheduling dependencies: blocks / blocked by: they affect the order of work and are rendered as connectors in Timeline, and violated dependencies (the blocker finishes later than the dependent task) are highlighted; a blocked task is marked in lists, and closing it with unresolved blockers gives a warning (not a prohibition). Context relations: relates to / duplicates: navigational context in the panel only. Custom relation types are not implemented (trade-off, 22).
+- **External links:** arbitrary URLs on a task (title + url): specifications, designs, client tickets.
+- **Views:** List (grouping by status/priority/assignee/type/label, an inline quick-add row: title + Enter creates a task with defaults), Board (kanban by status or assignee, drag-and-drop), Calendar (by due date), Timeline (Gantt: start→due bars, drag to change dates, dependency connectors), Spreadsheet (a grid with inline editing of fields in cells, bulk editing of a column). View + filters + grouping are saved in saved_views: personal, shared and workspace-level (cross-project, for projects.read).
+- **Drafts:** an unfinished task (the modal was closed, the connection dropped) is autosaved to the user's drafts (without a number); a Drafts section in the sidebar lets you continue editing or discard. The number is assigned on publishing.
+- **Task activity:** tabs All / Comments / History (system field changes with the actor) / Worklogs (time entries from the Time module).
+- Filters: status (and category), type, priority, assignee, labels, cycle, dates (overdue, this week…), text. In the API, the date window for `GET /tasks` is `dueFrom`/`dueTo` on due_date (a task without a date does not fall into it, as it should be for a calendar slice), and `label` accepts a comma-separated list and narrows the result: a task must carry all the listed labels. Bulk actions: status, assignee, labels, cycle, priority.
+- A peek panel on the right + a full page `/projects/KEY/tasks/42`. Rich-text comments with @user mentions (notification), emoji reactions, an "edited" marker.
+- Quick creation: global hotkey C, parsing of quick syntax in the title (`!high`, `#label`, `@user`, `%type`), creation directly in a board column, converting a comment into a task.
+- Duplicating a task; moving a task between projects (a new number is assigned, the old one remains as a redirect); task archive (a separate filter).
 
----
+### 8.4. Cycles
 
-## 10. Модуль Time (тайм-трекінг)
+- Per-project timeboxes: name, start/end, goal. One active cycle per project at a time; upcoming → active automatically by date (worker) or manually.
+- A task belongs to at most one cycle. The board/list can be filtered by cycle; the cycle page: progress (done/all, by estimate if estimates are tracked), a burndown chart (a daily snapshot of the open scope: the cycle_snapshots table, a midnight worker), a breakdown by assignee.
+- Completing a cycle: a summary + a wizard to carry over unfinished tasks (to the next cycle / to the backlog). The `cycle.completed` event.
 
-### 10.1. Призначення
+### 8.5. Cross-project screens
 
-Облік часу по задачах для двох цілей: внутрішня картина завантаження і білінг клієнтам за годинною моделлю.
+- **My tasks:** all projects, grouped into overdue/today/this week/later + tasks you created that have no assignee.
+- **All tasks** (for projects.read): a global list with a project filter, saved views.
 
-### 10.2. Функціонал
+### 8.6. Intake (incoming requests)
 
-- **Таймер:** старт/стоп на задачі (один активний таймер на користувача; старт нового зупиняє попередній); індикатор активного таймера в топбарі всюди; нотатка до запису.
-- **Ручні записи:** дата, тривалість, задача, нотатка; редагування своїх записів; time.manage: редагування чужих.
-- **Billable:** прапорець (дефолт з налаштувань проєкту); hourly_rate знімається в запис у момент створення з project_rates (персональна ставка → дефолт проєкту → 0).
-- **Ставки:** project_rates у налаштуваннях проєкту (валюта = валюта клієнта): дефолтна ставка проєкту + перевизначення на користувача. Редагує project admin з finance.settings або time.manage.
-- **Звіти (time.read_all):** зведення за період: за проєктами / людьми / клієнтами; billable vs non-billable; незабільлений billable-час (invoice_item_id IS NULL) як окремий зріз. Експорт CSV.
-- **Мій час:** тижнева сітка своїх записів, редагування инлайн.
+Reference: Plane Intake. A channel for the structured intake of requests from clients and team members who have no direct access to the project:
 
-### 10.3. Звʼязка з фінансами
+- **Sources:** a public form `/intake/{form_token}` (a per-project token, enabled in the project settings: title/description/email/attachments fields, branding from the workspace business details) and an optional mailbox (IMAP polling by a worker: email → intake request, attachments carried over).
+- **Triage:** the Intake queue in the project (visible to project admins/members): pending requests with a preview; actions: Accept (opens a pre-filled task creation modal: type, status, assignee; the request gets created_task_id) or Decline (with a reason; if the requester's email is known: an optional reply email from a template).
+- A requester with an email receives an acknowledgement of receipt and, optionally, a notification of acceptance (without details of the internal task).
+- Anti-abuse: rate limit on the form, a honeypot field, token regeneration.
 
-Генерація рахунку з часу (finance.write): майстер "Виставити час": клієнт → період → вибір проєктів → перегляд незабільлених записів (групування: за задачею / за користувачем / одним рядком) → створюється draft-рахунок, invoice_items з source=time, записи отримують invoice_item_id. Скасування рахунку або видалення позиції відвʼязує записи (стають знову незабільленими). Записи, привʼязані до позиції, блокуються від редагування тривалості.
+### 8.7. Task templates and recurring tasks
 
----
-
-## 11. Модуль Finance (референс: Invoice Ninja)
-
-### 11.1. Межі
-
-Операційні фінанси: quotes, рахунки, оплати, дебіторка, нагадування, витрати. Не бухгалтерія: подвійний запис, податкова звітність і легальний e-invoicing compliance поза системою (зовнішні інструменти); за потреби legal-інтеграція додається окремим модулем через шину подій без зміни моделі.
-
-### 11.2. Quotes (комерційні пропозиції)
-
-- Життєвий цикл: draft → sent → viewed → accepted | declined | expired (expired: воркер по valid_until).
-- Структура ідентична рахунку (позиції, податки, знижка, PDF, публічна сторінка `/q/{token}`).
-- На публічній сторінці клієнт натискає Accept/Decline (з коментарем): подія `quote.accepted` → нотифікація owner-у + автоматизація пропонує конвертувати.
-- Конвертація в рахунок: копіює позиції, ставить quote_id, quote отримує converted_invoice_id. Quote після sent не редагується: тільки дублювання новою версією.
-
-### 11.3. Рахунки
-
-- Створення: з нуля / з проєкту (pre-filled) / з quote / з часу (10.3) / дублюванням / recurring-шаблоном.
-- Номерація: конфігурований шаблон `INV-{YYYY}-{seq:4}` (окремі послідовності для invoices/quotes, атомарні, reset-період none/year).
-- Позиції: опис, кількість, ціна, податкова ставка з довідника; суми рахує тільки сервер. Знижка рахунку: відсоток або фіксована, до чи після податків (налаштування). Мова документа uk/en (шаблон PDF локалізований).
-- **Життєвий цикл:** draft → sent → viewed → partially_paid → paid; canceled з будь-якого несплаченого; is_overdue: обчислюваний прапорець (due_date < today і не paid/canceled). Всі переходи через сервіс з валідацією матриці переходів; після sent позиції незмінні: правки через cancel + duplicate (пишеться звʼязок).
-- **PDF:** Typst-шаблон, один мінімалістичний дизайн: логотип, реквізити агенції (з налаштувань), реквізити клієнта, позиції, підсумки, terms/notes, QR з посиланням на публічну сторінку. Артефакт кожної відправки імутабельно в S3.
-- **Відправка:** email (шаблон з email_templates) на billing_email/обраний контакт, PDF у вкладенні + публічний лінк. Повторна відправка можлива.
-- **Публічна сторінка** `/i/{public_token}`: перегляд, завантаження PDF; перше відкриття → viewed + подія. Місце під кнопку онлайн-оплати зарезервовано (платіжний провайдер: окремий майбутній модуль).
-
-### 11.4. Оплати і кредит-ноти
-
-- Фіксація платежу: сума, дата, метод (bank/card/cash/other), референс. Часткові: список платежів, amount_paid і статус перераховуються. Переплата заборонена (Σ payments + Σ credit_notes ≤ total).
-- Кредит-нота: зменшення заборгованості по рахунку (сума, причина); враховується в балансі рахунку і дебіторці.
-- Видалення платежу (finance.payments + підтвердження): відкат статусу, activity з diff.
-
-### 11.5. Повторювані рахунки
-
-Шаблон: клієнт, проєкт, позиції, частота (weekly/monthly/quarterly/yearly), next_issue_date, auto_send, кінець (дата/кількість/безстроково). Щоденний воркер: створює draft або одразу відправляє, зсуває next_issue_date, подія `invoice.created(source=recurring)`. Пауза/відновлення.
-
-### 11.6. Нагадування
-
-reminder_rules: зсуви від due_date (напр. -3, +1, +7, +14 днів), кожне зі своїм email-шаблоном (плейсхолдери: {client}, {number}, {total}, {due_date}, {link}). Щоденний воркер: ідемпотентно через reminder_log; reminders_paused на рахунку вимикає. Ручна відправка нагадування з рахунку. Late fees не реалізуються (компроміс, 22).
-
-### 11.7. Витрати
-
-Журнал: сума, валюта, дата, категорія (довідник), опційно клієнт/проєкт, вкладення-чек, опис. У огляді проєкту (finance.read): витрати проти виставленого. Не бухгалтерія: без ПДВ-обліку витрат.
-
-### 11.8. Клієнтський портал (легкий)
-
-Сторінка `/portal/{company.portal_token}` без автентифікації (unguessable token, регенерується): список документів клієнта: рахунки (статуси, суми, лінки на публічні сторінки) і quotes. Дає клієнту одну постійну адресу замість розсипу лінків. Вимикається пер-клієнтно. Повноцінний портал з логіном не реалізується (компроміс, 22).
-
-### 11.9. Фінансовий дашборд і списки
-
-Дашборд (finance.read): дебіторка сумарно і aging 0-30/31-60/61-90/90+ (за валютами), виставлено/сплачено за період, прострочені списком, очікувані оплати за due_date, топ боржників, незабільлений billable-час (місток у 10.3). Списки рахунків/quotes: фільтри статус/клієнт/проєкт/період, підсумки під фільтром, масові нагадування, експорт CSV.
-
-### 11.10. Собівартість і прибутковість (cost & profitability)
-
-Референс: Productive.io (agency-management: cost rates, overhead, project/client profit). Це відповідь на "бачити витрати по ЗП і т.п." на рівні бізнесу: не скільки нарахувати людині (payroll, якого нема), а скільки нам коштує робота і скільки ми на ній заробляємо. Доступ: `finance.read_costs` (окреме від finance.read: можна бачити рахунки й дебіторку, але не собівартість і ЗП).
-
-- **Вартість години праці:** бере cost rate співробітника (12.5) + overhead per hour (12.5, якщо ввімкнено) як знімок на момент запису часу; тому кожен time-entry має not лише billable-суму (ставка клієнту), а й cost-суму (собівартість). Історичність компенсації (versioned) гарантує коректність минулих періодів.
-- **Прибутковість проєкту:** revenue (виставлено або billable-час за ставками клієнта) мінус витрати (собівартість відпрацьованих годин + небіллабельні витрати проєкту з expenses + біллабельні витрати без маркапу) = маржа проєкту (сума і %). Зріз на картці проєкту (таб Огляд, за finance.read_costs) і в звіті.
-- **Прибутковість клієнта:** та сама модель, агрегована по всіх проєктах клієнта: показує, хто приносить прибуток, а хто в мінусі (ключова цінність Productive-класу).
-- **Витрати на ЗП (labor cost):** агрегований звіт: собівартість праці за період, розбивка за співробітником / командою / проєктом / клієнтом; billable vs non-billable години у грошах (скільки коштує небіллабельний час). Це і є "витрати по ЗП" в операційному сенсі.
-- **Utilization:** % біллабельних годин від доступних (з урахуванням відсутностей з 12.2) per людина/команда: показує, наскільки завантаження конвертується у виставлене.
-- **Звіти-конструктор:** profit згрупований за клієнтом/проєктом/періодом з фільтрами, як у Productive; експорт CSV; ці ж метрики доступні віджетами кастомних дашбордів (джерело "profitability", лише з finance.read_costs).
-
-Межа: це управлінська аналітика на основі cost rate і годин, а не бухгалтерський P&L і не payroll. Точні нарахування ЗП, податки, відомості – поза ordi (зовнішній інструмент), як і legal-частина Finance (11.1).
+- **Task templates** (workspace + per-project): pre-filled title pattern, description, type, priority, labels, estimate, a set of subtasks. Used from the creation modal, from intake accept, and from recurring tasks.
+- **Recurring tasks:** a rule: project + template + frequency (daily/weekly/monthly/custom cron) + next run + active flag. A daily worker creates a task from the template (idempotently) and shifts next_run. Use cases: regular support checklists, monthly client reports.
 
 ---
 
-## 12. Модуль People (HR)
+## 9. Knowledge Base module (reference: Plane Pages)
 
-Референс: Frappe HR (open-source HRMS: lifecycle, leaves, attendance, recruitment). Береться модель і термінологія, адаптовані під масштаб агенції. Свідомо НЕ береться: payroll-движок з формульними компонентами і регіональним податковим compliance (генерація зарплатних відомостей, слабів, податкові слаби) – це бухгалтерсько-юридична зона, яку ordi не покриває (та сама межа, що й у Finance, розділ 11.1). Зарплата в ordi присутня як атрибут вартості співробітника для аналітики (12.5 + 11.x), а не як розрахунковий движок нарахувань.
+### 9.1. Purpose
 
-Доступ до модуля керується окремим доменом permissions `people.*` (нижче), бо HR-дані чутливі й не мають бути видимі всім із доступом до проєктів.
+Agency and project documentation: briefs, processes, onboarding guides, specifications. It lives next to the tasks, is linked to projects, and has access control.
 
-### 12.1. Співробітники (employee records, lifecycle)
+### 9.2. Spaces
 
-- **Картка співробітника:** привʼязка до user (nullable: можна вести підрядника без облікового запису), імʼя, контакти, посада, відділ/команда, тип зайнятості (full-time/part-time/contractor), менеджер (self-reference), дати join/probation-end/exit, статус (active/on_leave/terminated), емердженсі-контакт, кастомні поля, документи (вкладення: контракт, скани). Persona-поля (дата народження, адреса тощо) видимі лише за `people.read_sensitive`.
-- **Lifecycle:** статусні переходи з подіями (`employee.onboarded`, `employee.exited`). Онбординг/офбординг як чеклісти: шаблон онбордингу (набір задач) при найманні автоматично створює задачі у внутрішньому HR-проєкті (kind=internal) і асайнить відповідальних (місток у Projects через шину, як у Frappe HR, де boarding auto-створює задачі).
-- **Довідник відділів/команд і посад** (конфігуровані); оргструктура через поле менеджера (дерево).
+- kb_spaces: workspace-level (e.g. "Agency processes", "HR") and project-level (created automatically together with the project via a template flag, or manually; project_id is set).
+- Access: workspace spaces by visibility+space_members; project spaces inherit project membership (4.4). kb.manage_spaces: creating/deleting workspace-level spaces.
 
-### 12.2. Відпустки і відсутності (leaves)
+### 9.3. Pages
 
-- **Типи відсутностей** (конфігуровані): щорічна відпустка, лікарняний (sick leave), відгул, неоплачувана, компенсаційний, кастомні. Параметри типу: оплачувана/ні, чи потребує апруву, чи зменшує баланс, чи дозволений half-day, річна квота, перенос залишку (carry-forward) з лімітом і терміном згорання.
-- **Баланси:** нарахування квоти на період (річне, помісячне-earned), таблиця leave_balances per співробітник per тип; перегляд балансу співробітником. **Залишок** (leave-entitlements) = allocated + carried − used − дні заявок у статусі pending, per тип per період; поки період не нарахований, allocated береться з річної квоти типу, тож залишок видно ще до першого accrue. Квота 0 і типи, що не списують баланс, залишку не мають і нічим не обмежені.
-- **Заявки (request → approval):** співробітник подає заявку (тип, діапазон дат або half-day, коментар, опційне вкладення напр. довідка); маршрут апруву: менеджер співробітника, з фолбеком на роль `people.approve_leave`. Стани: pending → approved | rejected | canceled. Апрув списує баланс; скасування повертає. Конфлікт (перекриття з наявною заявкою) блокується. Заявка довша за залишок відхиляється — і при поданні (з урахуванням уже поданих pending-заявок), і повторно при апруві (квоту могли зменшити після подання).
-- **Календар відсутностей:** командний календар хто коли відсутній (з урахуванням прав); інтеграція в резолвінг завантаження (Resourcing, 12.4) і попередження при асайні задачі на людину у відпустці.
-- **Holiday calendars:** конфігуровані святкові календарі (пер-регіон/офіс), призначаються співробітникам; впливають на робочі дні в розрахунках і календарі.
-- Нотифікації: подання заявки → менеджеру; рішення → співробітнику; наближення відпустки → команді (опційно).
+- A page tree within a space (nesting without a hard limit, drag-to-move within the tree, moving between spaces with a permission check).
+- Tiptap editor: headings, lists, checkboxes, tables, code blocks with syntax highlighting, callouts, images (S3), file embeds, dividers, toggle blocks.
+- **Mentions:** `@user` (notification), `#KEY-42` (link to a task with its live status), `[[page title]]` (link to a page). All mentions are written to kb_page_links → a Backlinks section on the task and the page ("where this is mentioned").
+- **Versions:** every save (30 s debounce) creates a kb_page_versions row; version history with a diff view and restore. Redo-safe: a restore creates a new version.
+- **Locking:** opening in edit mode sets a soft lock (locked_by, heartbeat); another user sees "X is editing", and can open it read-only or take over (if the lock is older than 2 min).
+- Page templates (is_template): "Create from template"; templates scoped to a space and global ones.
+- Publishing: a draft/published flag: drafts are visible to the space's editors, published pages to everyone with access to the space. A new page is created as published; draft is a deliberate state (unpublish / create as draft), otherwise the knowledge base would sit empty for viewer roles.
+- **Page-level visibility** (the Plane model): public (everyone with access to the space) or private (the author + space admins). Visibility is not inherited automatically: a private child page is invisible to readers of its public parent; the tree is rendered with permission filtering.
+- **Page comments:** a comment thread below the page (rich text, mentions), for discussion without editing the body.
+- **Convert to task:** a selected block of the page → "Create task" (a modal with a pre-filled description and a backlink to the page): meeting notes become tasks without leaving the document.
+- Page export to Markdown; full-text search over the body (tsvector from the JSON body) integrated into the global palette with ranking.
 
-### 12.3. Хайринг (recruitment)
+---
 
-- **Вакансії (job openings):** назва, відділ, тип зайнятості, опис, статус (draft/open/on_hold/closed), кількість позицій, гайрінг-менеджер, опційно вилка ЗП (діапазон, видима лише `people.read_sensitive`).
-- **Публічна сторінка вакансії** `/careers/{token}` (опційно вмикається): опис + форма відгуку (імʼя, email, résumé-вкладення, супровідний текст). Anti-abuse як в intake (rate limit, honeypot).
-- **Кандидати (applicants) і пайплайн:** kanban за етапами (конфігуровані: Applied → Screening → Interview → Offer → Hired / Rejected), картка кандидата (контакти, résumé, звʼязок з вакансією, оцінки інтервʼюерів, нотатки, історія). Перетягування між етапами; rejected з причиною. Дублікат-детект за email.
-- **Інтервʼю:** запис інтервʼю (кандидат, інтервʼюери, дата/час, тип, підсумок/скоркард). Нагадування інтервʼюерам.
-- **Найм:** етап Hired на кандидаті → дія "Створити співробітника" (пре-заповнена картка employee з даних кандидата, запускається онбординг-чекліст 12.1). Подія `applicant.hired`.
+## 10. Time module (time tracking)
 
-### 12.4. Resourcing (завантаження команди)
+### 10.1. Purpose
 
-Шар планування завантаження (аналог Resourcing у Productive, спрощений: повний capacity-planning з прогнозними плейсхолдерами не робимо, див. компроміс у 22). Тижневий вигляд хто на які проєкти алоцений, з урахуванням відсутностей (12.2). Джерело алокацій: призначення задач із дедлайнами + явні алокації (allocation: user, project, годин/тиждень, період). Мета: бачити перевантаження і вікна, і живити utilization-аналітику (11.10). Входить у 1.0 як повноцінний модуль; поза скоупом лишаються лише прогнозні плейсхолдери (алокація на ще-не-найнятого) і сценарне forecasting, що зафіксовано в компромісах.
+Tracking time against tasks for two goals: an internal picture of workload, and billing clients on an hourly model.
 
-### 12.5. Компенсація співробітника (cost rate) – містковий підрозділ між People і Finance
+### 10.2. Functionality
 
-Тут живе твоє "бачити ЗП і витрати по ЗП". Це свідомо НЕ payroll (нарахування/слаби/податки), а вартісна ставка людини для розрахунку собівартості й прибутковості. Модель – з Productive (cost rate + overhead), не з Frappe payroll:
+- **Timer:** start/stop on a task (one active timer per user; starting a new one stops the previous one); an active timer indicator in the top bar everywhere; a note on the entry.
+- **Manual entries:** date, duration, task, note; editing your own entries; time.manage: editing other people's.
+- **Billable:** a flag (default from the project settings); hourly_rate is snapshotted into the entry at creation time from project_rates (personal rate → project default → 0).
+- **Rates:** project_rates in the project settings (currency = the client's currency): the project's default rate + per-user overrides. Edited by a project admin with finance.settings or time.manage.
+- **Reports (time.read_all):** a summary for a period: by project / person / client; billable vs non-billable; unbilled billable time (invoice_item_id IS NULL) as a separate slice. CSV export.
+- **My time:** a weekly grid of your own entries, with inline editing.
 
-- **compensation** per співробітник: тип (місячна ЗП / годинна ставка / контракторський рейт), сума, валюта, період дії (versioned: історія змін ЗП з датами, тому собівартість минулих періодів рахується коректно). Видима лише за `people.read_compensation` (найвужче право, окреме від решти HR).
-- **Cost rate (годинна собівартість):** обчислюється з компенсації і норми годин (робочі години/тиждень з налаштувань). Для контрактора – прямий рейт. Cost rate – це те, що множиться на відпрацьовані години з модуля Time для собівартості.
-- **Overhead (опційно):** company overhead per hour (фасіліті + внутрішні/небіллабельні витрати), як у Productive: конфігурована місячна база накладних розкидається на робочі години й додається поверх cost rate. Дає "справжню" собівартість години.
+### 10.3. Link to finance
 
-Ці дані споживає фінансова аналітика (нижче) і собівартість проєкту. Самі суми ЗП ніде, крім карток за правом `people.read_compensation` і агрегованих звітів за правом `finance.read_costs`, не показуються.
+Generating an invoice from time (finance.write): the "Bill time" wizard: client → period → choice of projects → review of unbilled entries (grouping: by task / by user / as a single line) → a draft invoice is created, invoice_items with source=time, and the entries get invoice_item_id. Cancelling the invoice or deleting a line item unlinks the entries (they become unbilled again). Entries linked to a line item are locked against duration edits.
 
-### 12.6. HR-дашборд і звіти
+---
 
-За правами: headcount (активні/у відпустці/нові/exits за період), майбутні відсутності (календар), відкриті вакансії і стан пайплайну кандидатів, найближчі кінці probation. Звіти: leave balances по команді, attendance-зведення (якщо ведеться), recruitment-воронка. Компенсаційні/costs-звіти – окремо, за `finance.read_costs` (12.5 + розділ 11.x).
+## 11. Finance module (reference: Invoice Ninja)
 
-### 12.7. Модель даних (People)
+### 11.1. Scope
+
+Operational finance: quotes, invoices, payments, receivables, reminders, expenses. Not accounting: double-entry bookkeeping, tax reporting and legal e-invoicing compliance are outside the system (external tools); if needed, a legal integration is added as a separate module via the event bus without changing the model.
+
+### 11.2. Quotes (commercial proposals)
+
+- Lifecycle: draft → sent → viewed → accepted | declined | expired (expired: a worker based on valid_until).
+- The structure is identical to an invoice (line items, taxes, discount, PDF, public page `/q/{token}`).
+- On the public page the client clicks Accept/Decline (with a comment): a `quote.accepted` event → a notification to the owner + an automation offers to convert it.
+- Conversion to an invoice: copies the line items, sets quote_id, and the quote gets converted_invoice_id. A quote cannot be edited after sent: only duplicated as a new version.
+
+### 11.3. Invoices
+
+- Creation: from scratch / from a project (pre-filled) / from a quote / from time (10.3) / by duplication / from a recurring template.
+- Numbering: a configurable pattern `INV-{YYYY}-{seq:4}` (separate sequences for invoices/quotes, atomic, reset period none/year).
+- Line items: description, quantity, price, tax rate from the reference list; totals are calculated only by the server. Invoice discount: a percentage or a fixed amount, before or after tax (a setting). Document language uk/en (the PDF template is localised).
+- **Lifecycle:** draft → sent → viewed → partially_paid → paid; canceled from any unpaid state; is_overdue: a computed flag (due_date < today and not paid/canceled). All transitions go through a service that validates the transition matrix; after sent, line items are immutable: corrections via cancel + duplicate (the link is recorded).
+- **PDF:** a Typst template, one minimalist design: logo, agency details (from settings), client details, line items, totals, terms/notes, a QR code linking to the public page. The artefact of every send is stored immutably in S3.
+- **Sending:** email (a template from email_templates) to billing_email/the chosen contact, the PDF attached + a public link. Re-sending is possible.
+- **Public page** `/i/{public_token}`: view, PDF download; the first open → viewed + an event. Space for an online payment button is reserved (payment provider: a separate future module).
+
+### 11.4. Payments and credit notes
+
+- Recording a payment: amount, date, method (bank/card/cash/other), reference. Partial payments: a list of payments; amount_paid and the status are recalculated. Overpayment is forbidden (Σ payments + Σ credit_notes ≤ total).
+- Credit note: reduces the amount owed on an invoice (amount, reason); counted in the invoice balance and receivables.
+- Deleting a payment (finance.payments + confirmation): status rollback, activity with a diff.
+
+### 11.5. Recurring invoices
+
+Template: client, project, line items, frequency (weekly/monthly/quarterly/yearly), next_issue_date, auto_send, end (date/count/indefinite). A daily worker: creates a draft or sends it right away, advances next_issue_date, emits `invoice.created(source=recurring)`. Pause/resume.
+
+### 11.6. Reminders
+
+reminder_rules: offsets from due_date (e.g. -3, +1, +7, +14 days), each with its own email template (placeholders: {client}, {number}, {total}, {due_date}, {link}). A daily worker: idempotent via reminder_log; reminders_paused on an invoice turns them off. Manual sending of a reminder from the invoice. Late fees are not implemented (trade-off, 22).
+
+### 11.7. Expenses
+
+A log: amount, currency, date, category (reference list), optionally client/project, a receipt attachment, description. In the project overview (finance.read): expenses against invoiced. Not accounting: no VAT accounting for expenses.
+
+### 11.8. Client portal (lightweight)
+
+The page `/portal/{company.portal_token}` without authentication (unguessable token, regenerable): a list of the client's documents: invoices (statuses, amounts, links to the public pages) and quotes. Gives the client one permanent address instead of a scatter of links. Can be disabled per client. A full portal with login is not implemented (trade-off, 22).
+
+### 11.9. Finance dashboard and lists
+
+Dashboard (finance.read): total receivables and aging 0-30/31-60/61-90/90+ (by currency), invoiced/paid for the period, a list of overdue invoices, expected payments by due_date, top debtors, unbilled billable time (the bridge in 10.3). Invoice/quote lists: filters for status/client/project/period, totals for the filter, bulk reminders, CSV export.
+
+### 11.10. Cost and profitability
+
+Reference: Productive.io (agency management: cost rates, overhead, project/client profit). This is the answer to "seeing salary costs and the like" at the business level: not how much to pay a person (payroll, which does not exist here), but how much the work costs us and how much we earn on it. Access: `finance.read_costs` (separate from finance.read: you can see invoices and receivables but not cost and salaries).
+
+- **Cost of an hour of labour:** takes the employee's cost rate (12.5) + overhead per hour (12.5, if enabled) as a snapshot at the moment time is logged; so every time entry has not only a billable amount (the client rate) but also a cost amount. Versioned compensation history guarantees correctness for past periods.
+- **Project profitability:** revenue (invoiced, or billable time at client rates) minus costs (the cost of hours worked + the project's non-billable expenses from expenses + billable expenses without markup) = the project margin (amount and %). Shown on the project card (Overview tab, with finance.read_costs) and in the report.
+- **Client profitability:** the same model aggregated across all of the client's projects: shows who brings in profit and who is in the red (the key value of the Productive class of tools).
+- **Labour cost:** an aggregated report: labour cost for a period, broken down by employee / team / project / client; billable vs non-billable hours in money (what non-billable time costs). This is what "salary costs" means in the operational sense.
+- **Utilisation:** % of billable hours out of available hours (taking absences from 12.2 into account) per person/team: shows how well workload converts into invoiced work.
+- **Report builder:** profit grouped by client/project/period with filters, as in Productive; CSV export; the same metrics are available as custom dashboard widgets (source "profitability", only with finance.read_costs).
+
+Boundary: this is management analytics based on cost rate and hours, not an accounting P&L and not payroll. Exact salary calculations, taxes, payroll statements – outside ordi (an external tool), as is the legal part of Finance (11.1).
+
+---
+
+## 12. People module (HR)
+
+Reference: Frappe HR (open-source HRMS: lifecycle, leaves, attendance, recruitment). The model and terminology are taken over, adapted to agency scale. Deliberately NOT taken over: a payroll engine with formula-based components and regional tax compliance (generating payroll statements, payslips, tax slips) – this is the accounting and legal zone that ordi does not cover (the same boundary as in Finance, section 11.1). Salary is present in ordi as an attribute of an employee's cost for analytics (12.5 + 11.x), not as a payroll calculation engine.
+
+Access to the module is controlled by a separate permission domain `people.*` (below), because HR data is sensitive and must not be visible to everyone with access to projects.
+
+### 12.1. Employees (employee records, lifecycle)
+
+- **Employee card:** link to a user (nullable: a contractor can be kept without an account), name, contacts, job title, department/team, employment type (full-time/part-time/contractor), manager (self-reference), join/probation-end/exit dates, status (active/on_leave/terminated), emergency contact, custom fields, documents (attachments: contract, scans). Personal fields (date of birth, address, etc.) are visible only with `people.read_sensitive`.
+- **Lifecycle:** status transitions with events (`employee.onboarded`, `employee.exited`). Onboarding/offboarding as checklists: on hiring, an onboarding template (a set of tasks) automatically creates tasks in the internal HR project (kind=internal) and assigns the people responsible (a bridge into Projects via the bus, as in Frappe HR, where boarding auto-creates tasks).
+- **Reference lists of departments/teams and positions** (configurable); org structure via the manager field (a tree).
+
+### 12.2. Leave and absences (leaves)
+
+- **Absence types** (configurable): annual leave, sick leave, time off in lieu, unpaid leave, compensatory leave, custom. Type parameters: paid or not, whether it needs approval, whether it reduces the balance, whether half-day is allowed, annual quota, carry-forward of the remainder with a limit and an expiry period.
+- **Balances:** quota accrual for a period (annual, monthly-earned), a leave_balances table per employee per type; the employee can view their balance. **Remaining** (leave-entitlements) = allocated + carried − used − days of requests in pending status, per type per period; until the period has been accrued, allocated is taken from the type's annual quota, so the remainder is visible even before the first accrual. A quota of 0 and types that do not deduct from the balance have no remainder and are not limited by anything.
+- **Requests (request → approval):** the employee submits a request (type, date range or half-day, comment, optional attachment, e.g. a medical certificate); approval route: the employee's manager, falling back to the `people.approve_leave` role. States: pending → approved | rejected | canceled. Approval deducts from the balance; cancellation returns it. A conflict (overlap with an existing request) is blocked. A request longer than the remainder is rejected – both on submission (taking already submitted pending requests into account) and again on approval (the quota may have been reduced after submission).
+- **Absence calendar:** a team calendar of who is away when (subject to permissions); integrated into workload resolution (Resourcing, 12.4) and a warning when assigning a task to a person on leave.
+- **Holiday calendars:** configurable public holiday calendars (per region/office), assigned to employees; they affect working days in calculations and in the calendar.
+- Notifications: request submitted → to the manager; decision → to the employee; upcoming leave → to the team (optional).
+
+### 12.3. Hiring (recruitment)
+
+- **Job openings:** title, department, employment type, description, status (draft/open/on_hold/closed), number of positions, hiring manager, optionally a salary band (a range, visible only with `people.read_sensitive`).
+- **Public job opening page** `/careers/{token}` (optionally enabled): description + application form (name, email, résumé attachment, cover text). Anti-abuse as in intake (rate limit, honeypot).
+- **Applicants and pipeline:** a kanban by stage (configurable: Applied → Screening → Interview → Offer → Hired / Rejected), an applicant card (contacts, résumé, link to the job opening, interviewer ratings, notes, history). Dragging between stages; rejected with a reason. Duplicate detection by email.
+- **Interviews:** an interview record (applicant, interviewers, date/time, type, summary/scorecard). Reminders to interviewers.
+- **Hiring:** the Hired stage on an applicant → a "Create employee" action (an employee card pre-filled from the applicant's data; the onboarding checklist from 12.1 is started). Event `applicant.hired`.
+
+### 12.4. Resourcing (team workload)
+
+A workload planning layer (an analogue of Resourcing in Productive, simplified: we do not build full capacity planning with forecast placeholders, see the trade-off in 22). A weekly view of who is allocated to which projects, taking absences (12.2) into account. Allocation sources: task assignments with deadlines + explicit allocations (allocation: user, project, hours/week, period). Goal: to see overload and free windows, and to feed the utilisation analytics (11.10). It is part of 1.0 as a full module; only forecast placeholders (allocating a not-yet-hired person) and scenario forecasting remain out of scope, which is recorded in the trade-offs.
+
+### 12.5. Employee compensation (cost rate) – a bridging subsection between People and Finance
+
+This is where your "seeing salaries and salary costs" lives. This is deliberately NOT payroll (calculations/payslips/taxes), but a person's cost rate for calculating cost and profitability. The model comes from Productive (cost rate + overhead), not from Frappe payroll:
+
+- **compensation** per employee: type (monthly salary / hourly rate / contractor rate), amount, currency, validity period (versioned: a history of salary changes with dates, so the cost of past periods is calculated correctly). Visible only with `people.read_compensation` (the narrowest permission, separate from the rest of HR).
+- **Cost rate (hourly cost):** calculated from compensation and the standard hours (working hours/week from settings). For a contractor – the direct rate. The cost rate is what gets multiplied by the hours worked from the Time module to get cost.
+- **Overhead (optional):** company overhead per hour (facilities + internal/non-billable expenses), as in Productive: a configurable monthly overhead base is spread across working hours and added on top of the cost rate. Gives the "true" cost of an hour.
+
+This data is consumed by the finance analytics (below) and the project cost. The salary amounts themselves are shown nowhere except on cards with the `people.read_compensation` permission and in aggregated reports with the `finance.read_costs` permission.
+
+### 12.6. HR dashboard and reports
+
+Subject to permissions: headcount (active/on leave/new/exits for the period), upcoming absences (calendar), open job openings and the state of the applicant pipeline, upcoming probation end dates. Reports: leave balances by team, attendance summary (if tracked), recruitment funnel. Compensation/cost reports – separately, with `finance.read_costs` (12.5 + section 11.x).
+
+### 12.7. Data model (People)
 
 departments (name, parent_id), positions (title), employees (user_id?, first/last name, contacts, position_id, department_id, employment_type, manager_id, join_date, probation_end, exit_date, status, emergency_contact JSONB, sensitive JSONB, custom_fields), employee_documents (employee_id, attachment_id, type), leave_types (name, is_paid, needs_approval, affects_balance, allow_half_day, annual_quota, carry_forward_limit, carry_forward_expiry), leave_balances (employee_id, leave_type_id, period, allocated, used, carried), leave_requests (employee_id, leave_type_id, from_date, to_date, half_day bool, reason, attachment_id?, status, approver_id, decided_at), holiday_calendars (name), holidays (calendar_id, date, name), employee_holiday_calendar (employee_id, calendar_id), job_openings (title, department_id, employment_type, description, status, positions_count, hiring_manager_id, salary_range JSONB, public_token, public_enabled), applicants (job_opening_id, name, email, phone, resume_attachment_id, cover_text, stage, rejected_reason, source, created_from: form/manual), applicant_stages (name, position, is_hired, is_rejected), interviews (applicant_id, scheduled_at, type, interviewers JSONB, scorecard JSONB, summary), allocations (user_id, project_id, hours_per_week, from_date, to_date) [12.4], compensation (employee_id, comp_type, amount, currency, effective_from, effective_to), overhead_settings (monthly_base, currency, working_hours_per_week, effective_from).
 
-### 12.8. Permissions (People) і чутливість
+### 12.8. Permissions (People) and sensitivity
 
-Окремий домен, бо HR-дані не мають розтікатися:
+A separate domain, because HR data must not leak:
 
-| Permission | Дає |
+| Permission | Grants |
 |---|---|
-| `people.read` | Базовий довідник співробітників, оргструктура, публічні поля |
-| `people.read_sensitive` | Persona-поля (д.н., адреса, документи), вилки ЗП у вакансіях |
-| `people.read_compensation` | Компенсація співробітників (ЗП, ставки) – найвужче |
-| `people.write` | Редагування карток, lifecycle |
-| `people.manage_leave` | Налаштування типів/квот/календарів |
-| `people.approve_leave` | Апрув заявок поза лінією менеджера |
-| `people.recruit` | Вакансії, кандидати, інтервʼю, найм |
-| `finance.read_costs` | Агреговані costs/ЗП-звіти й собівартість (у домені finance, бо це гроші) |
+| `people.read` | The basic employee directory, org structure, public fields |
+| `people.read_sensitive` | Personal fields (date of birth, address, documents), salary bands in job openings |
+| `people.read_compensation` | Employee compensation (salaries, rates) – the narrowest |
+| `people.write` | Editing cards, lifecycle |
+| `people.manage_leave` | Configuring types/quotas/calendars |
+| `people.approve_leave` | Approving requests outside the manager line |
+| `people.recruit` | Job openings, applicants, interviews, hiring |
+| `finance.read_costs` | Aggregated cost/salary reports and cost (in the finance domain, because it is money) |
 
-Системні ролі оновлюються: Owner/Admin – все. Преднастроєна роль **Sales** покриває sales workspace: `crm.*`, `deals.read/write`, плюс read-only на проєкти та фінанси (продавцю потрібно бачити, що доставляється і що оплачено, але не змінювати ні того, ні іншого). Нова преднастроєна роль **HR** (people.* повністю крім read_compensation, яку дають вибірково). Роль **Finance** отримує `finance.read_costs` (бачить агреговані витрати на ЗП, але не обовʼязково поіменні ставки: read_compensation видається окремо). Member/guest – жодних people.*: розділ People відсутній у навігації.
+System roles are updated: Owner/Admin – everything. The preset **Sales** role covers the sales workspace: `crm.*`, `deals.read/write`, plus read-only on projects and finance (a salesperson needs to see what is being delivered and what has been paid, but not change either). A new preset **HR** role (all of people.* except read_compensation, which is granted selectively). The **Finance** role gets `finance.read_costs` (sees aggregated salary costs, but not necessarily individual rates: read_compensation is granted separately). Member/guest – no people.* at all: the People section is absent from the navigation.
 
-Кожен доступ до compensation і read_sensitive додатково пишеться в audit (хто дивився ЗП).
+Every access to compensation and read_sensitive is additionally written to the audit (who looked at salaries).
 
 ---
 
-## 13. Інтеграції
+## 13. Integrations
 
 ### 13.1. Git (GitHub, GitLab, Gitea)
 
-**Призначення:** задачі звʼязані з реальним кодом: гілки, коміти, PR/MR видимі з задачі, статуси рухаються автоматично.
+**Purpose:** tasks are linked to real code: branches, commits, PRs/MRs are visible from the task, and statuses move automatically.
 
-**Підключення (integrations.manage):**
-- GitHub: GitHub App через manifest flow – ordi створює App одним кліком
-  (POST маніфеста → GitHub повертає креденшели через одноразовий код);
-  вебхук і права реєструються централізовано, installation-вебхуки самі
-  створюють підключення і синхронізують repo-список. Креденшели App
-  (app id, приватний ключ, webhook-секрет) зберігаються у
-  workspace_settings.integrations (секрети AES-GCM). Legacy-шлях (OAuth
-  app / PAT) лишається робочим.
-- GitLab / Gitea (включно з self-hosted): URL інстансу + access token; вебхук на repo/групу з секретом.
-- Креденшели шифруються (AES-GCM, ключ у env). Налаштування → Інтеграції: статус підключення, перелік репозиторіїв, health останніх вебхуків.
+**Connection (integrations.manage):**
+- GitHub: a GitHub App via the manifest flow – ordi creates the App in one click
+  (POST the manifest → GitHub returns the credentials via a one-time code);
+  the webhook and permissions are registered centrally, and installation webhooks
+  create the connection themselves and sync the repo list. The App credentials
+  (app id, private key, webhook secret) are stored in
+  workspace_settings.integrations (secrets AES-GCM). The legacy path (OAuth
+  app / PAT) keeps working.
+- GitLab / Gitea (including self-hosted): instance URL + access token; a webhook on the repo/group with a secret.
+- Credentials are encrypted (AES-GCM, key in env). Settings → Integrations: connection status, list of repositories, health of recent webhooks.
 
-**Привʼязка:** project_repositories: у налаштуваннях проєкту project admin привʼязує один чи кілька репозиторіїв підключення.
+**Binding:** project_repositories: in the project settings a project admin binds one or more of the connection's repositories.
 
-**Автолінкування (вхідні вебхуки `/api/v1/integrations/git/{provider}/webhook`, перевірка підпису):**
-- Парсинг патерну `KEY-\d+` у назві гілки, повідомленнях комітів, назві/описі PR/MR.
-- Знайдений збіг у привʼязаному до проєкту репозиторії → git_links (branch/commit/pr) на задачі; стан PR оновлюється подіями (open/merge/close).
-- Панель задачі: секція Git: гілки, останні коміти, PR зі статусом і лінком.
+**Auto-linking (incoming webhooks `/api/v1/integrations/git/{provider}/webhook`, signature verification):**
+- Parsing the `KEY-\d+` pattern in the branch name, commit messages, PR/MR title/description.
+- A match found in a repository bound to the project → git_links (branch/commit/pr) on the task; the PR state is updated by events (open/merge/close).
+- Task panel: a Git section: branches, recent commits, PRs with status and link.
 
-**Зі сторони задачі:** кнопка "Copy branch name": генерує `{type-prefix}/{key-42}-{slug}` (шаблон конфігурується на проєкті).
+**From the task side:** a "Copy branch name" button: generates `{type-prefix}/{key-42}-{slug}` (the pattern is configured on the project).
 
-**Автоматизації статусів (git_automation_rules, пер-проєкт):** конфігурована мапа: branch_created → In Progress; pr_opened → In Review (якщо статус існує); pr_merged → Done; pr_closed без merge → нічого/конфігуровано. Виконується через шину (`git.pr_merged` → обробник у projects/automations.ts); зміна статусу пишеться в activity з actor_type=integration.
+**Status automations (git_automation_rules, per project):** a configurable map: branch_created → In Progress; pr_opened → In Review (if the status exists); pr_merged → Done; pr_closed without merge → nothing/configurable. Executed via the bus (`git.pr_merged` → a handler in projects/automations.ts); the status change is written to activity with actor_type=integration.
 
-**Надійність:** вебхуки кладуться в pg-boss і обробляються ідемпотентно (dedup за delivery id); ручний ресинк лінків задачі.
+**Reliability:** webhooks are put into pg-boss and processed idempotently (dedup by delivery id); manual resync of a task's links.
 
-### 13.2. Вихідні вебхуки
+### 13.2. Outgoing webhooks
 
-webhook_subscriptions (settings): URL + secret + перелік подій з каталогу 3.3. Доставка воркером: HMAC-SHA256 підпис, retry з backoff (5 спроб), лог доставок з відповіддю. Це шлях для зовнішніх систем (Telegram-бот, n8n) без опитувань.
+webhook_subscriptions (settings): URL + secret + a list of events from the catalogue in 3.3. Delivery by a worker: HMAC-SHA256 signature, retry with backoff (5 attempts), a delivery log with the response. This is the path for external systems (a Telegram bot, n8n) without polling.
 
-### 13.3. Внутрішні автоматизації (вбудовані правила)
+### 13.3. Internal automations (built-in rules)
 
-Не конструктор автоматизацій (компроміс, 22), а фіксований набір конфігурованих правил, кожне вкл/викл у налаштуваннях:
-- deal.won → пропозиція створити проєкт/quote.
-- project.completed → пропозиція рахунку при незабільленому часі.
-- quote.accepted → пропозиція конвертації.
-- git-правила (13.1).
-- invoice.overdue → нагадування (11.6).
-- cycle end date настав → пропозиція завершення циклу.
-- applicant.hired → створити співробітника + запустити онбординг-чекліст (12.3).
-- leave_request submitted → нотифікація менеджеру; рішення → співробітнику (12.2).
+Not an automation builder (trade-off, 22), but a fixed set of configurable rules, each toggled on/off in settings:
+- deal.won → suggestion to create a project/quote.
+- project.completed → invoice suggestion when there is unbilled time.
+- quote.accepted → conversion suggestion.
+- git rules (13.1).
+- invoice.overdue → reminder (11.6).
+- cycle end date reached → suggestion to complete the cycle.
+- applicant.hired → create an employee + start the onboarding checklist (12.3).
+- leave_request submitted → notification to the manager; decision → to the employee (12.2).
 
 ---
 
-## 14. Наскрізні підсистеми
+## 14. Cross-cutting subsystems
 
-### 14.1. Дашборд (стартовий екран)
+### 14.1. Dashboard (home screen)
 
-Віджети за правами: Мої задачі сьогодні/прострочені; активний цикл мого основного проєкту; дебіторка і прострочені (finance.read); угоди за етапами (deals.read); стрічка останніх подій (відфільтрована за доступом). Одна відповідь `/api/v1/dashboard`.
+Widgets subject to permissions: My tasks today/overdue; the active cycle of my main project; receivables and overdue invoices (finance.read); deals by stage (deals.read); a feed of recent events (filtered by access). A single response from `/api/v1/dashboard`.
 
-**Кастомні дашборди** (референс: Plane Dashboards). Окрім стартового: користувацькі дашборди з віджетами на сітці (drag/resize). Віджет: конфігурований запит виду "для цих сутностей, згрупованих за X, показати метрику Y": типи bar / line / pie / число / таблиця; джерела: задачі (фільтри як у списках), рахунки, угоди, час; groupby: статус/тип/пріоритет/виконавець/проєкт/клієнт/період; метрика: кількість / сума (amount, estimate, тривалість). Видимість дашборда: private | workspace. Дані віджета обчислює бекенд одним ендпоінтом з примусовим накладанням прав (accessibleProjectIds + permission домену джерела: віджет по рахунках без finance.read не рендериться).
+**Custom dashboards** (reference: Plane Dashboards). Besides the home dashboard: user dashboards with widgets on a grid (drag/resize). Widget: a configurable query of the form "for these entities, grouped by X, show metric Y": types bar / line / pie / number / table; sources: tasks (filters as in lists), invoices, deals, time; group by: status/type/priority/assignee/project/client/period; metric: count / sum (amount, estimate, duration). Dashboard visibility: private | workspace. Widget data is computed by the backend in a single endpoint with permissions enforced (accessibleProjectIds + the permission of the source's domain: a widget over invoices is not rendered without finance.read).
 
-### 14.2. Command palette і пошук
+### 14.2. Command palette and search
 
-`Cmd/Ctrl+K`: сутності (компанії, контакти, угоди, проєкти, задачі за номером/текстом, KB-сторінки, рахунки/quotes за номером), дії ("Створити…", "Перейти…", "Старт таймера…"), нещодавні. Результати фільтруються правами (пошуковий сервіс приймає accessibleProjectIds/space ids). Бекенд: FTS + trigram, ранжування: точний номер > заголовок > тіло.
+`Cmd/Ctrl+K`: entities (companies, contacts, deals, projects, tasks by number/text, KB pages, invoices/quotes by number), actions ("Create…", "Go to…", "Start timer…"), recent items. Results are filtered by permissions (the search service accepts accessibleProjectIds/space ids). Backend: FTS + trigram, ranking: exact number > title > body.
 
-### 14.3. Нотифікації
+### 14.3. Notifications
 
-In-app (дзвіночок, read/unread, перехід до сутності) + email-дублювання за типами з профілю. Типи: згадка, призначення, коментар у моїй задачі, зміна статусу моєї задачі, quote accepted, оплата, прострочення, дедлайн сьогодні, git PR merged у моїй задачі, sales work digest.
+In-app (bell, read/unread, jump to the entity) + email duplication per type, set in the profile. Types: mention, assignment, comment on my task, status change of my task, quote accepted, payment, overdue, deadline today, git PR merged on my task, sales work digest.
 
-Sales work digest запускається щогодини, але для кожного активного human-користувача з `crm.read` створюється не більше одного разу за його локальну дату й лише у локальному вікні 08:00–18:00. Summary включає overdue, due today, waiting reply, nurture due і no next action; deal work додається лише з `deals.read`. Ledger `sales_digest_runs(user_id, local_date)` записує також порожній ранок, щоб пізніша активність не породила другий «ранковий» digest. Email-копія керується окремим preference `sales.work_digest`.
+The sales work digest runs hourly, but for each active human user with `crm.read` it is created at most once per their local date, and only within the local 08:00–18:00 window. The summary includes overdue, due today, waiting reply, nurture due and no next action; deal work is added only with `deals.read`. The ledger `sales_digest_runs(user_id, local_date)` also records an empty morning, so that later activity does not produce a second "morning" digest. The email copy is controlled by a separate preference `sales.work_digest`.
 
-Фонові notification/reminder emails не виконують SMTP I/O всередині outbox consumer. Consumer атомарно записує notification та ідемпотентний `email_deliveries` row, а окремий worker відправляє його з retry і stale-claim recovery. Інтерактивні document sends, де користувачу потрібен негайний результат, лишаються синхронними.
+Background notification/reminder emails do not perform SMTP I/O inside the outbox consumer. The consumer atomically writes the notification and an idempotent `email_deliveries` row, and a separate worker sends it with retry and stale-claim recovery. Interactive document sends, where the user needs an immediate result, remain synchronous.
 
-### 14.4. Activity log і чутливі дані
+### 14.4. Activity log and sensitive data
 
-Кожна мутація сервісів пише запис: actor (user/agent/system/integration), action, diff (старі/нові значення змінених полів). Таб Активність на компанії/угоді/проєкті/задачі/рахунку; глобальна стрічка (audit.read) з фільтрами за actor/типом/періодом. Записи незмінювані.
+Every service mutation writes a record: actor (user/agent/system/integration), action, diff (old/new values of the changed fields). An Activity tab on the company/deal/project/task/invoice; a global feed (audit.read) with filters by actor/type/period. Records are immutable.
 
-Повний diff небезпечний: без обмежень він продублює ЗП, персональні дані й секрети у вічну незмінну таблицю. Тому:
+A full diff is dangerous: without restrictions it would duplicate salaries, personal data and secrets into a permanent immutable table. Therefore:
 
-- **Redaction-реєстр.** Поля, позначені чутливими (compensation.amount, employees.sensitive, salary_range у вакансіях, будь-які поля під people.read_compensation/read_sensitive), у diff НЕ пишуть значення. Пишеться лише факт зміни: `field: "compensation.amount", action: "changed"`, без старого/нового значення. Читач історії бачить, що ЗП змінили, коли і хто, але не суми.
-- **Токени й секрети – ніколи.** api_tokens.hash, webhook.secret, git-креденшели, паролі не потрапляють у diff за жодних умов (виключені на рівні серіалізатора, не лише redacted): для них навіть факт-запис не містить матеріалу.
-- **Позначка чутливості запису.** Записи, що стосуються HR/compensation-сутностей, мають `sensitivity: sensitive`. Це керує (а) видимістю (такі записи в загальній стрічці видно лише з people.read_sensitive/compensation, а не будь-кому з audit.read) і (б) політикою зберігання.
-- **Політика зберігання.** Звичайний audit зберігається безстроково (аудит бізнес-дій цінний). Sensitive-audit має окреме, коротше вікно зберігання (конфігурується, напр. 24 міс) з наступним прибиранням значень-фактів понад строк: мінімізація чутливого сліду. Сам факт доступу до compensation/sensitive-полів (перегляд, не лише зміна) теж пишеться в sensitive-audit (хто дивився ЗП), як зазначено в 12.8.
+- **Redaction registry.** For fields marked as sensitive (compensation.amount, employees.sensitive, salary_range in job openings, any fields under people.read_compensation/read_sensitive), the diff does NOT record values. Only the fact of the change is recorded: `field: "compensation.amount", action: "changed"`, without the old/new value. A reader of the history sees that the salary was changed, when and by whom, but not the amounts.
+- **Tokens and secrets – never.** api_tokens.hash, webhook.secret, git credentials and passwords never get into the diff under any circumstances (excluded at the serialiser level, not just redacted): for them even the fact record contains no material.
+- **Record sensitivity flag.** Records concerning HR/compensation entities have `sensitivity: sensitive`. This controls (a) visibility (such records in the general feed are visible only with people.read_sensitive/compensation, not to anyone with audit.read) and (b) the retention policy.
+- **Retention policy.** Regular audit is kept indefinitely (an audit of business actions is valuable). Sensitive audit has a separate, shorter retention window (configurable, e.g. 24 months), after which the fact values beyond the term are cleaned up: minimisation of the sensitive trail. The very fact of access to compensation/sensitive fields (viewing, not only changing) is also written to the sensitive audit (who looked at salaries), as stated in 12.8.
 
-Redaction застосовується централізовано в шарі, що формує diff (один серіалізатор з реєстром чутливих ключів), тому новий чутливий атрибут закривається доповненням реєстру, а не правками по всіх сервісах.
+Redaction is applied centrally in the layer that builds the diff (a single serialiser with a registry of sensitive keys), so a new sensitive attribute is covered by adding it to the registry rather than by edits across all services.
 
-### 14.5. Файли
+### 14.5. Files
 
-Presigned upload у S3, реєстрація attachment, ліміт 25 МБ, превʼю зображень/PDF, антивірусна перевірка не реалізується (компроміс), розширення виконуваних файлів блокуються.
+Presigned upload to S3, attachment registration, a 25 MB limit, image/PDF previews, antivirus scanning is not implemented (trade-off), executable file extensions are blocked.
 
-`/presign` повертає `fileKey` разом із підписом `keyToken`; `/register` без цього
-підпису відмовляє. Інакше реєстрація була б способом отримати посилання на
-будь-який обʼєкт у бакеті, а не лише на щойно завантажений.
+`/presign` returns `fileKey` together with a `keyToken` signature; `/register` refuses without this
+signature. Otherwise registration would be a way to obtain a link to
+any object in the bucket, not just the one that was just uploaded.
 
-**Файли всередині rich text** (зображення в задачах, KB, описах) не можуть
-покладатися на сесію: `<img>` не надсилає `Authorization`, а десктоп працює з
-bearer-токеном з origin `tauri://localhost` і взагалі не має cookie. Presigned
-S3-URL зберігати в документі теж не можна — він спливає, і документ ламається
-за годину. Тому діє та сама модель, що для інвойсів і клієнтських порталів:
-незгадуваний токен у посиланні. `GET /api/v1/files/{id}/{token}`, де токен —
-HMAC id вкладення під `AUTH_SECRET`, безстроковий, редіректить на свіжий
-presigned URL. Компроміс явний: хто має посилання — бачить файл без входу
-(так само як публічне посилання на інвойс). Ротація `AUTH_SECRET` анулює всі
-видані посилання.
+**Files inside rich text** (images in tasks, KB, descriptions) cannot
+rely on the session: `<img>` does not send `Authorization`, and the desktop app works with a
+bearer token from the origin `tauri://localhost` and has no cookie at all. Storing a presigned
+S3 URL in the document is not an option either – it expires, and the document breaks
+within an hour. So the same model applies as for invoices and client portals:
+an unguessable token in the link. `GET /api/v1/files/{id}/{token}`, where the token is
+an HMAC of the attachment id under `AUTH_SECRET`, never expires, and redirects to a fresh
+presigned URL. The trade-off is explicit: whoever has the link sees the file without signing in
+(just like a public invoice link). Rotating `AUTH_SECRET` invalidates all
+links ever issued.
 
-У документі зберігається **кореневий відносний шлях**, не абсолютний URL: веб
-розвʼязує його від свого origin, десктоп — від налаштованого інстансу, тому
-переїзд на інший домен не ламає всі коли-небудь вставлені зображення.
+The document stores a **root-relative path**, not an absolute URL: the web app
+resolves it against its own origin, the desktop app against the configured instance, so
+moving to another domain does not break every image ever inserted.
 
-### 14.6. Імпорт/експорт
+### 14.6. Import/export
 
-Імпорт CSV: компанії, контакти, задачі (мапінг колонок, dry-run зі звітом помилок, транзакційне застосування). Експорт CSV: будь-який список у відфільтрованому стані (permission export відповідного домену). Експорт KB: Markdown-архів простору. Повне резервування (PITR БД + реплікація вкладень) і цілі RPO/RTO: розділ 19.2.
+CSV import: companies, contacts, tasks (column mapping, dry run with an error report, transactional apply). CSV export: any list in its filtered state (the export permission of the corresponding domain). KB export: a Markdown archive of a space. Full backup (DB PITR + attachment replication) and RPO/RTO targets: section 19.2.
 
-### 14.7. Налаштування (мапа розділів)
+### 14.7. Settings (map of sections)
 
-| Розділ | Зміст | Permission |
+| Section | Contents | Permission |
 |---|---|---|
-| Воркспейс | Назва, логотип, реквізити для PDF, робочі дні | settings.manage |
-| Користувачі | Інвайти, ролі, деактивація | users.manage |
-| Ролі | Редактор матриці permissions | roles.manage |
-| Проєкти | Типи проєктів, шаблони, дефолтний воркфлоу, типи задач (воркспейс), мітки | settings.manage |
-| CRM | Етапи угод, статуси компаній (лейбли) | settings.manage |
-| Кастомні поля | Реєстр за сутностями | settings.manage |
-| Фінанси | Номерація, податкові ставки, категорії витрат, правила нагадувань, email-шаблони, валюта за замовчуванням | finance.settings |
-| Час | Дефолт billable, одиниці естімейтів | settings.manage |
-| People (HR) | Відділи, посади, типи відсутностей і квоти, святкові календарі, етапи рекрутингу, шаблони онбордингу | people.manage_leave / people.recruit |
-| Компенсація і накладні | Overhead-база, робочі години/тиждень, ставки | finance.settings + people.read_compensation |
-| Інтеграції | Git-підключення, вихідні вебхуки | integrations.manage |
-| API-токени | Свої токени | будь-хто (свої) |
-| Аудит | Глобальна стрічка | audit.read |
-| Кошик | Soft-deleted, відновлення/hard delete | settings.manage |
+| Workspace | Name, logo, details for PDFs, working days | settings.manage |
+| Users | Invites, roles, deactivation | users.manage |
+| Roles | Permissions matrix editor | roles.manage |
+| Projects | Project types, templates, default workflow, task types (workspace), labels | settings.manage |
+| CRM | Deal stages, company statuses (labels) | settings.manage |
+| Custom fields | Registry by entity | settings.manage |
+| Finance | Numbering, tax rates, expense categories, reminder rules, email templates, default currency | finance.settings |
+| Time | Billable default, estimate units | settings.manage |
+| People (HR) | Departments, positions, absence types and quotas, holiday calendars, recruitment stages, onboarding templates | people.manage_leave / people.recruit |
+| Compensation and overhead | Overhead base, working hours/week, rates | finance.settings + people.read_compensation |
+| Integrations | Git connections, outgoing webhooks | integrations.manage |
+| API tokens | Your own tokens | anyone (their own) |
+| Audit | Global feed | audit.read |
+| Trash | Soft-deleted items, restore/hard delete | settings.manage |
 
-### 14.8. Кастомізація (зведення можливостей)
+### 14.8. Customisation (summary of capabilities)
 
-Все нижче: дані, не код: статуси задач пер-проєкт (+ воркспейс-дефолт), типи задач (воркспейс + пер-проєкт), типи проєктів, шаблони проєктів (повний blueprint), шаблони задач, повторювані задачі, intake-форми пер-проєкт, шаблони KB-сторінок, видимість сторінок, етапи пайплайну з probability, типи відсутностей і квоти, святкові календарі, етапи рекрутинг-пайплайну, шаблони онбордингу, кастомні поля 8 типів на сутностях (включно з employees/applicants), кастомні ролі з матрицею permissions, saved views особисті/shared/workspace, кастомні дашборди з віджетами, формат номерації документів, email-шаблони, правила нагадувань, git-автоматизації пер-проєкт, шаблон назви гілки, ставки часу пер-проєкт/пер-користувач, overhead, мова PDF пер-документ.
+Everything below is data, not code: task statuses per project (+ workspace default), task types (workspace + per project), project types, project templates (a full blueprint), task templates, recurring tasks, intake forms per project, KB page templates, page visibility, pipeline stages with probability, absence types and quotas, holiday calendars, recruitment pipeline stages, onboarding templates, custom fields of 8 types on entities (including employees/applicants), custom roles with a permissions matrix, saved views personal/shared/workspace, custom dashboards with widgets, document numbering format, email templates, reminder rules, git automations per project, branch name pattern, time rates per project/per user, overhead, PDF language per document.
 
 ---
 
 ## 15. REST API
 
-### 15.1. Конвенції
+### 15.1. Conventions
 
-- База `/api/v1`, JSON; auth: cookie або Bearer-токен. Кожен маршрут: guard(permission) або public().
-- Ресурсні CRUD + дієслівні операції: `POST /invoices/:id/send`, `POST /quotes/:id/convert`, `POST /tasks/:id/move`, `POST /cycles/:id/complete`, `POST /time/timer/start|stop`.
-- Пагінація cursor-based; фільтри плоскими query-параметрами; `include=`-параметр для дозованих звʼязків (task?include=assignees,labels,git_links).
-- Помилки `{error:{code,message,details}}`: 400 (Zod details), 401, 403 (з кодом required permission), 404 (і для ресурсів поза доступом: без витоку існування), 409 (конфлікт версій: мутація несе відому `version`, розбіжність повертає поточний стан), 422 (доменні правила).
-- OpenAPI генерується з Zod (hono-openapi), публікується на `/api/docs`: контракт для MCP і зовнішніх інтеграцій.
-- SSE `/api/v1/stream` з правами; публічні: `/i/:token`, `/q/:token`, `/portal/:token`, git-вебхуки.
+- Base `/api/v1`, JSON; auth: cookie or a Bearer token. Every route: guard(permission) or public().
+- Resource CRUD + verb operations: `POST /invoices/:id/send`, `POST /quotes/:id/convert`, `POST /tasks/:id/move`, `POST /cycles/:id/complete`, `POST /time/timer/start|stop`.
+- Cursor-based pagination; filters as flat query parameters; an `include=` parameter for loading relations selectively (task?include=assignees,labels,git_links).
+- Errors `{error:{code,message,details}}`: 400 (Zod details), 401, 403 (with the code of the required permission), 404 (also for resources outside your access: no leaking of existence), 409 (version conflict: a mutation carries the known `version`, a mismatch returns the current state), 422 (domain rules).
+- OpenAPI is generated from Zod (hono-openapi) and published at `/api/docs`: the contract for MCP and external integrations.
+- SSE `/api/v1/stream` with permissions; public: `/i/:token`, `/q/:token`, `/portal/:token`, git webhooks.
 
-### 15.2. Зріз ендпоінтів за доменами (повний перелік: OpenAPI)
+### 15.2. Endpoints by domain (full list: OpenAPI)
 
-core: auth/*, me (профіль+permissions+memberships+notification preferences), users, roles, search, dashboard, dashboards (+widgets, +widget-data), notifications, attachments (presign/register), custom-fields, saved-views, webhooks, audit, stream.
+core: auth/*, me (profile+permissions+memberships+notification preferences), users, roles, search, dashboard, dashboards (+widgets, +widget-data), notifications, attachments (presign/register), custom-fields, saved-views, webhooks, audit, stream.
 crm: companies (+overview), contacts, leads (+convert), sales-work, sales-activities (+complete/+cancel), sales-message-templates, sales-sequences (+enroll/+stop), deals (+move), deal-stages, notes.
-projects: projects (+members, +repositories, +templates apply/save), task-statuses, task-types, project-types, tasks (+move, +relations, +links, +duplicate, +transfer), drafts, task-templates, recurring-tasks, intake (+accept, +decline, налаштування; публічна форма `/intake/:token`), comments, labels, cycles (+complete, +snapshots), me/tasks.
+projects: projects (+members, +repositories, +templates apply/save), task-statuses, task-types, project-types, tasks (+move, +relations, +links, +duplicate, +transfer), drafts, task-templates, recurring-tasks, intake (+accept, +decline, settings; public form `/intake/:token`), comments, labels, cycles (+complete, +snapshots), me/tasks.
 kb: spaces (+members), pages (tree, +versions, +restore, +lock, +export), templates.
 time: entries CRUD, timer start/stop, rates, reports, unbilled.
-finance: quotes (+send/accept-internal/convert/pdf), invoices (+send/cancel/duplicate/pdf/from-time), payments, credit-notes, recurring, expenses (+categories), tax-rates, reminder-rules, email-templates, finance/dashboard, finance/profitability (проєкт/клієнт/labor, лише finance.read_costs).
+finance: quotes (+send/accept-internal/convert/pdf), invoices (+send/cancel/duplicate/pdf/from-time), payments, credit-notes, recurring, expenses (+categories), tax-rates, reminder-rules, email-templates, finance/dashboard, finance/profitability (project/client/labor, only finance.read_costs).
 people: employees (+lifecycle, +documents), departments, positions, leave-types, leave-requests (+approve/reject), leave-balances, leave-entitlements, holiday-calendars, job-openings (+public `/careers/:token`), applicants (+move/hire), interviews, allocations, compensation (finance.read_costs/people.read_compensation), overhead-settings, people/dashboard.
 integrations: git connections/repositories, project bindings, automation rules, resync.
 
 ---
 
-## 16. MCP-сервер
+## 16. MCP server
 
-Пакет packages/mcp: автентифікація API-токеном, всі виклики через REST (жодного прямого доступу до БД); права агента = скоуп токена, тому "агент бачить фінанси" вирішується так само, як для людини: роллю власника токена і скоупом.
+The packages/mcp package: authentication with an API token, all calls go through REST (no direct database access at all); the agent's permissions = the token's scope, so "the agent can see finance" is decided the same way as for a person: by the token owner's role and the scope.
 
-Інструменти (обгортки 1-2 викликів зі стислими описами і Zod-схемами з shared):
-- Читання: search (включно з тілами CRM-нотаток), list_projects (фільтр `key` — проєкт знаходиться за коротким кодом, напр. CONTENT), get_project_schema (статуси, типи задач, мітки задач, цикли і кастомні поля проєкту — словник, який приймають write-інструменти), list_tasks (вікно дат за dueDate, статус, мітки, тип, батьківська задача, цикл, підрядок назви і кастомні поля; відповідь у календарному порядку), get_task (повна картка: текст, дата, статус, мітки, кастомні поля, виконавці, зовнішні посилання, коментарі і актуальна version), list_companies, list_contacts, list_deals, list_deal_stages, list_notes, list_custom_fields, list_users, list_kb_spaces, list_kb_pages, get_kb_page, get_company, get_contact, get_deal, get_company_overview, list_my_tasks, get_project_status, get_cycle_progress, list_overdue_invoices, get_receivables_aging, list_unbilled_time, find_kb_page. Кожен запис читається окремо і в списках повертається customFields: те, що агент записав, він має прочитати назад, не змінюючи запис заради читання. list_* — точка входу для отримання id: решта інструментів приймають projectId/companyId/dealId/stageId, які агенту більше не треба вгадувати; статуси, типи, мітки задач і цикли приймаються ще й назвами, а невідома назва повертає перелік наявних. Відповіді всіх інструментів проходять scrub: службові поля (version, deletedAt, templateSourceId) і секрети (portalToken) до контексту моделі не потрапляють — крім `version` у задачних інструментах, бо саме її агент повертає назад у запис.
-- Дії: create_task (уся картка одним викликом: назва, текст, дата, статус, тип, мітки, кастомні поля, посилання; parentId робить її підзадачею, cycle кладе в цикл), update_task (перезапис картки, зокрема батьківської задачі й циклу — null відв'язує; батьківська задача має бути з того самого проєкту і не може бути самою задачею чи її підзадачею; expectedVersion з get_task — і чужа правка не затирається, а повертає 409 з поточною версією), upsert_task (створення-або-оновлення за власним унікальним ключем: ключ лежить у кастомному полі, тож повторний запуск тієї самої генерації оновлює ту саму задачу, а не заводить другу; якщо назву, текст, дату чи статус змінили в Ordi після останнього запису — відмова замість затирання, поки не передано force), add_task_link (джерело тренду до публікації, permalink опублікованого поста після; той самий url удруге — no-op), update_task_status, assign_task, comment_on_task, log_time, create_invoice_from_time, create_invoice_from_project, send_invoice, record_payment, send_payment_reminder, create_quote, create_note, update_note, create_company (відмовляє на дублікаті імені/домену), update_company, create_contact, update_contact, create_deal, update_deal (ownerId — і в create, і в update, id беруться з list_users), move_deal (разом зі структурованою причиною через customFields), create_custom_field і update_custom_field (потребують settings.manage у скоупі; замість видалення — deprecated), create_kb_page, update_kb_page, request_leave, approve_leave, create_job_opening, move_applicant. У всіх update-інструментах customFields мержаться по ключах: правка одного поля не стирає решту. Кожен write-інструмент має свою пару на читання і на переписування (нотатка, KB-сторінка, задача): те, що агент може записати, він може прочитати і виправити, інакше дублікати і застарілі записи нічим прибрати.
-- CRM sales loop: `list_leads`, `get_lead`, `create_lead`, `update_lead`, `get_sales_work`, `list_sales_activities`, `schedule_sales_activity`, `update_sales_activity`, `complete_sales_activity`, `cancel_sales_activity`, `convert_lead`, `list_sales_playbooks`, `save_sales_message_template`, `save_sales_sequence`, `manage_sales_sequence`. `schedule_sales_activity` приймає `templateId` і рендерить placeholders на API; sequence enrollment планує ручні дії, але не надсилає повідомлення.
-- Помилки інструменту несуть код API (not_found, forbidden, version_conflict, validation_error) і дію, якою це лікується: конфлікт версій каже перечитати задачу через get_task і накласти зміну на актуальну версію, дубль — назву й ref наявного запису, відсутній доступ — що бракує саме скоупу токена.
-- Читання (People/costs, лише в межах прав токена): list_pending_leave, get_team_availability, get_recruitment_pipeline, get_project_profitability, get_labor_cost (останні два вимагають finance.read_costs у скоупі токена; без нього інструмент недоступний).
+Tools (wrappers around 1-2 calls with concise descriptions and Zod schemas from shared):
+- Reading: search (including the bodies of CRM notes), list_projects (a `key` filter – a project is found by its short code, e.g. CONTENT), get_project_schema (the project's statuses, task types, task labels, cycles and custom fields – the vocabulary the write tools accept), list_tasks (a date window by dueDate, status, labels, type, parent task, cycle, title substring and custom fields; the response is in calendar order), get_task (the full card: text, date, status, labels, custom fields, assignees, external links, comments and the current version), list_companies, list_contacts, list_deals, list_deal_stages, list_notes, list_custom_fields, list_users, list_kb_spaces, list_kb_pages, get_kb_page, get_company, get_contact, get_deal, get_company_overview, list_my_tasks, get_project_status, get_cycle_progress, list_overdue_invoices, get_receivables_aging, list_unbilled_time, find_kb_page. Each record can be read individually, and lists return customFields: whatever the agent has written, it must be able to read back without changing the record just to read it. list_* is the entry point for getting ids: the other tools accept projectId/companyId/dealId/stageId, which the agent no longer has to guess; statuses, types, task labels and cycles are also accepted by name, and an unknown name returns the list of existing ones. The responses of all tools are scrubbed: internal fields (version, deletedAt, templateSourceId) and secrets (portalToken) never reach the model's context – except `version` in the task tools, because that is exactly what the agent passes back in a write.
+- Actions: create_task (the whole card in one call: title, text, date, status, type, labels, custom fields, links; parentId makes it a subtask, cycle puts it into a cycle), update_task (rewrites the card, including the parent task and cycle – null unlinks; the parent task must be from the same project and cannot be the task itself or one of its subtasks; expectedVersion from get_task – and someone else's edit is not overwritten, but a 409 with the current version is returned), upsert_task (create-or-update by the caller's own unique key: the key lives in a custom field, so re-running the same generation updates the same task instead of creating a second one; if the title, text, date or status was changed in Ordi after the last write – a refusal instead of overwriting, until force is passed), add_task_link (the trend source before publication, the permalink of the published post after; the same url a second time is a no-op), update_task_status, assign_task, comment_on_task, log_time, create_invoice_from_time, create_invoice_from_project, send_invoice, record_payment, send_payment_reminder, create_quote, create_note, update_note, create_company (refuses on a duplicate name/domain), update_company, create_contact, update_contact, create_deal, update_deal (ownerId – in both create and update, ids come from list_users), move_deal (together with a structured reason via customFields), create_custom_field and update_custom_field (require settings.manage in the scope; deprecated instead of deletion), create_kb_page, update_kb_page, request_leave, approve_leave, create_job_opening, move_applicant. In all update tools customFields are merged by key: editing one field does not erase the rest. Every write tool has a matching tool for reading and for rewriting (note, KB page, task): whatever the agent can write, it can read and correct, otherwise there would be no way to clean up duplicates and stale records.
+- CRM sales loop: `list_leads`, `get_lead`, `create_lead`, `update_lead`, `get_sales_work`, `list_sales_activities`, `schedule_sales_activity`, `update_sales_activity`, `complete_sales_activity`, `cancel_sales_activity`, `convert_lead`, `list_sales_playbooks`, `save_sales_message_template`, `save_sales_sequence`, `manage_sales_sequence`. `schedule_sales_activity` accepts `templateId` and renders placeholders in the API; sequence enrollment schedules manual actions but does not send messages.
+- Tool errors carry the API code (not_found, forbidden, version_conflict, validation_error) and the action that fixes it: a version conflict says to re-read the task via get_task and apply the change on top of the current version, a duplicate gives the name and ref of the existing record, missing access says exactly what the token's scope lacks.
+- Reading (People/costs, only within the token's permissions): list_pending_leave, get_team_availability, get_recruitment_pipeline, get_project_profitability, get_labor_cost (the last two require finance.read_costs in the token's scope; without it the tool is unavailable).
 
-Generic delete та незворотні адміністративні операції через MCP не виставляються. `cancel_sales_activity` є явною, аудитованою lifecycle-командою для planned activity, а не generic delete. Всі дії пишуться в activity з actor_type=agent (службовий користувач Agent): у UI завжди видно, що зробив агент, з diff-ом.
+Generic delete and irreversible administrative operations are not exposed via MCP. `cancel_sales_activity` is an explicit, audited lifecycle command for a planned activity, not a generic delete. All actions are written to activity with actor_type=agent (the Agent service user): the UI always shows what the agent did, with a diff.
 
-### 16.1. Агенти-співробітники
+### 16.1. Agent employees
 
-План: `docs/plans/2026-09-05-001-feature-ai-agent-employees-plan.md`.
+Plan: `docs/plans/2026-09-05-001-feature-ai-agent-employees-plan.md`.
 
-MCP-сервер дає агенту доступ; §16.1 дає йому робоче місце. Агент – це користувач з `actor_type = 'agent'`, роллю, рантаймом (Claude Code; Codex зареєстрований як coming soon) і списком дозволених MCP-конекторів. Його додають тим самим діалогом «Додати учасника», що й людину, додають у проєкти тими самими членствами і призначають на задачі тим самим селектором виконавця. Інтелект лишається зовнішнім – це Claude Code через Agent SDK, на підписці або API-ключі робочої області; ordi не має власної моделі й не стає AI-продуктом. Нове тут – цикл: призначення задачі стає запуском, запуск стає pull request-ом.
+The MCP server gives an agent access; §16.1 gives it a workplace. An agent is a user with `actor_type = 'agent'`, a role, a runtime (Claude Code; Codex is registered as coming soon) and a list of allowed MCP connectors. It is added through the same "Add member" dialog as a person, added to projects through the same memberships, and assigned to tasks with the same assignee picker. The intelligence stays external – it is Claude Code via the Agent SDK, on the workspace's subscription or API key; ordi has no model of its own and does not become an AI product. What is new here is the loop: assigning a task becomes a run, and a run becomes a pull request.
 
-- **Виконання всередині деплойменту.** Воркер у процесі API (`AGENT_WORKER_ENABLED`, `AGENT_WORKER_CONCURRENCY`) забирає запуски через `FOR UPDATE SKIP LOCKED`, клонує репозиторій проєкту в `/data/agent-work/<runId>` інсталяційним токеном GitHub App, стартує Claude Code і стримить події в лог задачі. Для прода задокументовано винесення воркера в окремий контейнер із того самого образу.
-- **Доступ до Claude – ресурс робочої області.** Один доступ (плюс запасний) на всіх агентів, підключає власник права `agents.manage` у Налаштування → Агенти: токен підписки з `claude setup-token` або API-ключ Anthropic – рівноправні варіанти. Секрет шифрується AES-GCM, на картці видно, хто підключив: витрачається чийсь особистий план, і це має бути видно.
-- **Конектори – через шлюз.** Робоча область веде бібліотеку MCP-серверів (курований каталог або власний URL), агенту вмикають потрібні галочками. У запуску агент отримує тільки `ordi` і по одному входу на дозволений конектор, і всі вони ведуть у шлюз ordi; upstream-адреси, заголовки і токени лишаються в процесі API. OAuth 2.1 для конекторів виконує сам ordi (дискавері, динамічна реєстрація, PKCE, оновлення токенів).
-- **Права.** Нове право `agents.manage` (доступ Claude, агенти, ліміти, конектори агента, скасування запусків), пресет-роль `Agent` (projects.read, projects.write, kb.read), членство в проєкті як межа ресурсу і політика призначення на кожного агента (`project_members` / `project_admins` / `agents_managers`), щоб призначення роботи агенту було свідомим правом, а не побічним ефектом випадайки.
-- **Цикл задачі.** Агент звітує коментарями, чіпляє PR через `add_task_link` і переводить задачу в категорію `in_review` – у `done` він не переводить ніколи. Задачу закриває наявна автоматизація `pr_merged` після того, як людина змержила PR. Коментар людини під задачею продовжує ту саму сесію Claude наступним запуском.
-- **Безпека.** Дочірній процес отримує перебудоване оточення (PATH, HOME, один креденшел, таймаути MCP) – без `DATABASE_URL`, `ENCRYPTION_KEY`, `AUTH_SECRET`, S3 і SMTP; токен запуску мінтиться на старті і відкликається на фініші зі скоупом = права ролі агента; списки дозволених і заборонених інструментів; збережені події логу проходять scrub на відомі секрети. Радіус ураження названо прямо: контейнер, роль агента в ordi і запис у репозиторій через інсталяційний токен.
+- **Execution inside the deployment.** A worker in the API process (`AGENT_WORKER_ENABLED`, `AGENT_WORKER_CONCURRENCY`) picks up runs via `FOR UPDATE SKIP LOCKED`, clones the project's repository into `/data/agent-work/<runId>` with the GitHub App installation token, starts Claude Code and streams events into the task log. For production, moving the worker into a separate container from the same image is documented.
+- **Claude access is a workspace resource.** One access (plus a fallback) for all agents, connected by a holder of the `agents.manage` permission in Settings → Agents: a subscription token from `claude setup-token` or an Anthropic API key – equally valid options. The secret is encrypted with AES-GCM, and the card shows who connected it: someone's personal plan is being spent, and that has to be visible.
+- **Connectors go through a gateway.** The workspace keeps a library of MCP servers (a curated catalogue or a custom URL), and the ones an agent needs are switched on with checkboxes. In a run the agent gets only `ordi` and one entry per allowed connector, and all of them lead into the ordi gateway; upstream addresses, headers and tokens stay in the API process. OAuth 2.1 for connectors is performed by ordi itself (discovery, dynamic registration, PKCE, token refresh).
+- **Permissions.** A new `agents.manage` permission (Claude access, agents, limits, agent connectors, cancelling runs), a preset `Agent` role (projects.read, projects.write, kb.read), project membership as the resource boundary, and an assignment policy per agent (`project_members` / `project_admins` / `agents_managers`), so that assigning work to an agent is a deliberate permission rather than a side effect of a dropdown.
+- **Task loop.** The agent reports through comments, attaches the PR via `add_task_link` and moves the task to the `in_review` category – it never moves it to `done`. The task is closed by the existing `pr_merged` automation after a person has merged the PR. A person's comment on the task continues the same Claude session in the next run.
+- **Security.** The child process gets a rebuilt environment (PATH, HOME, one credential, MCP timeouts) – without `DATABASE_URL`, `ENCRYPTION_KEY`, `AUTH_SECRET`, S3 and SMTP; the run token is minted at start and revoked at finish, with scope = the agent role's permissions; allowlists and denylists of tools; stored log events are scrubbed for known secrets. The blast radius is named plainly: the container, the agent's role in ordi, and write access to the repository via the installation token.
 
 ---
 
-## 17. UX-специфікація
+## 17. UX specification
 
-### 17.1. Принципи
+### 17.1. Principles
 
-1. Щільність без тісноти: рядок списку ~40px, Inter, один акцентний колір, семантичні кольори тільки статуси/пріоритети.
-2. Клавіатура як першоклас: Cmd+K палета; C нова задача; T старт/стоп таймера; G потім D/P/C/F/K навігація (дашборд/проєкти/клієнти/фінанси/KB); J/K по списку, Enter відкрити, E статус, A асайн, L мітки. Хоткеї в тултіпах і палеті.
-3. Peek-панелі замість переходів (задача, рахунок, контакт, запис часу); прямий URL існує завжди.
-4. Оптимістичні оновлення з відкатом і тостом.
-5. Порожні стани навчають: речення + первинна дія + хоткей.
-6. Модалки тільки для швидкого створення і підтверджень; редагування инлайн/панель.
-7. Права формують інтерфейс: розділи і дії без доступу відсутні (не disabled), щоб member без finance.read взагалі не бачив грошей у навігації, табах і віджетах.
+1. Density without crowding: list row ~40px, Inter, one accent colour, semantic colours only for statuses/priorities.
+2. Keyboard as a first-class citizen: Cmd+K palette; C new task; T start/stop timer; G then D/P/C/F/K navigation (dashboard/projects/clients/finance/KB); J/K through a list, Enter to open, E status, A assign, L labels. Hotkeys shown in tooltips and the palette.
+3. Peek panels instead of page transitions (task, invoice, contact, time entry); a direct URL always exists.
+4. Optimistic updates with rollback and a toast.
+5. Empty states teach: a sentence + the primary action + a hotkey.
+6. Modals only for quick creation and confirmations; editing inline/in a panel.
+7. Permissions shape the interface: sections and actions without access are absent (not disabled), so that a member without finance.read does not see money anywhere in the navigation, tabs or widgets.
 
-### 17.2. Навігація
+### 17.2. Navigation
 
 ```
-┌──────────┬─────────────────────────────────────────┐
-│ Дашборд  │  Заголовок + фільтри + перемикач вигляду│
-│ Мої      │  ┌───────────────────────────┬────────┐ │
-│  задачі  │  │ List/Board/Calendar/      │ Peek-  │ │
-│ Клієнти  │  │ Timeline / картки / KB    │ панель │ │
-│ Угоди    │  │                           │        │ │
-│ Проєкти  │  └───────────────────────────┴────────┘ │
-│  ├ KLD   │   [⏱ активний таймер: KLD-42 00:47]     │
-│  └ APR   │                                         │
-│ KB       │                                         │
-│ Час      │                                         │
-│ Фінанси  │  ← відсутній без finance.read           │
-│ Люди     │  ← відсутній без people.read            │
-│ ───────  │                                         │
-│ Пошук ⌘K │                                         │
-│ Налашт.  │                                         │
-└──────────┴─────────────────────────────────────────┘
+┌───────────┬─────────────────────────────────────────┐
+│ Dashboard │  Title + filters + view switcher        │
+│ My        │  ┌───────────────────────────┬────────┐ │
+│  tasks    │  │ List/Board/Calendar/      │ Peek   │ │
+│ Clients   │  │ Timeline / cards / KB     │ panel  │ │
+│ Deals     │  │                           │        │ │
+│ Projects  │  └───────────────────────────┴────────┘ │
+│  ├ KLD    │   [⏱ active timer: KLD-42 00:47]        │
+│  └ APR    │                                         │
+│ KB        │                                         │
+│ Time      │                                         │
+│ Finance   │  ← hidden without finance.read          │
+│ People    │  ← hidden without people.read           │
+│ ───────   │                                         │
+│ Search ⌘K │                                         │
+│ Settings  │                                         │
+└───────────┴─────────────────────────────────────────┘
 ```
 
-Sidebar згортається; активні проєкти пінляться; guest бачить тільки свої проєкти і простори. Мобільно: responsive ті самі екрани, нижня навігація; окремий мобільний застосунок не розробляється.
+The sidebar collapses; active projects are pinned; a guest sees only their own projects and spaces. Mobile: the same screens, responsive, with bottom navigation; a separate mobile app is not developed.
 
-### 17.3. Ключові екрани
+### 17.3. Key screens
 
-Дашборд; Мої задачі; Клієнти (список, картка з табами); Угоди (kanban, список); Проєкти (список; проєкт: задачі у 4 виглядах + peek, цикли з burndown, сторінки-дерево з редактором, час, налаштування з воркфлоу-редактором, доступом, git); KB (простори, дерево, редактор з версіями); Час (мій тиждень, звіти); Фінанси (дашборд, списки, редактор рахунку/quote: форма зліва + живий PDF-preview справа, прибутковість проєкта/клієнта за finance.read_costs); People (співробітники зі списком і карткою lifecycle, календар відсутностей і заявки, рекрутинг-канбан з картками кандидатів, HR-дашборд); публічні сторінки (invoice, quote з Accept/Decline, портал, intake-форма, careers-форма); Налаштування (14.7); Профіль.
+Dashboard; My tasks; Clients (list, card with tabs); Deals (kanban, list); Projects (list; project: tasks in 4 views + peek, cycles with burndown, a page tree with the editor, time, settings with the workflow editor, access, git); KB (spaces, tree, editor with versions); Time (my week, reports); Finance (dashboard, lists, invoice/quote editor: form on the left + live PDF preview on the right, project/client profitability with finance.read_costs); People (employees with a list and a lifecycle card, absence calendar and requests, recruitment kanban with applicant cards, HR dashboard); public pages (invoice, quote with Accept/Decline, portal, intake form, careers form); Settings (14.7); Profile.
 
-### 17.4. Стани
+### 17.4. States
 
-Кожен список: loading (скелетони) / empty (навчальний) / error (retry) / data. Довгі операції (PDF, імпорт, експорт): серверні, з прогресом і можливістю піти. Деструктивні дії: підтвердження з імʼям сутності. 403 всередині сесії (роль змінили): екран "немає доступу" з поясненням, не білий екран.
-
----
-
-## 18. Десктоп (Tauri)
-
-Tauri 2 загортає білд apps/web; окремого UI-коду немає. Нативне: трей з лічильником нотифікацій; OS-нотифікації з SSE; глобальний хоткей quick-add (мале always-on-top вікно: задача або таймер); автозапуск; deep links `ordi://task/KLD-42`; updater з підписаними релізами з CI. Білди: macOS universal, Windows msi, Linux AppImage/deb. Перший запуск: URL інстансу API.
+Every list: loading (skeletons) / empty (instructive) / error (retry) / data. Long operations (PDF, import, export): server-side, with progress and the option to leave. Destructive actions: confirmation with the entity's name. A 403 inside a session (the role was changed): a "no access" screen with an explanation, not a blank white screen.
 
 ---
 
-## 19. Нефункціональні вимоги
+## 18. Desktop (Tauri)
 
-### 19.1. Безпека
-
-HTTPS всюди (проксі Dokploy); паролі за Better Auth; API-токени SHA-256-хешами; git-креденшели AES-GCM. Zod на межі; параметризовані запити; санітизація rich-text на рендері; CSP. CSRF для cookie; CORS allowlist (web-домен, tauri://). Публічні токени 128-біт, rate limit, без перелічуваності; 404 замість 403 для чужих ресурсів. Секрети тільки env. RBAC-інваріанти покриті тестами (розділ 20).
-
-### 19.2. Надійність, резервування і відновлення
-
-**Формальні цілі (обовʼязкові вимоги, не побажання):**
-- **RPO ≤ 5 хвилин** (максимум допустимих втрачених даних). Голого нічного дампа для цього недостатньо (втрата до доби). Механізм: continuous archiving / point-in-time recovery: стрімінг WAL-сегментів у S3-сумісне сховище безперервно, плюс періодичний base backup. Це дозволяє відновитися на будь-яку точку в часі з втратою не більше кількох хвилин.
-- **RTO ≤ 1 година** (максимум часу до відновлення роботи). Механізм: документована й відрепетована runbook-процедура: підняти новий інстанс Postgres, відновити з останнього base backup + програти WAL до цільової точки, відновити вкладення з S3-бакета (він реплікований окремо), перемкнути застосунок. Процедура репетується щоквартально з заміром фактичного RTO; якщо замір перевищує ціль, це блокер.
-
-**Резервування вкладень (S3):** окремо від БД, з версіюванням обʼєктів і крос-регіональною реплікацією бакета; RPO вкладень визначається лагом реплікації (близький до нуля).
-
-**Черга/події:** таблиці `events`, `processed_events`, dead-letter входять у той самий PITR-периметр БД, тому подія, зафіксована перед збоєм, переживає відновлення (не втрачається і не дублюється завдяки processed_events).
-
-**Інше:** міграції адитивні, окремий крок деплою перед перемиканням трафіку; ідемпотентні воркери (reminder_log, dedup вебхуків, processed_events); `/healthz` (liveness), `/readyz` (БД доступна); інтеграція з наявним моніторингом (OneUptime) з алертами на глибину dead-letter черги, лаг WAL-архівації і провал health-перевірок.
-
-### 19.3. Продуктивність
-
-P95 списків ≤ 300 мс на цільових обсягах (індекси за фільтрами, accessibleProjectIds одним запитом); перше завантаження SPA ≤ 2 с, code splitting за маршрутами; PDF ≤ 3 с; пошук ≤ 200 мс.
-
-### 19.4. Спостережуваність
-
-pino JSON-логи з request_id і actor; метрики: латентність за маршрутами, глибина черг, помилки воркерів, доставка вебхуків; Sentry для фронту й бекенду.
-
-### 19.5. Локалізація
-
-UI uk/en (i18n-ключі з першого дня); Intl для дат/чисел/валют; PDF пер-документна мова.
+Tauri 2 wraps the apps/web build; there is no separate UI code. Native features: a tray icon with a notification counter; OS notifications from SSE; a global quick-add hotkey (a small always-on-top window: a task or a timer); autostart; deep links `ordi://task/KLD-42`; an updater with signed releases from CI. Builds: macOS universal, Windows msi, Linux AppImage/deb. First launch: the API instance URL.
 
 ---
 
-## 20. Тестування
+## 19. Non-functional requirements
 
-- **Юніт (Vitest):** статусні матриці (invoice, quote, задачі, leave_request, applicant), гроші (підсумки, податки, знижки, часткові оплати, кредит-ноти, переплата), собівартість (cost_rate знімок, overhead per hour, маржа проєкту/клієнта, internal-проєкт як чиста вартість без revenue), номерні послідовності, aging, burndown-знімки, leave-баланси (нарахування, carry-forward, списання/повернення), парсер git-згадок, RBAC-резолвер, побудова фільтрів/сортування кастомних полів за реєстром (валідація op під тип), redaction-серіалізатор diff (чутливі поля без значень, токени виключені повністю).
-- **Інтеграційні API (testcontainers + Postgres):** контракти маршрутів; **матриця прав**: для кожної ролі з сіда прогін ключових ендпоінтів на 200/403/404 (генерується з каталогу permissions: нова permission без тесту валить CI); **ізоляція чутливих даних**: member/guest не бачать people.* ніде (навігація, пошук, API, дашборд-віджети); compensation недоступна без people.read_compensation, costs-звіти без finance.read_costs; sensitive-audit невидимий без відповідного права; кожен доступ до compensation пише audit; **version-locking** (паралельний UPDATE з застарілою version → 409); **internal-проєкти** (kind=internal без company_id не течуть у CRM/aging/profitability-revenue; рахунок на internal-проєкт відхиляється); ресурсний доступ (private проєкт невидимий не-члену включно з пошуком, SSE, дашбордом); вебхуки з підписами.
-- **Обробка подій (outbox):** ідемпотентність (повторна доставка того самого event_id не дублює ефект), retry→dead-letter після вичерпання, per-aggregate порядок (події одного aggregate_id обробляються послідовно), replay з DLQ.
-- **E2E (Playwright):** логін; клієнт → угода → won → проєкт з шаблону → задачі по борду → цикл; час → рахунок з часу → відправка → часткова і фінальна оплата; quote → accept на публічній сторінці → конвертація; KB: сторінка, версія, відновлення, згадка задачі; вакансія → кандидат → hire → створення співробітника з онбордингом; заявка на відпустку → апрув → баланс списано; member не бачить розділів People і Фінанси; git-вебхук (мок) рухає статус.
-- **DR-репетиція (у hardening):** прогін відновлення з PITR + вкладень із заміром фактичних RPO/RTO проти цілей 19.2.
-- CI: lint, tsc, тести, збірка образів і Tauri; деплой тегованих релізів на Dokploy; сід демо-даних.
+### 19.1. Security
 
----
+HTTPS everywhere (Dokploy proxy); passwords via Better Auth; API tokens stored as SHA-256 hashes; git credentials encrypted with AES-GCM. Zod at the boundary; parameterised queries; rich-text sanitisation at render time; CSP. CSRF protection for cookies; CORS allowlist (web domain, tauri://). Public tokens are 128-bit, rate limited and non-enumerable; 404 instead of 403 for other people's resources. Secrets only in env. RBAC invariants are covered by tests (section 20).
 
-## 21. План поставки
+### 19.2. Reliability, backup and recovery
 
-Без MVP: все входить у 1.0. Порядок за залежностями, кожен етап: працюючий інкремент на staging:
+**Formal targets (mandatory requirements, not wishes):**
+- **RPO ≤ 5 minutes** (maximum acceptable data loss). A plain nightly dump is not enough for this (loss of up to a day). Mechanism: continuous archiving / point-in-time recovery: WAL segments are streamed continuously to S3-compatible storage, plus a periodic base backup. This makes it possible to restore to any point in time with a loss of no more than a few minutes.
+- **RTO ≤ 1 hour** (maximum time until work is restored). Mechanism: a documented and rehearsed runbook procedure: bring up a new Postgres instance, restore from the latest base backup + replay WAL up to the target point, restore attachments from the S3 bucket (it is replicated separately), switch the application over. The procedure is rehearsed quarterly with the actual RTO measured; if the measurement exceeds the target, it is a blocker.
 
-1. **Фундамент:** монорепо, CI, core-схема, auth, **RBAC цілком** (каталог, ролі, guard-и, матричний тест), каркас API і SPA (навігація, палета, дизайн-система), деплой.
-2. **CRM:** компанії, контакти, нотатки, активність, списки/картка, saved views, пошук.
-3. **Projects, ядро:** проєкти, воркфлоу, типи, задачі (List/Board/Calendar/Spreadsheet), драфти, inline quick-add, підзадачі, коментарі, мітки, лінки, Мої задачі, нотифікації, members/visibility.
-4. **Projects, розширення:** цикли з burndown, relations/dependencies, Timeline, шаблони проєктів і задач, повторювані задачі, intake (форма + IMAP), перенос/дублювання.
-5. **KB:** простори, дерево, редактор, версії, згадки/backlinks, шаблони, експорт.
-6. **Time:** таймер, записи, ставки, звіти.
-7. **Finance:** рахунки повний цикл, PDF, публічні сторінки, оплати, кредит-ноти, quotes з accept, recurring, нагадування, витрати, рахунок з часу, портал, фін-дашборд.
-8. **People (HR):** співробітники і lifecycle, відпустки/відсутності з апрувами і балансами, святкові календарі, рекрутинг (вакансії, кандидати, інтервʼю, найм), онбординг-чеклісти, HR-дашборд, домен permissions people.*.
-9. **Costs & profitability:** компенсація і overhead, cost_rate у time-entry, собівартість і прибутковість проєкту/клієнта, labor-cost і utilization звіти, finance.read_costs.
-10. **Deals + стартовий дашборд + кастомні дашборди + імпорт/експорт.**
-11. **Інтеграції:** git (усі три провайдери), автоматизації, вихідні вебхуки, SSE-realtime.
-12. **MCP-сервер.**
-13. **Desktop:** трей, нотифікації, quick-add, updater.
-14. **Hardening:** e2e-повнота, прогін бекап/відновлення, security-аудит (включно з RBAC-фазингом і перевіркою ізоляції HR/costs-даних), i18n-повнота, документація (оператор: розгортання/env/бекапи; користувач: короткий гайд).
+**Attachment backups (S3):** separate from the DB, with object versioning and cross-region bucket replication; the RPO for attachments is determined by replication lag (close to zero).
 
-Критерій 1.0: агенція веде в системі клієнтів, угоди, всі проєкти, документацію, час, персонал (штат, відпустки, хайринг), собівартість і прибутковість, і 100% виставлення; зовнішні трекер/CRM/вікі/таймер/білінг/HR-таблиці виведені.
+**Queue/events:** the `events`, `processed_events` and dead-letter tables are inside the same DB PITR perimeter, so an event committed before a failure survives the restore (it is neither lost nor duplicated, thanks to processed_events).
+
+**Other:** migrations are additive, run as a separate deployment step before traffic is switched; idempotent workers (reminder_log, webhook dedup, processed_events); `/healthz` (liveness), `/readyz` (DB reachable); integration with the existing monitoring (OneUptime) with alerts on dead-letter queue depth, WAL archiving lag and failed health checks.
+
+### 19.3. Performance
+
+List P95 ≤ 300 ms at target volumes (indexes on filters, accessibleProjectIds in a single query); first SPA load ≤ 2 s, route-based code splitting; PDF ≤ 3 s; search ≤ 200 ms.
+
+### 19.4. Observability
+
+pino JSON logs with request_id and actor; metrics: per-route latency, queue depth, worker errors, webhook delivery; Sentry for the frontend and backend.
+
+### 19.5. Localisation
+
+UI in uk/en (i18n keys from day one); Intl for dates/numbers/currencies; per-document language for PDFs.
 
 ---
 
-## 22. Свідомі компроміси (залишкові)
+## 20. Testing
 
-| Рішення | Компроміс | Чому прийнятно |
+- **Unit (Vitest):** status matrices (invoice, quote, tasks, leave_request, applicant), money (totals, taxes, discounts, partial payments, credit notes, overpayment), cost (cost_rate snapshot, overhead per hour, project/client margin, internal project as pure cost without revenue), number sequences, aging, burndown snapshots, leave balances (accrual, carry-forward, deduction/refund), git mention parser, RBAC resolver, building custom-field filters/sorting from the registry (validating op against the type), diff redaction serialiser (sensitive fields without values, tokens excluded entirely).
+- **API integration (testcontainers + Postgres):** route contracts; **permission matrix**: for each seeded role, key endpoints are run for 200/403/404 (generated from the permissions catalogue: a new permission without a test fails CI); **sensitive-data isolation**: member/guest do not see people.* anywhere (navigation, search, API, dashboard widgets); compensation is unavailable without people.read_compensation, cost reports without finance.read_costs; the sensitive audit is invisible without the corresponding permission; every access to compensation writes an audit entry; **version locking** (a concurrent UPDATE with a stale version → 409); **internal projects** (kind=internal without company_id does not leak into CRM/aging/profitability revenue; an invoice for an internal project is rejected); resource access (a private project is invisible to a non-member, including in search, SSE and the dashboard); webhooks with signatures.
+- **Event processing (outbox):** idempotency (redelivery of the same event_id does not duplicate the effect), retry→dead-letter once retries are exhausted, per-aggregate ordering (events of one aggregate_id are processed sequentially), replay from the DLQ.
+- **E2E (Playwright):** login; client → deal → won → project from a template → tasks across the board → cycle; time → invoice from time → sending → partial and final payment; quote → accept on the public page → conversion; KB: page, version, restore, task mention; job opening → applicant → hire → creating an employee with onboarding; leave request → approval → balance deducted; a member does not see the People and Finance sections; a git webhook (mock) moves the status.
+- **DR rehearsal (during hardening):** a restore run from PITR + attachments, measuring the actual RPO/RTO against the targets in 19.2.
+- CI: lint, tsc, tests, image and Tauri builds; deployment of tagged releases to Dokploy; demo data seed.
+
+---
+
+## 21. Delivery plan
+
+No MVP: everything goes into 1.0. Ordered by dependencies; each stage is a working increment on staging:
+
+1. **Foundation:** monorepo, CI, core schema, auth, **full RBAC** (catalogue, roles, guards, matrix test), API and SPA skeleton (navigation, command palette, design system), deployment.
+2. **CRM:** companies, contacts, notes, activity, lists/record card, saved views, search.
+3. **Projects, core:** projects, workflows, types, tasks (List/Board/Calendar/Spreadsheet), drafts, inline quick-add, subtasks, comments, labels, links, My tasks, notifications, members/visibility.
+4. **Projects, extensions:** cycles with burndown, relations/dependencies, Timeline, project and task templates, recurring tasks, intake (form + IMAP), move/duplicate.
+5. **KB:** spaces, tree, editor, versions, mentions/backlinks, templates, export.
+6. **Time:** timer, entries, rates, reports.
+7. **Finance:** full invoice cycle, PDF, public pages, payments, credit notes, quotes with accept, recurring, reminders, expenses, invoice from time, portal, finance dashboard.
+8. **People (HR):** employees and lifecycle, leave/absences with approvals and balances, holiday calendars, recruitment (job openings, applicants, interviews, hiring), onboarding checklists, HR dashboard, the people.* permissions domain.
+9. **Costs & profitability:** compensation and overhead, cost_rate on the time entry, project/client cost and profitability, labor-cost and utilization reports, finance.read_costs.
+10. **Deals + starter dashboard + custom dashboards + import/export.**
+11. **Integrations:** git (all three providers), automations, outgoing webhooks, SSE realtime.
+12. **MCP server.**
+13. **Desktop:** tray, notifications, quick-add, updater.
+14. **Hardening:** e2e completeness, backup/restore run, security audit (including RBAC fuzzing and verification of HR/costs data isolation), i18n completeness, documentation (operator: deployment/env/backups; user: a short guide).
+
+1.0 criterion: the agency runs its clients, deals, all projects, documentation, time, staff (headcount, leave, hiring), cost and profitability, and 100% of invoicing in the system; the external tracker/CRM/wiki/timer/billing/HR spreadsheets are retired.
+
+---
+
+## 22. Deliberate trade-offs (residual)
+
+| Decision | Trade-off | Why it is acceptable |
 |---|---|---|
-| Немає онлайн-оплати на публічних сторінках | Оплата переказом поза системою, фіксація ручна | Модель payments готова; платіжний провайдер = майбутній модуль без зміни схеми |
-| Немає бухгалтерії і legal e-invoicing | Compliance у зовнішніх інструментах | Свідома межа; інтеграція через події/вебхуки за потреби |
-| Фінанси без пер-записних ACL | Не можна дати доступ до фінансів одного клієнта | Роль Finance або нічого; пер-клієнтний фінансовий доступ різко ускладнює модель заради рідкісного кейсу |
-| Легкий портал за токеном, без логіна клієнтів | Клієнт не має особистого кабінету з автентифікацією | Портал-токен покриває 90% цінності; повноцінний клієнтський логін = окремий великий модуль |
-| Вбудовані правила замість конструктора автоматизацій | Не можна малювати довільні сценарії в UI | Конструктор = найдорожча фіча класу; довільні сценарії робляться зовнішньо через вебхуки + API (n8n/агент) |
-| Contact N–1 company | Людина у двох клієнтах = два записи | Рідкісний кейс; many-to-many всюди дорожчий |
-| Optimistic locking (version) + soft-lock замість CRDT | Немає одночасного співредагування одного тексту | Команда ≤ 50; version-конфлікт (409) + soft-lock на KB/описах покривають реальний ризик втрат |
-| Один PDF-шаблон | Немає конструктора шаблонів | Бренд-шаблон достатній; конструктор Invoice Ninja = найменш цінна тут фіча |
-| Late fees відсутні | Пеня не нараховується автоматично | Нагадування покривають кейс; пеня в наших договорах рідкість |
-| pg-boss замість Redis | Черга ділить ресурси з БД | Обсяги мізерні; мінус компонент інфраструктури |
-| Epics / Initiatives / Modules / Milestones / Teamspaces (Plane) відсутні | Немає рівнів угруповання над проєктом і циклом | На масштабі агенції проєкт + цикл достатні; epic за потреби додається таблицею-угрупованням поверх tasks без зміни ядра |
-| Approval-воркфлоу і скрипти переходів (Plane Business) відсутні | Перехід статусу не блокується правилами й не запускає довільні скрипти | Governance-фіча великих організацій; наші автоматизації покривають типові пост-дії; тригер перегляду: поява ролей затвердження |
-| Фіксовані типи звʼязків задач | Немає кастомних relation types (Mitigates, Supersedes…) | blocks/duplicates/relates покривають агенційні кейси; тип = enum, розширюється міграцією |
-| Payroll-движок відсутній (People) | ordi не нараховує ЗП, не генерує зарплатні слаби, не рахує податки | Бухгалтерсько-юридична зона (та сама межа, що Finance 11.1); ЗП присутня як cost rate для аналітики; тригер: рішення вести розрахунок ЗП усередині → окремий payroll-модуль або інтеграція |
-| Attendance/shifts/geo-checkin (Frappe HR) не в 1.0 | Немає обліку робочого часу через чек-іни і змінних графіків | Агенція облікує час через тайм-трекінг (модуль Time), а не через табель прихід/вихід; attendance додається як окремий підмодуль People без зміни ядра |
-| Performance/appraisals (Frappe HR) не в 1.0 | Немає циклів оцінки й KPI | Поза початковою потребою; додається таблицями в People |
-| Cost/profitability це управлінська аналітика, не бухгалтерія | Немає подвійного запису, P&L, звірки з банком | Модель Productive-класу на cost rate + години; бухгалтерія зовнішня |
-| Пер-записний доступ до ЗП відсутній | Не можна дати доступ до компенсації окремих людей вибірково | people.read_compensation = все або нічого; вибірковий доступ ускладнює модель заради рідкісного кейсу |
-| Глобальний total-order подій не гарантується | Крос-агрегатний строгий порядок обробки відсутній (тільки per-aggregate) | Глобальний порядок дорогий і не потрібен; події одного проєкту/клієнта серіалізовані між собою, обробники не покладаються на крос-агрегатний порядок (3.3) |
-| Прогнозний capacity-planning (Resourcing) відсутній | Немає плейсхолдерів на ще-не-найнятих і сценарного forecasting | Фактичне завантаження й utilization є (12.4, 11.10); прогнозне планування додається таблицями без зміни ядра |
+| No online payment on public pages | Payment by bank transfer outside the system, recorded manually | The payments model is ready; a payment provider = a future module with no schema change |
+| No accounting and no legal e-invoicing | Compliance lives in external tools | A deliberate boundary; integration via events/webhooks if needed |
+| Finance without per-record ACLs | Access to a single client's finances cannot be granted | Finance role or nothing; per-client financial access sharply complicates the model for the sake of a rare case |
+| Lightweight token-based portal, no client logins | The client has no authenticated personal account | The portal token covers 90% of the value; a full client login = a separate large module |
+| Built-in rules instead of an automation builder | Arbitrary scenarios cannot be drawn in the UI | A builder = the most expensive feature in its class; arbitrary scenarios are built externally via webhooks + API (n8n/agent) |
+| Contact N–1 company | A person at two clients = two records | A rare case; many-to-many everywhere is more expensive |
+| Optimistic locking (version) + soft-lock instead of CRDT | No simultaneous co-editing of the same text | Team ≤ 50; a version conflict (409) + soft-lock on KB/descriptions cover the real risk of lost work |
+| One PDF template | No template builder | A brand template is enough; Invoice Ninja's builder = the least valuable feature here |
+| No late fees | Late fees are not charged automatically | Reminders cover the case; late fees are rare in our contracts |
+| pg-boss instead of Redis | The queue shares resources with the DB | Volumes are tiny; one less infrastructure component |
+| No Epics / Initiatives / Modules / Milestones / Teamspaces (Plane) | No grouping levels above project and cycle | At agency scale, project + cycle are enough; if needed, an epic can be added as a grouping table on top of tasks without changing the core |
+| No approval workflows or transition scripts (Plane Business) | A status transition is not blocked by rules and does not run arbitrary scripts | A governance feature of large organisations; our automations cover the typical post-actions; review trigger: approval roles appear |
+| Fixed task relation types | No custom relation types (Mitigates, Supersedes…) | blocks/duplicates/relates cover agency cases; the type is an enum, extended by a migration |
+| No payroll engine (People) | ordi does not calculate salaries, generate payslips or compute taxes | Accounting and legal territory (the same boundary as Finance 11.1); salary is present as a cost rate for analytics; trigger: a decision to run payroll in-house → a separate payroll module or an integration |
+| Attendance/shifts/geo check-in (Frappe HR) not in 1.0 | No working-time tracking via check-ins or shift schedules | The agency tracks time through time tracking (the Time module), not a clock-in/clock-out timesheet; attendance can be added as a separate People submodule without changing the core |
+| Performance/appraisals (Frappe HR) not in 1.0 | No appraisal cycles or KPIs | Outside the initial need; added as tables in People |
+| Cost/profitability is management analytics, not accounting | No double-entry bookkeeping, P&L or bank reconciliation | A Productive-class model based on cost rate + hours; accounting is external |
+| No per-record access to salaries | Access to the compensation of selected people cannot be granted selectively | people.read_compensation = all or nothing; selective access complicates the model for the sake of a rare case |
+| A global total order of events is not guaranteed | No strict cross-aggregate processing order (per-aggregate only) | A global order is expensive and not needed; events of one project/client are serialised relative to each other, and handlers do not rely on cross-aggregate order (3.3) |
+| No predictive capacity planning (Resourcing) | No placeholders for not-yet-hired people and no scenario forecasting | Actual workload and utilisation are available (12.4, 11.10); predictive planning can be added with tables without changing the core |
 
-Кожен пункт таблиці має шлях розширення, який не ламає модель даних: це критерій, за яким компроміс дозволений.
-
----
-
-## 23. Глосарій
-
-- **Permission**: атомарне право виду domain.action; **роль**: конфігурований набір permissions; **membership**: доступ до конкретного ресурсу (проєкт, простір).
-- **Peek-панель**: бічна панель деталей поверх списку без переходу.
-- **Outbox**: подія пишеться в БД в одній транзакції з даними, обробляється асинхронно окремим relay.
-- **At-least-once**: гарантія, що подія доставиться хоч раз (можливий повтор), тому обробники ідемпотентні.
-- **Dead-letter**: стан події, що не обробилася після всіх ретраїв: відкладена окремо, не втрачена, з ручним replay.
-- **Per-aggregate ordering**: події з однаковим aggregate_id обробляються послідовно; різні агрегати паралельно; глобального порядку немає.
-- **Optimistic locking**: контроль конкурентного редагування через поле version (не блокування рядка): застаріла version → 409.
-- **PITR (point-in-time recovery)**: відновлення БД на будь-яку точку в часі з base backup + WAL.
-- **RPO / RTO**: макс. допустимі втрата даних / час до відновлення (тут 5 хв / 1 год).
-- **Redaction**: приховування значень чутливих полів (ЗП, персональні дані) в аудиті: фіксується факт зміни без самого значення.
-- **Fractional indexing**: дробові позиції для вставки між сусідами без перенумерації.
-- **Aging**: розбивка дебіторки за давністю (0-30/31-60/61-90/90+).
-- **Burndown**: графік залишку обсягу циклу за днями (щоденні знімки).
-- **Backlink**: зворотне посилання: де сутність згадана (сторінки, задачі).
+Every row of the table has an extension path that does not break the data model: that is the criterion by which a trade-off is allowed.
 
 ---
 
-## Додаток A. Мапа покриття референсів
+## 23. Glossary
 
-Досліджені джерела: docs.plane.so (core concepts, work items, nested pages, dashboards, analytics), plane.so (work-items, work-item-types, wiki, pro, changelog 2025-2026), twenty.com і огляди Twenty 2.x, invoiceninja.com і функціональні огляди, frappe.io/hr і frappe/hrms (модулі leaves/attendance/recruitment/payroll), productive.io (cost rates, overhead, profitability, agency management). Позначки: ✅ включено, 🔧 адаптовано під скоуп ordi, ❌ виключено свідомо (обґрунтування в розділі 22 або тут).
+- **Permission**: an atomic right of the form domain.action; **role**: a configurable set of permissions; **membership**: access to a specific resource (project, space).
+- **Peek panel**: a side panel with details shown over a list, without navigating away.
+- **Outbox**: an event is written to the DB in the same transaction as the data and processed asynchronously by a separate relay.
+- **At-least-once**: a guarantee that an event is delivered at least once (a repeat is possible), which is why handlers are idempotent.
+- **Dead-letter**: the state of an event that failed to process after all retries: set aside separately, not lost, with manual replay.
+- **Per-aggregate ordering**: events with the same aggregate_id are processed sequentially; different aggregates in parallel; there is no global order.
+- **Optimistic locking**: control of concurrent editing through a version field (not row locking): a stale version → 409.
+- **PITR (point-in-time recovery)**: restoring the DB to any point in time from a base backup + WAL.
+- **RPO / RTO**: max. acceptable data loss / time to recovery (here 5 min / 1 h).
+- **Redaction**: hiding the values of sensitive fields (salary, personal data) in the audit log: the fact of the change is recorded without the value itself.
+- **Fractional indexing**: fractional positions for inserting between neighbours without renumbering.
+- **Aging**: a breakdown of receivables by age (0-30/31-60/61-90/90+).
+- **Burndown**: a chart of a cycle's remaining scope by day (daily snapshots).
+- **Backlink**: a reverse link: where an entity is mentioned (pages, tasks).
+
+---
+
+## Appendix A. Reference coverage map
+
+Sources studied: docs.plane.so (core concepts, work items, nested pages, dashboards, analytics), plane.so (work-items, work-item-types, wiki, pro, changelog 2025-2026), twenty.com and reviews of Twenty 2.x, invoiceninja.com and feature reviews, frappe.io/hr and frappe/hrms (leaves/attendance/recruitment/payroll modules), productive.io (cost rates, overhead, profitability, agency management). Marks: ✅ included, 🔧 adapted to ordi's scope, ❌ deliberately excluded (rationale in section 22 or here).
 
 ### A.1. Plane → ordi (Projects, KB)
 
-| Фіча Plane | ordi | Коментар |
+| Plane feature | ordi | Comment |
 |---|---|---|
-| Work items: title+state мінімум, множинні асайні, пріоритети, мітки, дати, естімейти | ✅ | 8.3 |
-| Custom states з категоріями (backlog/unstarted/started/completed/cancelled) | ✅ | категорії backlog/todo/in_progress/done/canceled, 8.2 |
-| Work item types з іконками/кольорами | 🔧 | типи є; пер-типові набори properties і пер-типові воркфлоу не робимо: custom fields спільні на сутність |
+| Work items: title+state minimum, multiple assignees, priorities, labels, dates, estimates | ✅ | 8.3 |
+| Custom states with categories (backlog/unstarted/started/completed/cancelled) | ✅ | categories backlog/todo/in_progress/done/canceled, 8.2 |
+| Work item types with icons/colours | 🔧 | types exist; we do not do per-type property sets or per-type workflows: custom fields are shared per entity |
 | 5 layouts: List, Board, Calendar, Spreadsheet, Gantt | ✅ | 8.3 |
-| Views (збережені) на рівні проєкту і воркспейсу | ✅ | saved_views особисті/shared/workspace |
-| Sub-work items | ✅ | дерево до 5 рівнів |
-| Relations vs dependencies, конектори в Timeline, порушені залежності | ✅ | 8.3 |
-| Custom relation types | ❌ | розділ 22 |
-| Drafts (автозбереження недописаних) | ✅ | 8.3 |
-| Links, attachments, linked pages | ✅ | лінки 8.3, вкладення 14.5, звʼязок сторінок через згадки 9.3 |
+| Views (saved) at project and workspace level | ✅ | saved_views personal/shared/workspace |
+| Sub-work items | ✅ | tree up to 5 levels deep |
+| Relations vs dependencies, connectors in Timeline, broken dependencies | ✅ | 8.3 |
+| Custom relation types | ❌ | section 22 |
+| Drafts (autosave of unfinished items) | ✅ | 8.3 |
+| Links, attachments, linked pages | ✅ | links 8.3, attachments 14.5, linking pages through mentions 9.3 |
 | Activity tabs (All/Comments/History/Worklogs) | ✅ | 8.3 |
 | Quick-add inline row, peek side/modal/full | ✅ | 8.3, 17.1 |
 | Copy branch name | ✅ | 13.1 |
-| Cycles: burndown, перенесення незакритих, active cycle | ✅ | 8.4 |
-| Velocity-порівняння циклів | ❌ | агенційні цикли нерегулярні; знімки є, метрика додається віджетом дашборда |
-| Modules / Epics / Initiatives / Milestones / Releases / Teamspaces | ❌ | розділ 22: рівні понад проєкт+цикл |
-| Intake: форма, email-capture, тріаж accept/decline | ✅ | 8.6 |
+| Cycles: burndown, carrying over unfinished items, active cycle | ✅ | 8.4 |
+| Cycle velocity comparison | ❌ | agency cycles are irregular; snapshots exist, the metric can be added as a dashboard widget |
+| Modules / Epics / Initiatives / Milestones / Releases / Teamspaces | ❌ | section 22: levels above project+cycle |
+| Intake: form, email capture, accept/decline triage | ✅ | 8.6 |
 | Work item templates, recurring work items | ✅ | 8.7 |
-| Pages/Wiki: вкладені сторінки, версії з diff, локи, page-level visibility | ✅ | 9.3 |
-| Inline-коментарі в тексті сторінки | 🔧 | коментарі тредом під сторінкою; inline-анкери не робимо |
-| Real-time co-editing сторінок | ❌ | soft-lock + версії, розділ 22 |
-| Embeds (Figma/Loom/Draw.io), LaTeX | 🔧 | зображення, файли, код; iframe-embeds і LaTeX не в 1.0: додаються розширеннями Tiptap без зміни моделі |
-| Конвертація нотаток у задачі | ✅ | 9.3 |
-| Custom dashboards з віджетами | ✅ | 14.1, спрощена модель віджета |
-| Analytics-розділ | 🔧 | покривається кастомними дашбордами і фін-дашбордом |
-| Workflows/approvals, pre-validation і post-action скрипти | ❌ | розділ 22; типові пост-дії: вбудовані автоматизації 13.3 |
-| Публікація pages/views назовні | 🔧 | назовні публікуються рахунки/quotes/портал/intake-форма; сторінки KB назовні не публікуються |
-| AI-фічі Plane (Pi, агенти) | 🔧 | вбудованої моделі немає: MCP-сервер (16) плюс агенти-співробітники, яких хостить платформа, а інтелект лишається зовнішнім – Claude Code через Agent SDK на вашій підписці чи ключі (16.1) |
-| Importers (Jira тощо) | ❌ | імпорт CSV достатній: міграція з чужих систем разова, робиться скриптом через API |
+| Pages/Wiki: nested pages, versions with diff, locks, page-level visibility | ✅ | 9.3 |
+| Inline comments in the page text | 🔧 | comments as a thread below the page; we do not do inline anchors |
+| Real-time co-editing of pages | ❌ | soft-lock + versions, section 22 |
+| Embeds (Figma/Loom/Draw.io), LaTeX | 🔧 | images, files, code; iframe embeds and LaTeX are not in 1.0: they can be added as Tiptap extensions without changing the model |
+| Converting notes into tasks | ✅ | 9.3 |
+| Custom dashboards with widgets | ✅ | 14.1, simplified widget model |
+| Analytics section | 🔧 | covered by custom dashboards and the finance dashboard |
+| Workflows/approvals, pre-validation and post-action scripts | ❌ | section 22; typical post-actions: built-in automations 13.3 |
+| Publishing pages/views externally | 🔧 | invoices/quotes/the portal/the intake form are published externally; KB pages are not published externally |
+| Plane AI features (Pi, agents) | 🔧 | there is no built-in model: an MCP server (16) plus agent employees hosted by the platform, while the intelligence stays external – Claude Code via the Agent SDK on your subscription or key (16.1) |
+| Importers (Jira etc.) | ❌ | CSV import is enough: migration from other systems is a one-off, done with a script through the API |
 
 ### A.2. Twenty → ordi (CRM)
 
-| Фіча Twenty | ordi | Коментар |
+| Twenty feature | ordi | Comment |
 |---|---|---|
 | Companies / People / Opportunities | ✅ | companies / contacts / deals |
-| Кастомні обʼєкти (нові сутності на рантаймі) | ❌ | найважче рішення відхилення: метамодель = інший клас складності; custom fields на 7 сутностях покривають агенційні кейси; нова сутність = міграція (дешева в моностеку) |
-| Кастомні поля через UI | ✅ | 8 типів, реєстр, 5.2 |
-| Views: фільтри, сортування, kanban/table | ✅ | saved_views, списки, kanban угод |
-| Workflows (тригер-дія) | 🔧 | вбудовані правила 13.3 + вихідні вебхуки замість конструктора |
-| GraphQL/REST API + вебхуки | 🔧 | REST + вебхуки; GraphQL: тригер у 2.x-таблиці |
-| Нативний MCP | ✅ | 16 |
-| Email-синк і календар | ❌ | глибока інтеграція пошти поза скоупом 1.0; звʼязок з клієнтом ведеться нотатками й активністю; тригер перегляду: реальна потреба листування в картці |
-| Row-level permissions (Enterprise) | 🔧 | ресурсний доступ на проєктах/просторах; пер-записний ACL у CRM/фінансах: розділ 22 |
+| Custom objects (new entities at runtime) | ❌ | the hardest rejection decision: a metamodel = a different class of complexity; custom fields on 7 entities cover agency cases; a new entity = a migration (cheap in a monostack) |
+| Custom fields via the UI | ✅ | 8 types, registry, 5.2 |
+| Views: filters, sorting, kanban/table | ✅ | saved_views, lists, deals kanban |
+| Workflows (trigger-action) | 🔧 | built-in rules 13.3 + outgoing webhooks instead of a builder |
+| GraphQL/REST API + webhooks | 🔧 | REST + webhooks; GraphQL: a trigger in the 2.x table |
+| Native MCP | ✅ | 16 |
+| Email sync and calendar | ❌ | deep email integration is outside the 1.0 scope; communication with the client is tracked through notes and activity; review trigger: a real need for correspondence in the record card |
+| Row-level permissions (Enterprise) | 🔧 | resource access on projects/spaces; per-record ACL in CRM/finance: section 22 |
 
 ### A.3. Invoice Ninja → ordi (Finance)
 
-| Фіча Invoice Ninja | ordi | Коментар |
+| Invoice Ninja feature | ordi | Comment |
 |---|---|---|
-| Invoices: позиції, податки, знижки, статуси | ✅ | 11.3 |
-| Quotes з accept/decline і конвертацією | ✅ | 11.2 |
-| Часткові оплати, кредит-ноти | ✅ | 11.4 |
-| Recurring invoices з auto-send | ✅ | 11.5 |
-| Нагадування за розкладом, шаблони листів | ✅ | 11.6 |
-| Late fees | ❌ | розділ 22 |
-| Client portal з логіном | 🔧 | токен-портал 11.8 без автентифікації; повний портал: розділ 22 |
-| Онлайн-оплати (Stripe і 40+ шлюзів) | ❌ | зарезервоване місце на публічній сторінці; окремий майбутній модуль |
-| Expenses, категорії | ✅ | 11.7 |
-| Vendors, purchase orders | ❌ | закупівельний цикл поза потребою агенції |
-| Конструктор PDF-шаблонів | ❌ | розділ 22: один бренд-шаблон |
-| Time tracking → інвойс | ✅ | модуль Time, 10.3 |
-| Мультивалютність | 🔧 | валюта пер-документ без конвертації, 11.3 |
-| Податкова звітність / e-invoicing | ❌ | межа скоупу 11.1 |
+| Invoices: line items, taxes, discounts, statuses | ✅ | 11.3 |
+| Quotes with accept/decline and conversion | ✅ | 11.2 |
+| Partial payments, credit notes | ✅ | 11.4 |
+| Recurring invoices with auto-send | ✅ | 11.5 |
+| Scheduled reminders, email templates | ✅ | 11.6 |
+| Late fees | ❌ | section 22 |
+| Client portal with login | 🔧 | token portal 11.8 without authentication; full portal: section 22 |
+| Online payments (Stripe and 40+ gateways) | ❌ | space reserved on the public page; a separate future module |
+| Expenses, categories | ✅ | 11.7 |
+| Vendors, purchase orders | ❌ | the procurement cycle is outside the agency's needs |
+| PDF template builder | ❌ | section 22: one brand template |
+| Time tracking → invoice | ✅ | Time module, 10.3 |
+| Multi-currency | 🔧 | per-document currency without conversion, 11.3 |
+| Tax reporting / e-invoicing | ❌ | scope boundary 11.1 |
 
-### A.4. Frappe HR → ordi (People) і Productive → ordi (costs/profitability)
+### A.4. Frappe HR → ordi (People) and Productive → ordi (costs/profitability)
 
-| Фіча Frappe HR | ordi | Коментар |
+| Frappe HR feature | ordi | Comment |
 |---|---|---|
-| Employee lifecycle (онбординг → промоції/трансфери → exit) | ✅ | 12.1, онбординг-чеклісти auto-створюють задачі (як у Frappe) |
-| Leave types і policies (carry-forward, earned, LWP, half-day, encashment) | 🔧 | типи/квоти/carry-forward/half-day є (12.2); encashment (грошова компенсація невикористаних) – ні, бо це payroll |
-| Leave requests з апрувами, баланси, календар | ✅ | 12.2 |
-| Holiday calendars регіональні | ✅ | 12.2 |
-| Recruitment: вакансії, кандидати, інтервʼю, найм | ✅ | 12.3, публічна careers-форма |
-| Attendance, shifts, roster, geo check-in | ❌ | розділ 22: агенція облікує час через Time, не табель |
-| Payroll: salary structures, компоненти, слаби, податки, регіональний compliance | ❌ | розділ 22: бухгалтерсько-юридична зона; ЗП присутня як cost rate (12.5) |
-| Performance/appraisals, KPI | ❌ | розділ 22 |
-| Expense claims співробітників | 🔧 | покривається expenses у Finance (11.7) з привʼязкою до співробітника |
-| Employee self-service (mobile PWA) | 🔧 | самообслуговування через ту саму SPA/десктоп (баланси, заявки); окремого mobile-app немає |
-| Fleet/training/loans модулі | ❌ | поза потребою агенції |
+| Employee lifecycle (onboarding → promotions/transfers → exit) | ✅ | 12.1, onboarding checklists auto-create tasks (as in Frappe) |
+| Leave types and policies (carry-forward, earned, LWP, half-day, encashment) | 🔧 | types/quotas/carry-forward/half-day exist (12.2); encashment (cash compensation for unused leave) – no, because that is payroll |
+| Leave requests with approvals, balances, calendar | ✅ | 12.2 |
+| Regional holiday calendars | ✅ | 12.2 |
+| Recruitment: job openings, applicants, interviews, hiring | ✅ | 12.3, public careers form |
+| Attendance, shifts, roster, geo check-in | ❌ | section 22: the agency tracks time through Time, not a timesheet |
+| Payroll: salary structures, components, slips, taxes, regional compliance | ❌ | section 22: accounting and legal territory; salary is present as a cost rate (12.5) |
+| Performance/appraisals, KPI | ❌ | section 22 |
+| Employee expense claims | 🔧 | covered by expenses in Finance (11.7) linked to an employee |
+| Employee self-service (mobile PWA) | 🔧 | self-service through the same SPA/desktop app (balances, requests); there is no separate mobile app |
+| Fleet/training/loans modules | ❌ | outside the agency's needs |
 
-| Фіча Productive | ordi | Коментар |
+| Productive feature | ordi | Comment |
 |---|---|---|
-| Cost rate співробітника (з ЗП і норми годин) | ✅ | 12.5, versioned |
-| Overhead per hour (фасіліті + внутрішні витрати) | ✅ | 12.5, опційно |
-| Project profitability (revenue − cost, маржа %) | ✅ | 11.10 |
+| Employee cost rate (from salary and standard hours) | ✅ | 12.5, versioned |
+| Overhead per hour (facilities + internal expenses) | ✅ | 12.5, optional |
+| Project profitability (revenue − cost, margin %) | ✅ | 11.10 |
 | Client profitability | ✅ | 11.10 |
-| Labor cost звіти (за людиною/командою/проєктом/клієнтом) | ✅ | 11.10 – це і є "витрати по ЗП" |
-| Utilization (billable %) з урахуванням відсутностей | ✅ | 11.10 + 12.2 |
-| Custom rate cards (ставки за сервісом/клієнтом) | 🔧 | ставки пер-проєкт/пер-користувач (Time); повні rate cards за сервісами не робимо |
-| Budgets і budget burn з алертами | 🔧 | естімейти проєкту й прибутковість є; окремих бюджетів із burn-алертами в 1.0 немає – тригер: потреба фікс-бюджетного контролю |
-| Resource scheduling / forecasting з плейсхолдерами | 🔧 | легкий Resourcing (12.4) без прогнозних плейсхолдерів |
-| Нативний MCP-сервер | ✅ | 16 |
-| Xero/QuickBooks-синк бухгалтерії | ❌ | бухгалтерія зовнішня; звʼязок через експорт/вебхуки |
+| Labor cost reports (by person/team/project/client) | ✅ | 11.10 – this is exactly the "payroll costs" |
+| Utilization (billable %) accounting for absences | ✅ | 11.10 + 12.2 |
+| Custom rate cards (rates by service/client) | 🔧 | per-project/per-user rates (Time); we do not do full service-based rate cards |
+| Budgets and budget burn with alerts | 🔧 | project estimates and profitability exist; there are no separate budgets with burn alerts in 1.0 – trigger: a need for fixed-budget control |
+| Resource scheduling / forecasting with placeholders | 🔧 | lightweight Resourcing (12.4) without forecast placeholders |
+| Native MCP server | ✅ | 16 |
+| Xero/QuickBooks accounting sync | ❌ | accounting is external; connected through export/webhooks |
