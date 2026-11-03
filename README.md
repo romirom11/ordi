@@ -76,10 +76,12 @@ delivery and finance system that follows the sale.
 
 ### Projects and tasks
 Deliberately modelled on Linear: keyboard-first, fast, opinionated. Board, list,
-calendar, timeline and spreadsheet views; cycles with burn-up and a burndown,
-milestones, project updates with health; sub-tasks, dependencies, labels, custom
-fields (workspace-wide or per project); saved views, filters and display options;
-project templates; files with in-app previews on every task.
+calendar, timeline and spreadsheet views; a **Plan** tab with milestones (progress,
+target dates, "pull open tasks into the cycle") and opt-in cycles with burn-up and a
+burndown; project updates with health; sub-tasks, dependencies, labels, custom
+fields (workspace-wide or per project); saved views, filters, grouping and bulk
+edits by milestone or cycle; project templates; files with in-app previews on every
+task.
 
 </td><td width="50%">
 
@@ -104,7 +106,7 @@ rate. A won deal turns into a project without retyping anything.
 
 ### Finance
 Quotes and invoices with tax, discounts, branded localized PDFs and public payment
-pages. Payments, credit notes, recurring invoices and expenses; receivables aging
+pages, sent from the mail sender you pick. Payments, credit notes, recurring invoices and expenses; receivables aging
 and overdue reminders; invoice straight from unbilled time; project profitability
 out of the box. Underneath sits a **double-entry ledger** – every invoice, payment
 and expense posts balanced entries, so the books actually balance.
@@ -151,18 +153,29 @@ and expense posts balanced entries, so the books actually balance.
 - **Permissions that hold** – enforced on every request, the UI only hides things;
   audit diffs redact sensitive fields, writes use optimistic locking.
 - **Built-in MCP server** – point Claude or Cursor at your workspace over OAuth with
-  PKCE; the agent gets exactly the permissions of its API token, nothing more.
+  PKCE; the agent gets exactly the permissions of its API token, nothing more. It can
+  file subtasks, plan milestones and cycles, and put screenshots into a task.
 - **AI agent employees** – add an agent as a team member, assign it a task like you
   would a person, and it works through the project's repository and opens a pull
-  request for a human to review. Runs on your own Claude subscription or API key,
-  with MCP connectors granted per agent.
+  request for a human to review. Runs on **Claude Code** or **Codex**, per agent, with
+  your own Claude subscription or API key, an OpenAI key (or any OpenAI-compatible
+  gateway – LiteLLM, OpenRouter, Ollama, Azure) or a ChatGPT plan; MCP connectors
+  are granted per agent.
 - **Desktop app** – macOS, Windows and Linux, with native notifications, a global
-  quick-add shortcut, signed auto-updates, and sign-in through your browser
-  instead of retyping credentials. Downloadable from inside the web app.
+  quick-add shortcut, signed auto-updates, two-finger swipe back and forward, and
+  sign-in through your browser instead of retyping credentials – connecting GitHub,
+  Slack or an MCP connector goes through the browser too. Downloadable from inside
+  the web app.
+- **Mail from the right address** – several senders, each with its own From,
+  Reply-To and SMTP login: one for invites and notifications, one for invoices and
+  quotes, and a From picker when you send.
 - **Setup wizard, invites and password reset** – the first run creates the
   workspace, owner account, currency and modules on one screen; members arrive by
   invite.
-- **English and Ukrainian**, dark and light.
+- **Two looks** – **Glass**, frosted panes over a soft backdrop with a lime accent
+  (new installations start on Glass Dark), or **Classic**, solid and quiet; each in
+  dark and light.
+- **English and Ukrainian** throughout, including the invoice PDFs.
 
 ## Quick start
 
@@ -179,7 +192,7 @@ docker compose up
 Open <http://localhost:8080> and the setup wizard will create your workspace and
 owner account.
 
-`docker compose pull` moves you to the newest release; `ORDI_VERSION=1.36.1`
+`docker compose pull` moves you to the newest release; `ORDI_VERSION=1.41.0`
 in a `.env` next to the compose file pins one (and is how you roll back). The
 image is `linux/amd64`.
 
