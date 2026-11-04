@@ -18,6 +18,7 @@ import { tabFallbackTitle, useTabs, type TabItem } from '../../lib/tabs';
 import { cn, Tooltip } from '../ui';
 import { ContextMenu, toast, type ContextMenuEntry } from '../overlays';
 import { Hint } from '../Hint';
+import { SwipeNavigation } from './SwipeNavigation';
 import { appOrigin } from '../../lib/api';
 
 extendDict({
@@ -278,6 +279,8 @@ export function TabStrip({ leading, trafficLightInset = false }: {
         {/* Leftover width is a generous drag handle on macOS. */}
         <div className="min-w-6 flex-1 self-stretch" data-tauri-drag-region={isMacDesktop || undefined} />
       </div>
+      {/* Trackpad swipe back / forward (desktop app). */}
+      <SwipeNavigation />
       {/* Floating tip (bottom-left card) – appears once a second tab is opened. */}
       {tabs.tabs.length > 1 && (
         <Hint id="tabs-new-tab">

@@ -23,14 +23,6 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# Native webview handles for the trackpad back / forward swipe (see
-# enable_swipe_navigation in main.rs). Same versions Tauri already builds.
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "objc2-app-kit", "WKWebView"] }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-webkit2gtk = { version = "2", features = ["v2_24"] }
-
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
