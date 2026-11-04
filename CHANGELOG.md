@@ -3,6 +3,17 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## Unreleased
+
+- **Swiping back and forward no longer slides the whole window**: the
+  desktop app's two-finger swipe used the webview's native gesture, which
+  moved a snapshot of the entire window – sidebar included – and often
+  showed a black half-window where an SPA page had no snapshot. The swipe
+  is now read by the app itself: the page stays put, an arrow slides in
+  from the window edge, and it steps the active tab's own history instead
+  of jumping into another tab's pages. Sideways-scrolling content such as
+  the pipeline board keeps the swipe until it reaches its edge.
+
 ## v1.41.0
 
 - **Bitbucket Cloud**: Settings → Integrations → Bitbucket connects a

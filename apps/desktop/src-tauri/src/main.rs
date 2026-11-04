@@ -97,31 +97,6 @@ fn install_update(app: tauri::AppHandle) -> Result<(), String> {
     app.restart();
 }
 
-/// Two-finger trackpad swipes go back / forward through the workspace's
-/// history, as in a browser. wry switches the gesture off on every platform
-/// and Tauri has no config key for it, so flip the native webview setting.
-/// Windows is left alone: WebView2's swipe setting covers touch screens only,
-/// not touchpads.
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-fn enable_swipe_navigation(webview: tauri::webview::PlatformWebview) {
-    #[cfg(target_os = "macos")]
-    {
-        let view = webview.inner().cast::<objc2_web_kit::WKWebView>();
-        if !view.is_null() {
-            // SAFETY: Tauri hands over its live WKWebView, and with_webview
-            // runs this closure on the main thread WebKit requires.
-            unsafe { (*view).setAllowsBackForwardNavigationGestures(true) };
-        }
-    }
-    #[cfg(target_os = "linux")]
-    {
-        use webkit2gtk::{SettingsExt, WebViewExt};
-        if let Some(settings) = webview.inner().settings() {
-            settings.set_enable_back_forward_navigation_gestures(true);
-        }
-    }
-}
-
 fn main() {
     tauri::Builder::default()
         // MUST be first (Tauri requirement). On Windows and Linux a deep link
@@ -197,10 +172,6 @@ fn main() {
                 let workspace = Submenu::with_items(app, "Workspace", true, &[&task, &search, &sidebar, &preferences, &shortcuts])?;
                 menu.append(&workspace)?;
                 app.set_menu(menu)?;
-            }
-            #[cfg(any(target_os = "macos", target_os = "linux"))]
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.with_webview(enable_swipe_navigation);
             }
             // Best-effort: a failed registration (e.g. shortcut taken) must not
             // prevent the app from starting.

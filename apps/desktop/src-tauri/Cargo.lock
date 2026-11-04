@@ -2534,7 +2534,6 @@ dependencies = [
 name = "ordi-desktop"
 version = "1.36.1"
 dependencies = [
- "objc2-web-kit",
  "serde",
  "serde_json",
  "tauri",
@@ -2547,7 +2546,6 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
- "webkit2gtk",
 ]
 
 [[package]]
