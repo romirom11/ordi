@@ -39,6 +39,12 @@ pnpm test                 # API tests need a database
 pnpm check:query-shapes   # guards against React Query cache-shape collisions
 ```
 
+API tests run their files in parallel, each worker on its own copy of the
+test database: `TEST_DATABASE_URL` (default
+`postgres://postgres:postgres@localhost:5432/ordi_test`) is migrated once and
+cloned as `ordi_test_w1`, `ordi_test_w2`, … Set `TEST_WORKERS=1` to run the files
+one after another.
+
 CI runs all three plus a production web build. Green CI is expected, not a
 formality – if a check fails and you believe the check is wrong, say so in the PR
 instead of working around it.

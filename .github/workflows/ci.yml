@@ -3,7 +3,15 @@ name: CI
 on:
   push:
     branches: [master, main]
+    # Documentation-only changes have nothing for these jobs to check.
+    paths-ignore: ['**/*.md', 'docs/**', 'LICENSE', '.github/ISSUE_TEMPLATE/**', 'mcp-consent.png']
   pull_request:
+    paths-ignore: ['**/*.md', 'docs/**', 'LICENSE', '.github/ISSUE_TEMPLATE/**', 'mcp-consent.png']
+
+# A new push to a pull request makes the run for its previous commit moot.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-test:
@@ -33,7 +41,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile=false
+      - run: pnpm install --frozen-lockfile
       - name: Typecheck
         run: pnpm typecheck
       - name: Query cache shapes
@@ -68,7 +76,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile=false
+      - run: pnpm install --frozen-lockfile
       - name: Install Playwright Chromium
         run: pnpm --filter @ordi/web exec playwright install --with-deps chromium
       - name: Run e2e suite
