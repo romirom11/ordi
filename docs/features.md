@@ -27,6 +27,22 @@ Nothing at the moment.
 
 ## Shipped
 
+### v1.42.0
+
+- Deleted projects can be restored ("Deleted projects" on the Projects
+  page); the key goes back to the pool (migration `0043`), deleting saves
+  running timers and stops agent runs, and workers, time, finance, CRM and
+  KB views skip deleted projects ([PR #143](https://github.com/romirom11/ordi/pull/143)).
+- Project settings open as a side panel over the project list and gain a
+  Danger zone with Delete project ([PR #143](https://github.com/romirom11/ordi/pull/143)).
+- CSV round trip: rows with an `id` / task ref update instead of
+  duplicating, full lead fields, shared task columns, semicolon files, a
+  period for the time export, formula-safe cells ([PR #143](https://github.com/romirom11/ordi/pull/143)).
+- Desktop: updates download in the background and wait in a single sidebar
+  row ([PR #138](https://github.com/romirom11/ordi/pull/138)); the swipe no
+  longer slides the whole window and follows the active tab's history
+  ([PR #142](https://github.com/romirom11/ordi/pull/142)).
+
 ### v1.41.0
 
 - Bitbucket Cloud integration: a workspace connects with a token (an

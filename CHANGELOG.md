@@ -3,8 +3,29 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
-## Unreleased
+## v1.42.0
 
+- **Deleted projects can be restored**: the Projects page lists them with a
+  Restore button, and the key of a deleted project is free for a new one (a
+  restore whose key was taken meanwhile is refused). Deleting saves running
+  timers as time entries and stops the project's agent runs; recurring
+  tasks and invoices, cycles, intake mailboxes and the public form pause
+  until a restore. Time lists, reports, unbilled hours, the finance
+  dashboard, the CRM client overview and the knowledge base leave deleted
+  projects out, and former members can no longer bulk-edit their tasks.
+  Migration `0043` makes the key unique among live projects only.
+- **Project settings open over the project list** instead of navigating
+  into the project, and end with a Danger zone holding Delete project.
+- **CSV import and export round-trip**: a row with the `id` (tasks: the
+  ref) of an existing record updates it instead of duplicating it, leads
+  carry every importable field and an ended lead keeps its status, tasks
+  export and import with the same columns (status by name, dates,
+  estimate). Task import needs member rights and keeps file order;
+  semicolon-separated files parse; the time export takes a period;
+  formula-looking text opens as text; imported companies get an owner.
+- **Desktop updates download quietly** and wait in one "Update to vX" row
+  above Settings, with no banner or restart toast; the app checks at
+  launch, every 30 minutes and when the server moves ahead.
 - **Swiping back and forward no longer slides the whole window**: the
   desktop app's two-finger swipe used the webview's native gesture, which
   moved a snapshot of the entire window – sidebar included – and often
