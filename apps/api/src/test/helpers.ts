@@ -36,6 +36,12 @@ export async function resetDb(): Promise<void> {
 
 export interface SeededRole { key: string; roleId: string }
 
+/**
+ * Every seeded user signs in with "password". scrypt is slow on purpose, and
+ * seeding hashed it once per user for every test file; one hash serves all.
+ */
+const PASSWORD_HASH = hashPassword('password');
+
 export async function seedRolesAndUsers(): Promise<Record<string, { userId: string; cookie: string; token: string }>> {
   const { db } = getDb();
   const roleIds = new Map<string, string>();
@@ -51,7 +57,7 @@ export async function seedRolesAndUsers(): Promise<Record<string, { userId: stri
     const userId = ulid();
     await db.insert(schema.users).values({
       id: userId, email: `${seed.key}@test.local`, name: seed.name,
-      passwordHash: hashPassword('password'), roleId: roleIds.get(seed.key)!,
+      passwordHash: PASSWORD_HASH, roleId: roleIds.get(seed.key)!,
     });
     const token = generateToken();
     await db.insert(schema.sessions).values({ id: ulid(), userId, token, expiresAt: new Date(Date.now() + 3600_000) });

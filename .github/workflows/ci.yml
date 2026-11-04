@@ -3,7 +3,15 @@ name: CI
 on:
   push:
     branches: [master, main]
+    # Documentation-only changes have nothing for these jobs to check.
+    paths-ignore: ['**/*.md', 'docs/**', 'LICENSE', '.github/ISSUE_TEMPLATE/**', 'mcp-consent.png']
   pull_request:
+    paths-ignore: ['**/*.md', 'docs/**', 'LICENSE', '.github/ISSUE_TEMPLATE/**', 'mcp-consent.png']
+
+# A new push to a pull request makes the run for its previous commit moot.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-test:
@@ -33,7 +41,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile=false
+      - run: pnpm install --frozen-lockfile
       - name: Typecheck
         run: pnpm typecheck
       - name: Query cache shapes
@@ -48,8 +56,14 @@ jobs:
   # End-to-end: the real API + web + a throwaway S3 mock, driven through a
   # real Chromium. The Playwright config owns the whole stack (resets its own
   # database, migrates, seeds), so this job only supplies Postgres + browser.
+  # Split across three machines (one stack and database each); a single
+  # worker took close to four minutes for the suite.
   e2e:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     services:
       postgres:
         image: postgres:16-alpine
@@ -68,15 +82,28 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile=false
+      - run: pnpm install --frozen-lockfile
+      - name: Playwright version
+        id: pw
+        run: echo "version=$(pnpm --filter @ordi/web exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
       - name: Install Playwright Chromium
+        if: steps.pw-cache.outputs.cache-hit != 'true'
         run: pnpm --filter @ordi/web exec playwright install --with-deps chromium
-      - name: Run e2e suite
-        run: pnpm --filter @ordi/web e2e
+      - name: Install Playwright system dependencies
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: pnpm --filter @ordi/web exec playwright install-deps chromium
+      - name: Run e2e suite (shard ${{ matrix.shard }}/3)
+        run: pnpm --filter @ordi/web e2e --shard=${{ matrix.shard }}/3
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: apps/web/playwright-report
           retention-days: 7
 

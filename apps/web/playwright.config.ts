@@ -36,6 +36,10 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   // One worker: the suite shares one seeded workspace.
   workers: 1,
+  // One worker per machine (the specs share one seeded database), but CI
+  // splits the suite across machines with --shard: fullyParallel lets a shard
+  // take single tests rather than whole files, so the shards come out even.
+  fullyParallel: true,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
