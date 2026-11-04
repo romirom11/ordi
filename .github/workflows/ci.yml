@@ -56,14 +56,8 @@ jobs:
   # End-to-end: the real API + web + a throwaway S3 mock, driven through a
   # real Chromium. The Playwright config owns the whole stack (resets its own
   # database, migrates, seeds), so this job only supplies Postgres + browser.
-  # Split across three machines (one stack and database each); a single
-  # worker took close to four minutes for the suite.
   e2e:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
     services:
       postgres:
         image: postgres:16-alpine
@@ -83,27 +77,14 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Playwright version
-        id: pw
-        run: echo "version=$(pnpm --filter @ordi/web exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
-      - name: Cache Playwright browsers
-        id: pw-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
       - name: Install Playwright Chromium
-        if: steps.pw-cache.outputs.cache-hit != 'true'
         run: pnpm --filter @ordi/web exec playwright install --with-deps chromium
-      - name: Install Playwright system dependencies
-        if: steps.pw-cache.outputs.cache-hit == 'true'
-        run: pnpm --filter @ordi/web exec playwright install-deps chromium
-      - name: Run e2e suite (shard ${{ matrix.shard }}/3)
-        run: pnpm --filter @ordi/web e2e --shard=${{ matrix.shard }}/3
+      - name: Run e2e suite
+        run: pnpm --filter @ordi/web e2e
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report-${{ matrix.shard }}
+          name: playwright-report
           path: apps/web/playwright-report
           retention-days: 7
 
