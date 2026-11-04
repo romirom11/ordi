@@ -12,6 +12,7 @@ import {
 } from '@ordi/shared';
 import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
+import { assertLiveProject } from '../../core/access';
 import { writeActivity, recordSensitiveAccess } from '../../core/activity';
 import { emit } from '../../core/events';
 import { assertVersion, assertUpdated } from '../../core/locking';
@@ -1306,6 +1307,7 @@ export async function listAllocations(params: { userId?: string; projectId?: str
 }
 
 export async function createAllocation(actor: Actor, input: any): Promise<string> {
+  await assertLiveProject(input.projectId);
   const { db } = getDb();
   const id = ulid();
   await db.insert(schema.allocations).values({

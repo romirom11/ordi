@@ -15,6 +15,8 @@ import { writeActivity } from '../../core/activity';
 import { emit } from '../../core/events';
 import { assertVersion } from '../../core/locking';
 import { assertProject, accessibleProjectIds, effectiveProjectRole } from '../../core/access';
+import { closeProjectTimers } from '../time/service';
+import { cancelProjectRuns } from '../agents/runs';
 import { assertCanAssignAgents } from '../agents/profiles';
 import { buildCustomFieldFilter, mergeCustomFields } from '../../core/customfields';
 import { extractMentions } from '../kb/service';
@@ -298,11 +300,60 @@ export async function updateProject(actor: Actor, id: string, input: any) {
   return updated;
 }
 
+/**
+ * Soft delete: the row and everything under it stay, so the project can be
+ * restored. What runs on its own is filtered out by the workers (recurring
+ * tasks and invoices, cycles, intake mail and form) and resumes on restore.
+ * Two things cannot wait like that: a running timer is turned into its time
+ * entry now (it would be lost otherwise), and agent runs are cancelled.
+ */
 export async function softDeleteProject(actor: Actor, id: string) {
   await assertProject(actor, id, 'admin');
   const { db } = getDb();
+  await closeProjectTimers(actor, id);
+  await cancelProjectRuns(id);
   await db.update(projects).set({ deletedAt: new Date() }).where(eq(projects.id, id));
   await writeActivity(db, { entityType: 'project', entityId: id, action: 'deleted', actorId: actor.userId, actorType: actor.actorType });
+}
+
+/**
+ * Who may see and restore a deleted project: projects.delete, plus project
+ * admin rights – from projects.write, or an admin membership row. The access
+ * context skips memberships of deleted projects, so the row is read here.
+ */
+async function deletedProjectsFor(actor: Actor, id?: string) {
+  const { db } = getDb();
+  if (!actor.access.permissions.has('projects.delete')) return [];
+  const rows = await db.select({
+    id: projects.id, name: projects.name, key: projects.key, visibility: projects.visibility, deletedAt: projects.deletedAt,
+  }).from(projects).where(and(isNotNull(projects.deletedAt), id ? eq(projects.id, id) : undefined))
+    .orderBy(desc(projects.deletedAt));
+  if (actor.access.permissions.has('projects.write')) return rows;
+  if (!rows.length) return rows;
+  const admin = await db.select({ projectId: projectMembers.projectId }).from(projectMembers).where(and(
+    eq(projectMembers.userId, actor.userId), eq(projectMembers.role, 'admin'),
+    inArray(projectMembers.projectId, rows.map((r) => r.id)),
+  ));
+  const ok = new Set(admin.map((r) => r.projectId));
+  return rows.filter((r) => ok.has(r.id));
+}
+
+export async function listDeletedProjects(actor: Actor) {
+  return (await deletedProjectsFor(actor)).map(({ visibility: _v, ...r }) => r);
+}
+
+export async function restoreProject(actor: Actor, id: string) {
+  const [project] = await deletedProjectsFor(actor, id);
+  if (!project) throw err.notFound('Project not found');
+  const { db } = getDb();
+  // The key went back to the pool on delete; someone may have taken it since.
+  const [taken] = await db.select({ id: projects.id, name: projects.name }).from(projects)
+    .where(and(eq(projects.key, project.key), isNull(projects.deletedAt)));
+  if (taken) throw err.domain(`The key ${project.key} now belongs to project "${taken.name}" – rename that project's key or delete it first.`);
+  await db.update(projects).set({ deletedAt: null }).where(eq(projects.id, id));
+  await writeActivity(db, { entityType: 'project', entityId: id, action: 'restored', actorId: actor.userId, actorType: actor.actorType });
+  const [restored] = await db.select().from(projects).where(eq(projects.id, id));
+  return restored;
 }
 
 // ── Members ──
@@ -703,6 +754,9 @@ export async function openTasksAssignedTo(userId: string) {
     .where(and(
       eq(taskAssignees.userId, userId),
       isNull(tasks.deletedAt),
+      // A deleted project's tasks are nobody's work: handing them on would
+      // notify the successor (or queue an agent) about invisible tasks.
+      isNull(projects.deletedAt),
       inArray(taskStatuses.category, OPEN_CATEGORIES),
     ))
     .orderBy(desc(tasks.id));

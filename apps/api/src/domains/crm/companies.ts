@@ -214,7 +214,7 @@ export async function companyOverview(actor: Actor, id: string) {
     select count(*)::int as open_tasks from tasks t
     join projects p on p.id = t.project_id
     join task_statuses ts on ts.id = t.status_id
-    where p.company_id = ${id} and t.deleted_at is null and ts.category not in ('done','canceled')`) as any[];
+    where p.company_id = ${id} and p.deleted_at is null and t.deleted_at is null and ts.category not in ('done','canceled')`) as any[];
 
   const out: Record<string, unknown> = {
     company,
@@ -234,7 +234,7 @@ export async function companyOverview(actor: Actor, id: string) {
     const [unbilled] = await db.execute(sql`
       select coalesce(sum(duration_seconds),0)/3600.0 as unbilled_hours from time_entries te
       join projects p on p.id = te.project_id
-      where p.company_id = ${id} and te.billable = true and te.invoice_item_id is null`) as any[];
+      where p.company_id = ${id} and p.deleted_at is null and te.billable = true and te.invoice_item_id is null`) as any[];
     out.billing = billing;
     out.unbilledHours = Number(unbilled?.unbilled_hours ?? 0);
   }

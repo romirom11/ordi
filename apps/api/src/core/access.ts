@@ -2,7 +2,7 @@
  * Resource access (PRD §4.4). Project/space membership + accessibleProjectIds
  * (one cached query per request), and assert helpers used by services.
  */
-import { getDb, schema, eq, and, inArray, isNull, or } from '@ordi/db';
+import { getDb, schema, eq, and, inArray, isNull, or, sql, type SQL } from '@ordi/db';
 import { type AccessContext, projectAccessRank, spaceAccessRank } from '@ordi/shared';
 import type { Actor } from '../context';
 import { err } from '../lib/errors';
@@ -14,7 +14,12 @@ export async function buildAccessContext(
 ): Promise<AccessContext> {
   const { db } = getDb();
   const [pms, sms] = await Promise.all([
-    db.select().from(schema.projectMembers).where(eq(schema.projectMembers.userId, userId)),
+    // Memberships of soft-deleted projects grant nothing: code that trusts this
+    // map directly (bulk task edits, for one) must not reach a deleted project.
+    db.select({ projectId: schema.projectMembers.projectId, role: schema.projectMembers.role })
+      .from(schema.projectMembers)
+      .innerJoin(schema.projects, eq(schema.projects.id, schema.projectMembers.projectId))
+      .where(and(eq(schema.projectMembers.userId, userId), isNull(schema.projects.deletedAt))),
     db.select().from(schema.spaceMembers).where(eq(schema.spaceMembers.userId, userId)),
   ]);
   return {
@@ -61,6 +66,24 @@ export async function accessibleProjectIds(
   return ids;
 }
 
+/**
+ * SQL guard for rows hanging off a project: true unless that project is soft-
+ * deleted. NOT EXISTS rather than a join, so a row with no project (a client-
+ * level invoice, an internal expense) still passes. `col` may be a column or a
+ * raw alias such as sql`te.project_id`.
+ */
+export function notInDeletedProject(col: unknown): SQL {
+  return sql`not exists (select 1 from projects dp where dp.id = ${col} and dp.deleted_at is not null)`;
+}
+
+/** 404 unless the project exists and is not deleted – for writes that take a bare projectId. */
+export async function assertLiveProject(projectId: string): Promise<void> {
+  const { db } = getDb();
+  const [row] = await db.select({ id: schema.projects.id }).from(schema.projects)
+    .where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
+  if (!row) throw err.notFound('Project not found');
+}
+
 const PROJECT_RANK = { viewer: 1, member: 2, admin: 3 } as const;
 const SPACE_RANK = { viewer: 1, editor: 2 } as const;
 const PROJECT_ROLE_OF_RANK = [null, 'viewer', 'member', 'admin'] as const;
@@ -98,6 +121,8 @@ async function spaceAccessSets(
   ]));
   const sets: { viewer: string[]; editor: string[] } = { viewer: [], editor: [] };
   for (const s of spaces) {
+    // The space of a deleted project is hidden with it, workspace visibility or not.
+    if (s.projectId && !roleOfProject.has(s.projectId)) continue;
     const rank = spaceAccessRank(actor.access, {
       visibility: s.visibility as 'workspace' | 'private',
       spaceId: s.id,
@@ -187,12 +212,11 @@ export async function assertSpace(
       .select({ id: schema.projects.id, visibility: schema.projects.visibility })
       .from(schema.projects)
       .where(and(eq(schema.projects.id, space.projectId), isNull(schema.projects.deletedAt)));
-    if (project) {
-      inheritedProjectRole = effectiveProjectRole(actor, {
-        id: project.id,
-        visibility: project.visibility as 'workspace' | 'private',
-      });
-    }
+    if (!project) throw err.notFound('Space not found'); // went with its deleted project
+    inheritedProjectRole = effectiveProjectRole(actor, {
+      id: project.id,
+      visibility: project.visibility as 'workspace' | 'private',
+    });
   }
   const rank = spaceAccessRank(actor.access, {
     visibility: space.visibility as 'workspace' | 'private',

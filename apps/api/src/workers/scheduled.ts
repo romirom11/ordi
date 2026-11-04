@@ -4,6 +4,7 @@
  */
 import { getDb, schema, eq, and, lte, isNull, sql, inArray, desc } from '@ordi/db';
 import { ulid } from 'ulid';
+import { notInDeletedProject } from '../core/access';
 import { computeDocumentTotals, addMonthsIso } from '@ordi/shared';
 import { emit } from '../core/events';
 import { postExpense } from '../domains/finance/ledger.service';
@@ -30,7 +31,9 @@ function addFrequency(date: string, freq: string): string {
 export async function runRecurringTasks(): Promise<void> {
   const { db } = getDb();
   const rules = await db.select().from(schema.recurringTasks)
-    .where(and(eq(schema.recurringTasks.active, true), lte(schema.recurringTasks.nextRun, today())));
+    // Rules of a deleted project wait, untouched: a restore picks them up again.
+    .where(and(eq(schema.recurringTasks.active, true), lte(schema.recurringTasks.nextRun, today()),
+      notInDeletedProject(schema.recurringTasks.projectId)));
   for (const rule of rules) {
     const [tmpl] = await db.select().from(schema.taskTemplates).where(eq(schema.taskTemplates.id, rule.templateId));
     if (!tmpl) continue;
@@ -55,7 +58,8 @@ export async function runRecurringTasks(): Promise<void> {
 export async function runRecurringInvoices(): Promise<void> {
   const { db } = getDb();
   const rules = await db.select().from(schema.recurringInvoices)
-    .where(and(eq(schema.recurringInvoices.status, 'active'), lte(schema.recurringInvoices.nextIssueDate, today())));
+    .where(and(eq(schema.recurringInvoices.status, 'active'), lte(schema.recurringInvoices.nextIssueDate, today()),
+      notInDeletedProject(schema.recurringInvoices.projectId)));
   for (const rule of rules) {
     if (rule.endDate && rule.endDate < today()) {
       await db.update(schema.recurringInvoices).set({ status: 'ended' }).where(eq(schema.recurringInvoices.id, rule.id));
@@ -222,7 +226,8 @@ export async function runReminders(): Promise<void> {
 /** Daily burndown snapshot per active cycle. */
 export async function runCycleSnapshots(): Promise<void> {
   const { db } = getDb();
-  const cycles = await db.select().from(schema.cycles).where(eq(schema.cycles.status, 'active'));
+  const cycles = await db.select().from(schema.cycles)
+    .where(and(eq(schema.cycles.status, 'active'), notInDeletedProject(schema.cycles.projectId)));
   for (const cycle of cycles) {
     const [row] = await db.execute(sql`
       select count(*)::int as open_count, coalesce(sum(t.estimate),0) as open_estimate
@@ -239,7 +244,8 @@ export async function runCycleSnapshots(): Promise<void> {
 export async function runCycleActivation(): Promise<void> {
   const { db } = getDb();
   await db.update(schema.cycles).set({ status: 'active' })
-    .where(and(eq(schema.cycles.status, 'upcoming'), lte(schema.cycles.startDate, today())));
+    .where(and(eq(schema.cycles.status, 'upcoming'), lte(schema.cycles.startDate, today()),
+      notInDeletedProject(schema.cycles.projectId)));
 }
 
 export async function runQuoteExpiry(): Promise<void> {

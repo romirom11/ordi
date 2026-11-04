@@ -15,6 +15,7 @@ import {
 } from '@ordi/shared';
 import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
+import { assertLiveProject, notInDeletedProject } from '../../core/access';
 import { writeActivity } from '../../core/activity';
 import { emit } from '../../core/events';
 import { assertVersion } from '../../core/locking';
@@ -990,6 +991,7 @@ export async function listExpenses(params: { projectId?: string; companyId?: str
 }
 
 export async function createExpense(actor: Actor, input: any) {
+  if (input.projectId) await assertLiveProject(input.projectId);
   const { db } = getDb();
   const id = ulid();
   await db.insert(schema.expenses).values({
@@ -1201,7 +1203,8 @@ export async function financeDashboard(params: { from?: string; to?: string }) {
 
   const [unbilled] = await db.execute(sql`
     select coalesce(sum(duration_seconds),0)/3600.0 as hours
-    from time_entries where billable = true and invoice_item_id is null`) as any[];
+    from time_entries te where billable = true and invoice_item_id is null
+      and ${notInDeletedProject(sql`te.project_id`)}`) as any[];
 
   return {
     asOf,

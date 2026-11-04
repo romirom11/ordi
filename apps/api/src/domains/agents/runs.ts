@@ -158,6 +158,9 @@ async function claimOne(workerId: string): Promise<RunRow[]> {
       join agent_profiles p on p.user_id = r.agent_user_id
       join users u on u.id = r.agent_user_id
       where p.enabled and u.is_active
+        -- A run queued before its project or task was deleted never starts.
+        and not exists (select 1 from projects dp where dp.id = r.project_id and dp.deleted_at is not null)
+        and not exists (select 1 from tasks dt where dt.id = r.task_id and dt.deleted_at is not null)
         and (
           (r.status = 'queued' and (r.next_attempt_at is null or r.next_attempt_at <= now()))
           or (r.status = 'waiting_quota' and r.next_attempt_at is not null and r.next_attempt_at <= now())
@@ -365,6 +368,27 @@ export async function retryRun(actor: Actor, id: string): Promise<RunView> {
   });
   if (!newId) throw err.domain('The task already has an active run');
   return toView(await loadRun(newId));
+}
+
+/**
+ * Stop every active run of a project that is being deleted. A run the worker
+ * has not started is finished as cancelled; a running one gets the same cancel
+ * request a person's Cancel sends, and the worker aborts it.
+ */
+export async function cancelProjectRuns(projectId: string): Promise<void> {
+  const { db } = getDb();
+  const active = await db.select().from(agentRuns).where(and(
+    eq(agentRuns.projectId, projectId),
+    inArray(agentRuns.status, [...AGENT_RUN_ACTIVE_STATUSES]),
+  ));
+  for (const run of active) {
+    if (run.status === 'running') {
+      await db.update(agentRuns).set({ error: 'cancel requested' }).where(eq(agentRuns.id, run.id));
+      await recordRunEvent(run.id, 'status', { status: 'cancel_requested', reason: 'project deleted' });
+      continue;
+    }
+    await finishRun(run.id, { status: 'cancelled', error: 'project deleted' });
+  }
 }
 
 /** Is a cancel pending for a running run? Polled by the worker. */
