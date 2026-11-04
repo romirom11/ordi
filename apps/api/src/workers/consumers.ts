@@ -522,6 +522,8 @@ async function buildSlackMessage(ev: DomainEvent): Promise<{ text: string; proje
       const title = task?.title ?? '';
       const link = projectId ? `${app}/projects/${projectId}/tasks/${taskId}` : `${app}/my-tasks`;
       if (ev.type === 'task.created') {
+        // A CSV import creates tasks by the dozen; one message each would bury the channel.
+        if (p.source === 'import') return null;
         return { text: `:sparkles: New task *${p.ref ?? taskId}* – ${title}\n${link}`, projectId };
       }
       let statusName = '';

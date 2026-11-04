@@ -18,7 +18,7 @@ extendDict({
     'ctx.linkCopied': 'Link copied',
     'ctx.refCopied': 'Reference copied',
     'ctx.deleteProject': 'Delete project',
-    'ctx.deleteProjectBody': 'This permanently deletes the project and its tasks. This cannot be undone.',
+    'ctx.deleteProjectBody': 'The project and all its tasks disappear for everyone; running timers are saved and agent runs stop. It can be restored from Deleted projects on the Projects page. To only put it out of the way, set its status to Archived instead.',
     'ctx.deleteTask': 'Delete task',
     'ctx.deleteTaskBody': 'This permanently deletes the task. This cannot be undone.',
     'ctx.projectDeleted': 'Project deleted',
@@ -42,7 +42,7 @@ extendDict({
     'ctx.linkCopied': 'Посилання скопійовано',
     'ctx.refCopied': 'Ідентифікатор скопійовано',
     'ctx.deleteProject': 'Видалити проєкт',
-    'ctx.deleteProjectBody': 'Проєкт і всі його задачі буде видалено назавжди. Цю дію не можна скасувати.',
+    'ctx.deleteProjectBody': 'Проєкт і всі його задачі зникнуть для всіх; запущені таймери збережуться, запуски агентів зупиняться. Відновити його можна з «Видалених проєктів» на сторінці проєктів. Якщо треба лише прибрати його з очей, поставте статус «Архів».',
     'ctx.deleteTask': 'Видалити задачу',
     'ctx.deleteTaskBody': 'Задачу буде видалено назавжди. Цю дію не можна скасувати.',
     'ctx.projectDeleted': 'Проєкт видалено',
@@ -80,9 +80,12 @@ export interface ProjectMenuTarget {
   id: string; name: string; key?: string; status: string; version?: number;
 }
 
-export function ProjectContextMenu({ project, canWrite, canDelete, onDeleted, children, className }: {
+export function ProjectContextMenu({ project, canWrite, canDelete, onDeleted, onOpenSettings, children, className }: {
   project: ProjectMenuTarget; canWrite: boolean; canDelete: boolean;
-  onDeleted?: () => void; children: ReactNode; className?: string;
+  onDeleted?: () => void;
+  /** Opens the settings panel in place; without it the item goes to the project page. */
+  onOpenSettings?: () => void;
+  children: ReactNode; className?: string;
 }) {
   const t = useT();
   const qc = useQueryClient();
@@ -129,7 +132,7 @@ export function ProjectContextMenu({ project, canWrite, canDelete, onDeleted, ch
   items.push({ key: 'newtab', label: t('ctx.openNewTab'), icon: <ExternalLink size={15} />, onSelect: () => tabs?.openInNewTab(url) });
   items.push({ key: 'copy', label: t('ctx.copyLink'), icon: <Link2 size={15} />, onSelect: () => copyToClipboard(appOrigin() + url, t('ctx.linkCopied')) });
   items.push({ type: 'separator' });
-  items.push({ key: 'settings', label: t('ctx.openSettings'), icon: <Settings size={15} />, onSelect: () => navigate(`${url}?section=settings`) });
+  items.push({ key: 'settings', label: t('ctx.openSettings'), icon: <Settings size={15} />, onSelect: () => (onOpenSettings ? onOpenSettings() : navigate(`${url}?section=settings`)) });
   if (canDelete) {
     items.push({ type: 'separator' });
     items.push({ key: 'delete', label: t('ctx.deleteProject'), icon: <Trash2 size={15} />, danger: true, onSelect: () => setConfirmOpen(true) });

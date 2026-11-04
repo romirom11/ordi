@@ -357,6 +357,11 @@ export function publicRoutes() {
     const [settings] = await db.select().from(schema.intakeSettings)
       .where(eq(schema.intakeSettings.formToken, c.req.param('token')));
     if (!settings || !settings.formEnabled) throw err.notFound();
+    // Same answer as the GET: the form of a deleted project is gone, not
+    // quietly collecting requests nobody can see.
+    const [live] = await db.select({ id: schema.projects.id }).from(schema.projects)
+      .where(and(eq(schema.projects.id, settings.projectId), isNull(schema.projects.deletedAt)));
+    if (!live) throw err.notFound();
 
     const body = intakeSubmitSchema.parse(await c.req.json());
     // Honeypot: bots fill the hidden field – silently accept, create nothing.

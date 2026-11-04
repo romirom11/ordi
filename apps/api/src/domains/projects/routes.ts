@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { getDb, schema, eq, and, isNull, asc, sql } from '@ordi/db';
+import { getDb, schema, eq, ne, and, isNull, isNotNull, asc, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import {
   projectInputSchema, projectUpdateSchema, projectMemberInputSchema,
@@ -87,6 +87,10 @@ export function projectsRoutes() {
   app.get('/projects/task-counts', async (c) =>
     c.json({ data: await svc.projectTaskCounts(currentActor(c)) }));
 
+  // The trash: deleted projects this person may bring back.
+  app.get('/projects/deleted', guard('projects.delete'), async (c) =>
+    c.json({ data: await svc.listDeletedProjects(currentActor(c)) }));
+
   app.post('/projects', guard('projects.create'), async (c) => {
     const body = projectInputSchema.parse(await c.req.json());
     const res = await svc.createProject(currentActor(c), body);
@@ -104,6 +108,9 @@ export function projectsRoutes() {
     await svc.softDeleteProject(currentActor(c), c.req.param('id'));
     return c.json({ ok: true });
   });
+
+  app.post('/projects/:id/restore', guard('projects.delete'), async (c) =>
+    c.json(await svc.restoreProject(currentActor(c), c.req.param('id'))));
 
   // ── Members ──
   app.get('/projects/:id/members', async (c) => c.json({ data: await svc.listMembers(currentActor(c), c.req.param('id')) }));
@@ -303,10 +310,20 @@ export function projectsRoutes() {
     const [totalRow] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.projectTypes);
     if ((totalRow?.n ?? 0) <= 1) throw err.domain('Cannot delete the last project type – at least one must remain.');
     const [usedRow] = await db.select({ n: sql<number>`count(*)::int` })
-      .from(schema.projects).where(eq(schema.projects.projectTypeId, id));
+      .from(schema.projects).where(and(eq(schema.projects.projectTypeId, id), isNull(schema.projects.deletedAt)));
     const used = usedRow?.n ?? 0;
     if (used > 0) throw err.domain(`This type is used by ${used} project${used === 1 ? '' : 's'} – move them to another type first.`);
-    await db.delete(schema.projectTypes).where(eq(schema.projectTypes.id, id));
+    await db.transaction(async (tx) => {
+      // Deleted projects still point at the type (the foreign key would refuse
+      // the delete); they move to another type, which a restore then shows.
+      const [fallback] = await tx.select({ id: schema.projectTypes.id }).from(schema.projectTypes)
+        .where(ne(schema.projectTypes.id, id)).orderBy(asc(schema.projectTypes.createdAt)).limit(1);
+      if (fallback) {
+        await tx.update(schema.projects).set({ projectTypeId: fallback.id })
+          .where(and(eq(schema.projects.projectTypeId, id), isNotNull(schema.projects.deletedAt)));
+      }
+      await tx.delete(schema.projectTypes).where(eq(schema.projectTypes.id, id));
+    });
     return c.json({ ok: true });
   });
 

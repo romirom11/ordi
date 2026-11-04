@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { pgTable, text, boolean, integer, numeric, jsonb, index, uniqueIndex, primaryKey, timestamp } from 'drizzle-orm/pg-core';
 import { pk, timestamps, createdBy, version, deletedAt, customFields, position } from './_shared';
 import { users } from './core';
@@ -30,7 +31,8 @@ export const projects = pgTable('projects', {
   id: pk(),
   companyId: text('company_id').references(() => companies.id),
   name: text('name').notNull(),
-  key: text('key').notNull().unique(),
+  /** Unique among live projects only (projects_key_live_idx): a deleted project gives its key back. */
+  key: text('key').notNull(),
   projectTypeId: text('project_type_id').notNull().references(() => projectTypes.id),
   templateSourceId: text('template_source_id'),
   status: text('status').notNull().default('active'),
@@ -55,6 +57,7 @@ export const projects = pgTable('projects', {
   typeIdx: index('projects_type_idx').on(t.projectTypeId),
   statusIdx: index('projects_status_idx').on(t.status),
   companyIdx: index('projects_company_idx').on(t.companyId),
+  keyLiveIdx: uniqueIndex('projects_key_live_idx').on(t.key).where(sql`deleted_at is null`),
 }));
 
 export const projectMembers = pgTable('project_members', {

@@ -232,6 +232,8 @@ function canAccessSpaceRow(
   projectRoles: Map<string, 'admin' | 'member' | 'viewer' | null>,
   minRole: 'viewer' | 'editor' = 'viewer',
 ): boolean {
+  // A project's space goes with the project: absent from the map = deleted.
+  if (space.projectId && !projectRoles.has(space.projectId)) return false;
   const inheritedProjectRole = space.projectId ? projectRoles.get(space.projectId) ?? null : null;
   return canAccessSpace(actor.access, {
     visibility: space.visibility as 'workspace' | 'private',

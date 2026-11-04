@@ -11,7 +11,7 @@ import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { emit } from '../../core/events';
 import { assertVersion } from '../../core/locking';
-import { assertProject } from '../../core/access';
+import { assertProject, assertLiveProject, notInDeletedProject } from '../../core/access';
 
 /** Inclusive upper bound for a plain date (`YYYY-MM-DD` → end of that day). */
 function upperBound(to?: string): string | undefined {
@@ -85,7 +85,9 @@ async function snapshotCostRate(db: any, userId: string, isoDate: string): Promi
 
 async function getEntry(id: string) {
   const { db } = getDb();
-  const [entry] = await db.select().from(schema.timeEntries).where(eq(schema.timeEntries.id, id));
+  // An entry of a deleted project went with it: not editable until a restore.
+  const [entry] = await db.select().from(schema.timeEntries)
+    .where(and(eq(schema.timeEntries.id, id), notInDeletedProject(schema.timeEntries.projectId)));
   if (!entry) throw err.notFound('Time entry not found');
   return entry;
 }
@@ -122,6 +124,7 @@ export async function listEntries(actor: Actor, filters: EntryFilters, canReadAl
     scopedUserId ? eq(schema.timeEntries.userId, scopedUserId) : undefined,
     filters.projectId ? eq(schema.timeEntries.projectId, filters.projectId) : undefined,
     filters.taskId ? eq(schema.timeEntries.taskId, filters.taskId) : undefined,
+    notInDeletedProject(schema.timeEntries.projectId),
     filters.from ? gte(schema.timeEntries.startedAt, new Date(filters.from)) : undefined,
     to ? lte(schema.timeEntries.startedAt, new Date(to)) : undefined,
   )).orderBy(desc(schema.timeEntries.startedAt)).limit(filters.limit + 1);
@@ -194,7 +197,10 @@ async function timerToEntry(actor: Actor, timer: { userId: string; taskId: strin
     .where(and(eq(schema.tasks.id, timer.taskId), isNull(schema.tasks.deletedAt)));
   if (!task) return null; // task gone; nothing to persist
   const [proj] = await db.select({ settings: schema.projects.settings })
-    .from(schema.projects).where(eq(schema.projects.id, task.projectId));
+    .from(schema.projects).where(and(eq(schema.projects.id, task.projectId), isNull(schema.projects.deletedAt)));
+  // Project deleted under a running timer: closeProjectTimers saves those at
+  // delete time, so one still here has nowhere visible to go.
+  if (!proj) return null;
   const durationSeconds = Math.max(0, Math.floor((Date.now() - timer.startedAt.getTime()) / 1000));
   const billable = await resolveBillable(db, proj?.settings ?? {}, undefined);
   const hourlyRate = await snapshotHourlyRate(db, task.projectId, timer.userId);
@@ -215,6 +221,25 @@ async function timerToEntry(actor: Actor, timer: { userId: string; taskId: strin
   await writeActivity(db, { entityType: 'time_entry', entityId: id, action: 'created', after: { taskId: timer.taskId, projectId: task.projectId, durationSeconds, billable, source: 'timer' }, actorId: actor.userId, actorType: actor.actorType });
   await emit({ type: 'time.entry_created', aggregateType: 'time_entry', aggregateId: id, payload: { taskId: timer.taskId, projectId: task.projectId, userId: timer.userId, durationSeconds, billable, source: 'timer' }, actorId: actor.userId, actorType: actor.actorType });
   return id;
+}
+
+/**
+ * Turn every timer running on a project's tasks into its time entry. Called
+ * just before the project is soft-deleted: the entries go with the project and
+ * come back on restore, where a timer left running would be lost.
+ */
+export async function closeProjectTimers(actor: Actor, projectId: string): Promise<void> {
+  const { db } = getDb();
+  const timers = await db.select({
+    userId: schema.activeTimers.userId, taskId: schema.activeTimers.taskId,
+    startedAt: schema.activeTimers.startedAt, note: schema.activeTimers.note,
+  }).from(schema.activeTimers)
+    .innerJoin(schema.tasks, eq(schema.tasks.id, schema.activeTimers.taskId))
+    .where(eq(schema.tasks.projectId, projectId));
+  for (const timer of timers) {
+    await timerToEntry(actor, timer);
+    await db.delete(schema.activeTimers).where(eq(schema.activeTimers.userId, timer.userId));
+  }
 }
 
 export async function startTimer(actor: Actor, input: any) {
@@ -249,10 +274,16 @@ export async function getTimer(actor: Actor) {
   // The header indicator shows which task is being timed, so hand back its ref
   // and title rather than making every caller look them up.
   const [task] = await db
-    .select({ number: schema.tasks.number, title: schema.tasks.title, key: schema.projects.key })
+    .select({ number: schema.tasks.number, title: schema.tasks.title, key: schema.projects.key, deletedAt: schema.projects.deletedAt })
     .from(schema.tasks)
     .innerJoin(schema.projects, eq(schema.projects.id, schema.tasks.projectId))
     .where(eq(schema.tasks.id, timer.taskId));
+  if (task?.deletedAt) {
+    // Belt and braces – the delete closes these timers – but a stray one must
+    // not keep naming a task nobody can open.
+    await db.delete(schema.activeTimers).where(eq(schema.activeTimers.userId, actor.userId));
+    return null;
+  }
   return {
     ...timer,
     elapsedSeconds,
@@ -264,6 +295,7 @@ export async function getTimer(actor: Actor) {
 // ── Rates ──
 
 export async function listRates(projectId: string) {
+  await assertLiveProject(projectId);
   const { db } = getDb();
   return db.select().from(schema.projectRates)
     .where(eq(schema.projectRates.projectId, projectId))
@@ -271,6 +303,7 @@ export async function listRates(projectId: string) {
 }
 
 export async function upsertRate(actor: Actor, input: any): Promise<string> {
+  await assertLiveProject(input.projectId);
   const { db } = getDb();
   const userId = input.userId ?? null;
   const existing = await db.select().from(schema.projectRates)
@@ -306,7 +339,8 @@ export async function deleteRate(actor: Actor, id: string): Promise<void> {
 // ── Reports (raw SQL aggregates, PRD §10.2, §11.10) ──
 
 function whereFragments(f: { from?: string; to?: string; projectId?: string; billable: string }): SQL[] {
-  const conds: SQL[] = [];
+  // Time of a deleted project leaves the reports with it (and returns on restore).
+  const conds: SQL[] = [notInDeletedProject(sql`te.project_id`)];
   if (f.from) conds.push(sql`te.started_at >= ${f.from}`);
   const to = upperBound(f.to);
   if (to) conds.push(sql`te.started_at <= ${to}`);
@@ -374,7 +408,8 @@ export async function report(params: { from?: string; to?: string; groupBy: stri
 
 export async function unbilled(params: { companyId?: string; from?: string; to?: string }) {
   const { db } = getDb();
-  const conds: SQL[] = [sql`te.billable = true`, sql`te.invoice_item_id is null`];
+  // A deleted project cannot be invoiced, so its hours are not "unbilled work".
+  const conds: SQL[] = [sql`te.billable = true`, sql`te.invoice_item_id is null`, sql`p.deleted_at is null`];
   if (params.companyId) conds.push(sql`c.id = ${params.companyId}`);
   if (params.from) conds.push(sql`te.started_at >= ${params.from}`);
   const to = upperBound(params.to);
@@ -416,6 +451,7 @@ export async function myWeek(actor: Actor, weekStart: string) {
     eq(schema.timeEntries.userId, actor.userId),
     gte(schema.timeEntries.startedAt, start),
     lt(schema.timeEntries.startedAt, end),
+    notInDeletedProject(schema.timeEntries.projectId),
   )).orderBy(schema.timeEntries.startedAt);
 
   const byDay = new Map<string, { date: string; totalSeconds: number; billableSeconds: number; entries: any[] }>();

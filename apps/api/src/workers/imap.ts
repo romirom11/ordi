@@ -6,12 +6,13 @@
  */
 import { ImapFlow } from 'imapflow';
 import { simpleParser, type Attachment } from 'mailparser';
-import { getDb, schema, isNotNull } from '@ordi/db';
+import { getDb, schema, and, isNotNull } from '@ordi/db';
 import { ulid } from 'ulid';
 import { MAX_UPLOAD_BYTES, BLOCKED_FILE_EXTENSIONS } from '@ordi/shared';
 import { logger } from '../lib/logger';
 import { decrypt } from '../lib/crypto';
 import { putObject } from '../lib/s3';
+import { notInDeletedProject } from '../core/access';
 
 interface MailboxConfig {
   host: string;
@@ -130,7 +131,8 @@ async function pollMailbox(projectId: string, cfg: MailboxConfig): Promise<numbe
 export async function pollIntakeMailboxes(): Promise<void> {
   const { db } = getDb();
   const rows = await db.select().from(schema.intakeSettings)
-    .where(isNotNull(schema.intakeSettings.mailbox));
+    // A deleted project's mailbox is left alone until the project is restored.
+    .where(and(isNotNull(schema.intakeSettings.mailbox), notInDeletedProject(schema.intakeSettings.projectId)));
 
   for (const row of rows) {
     const cfg = row.mailbox as MailboxConfig | null;

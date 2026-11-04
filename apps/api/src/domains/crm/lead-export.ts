@@ -25,8 +25,10 @@ interface CustomFieldOption { value: string; label: string }
 
 /**
  * Column names double as import headers where the importer understands them
- * (companyName, title, product, status, score, signal, sourceUrl,
- * suggestedChannel, opener), so an exported file can be edited and fed back.
+ * (id, companyName, title, product, status, score, signal, painSignal,
+ * evidence, whyFit, whyNow, sourceTitle, sourceUrl, sourceType, signalDate,
+ * suggestedChannel, opener, caution), so an exported file can be edited and
+ * fed back: the `id` column makes each row update its lead, not duplicate it.
  */
 const LEAD_COLUMNS = [
   'id', 'companyName', 'companyDomain', 'title', 'product', 'status', 'score',

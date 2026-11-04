@@ -10,19 +10,17 @@ import { useCan, useProjectRole } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import {
   Button, IconButton, Input, Card, Badge, Skeleton, EmptyState, Spinner, Avatar, AvatarGroup,
-  StatusIcon, PriorityIcon, ProgressBar, ProgressRing, PageBody, Reveal, Switch,
+  StatusIcon, PriorityIcon, ProgressBar, ProgressRing, PageBody, Reveal,
   fmtDate, cn,
 } from '../components/ui';
-import { Dialog, ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, SidePanel, toast } from '../components/overlays';
+import { Dialog, ConfirmDialog, DropdownMenu, MenuItem, MenuLabel, toast } from '../components/overlays';
 import { BulkBar, RowCheckbox, bulkMessage, runBulk, useSelection } from '../components/bulk';
 import { CalendarView } from '../components/views/CalendarView';
 import { TimelineView } from '../components/views/TimelineView';
 import { SpreadsheetView } from '../components/views/SpreadsheetView';
 import { RichEditor, EMPTY_DOC } from '../components/richtext/RichEditor';
-import { ProjectAccessPanel } from '../components/ProjectAccessPanel';
 import { FilesSection } from '../components/FilesSection';
 import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
-import { CustomFieldsPanel } from '../components/settings/CustomFieldsPanel';
 import { ProjectIcon } from '../components/project/ProjectIcon';
 import { PropertiesRail } from '../components/project/PropertiesRail';
 import { ProjectResources, type ProjectLink } from '../components/project/ProjectResources';
@@ -30,12 +28,11 @@ import { ProjectUpdates } from '../components/project/ProjectUpdates';
 import { type Milestone } from '../components/project/ProjectMilestones';
 import { ProjectActivity } from '../components/project/ProjectActivity';
 import { ProjectDeals } from '../components/project/ProjectDeals';
-import { ProjectIntegrations } from '../components/project/ProjectIntegrations';
+import { ProjectSettingsPanel, useProjectPatch } from '../components/project/ProjectSettingsPanel';
 import { ProjectContextMenu, TaskContextMenu } from '../components/project/contextMenus';
-import { ProjectIntakeTab, IntakeSettingsSection, useIntakeItems } from '../components/project/ProjectIntake';
-import { ProjectAutomationSection } from '../components/project/ProjectAutomation';
+import { ProjectIntakeTab, useIntakeItems } from '../components/project/ProjectIntake';
 import { PlanTab, currentCycle, cyclePhase, useCycles } from '../components/project/PlanTab';
-import { PROJECT_STATUSES, STATUS_META, type UserLite } from '../components/project/pickers';
+import { type UserLite } from '../components/project/pickers';
 import { TasksToolbar } from '../components/project/TasksToolbar';
 import type { CycleLite, LabelLite } from '../components/project/FilterPopover';
 import { useLabels, useTaskStatuses } from '../lib/queries';
@@ -51,7 +48,6 @@ import { DateField } from '../components/DatePicker';
 
 extendDict({
   en: {
-    'projects.cyclesToggleHint': 'Time-boxed sprints in the Plan tab, a Cycle field on tasks and cycle filters. Off for projects that do not work in sprints.',
     'bulkTasks.status': 'Status',
     'bulkTasks.priority': 'Priority',
     'bulkTasks.deleteTitle': 'Delete tasks',
@@ -71,9 +67,6 @@ extendDict({
     'projects.visPrivateHint': 'Only members with access can see this project.',
     'projects.completion': 'Completion',
     'projects.byStatus': 'By status',
-    'projects.general': 'General',
-    'projects.access': 'Access',
-    'projects.conflict': 'This project changed elsewhere – reloaded the latest version.',
     'projects.statusActive': 'Active',
     'projects.statusPaused': 'Paused',
     'projects.statusCompleted': 'Completed',
@@ -93,7 +86,6 @@ extendDict({
     'projects.blocked': 'Blocked by another task',
   },
   uk: {
-    'projects.cyclesToggleHint': 'Спринти у вкладці «План», поле «Цикл» у задачах і фільтр за циклом. Вимкніть, якщо проєкт не працює спринтами.',
     'bulkTasks.status': 'Статус',
     'bulkTasks.priority': 'Пріоритет',
     'bulkTasks.deleteTitle': 'Видалити задачі',
@@ -113,9 +105,6 @@ extendDict({
     'projects.visPrivateHint': 'Проєкт бачать лише учасники з доступом.',
     'projects.completion': 'Завершеність',
     'projects.byStatus': 'За статусом',
-    'projects.general': 'Загальні',
-    'projects.access': 'Доступ',
-    'projects.conflict': 'Проєкт змінено деінде – завантажено найновішу версію.',
     'projects.statusActive': 'Активний',
     'projects.statusPaused': 'Призупинено',
     'projects.statusCompleted': 'Завершено',
@@ -222,22 +211,7 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
 
   const openTask = (tid: string, e?: OpenIntent) => open(`/projects/${id}/tasks/${tid}`, e);
 
-  const patchProject = useMutation({
-    mutationFn: (body: Record<string, unknown>) => api.patch(`/projects/${id}`, { ...body, version: project?.version }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['project', id] });
-      qc.invalidateQueries({ queryKey: ['projects'] });
-      qc.invalidateQueries({ queryKey: ['project-audit', id] });
-    },
-    onError: (e) => {
-      if (e instanceof ApiError && (e.status === 409 || e.code === 'conflict')) {
-        qc.invalidateQueries({ queryKey: ['project', id] });
-        toast.error(t('projects.conflict'));
-      } else {
-        toast.error(e instanceof ApiError ? e.message : t('common.saveFailed'));
-      }
-    },
-  });
+  const patchProject = useProjectPatch(id, project?.version);
 
   return (
     <div className="page-enter flex h-full flex-col">
@@ -283,9 +257,7 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
           : <EmptyState icon={<Inbox size={20} />} title={t('common.noAccess')} />)}
       </Reveal>
 
-      <SidePanel open={settingsOpen} onClose={closeSettings} title={t('nav.settings')} subtitle={project?.name} icon={<Settings size={16} />} width={640}>
-        <SettingsTab project={project} isAdmin={isAdmin} onPatch={(b) => patchProject.mutate(b)} pending={patchProject.isPending} />
-      </SidePanel>
+      <ProjectSettingsPanel projectId={id} open={settingsOpen} onClose={closeSettings} onDeleted={() => navigate('/projects')} />
     </div>
   );
 }
@@ -340,6 +312,7 @@ function ProjectHeader({ project, loading, canWrite, canDelete, tab, onTab, onDe
       canWrite={canWrite}
       canDelete={canDelete}
       onDeleted={onDeleted}
+      onOpenSettings={onSettings}
       className="block border-b border-border"
     >
       {/* One slim bar: parent trail + identity on the left, section switcher on
@@ -1273,106 +1246,3 @@ function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageM
   );
 }
 
-/* ───────────────────────── Settings tab ───────────────────────── */
-
-function SettingRow({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <div className="flex items-start justify-between gap-4 py-3">
-      <div className="min-w-0">
-        <p className="text-[13px] font-medium">{label}</p>
-        {hint && <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>}
-      </div>
-      <div className="w-64 shrink-0">{children}</div>
-    </div>
-  );
-}
-
-function SettingsTab({ project, isAdmin, onPatch, pending }: {
-  project?: Project; isAdmin: boolean; onPatch: (body: Record<string, unknown>) => void; pending: boolean;
-}) {
-  const t = useT();
-  const can = useCan();
-  const canManageIntegrations = can('integrations.manage');
-  const [name, setName] = useState('');
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (project) setName(project.name ?? '');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project?.id]);
-
-  if (!project) return <Skeleton className="h-40" />;
-
-  const saveName = () => {
-    setError(null);
-    if (!name.trim()) { setError(t('common.nameRequired')); return; }
-    if (name.trim() !== project.name) onPatch({ name: name.trim() });
-  };
-
-  return (
-    <div className="space-y-8">
-      {/* General */}
-      <section>
-        <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('projects.general')}</h2>
-        <div className="divide-y divide-border rounded-lg border border-border bg-card px-4">
-          <SettingRow label={t('common.name')}>
-            <div className="flex gap-2">
-              <Input value={name} disabled={!isAdmin} onChange={(e) => setName(e.target.value)} onBlur={saveName}
-                onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
-            </div>
-          </SettingRow>
-          <SettingRow label={t('projects.key')} hint={t('projects.keyImmutable')}>
-            <Input value={project.key} disabled className="font-mono" />
-          </SettingRow>
-          <SettingRow label={t('common.status')}>
-            <div className="flex flex-wrap gap-1.5">
-              {PROJECT_STATUSES.map((s) => (
-                <button key={s} disabled={!isAdmin} onClick={() => { if (s !== project.status) onPatch({ status: s }); }}
-                  className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors',
-                    project.status === s ? 'border-border-strong bg-muted text-foreground' : 'border-border bg-card text-muted-foreground hover:bg-muted',
-                    !isAdmin && 'pointer-events-none opacity-60')}>
-                  <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: STATUS_META[s]!.color }} />
-                  {t(STATUS_META[s]!.key)}
-                </button>
-              ))}
-            </div>
-          </SettingRow>
-          {/* Cycles are opt-in: projects that do not work in sprints never see them. */}
-          <SettingRow label={t('plan.cycles')} hint={t('projects.cyclesToggleHint')}>
-            <div className="flex justify-end">
-              <Switch checked={!!project.cyclesEnabled} disabled={!isAdmin} onChange={(v) => onPatch({ settings: { cycles: v } })} label={t('plan.cycles')} />
-            </div>
-          </SettingRow>
-        </div>
-        {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
-        {!isAdmin && <p className="mt-2 text-xs text-muted-foreground">{t('projects.adminRightsHint')}</p>}
-        {pending && <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground"><Spinner className="h-3 w-3" /> {t('common.loading')}</p>}
-      </section>
-
-      {/* Access */}
-      <section>
-        <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('projects.access')}</h2>
-        <ProjectAccessPanel projectId={project.id} canManage={isAdmin} />
-      </section>
-
-      {/* Intake form, project task fields + task automation – the endpoints demand project admin. */}
-      {isAdmin && (
-        <>
-          <section>
-            <CustomFieldsPanel projectId={project.id} />
-          </section>
-          <IntakeSettingsSection projectId={project.id} />
-          <ProjectAutomationSection projectId={project.id} />
-        </>
-      )}
-
-      {/* Integrations */}
-      <ProjectIntegrations
-        projectId={project.id}
-        settings={project.settings}
-        version={project.version}
-        canManage={canManageIntegrations}
-      />
-    </div>
-  );
-}

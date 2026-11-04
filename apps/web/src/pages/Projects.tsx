@@ -2,13 +2,13 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 're
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Plus, FolderKanban, Lock, Globe, Target, ChevronRight, UserCircle2, Users, CalendarDays,
-  Building2, Tag as TagIcon,
+  Building2, Tag as TagIcon, Trash2,
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { Link, useNavigate, useOpen } from '../lib/router';
 import { useCan, useMe } from '../lib/auth';
 import {
-  Button, Input, Badge, PageHeader, Breadcrumbs, Skeleton, EmptyState, Spinner,
+  Button, IconButton, Input, Badge, PageHeader, Breadcrumbs, Skeleton, EmptyState, Spinner,
   Avatar, AvatarGroup, PriorityIcon, ProgressRing, Tooltip, fmtDate, cn,
 } from '../components/ui';
 import { Calendar } from '../components/DatePicker';
@@ -18,6 +18,8 @@ import { SearchSelect } from '../components/SearchSelect';
 import { toast } from '../components/overlays';
 import { ProjectIcon } from '../components/project/ProjectIcon';
 import { ProjectContextMenu } from '../components/project/contextMenus';
+import { ProjectSettingsPanel } from '../components/project/ProjectSettingsPanel';
+import { DeletedProjectsPanel } from '../components/project/DeletedProjectsPanel';
 import { PRIORITIES, PRIORITY_LABEL_KEY } from '../components/project/taskViewPrefs';
 import { textToDoc } from '@ordi/shared';
 import { useT, extendDict } from '../lib/i18n';
@@ -141,6 +143,9 @@ export function ProjectsPage() {
   const canCreate = can('projects.create');
   const canWrite = can('projects.write') || can('projects.create');
   const canDelete = can('projects.delete');
+  const [settingsFor, setSettingsFor] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [filter, setFilter] = usePersistedState<Filter>('ordi:view:projects.filter', 'all', oneOfPref(FILTERS, 'all'));
 
@@ -193,8 +198,15 @@ export function ProjectsPage() {
         title={t('nav.projects')}
         subtitle={t('projects.subtitle')}
         breadcrumbs={<Breadcrumbs items={[{ label: t('nav.projects') }]} />}
-        actions={canCreate && (
-          <Button size="sm" onClick={() => setCreating(true)}><Plus size={14} /> {t('projects.newProject')}</Button>
+        actions={(canCreate || canDelete) && (
+          <div className="flex items-center gap-2">
+            {canDelete && (
+              <Tooltip label={t('projects.trash')} side="bottom">
+                <IconButton size="sm" aria-label={t('projects.trash')} onClick={() => setTrashOpen(true)}><Trash2 size={15} /></IconButton>
+              </Tooltip>
+            )}
+            {canCreate && <Button size="sm" onClick={() => setCreating(true)}><Plus size={14} /> {t('projects.newProject')}</Button>}
+          </div>
         )}
       />
 
@@ -257,6 +269,7 @@ export function ProjectsPage() {
                   project={{ id: p.id, name: p.name, key: p.key, status: p.status, version: p.version }}
                   canWrite={canWrite}
                   canDelete={canDelete}
+                  onOpenSettings={() => { setSettingsFor(p.id); setSettingsOpen(true); }}
                 >
                 <button
                   onClick={(e) => open(`/projects/${p.id}`, e)}
@@ -311,6 +324,10 @@ export function ProjectsPage() {
           </div>
         )}
       </div>
+
+      {canDelete && <DeletedProjectsPanel open={trashOpen} onClose={() => setTrashOpen(false)} />}
+      {/* The id outlives `open` so the panel keeps its content while it slides out. */}
+      <ProjectSettingsPanel projectId={settingsFor} open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       <NewProjectModal
         open={creating}
