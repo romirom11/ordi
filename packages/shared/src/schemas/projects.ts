@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { idSchema, customFieldsSchema, richTextSchema } from './common';
 import { docToText } from '../calc/richtext';
+import { intakeFormConfigSchema } from '../calc/intake';
 import {
   PROJECT_STATUSES, VISIBILITY, PROJECT_MEMBER_ROLES, REVENUE_SOURCES,
   TASK_STATUS_CATEGORIES, TASK_PRIORITIES, TASK_RELATION_TYPES, CYCLE_STATUSES, ESTIMATE_UNITS,
@@ -293,11 +294,18 @@ export const projectTemplateInputSchema = z.object({
   definition: z.record(z.string(), z.unknown()),
 });
 
+/**
+ * A public form submission: answers keyed by field key, checked against the
+ * project's form config (calc/intake). The flat built-in keys at the top
+ * level are the shape API callers used before the form was configurable,
+ * and still count as answers.
+ */
 export const intakeSubmitSchema = z.object({
-  requesterName: z.string().min(1),
-  requesterEmail: z.string().email().optional(),
-  title: z.string().min(1),
-  description: z.string().default(''),
+  values: z.record(z.string(), z.union([z.string(), z.boolean(), z.number()])).optional(),
+  requesterName: z.string().optional(),
+  requesterEmail: z.string().optional(),
+  title: z.string().optional(),
+  description: z.string().optional(),
   honeypot: z.string().optional(),
 });
 
@@ -315,4 +323,5 @@ export const intakeDeclineSchema = z.object({
 export const intakeSettingsSchema = z.object({
   formEnabled: z.boolean().optional(),
   mailbox: z.record(z.string(), z.unknown()).nullable().optional(),
+  formConfig: intakeFormConfigSchema.optional(),
 });
