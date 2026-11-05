@@ -26,6 +26,7 @@ import { ShortcutsDialog } from './ShortcutsDialog';
 import { GO_TO, MOD, SHORTCUTS, isTypingTarget } from '../lib/shortcuts';
 import { isNavActive } from '../lib/navSection';
 import { UpdateIndicator } from './UpdateIndicator';
+import { WhatsNew } from './WhatsNew';
 import { useActiveTimer, useStopTimer } from '../lib/timer';
 import { useScrollRestoration } from '../lib/scrollRestoration';
 
@@ -715,6 +716,8 @@ function ShellInner({ children }: { children: ReactNode }) {
           {/* A new version waiting (or a server older than the app): one
               quiet row, nothing at all until there is something to do. */}
           <UpdateIndicator />
+          {/* Once after an update: what changed since this person last looked. */}
+          <WhatsNew />
           {/* Settings is a destination, so it reads as one: a nav row at the
               foot of the nav rather than an item inside a dropdown. */}
           {(can('settings.manage') || can('users.manage') || can('roles.manage')) && (

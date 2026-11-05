@@ -16,6 +16,8 @@ COPY apps/web/package.json apps/web/
 RUN pnpm install --frozen-lockfile=false --filter @ordi/web...
 COPY packages/shared packages/shared
 COPY apps/web apps/web
+# The "What's new" list after an update reads it (apps/web/vite.config.ts).
+COPY CHANGELOG.md ./
 RUN pnpm --filter @ordi/web build
 # Precompress text assets once at build time; the server picks the .gz up via
 # Accept-Encoding (serveStatic precompressed) instead of compressing per request.
