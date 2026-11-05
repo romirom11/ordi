@@ -201,7 +201,7 @@ describe('files on the form', () => {
     for (const name of ['a.txt', 'b.txt', 'c.txt']) tooMany.append('files', new File(['x'], name));
     expect((await submitForm(tooMany)).status).toBe(400);
 
-    for (const name of ['setup.exe', 'setup.exe.', 'setup.exe .']) {
+    for (const name of ['setup.exe', 'setup.exe.', 'setup.exe .', `${'a'.repeat(195)}.exe.${'b'.repeat(10)}`]) {
       const blocked = new FormData();
       blocked.append('payload', JSON.stringify({ values: answers }));
       blocked.append('files', new File(['x'], name));
@@ -228,10 +228,20 @@ describe('the rate limit', () => {
     expect(statuses[5]).toBe(429);
   });
 
-  it('caps receipts per recipient', async () => {
+  it('caps receipts per recipient, across every project and whatever the case', async () => {
     const { db } = getDb();
     const mails = await db.select().from(schema.emailDeliveries).where(eq(schema.emailDeliveries.to, 'burst@example.com'));
     expect(mails).toHaveLength(3);
+
+    // A second project's form aimed at the same person sends them nothing more.
+    const owner = reqAs(users.owner!.cookie);
+    const type = await json(owner.post('/project-types', { name: 'Other', revenueSource: 'none' }));
+    const other = (await json(owner.post('/projects', { name: 'Other', key: 'OTH', projectTypeId: type.id, visibility: 'private' }))).id;
+    const otherToken = (await json(owner.patch(`/projects/${other}/intake-settings`, { formEnabled: true }))).formToken;
+    const res = await submit({ values: { requesterName: 'R', requesterEmail: 'BURST@example.com', title: 'Elsewhere' } }, '198.51.100.1', otherToken);
+    expect(res.status).toBe(200);
+    const after = await db.select().from(schema.emailDeliveries).where(eq(schema.emailDeliveries.to, 'burst@example.com'));
+    expect(after).toHaveLength(3);
   });
 });
 

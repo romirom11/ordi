@@ -5,7 +5,7 @@
  *
  * Triage itself (list / accept / decline / settings) lives in service.ts.
  */
-import { getDb, schema, and, eq, gt, sql } from '@ordi/db';
+import { getDb, schema, and, eq, gt, isNotNull, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import {
   MAX_UPLOAD_BYTES, BLOCKED_FILE_EXTENSIONS,
@@ -38,7 +38,8 @@ function safeFilename(name: string): string {
   const base = name.split(/[\\/]/).pop() ?? '';
   // Trailing dots and spaces are dropped too: `setup.exe.` must not pass the
   // extension check as "no extension" and then be saved as setup.exe.
-  const clean = base.replace(/[\u0000-\u001f\u007f]/g, '').trim().replace(/[.\s]+$/, '').slice(0, 200);
+  // Cut to length first, so the cut cannot leave a new trailing dot behind.
+  const clean = base.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 200).replace(/[.\s]+$/, '');
   return clean || 'attachment';
 }
 
@@ -128,16 +129,23 @@ export async function assertPublicIntakeRate(submitterKey: string): Promise<void
 
 async function receiptAllowed(projectId: string, email: string): Promise<boolean> {
   const { db } = getDb();
-  const [row] = await db.select({
-    forAddress: sql<number>`count(*) filter (where ${schema.intakeItems.requesterEmail} = ${email})`.mapWith(Number),
-    forProject: sql<number>`count(*) filter (where ${schema.intakeItems.requesterEmail} is not null)`.mapWith(Number),
-  }).from(schema.intakeItems).where(and(
+  const lastHour = gt(schema.intakeItems.createdAt, sql`now() - interval '1 hour'`);
+  const count = sql<number>`count(*)`.mapWith(Number);
+  // Per address across every project's form – one person gets at most a few
+  // receipts an hour however many forms are aimed at them.
+  const [forAddress] = await db.select({ n: count }).from(schema.intakeItems).where(and(
+    sql`lower(${schema.intakeItems.requesterEmail}) = ${email.toLowerCase()}`,
+    eq(schema.intakeItems.source, 'form'),
+    lastHour,
+  ));
+  const [forProject] = await db.select({ n: count }).from(schema.intakeItems).where(and(
     eq(schema.intakeItems.projectId, projectId),
     eq(schema.intakeItems.source, 'form'),
-    gt(schema.intakeItems.createdAt, sql`now() - interval '1 hour'`),
+    isNotNull(schema.intakeItems.requesterEmail),
+    lastHour,
   ));
   // The request just stored is one of them.
-  return (row?.forAddress ?? 0) <= RECEIPTS_PER_HOUR && (row?.forProject ?? 0) <= PROJECT_RECEIPTS_PER_HOUR;
+  return (forAddress?.n ?? 0) <= RECEIPTS_PER_HOUR && (forProject?.n ?? 0) <= PROJECT_RECEIPTS_PER_HOUR;
 }
 
 /**
