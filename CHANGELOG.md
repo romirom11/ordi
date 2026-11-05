@@ -26,7 +26,9 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   A page someone cannot open is left out of their list, title included.
   Migration `0044` moves each project's links and files into the new
   `project_resources` table (links first, in their order, then files)
-  and drops `projects.links`; `PATCH /projects/:id` no longer takes
+  and drops `projects.links`. Only http(s) links come across: the old
+  API also took `javascript:` and `file:` addresses, which are dropped
+  and refused from now on; `PATCH /projects/:id` no longer takes
   `links`. New API: `GET/POST /projects/:id/resources`,
   `PUT /projects/:id/resources/order`, `PATCH/DELETE /project-resources/:id`;
   a file uploaded onto a project joins its resources. New MCP tools:
