@@ -50,6 +50,7 @@ const routes: RouteDef[] = [
   { pattern: '/dashboards/:id', render: (p) => <ModuleGate module="dashboards"><DashboardsPage id={p.id} /></ModuleGate> },
   { pattern: '/resourcing', render: () => <ModuleGate module="resourcing"><ResourcingPage /></ModuleGate> },
   { pattern: '/profile', render: () => <ProfilePage /> },
+  { pattern: '/profile/:section', render: (p) => <ProfilePage section={p.section} /> },
   { pattern: '/download', render: () => <DownloadPage /> },
 ];
 

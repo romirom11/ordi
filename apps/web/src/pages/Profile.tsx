@@ -2,11 +2,14 @@ import { useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../lib/api';
 import { useMe } from '../lib/auth';
-import { Button, Input, Select, Card, Badge, Switch, Checkbox, Avatar, PageHeader, PageBody, Breadcrumbs, Skeleton, Spinner, fmtDate } from '../components/ui';
+import { Button, Input, Select, Card, Badge, Switch, Avatar, PageBody, Breadcrumbs, Skeleton, Spinner, cn } from '../components/ui';
 import { toast } from '../components/overlays';
-import { Camera, Check, Copy, IdCard, KeyRound, Plus, ShieldCheck, Trash2 } from 'lucide-react';
+import { Bell, Bot, Camera, Check, Copy, IdCard, KeyRound, ShieldCheck, UserRound } from 'lucide-react';
 import { extendDict, useT } from '../lib/i18n';
-import { useNavigate } from '../lib/router';
+import { Link, useNavigate } from '../lib/router';
+import { usePageTitle } from '../lib/tabs';
+import { McpPanel } from '../components/settings/McpPanel';
+import { SectionHead } from '../components/settings/primitives';
 import { DATE_FORMATS, TIME_ZONES, formatSample, offsetLabel, rememberDateFormat, type DateFormat } from '../lib/dates';
 import { downscaleImage } from '../components/settings/image';
 import { usePersistedState, oneOfPref } from '../lib/prefs';
@@ -18,8 +21,6 @@ extendDict({
     'profile.security': 'Security',
     'profile.saveFailedShort': 'Could not save changes.',
     'profile.notifSaveFailed': 'Could not update notification preference.',
-    'profile.tokenCreated': 'API token created.',
-    'profile.tokenRevoked': 'Token revoked.',
     'profile.avatarChange': 'Change photo',
     'profile.avatarRemove': 'Remove',
     'profile.avatarInvalid': "Couldn't read that image.",
@@ -34,6 +35,10 @@ extendDict({
     'profile.passwordChangeFailed': 'Could not change the password.',
     'profile.myCard': 'My HR card',
     'profile.myCardHint': 'Contacts, the questionnaire and leave live on your card.',
+    'profile.notifications': 'Notifications',
+    'profile.notificationsDesc': 'What reaches you by email, and the sound on this device.',
+    'profile.securityDesc': 'Your password and the second factor for signing in.',
+    'profile.mcp': 'MCP & API',
   },
   uk: {
     'profile.profileInfo': 'Профіль',
@@ -41,8 +46,6 @@ extendDict({
     'profile.security': 'Безпека',
     'profile.saveFailedShort': 'Не вдалося зберегти зміни.',
     'profile.notifSaveFailed': 'Не вдалося оновити налаштування сповіщень.',
-    'profile.tokenCreated': 'API-токен створено.',
-    'profile.tokenRevoked': 'Токен відкликано.',
     'profile.avatarChange': 'Змінити фото',
     'profile.avatarRemove': 'Прибрати',
     'profile.avatarInvalid': 'Не вдалося прочитати зображення.',
@@ -57,18 +60,13 @@ extendDict({
     'profile.passwordChangeFailed': 'Не вдалося змінити пароль.',
     'profile.myCard': 'Моя HR-картка',
     'profile.myCardHint': 'Контакти, анкета і відпустки живуть на вашій картці.',
+    'profile.notifications': 'Сповіщення',
+    'profile.notificationsDesc': 'Що приходить вам на пошту і звук на цьому пристрої.',
+    'profile.securityDesc': 'Пароль і другий фактор для входу.',
+    'profile.mcp': 'MCP і API',
   },
 });
 
-interface ApiToken {
-  id: string;
-  name: string;
-  prefix?: string | null;
-  scopes?: string[] | null;
-  readOnly?: boolean;
-  lastUsedAt?: string | null;
-  revoked?: boolean;
-}
 interface TotpState { enabled: boolean }
 interface TotpSetup { secret: string; otpauthUrl: string }
 
@@ -89,32 +87,87 @@ const NOTIFICATION_TYPES: { type: string; label: string }[] = [
   { type: 'sales.work_digest', label: 'profile.notifSalesDigest' },
 ];
 
-export function ProfilePage() {
+/**
+ * Personal settings, one section at a time. It used to be a single long
+ * column (profile, preferences, thirteen notification switches, password,
+ * tokens, 2FA) – the thing you came for was always a scroll away. The nav
+ * mirrors Settings, so both pages read the same; this one is only ever about
+ * the signed-in person, which is why personal MCP/API access lives here.
+ */
+const SECTIONS = [
+  { id: 'account', label: 'profile.profileInfo', icon: UserRound },
+  { id: 'notifications', label: 'profile.notifications', icon: Bell },
+  { id: 'security', label: 'profile.security', icon: ShieldCheck },
+  { id: 'mcp', label: 'profile.mcp', icon: Bot },
+] as const;
+type SectionId = (typeof SECTIONS)[number]['id'];
+
+/** The default section keeps the bare /profile url (Cmd/Ctrl+, lands there). */
+const sectionPath = (id: SectionId) => (id === 'account' ? '/profile' : `/profile/${id}`);
+
+export function ProfilePage({ section }: { section?: string }) {
   const t = useT();
-  const me = useMe();
+  const active = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0];
+  usePageTitle(active.id === 'account' ? t('profile.title') : `${t('profile.title')} · ${t(active.label)}`);
+
   return (
-    <div>
-      <PageHeader
-        title={t('profile.title')}
-        subtitle={me.user.email}
-        breadcrumbs={<Breadcrumbs items={[{ label: t('profile.title') }]} />}
-      />
-      <PageBody className="space-y-4">
-        {/* Identity lives on the HR card (ORD-19): the questionnaire and
-          * leave moved to the person's own employee page; the profile keeps
-          * account things and links over. */}
-        <ProfileInfoCard />
-        <PreferencesCard />
-        <NotificationsSection />
-        <div>
-          <h2 className="mb-2 px-0.5 text-xs font-semibold uppercase tracking-wide text-faint">{t('profile.security')}</h2>
-          <div className="space-y-4">
-            <PasswordSection />
-            <TokensSection />
-            <TotpSection />
-          </div>
+    <div className="flex flex-col">
+      <div className="flex h-11 shrink-0 items-center border-b border-border px-4">
+        <Breadcrumbs items={[{ label: t('profile.title'), to: '/profile' }, ...(active.id === 'account' ? [] : [{ label: t(active.label) }])]} />
+      </div>
+      <div className="flex min-h-[calc(100vh-53px)] flex-col md:flex-row">
+        <aside className="shrink-0 border-b border-border p-2 md:w-52 md:border-b-0 md:border-r md:p-3">
+          <nav className="flex gap-1 overflow-x-auto md:flex-col md:gap-0.5 md:overflow-visible">
+            {SECTIONS.map((s) => {
+              const Icon = s.icon;
+              const isActive = s.id === active.id;
+              return (
+                <Link
+                  key={s.id}
+                  to={sectionPath(s.id)}
+                  aria-current={isActive ? 'page' : undefined}
+                  className={cn(
+                    'flex shrink-0 items-center gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors duration-150',
+                    isActive ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                  )}
+                >
+                  <Icon size={15} />
+                  <span className="truncate">{t(s.label)}</span>
+                </Link>
+              );
+            })}
+          </nav>
+        </aside>
+        <div className="min-w-0 flex-1">
+          <PageBody key={active.id} width="default" className="anim-fade-in">
+            {active.id === 'account' && (
+              <div className="space-y-4">
+                {/* Identity lives on the HR card (ORD-19): the questionnaire and
+                  * leave moved to the person's own employee page; the profile
+                  * keeps account things and links over. */}
+                <ProfileInfoCard />
+                <PreferencesCard />
+              </div>
+            )}
+            {active.id === 'notifications' && (
+              <>
+                <SectionHead title={t('profile.notifications')} desc={t('profile.notificationsDesc')} />
+                <NotificationsSection />
+              </>
+            )}
+            {active.id === 'security' && (
+              <>
+                <SectionHead title={t('profile.security')} desc={t('profile.securityDesc')} />
+                <div className="space-y-4">
+                  <PasswordSection />
+                  <TotpSection />
+                </div>
+              </>
+            )}
+            {active.id === 'mcp' && <McpPanel />}
+          </PageBody>
         </div>
-      </PageBody>
+      </div>
     </div>
   );
 }
@@ -176,7 +229,6 @@ function ProfileInfoCard() {
 
   return (
     <Card className="p-4">
-      <SectionHeader title={t('profile.profileInfo')} />
       <div className="mb-4 flex items-center gap-3">
         <button
           type="button"
@@ -371,147 +423,6 @@ function CopyField({ value, mono = true }: { value: string; mono?: boolean }) {
         {copied ? <Check size={13} /> : <Copy size={13} />}
       </Button>
     </div>
-  );
-}
-
-function TokensSection() {
-  const t = useT();
-  const me = useMe();
-  const qc = useQueryClient();
-  const tokens = useQuery({
-    queryKey: ['apiTokens'],
-    queryFn: () => api.get<{ data: ApiToken[] }>('/auth/tokens'),
-  });
-
-  const [showForm, setShowForm] = useState(false);
-  const [name, setName] = useState('');
-  const [readOnly, setReadOnly] = useState(false);
-  const [scopes, setScopes] = useState<string[]>([]);
-  const [createdToken, setCreatedToken] = useState<string | null>(null);
-
-  const create = useMutation({
-    mutationFn: () => api.post<{ id: string; token: string }>('/auth/tokens', { name, readOnly, scopes }),
-    onSuccess: (res) => {
-      setCreatedToken(res.token);
-      setName('');
-      setReadOnly(false);
-      setScopes([]);
-      setShowForm(false);
-      qc.invalidateQueries({ queryKey: ['apiTokens'] });
-      toast(t('profile.tokenCreated'));
-    },
-    onError: () => toast.error(t('profile.createTokenFailed')),
-  });
-  const revoke = useMutation({
-    mutationFn: (id: string) => api.del(`/auth/tokens/${id}`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['apiTokens'] });
-      toast(t('profile.tokenRevoked'));
-    },
-    onError: () => toast.error(t('profile.revokeFailed')),
-  });
-
-  const toggleScope = (scope: string) => {
-    setScopes((s) => (s.includes(scope) ? s.filter((x) => x !== scope) : [...s, scope]));
-  };
-
-  const rows = tokens.data?.data ?? [];
-
-  return (
-    <Card className="p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm font-medium"><KeyRound size={15} className="text-muted-foreground" /> {t('profile.apiTokens')}</div>
-        <Button size="sm" variant="outline" onClick={() => setShowForm((s) => !s)}><Plus size={13} /> {t('profile.newToken')}</Button>
-      </div>
-
-      {createdToken && (
-        <div className="mb-3 rounded-md border border-border bg-muted/40 p-3">
-          <p className="mb-2 text-xs font-medium text-destructive">{t('profile.tokenCopyOnce')}</p>
-          <CopyField value={createdToken} />
-          <button className="mt-2 text-xs text-muted-foreground hover:underline" onClick={() => setCreatedToken(null)}>{t('common.close')}</button>
-        </div>
-      )}
-
-      {showForm && (
-        <form
-          className="mb-4 space-y-3 rounded-md border border-border p-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (name.trim() && scopes.length > 0) create.mutate();
-          }}
-        >
-          <div className="flex items-end gap-3">
-            <label className="flex-1 space-y-1.5 text-xs text-muted-foreground">
-              <span className="block">{t('common.name')}</span>
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('profile.tokenNamePlaceholder')} />
-            </label>
-            <label className="flex h-8 cursor-pointer items-center gap-2 text-[13px]">
-              <Checkbox checked={readOnly} onChange={(v) => setReadOnly(v)} />
-              {t('profile.readOnly')}
-            </label>
-          </div>
-          <div>
-            <div className="mb-1.5 text-xs text-muted-foreground">{t('profile.scopes')} ({scopes.length} {t('profile.selected')})</div>
-            <div className="grid max-h-40 grid-cols-2 gap-1.5 overflow-y-auto sm:grid-cols-3">
-              {me.permissions.map((p) => (
-                <label key={p} className="flex cursor-pointer items-center gap-1.5 text-xs">
-                  <Checkbox checked={scopes.includes(p)} onChange={() => toggleScope(p)} />
-                  <span className="truncate">{p}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <Button type="submit" size="sm" disabled={create.isPending || !name.trim() || scopes.length === 0}>{t('profile.createToken')}</Button>
-          </div>
-        </form>
-      )}
-
-      {tokens.isLoading ? (
-        <Skeleton className="h-16 w-full" />
-      ) : tokens.isError ? (
-        <p className="text-sm text-destructive">{t('profile.loadTokensFailed')}</p>
-      ) : rows.length === 0 ? (
-        <p className="py-4 text-center text-sm text-muted-foreground">{t('profile.noTokens')}</p>
-      ) : (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border text-left text-xs text-muted-foreground">
-              <th className="py-2 pr-3 font-medium">{t('common.name')}</th>
-              <th className="py-2 pr-3 font-medium">{t('profile.prefix')}</th>
-              <th className="py-2 pr-3 font-medium">{t('profile.scopes')}</th>
-              <th className="py-2 pr-3 font-medium">{t('profile.lastUsed')}</th>
-              <th className="py-2 font-medium" />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((tok) => (
-              <tr key={tok.id} className="border-b border-border last:border-0">
-                <td className="py-2 pr-3">
-                  <span className="font-medium">{tok.name}</span>
-                  {tok.readOnly && <Badge className="ml-2 bg-muted text-muted-foreground">{t('profile.readOnly')}</Badge>}
-                  {tok.revoked && <Badge className="ml-2 bg-destructive/10 text-destructive">{t('profile.revoked')}</Badge>}
-                </td>
-                <td className="py-2 pr-3 font-mono text-xs text-muted-foreground">{tok.prefix ?? '–'}</td>
-                <td className="py-2 pr-3 tabular-nums">{tok.scopes?.length ?? 0}</td>
-                <td className="py-2 pr-3 text-muted-foreground">{tok.lastUsedAt ? fmtDate(tok.lastUsedAt) : t('profile.never')}</td>
-                <td className="py-2 text-right">
-                  {!tok.revoked && (
-                    <button
-                      className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
-                      title={t('profile.revokeToken')}
-                      onClick={() => revoke.mutate(tok.id)}
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </Card>
   );
 }
 
