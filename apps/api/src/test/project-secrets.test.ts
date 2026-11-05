@@ -282,6 +282,11 @@ describe('editing', () => {
     expect((await create(manager, { name: 'MEMBER_CANNOT_EDIT' })).status).toBe(422);
     expect((await create(manager, { name: 'ANTHROPIC_API_KEY' })).status).toBe(400);
     expect((await create(manager, { name: 'lower_case' })).status).toBe(400);
+    // A url field is opened with a click: http(s) only.
+    for (const value of ['javascript:alert(1)', 'file:///etc/passwd', 'not a url']) {
+      const res = await create(manager, { name: 'BAD_URL', fields: [{ key: 'url', label: 'URL', type: 'url', value }] });
+      expect(res.status).toBe(400);
+    }
   });
 
   it('leaves agent use of a production secret to secrets.manage', async () => {
