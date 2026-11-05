@@ -84,31 +84,30 @@ user-visible string. Yes, really.
 
 ## Commits and PRs
 
-Write commit messages that explain the change and why it was needed. The subject
-line in the imperative mood, a body when the reason is not obvious from the diff.
+PRs are squash-merged, and the PR title becomes the line in the release
+notes. Write it as a conventional commit with a sentence a user
+understands: `feat: Milestones open in a side panel`,
+`fix: The public intake form submits again`. `docs:`, `refactor:`, `test:`,
+`build:`, `ci:` and `chore:` are for changes users do not see, and are left
+out of the notes. A breaking change gets a `!` (`feat!: …`) and a
+`BREAKING CHANGE:` note; [CLAUDE.md](CLAUDE.md#pr-titles-and-releases) has
+the details. A check fails a PR whose title does not follow the form.
 
 In the PR description, say what breaks if the change is wrong, and how you
 verified it. "Tested by clicking through the project page in both themes" is a
 useful sentence; "works" is not.
 
-A user-visible change adds its entry to `CHANGELOG.md` under `## Unreleased`
-(create the heading at the top if the last release removed it).
+## Releases
 
-## Cutting a release
+[release-please](https://github.com/googleapis/release-please) keeps a
+`chore: release X.Y.Z` PR open. It collects the titles of the PRs merged
+since the last release into a new CHANGELOG section, and it bumps the version
+in every file that carries it. Merging that PR is the release: the version is
+tagged, a draft GitHub release is created with the same notes, and the
+desktop and image builds start. The desktop workflow publishes the release
+once every platform's bundle is uploaded.
 
-1. On a `release/v<version>` branch, run `pnpm release minor` (or `patch`,
-   `major`, or an exact `1.44.0`). It sets the version in the five files that
-   carry it (`package.json`, `apps/{api,web,desktop}/package.json`,
-   `tauri.conf.json`) and renames `## Unreleased` in the CHANGELOG to
-   `## v<version>`. It refuses when the files disagree, the version is not
-   newer, or there is nothing under Unreleased.
-2. Write `docs/releases/v<version>.md`, which becomes the GitHub release body,
-   and move the shipped rows of `docs/features.md` into a `### v<version>`
-   section under Shipped.
-3. Open the PR. Merging it releases: the Release workflow tags the version,
-   creates a draft release from the notes and starts the desktop and image
-   builds. The desktop workflow publishes the release once every platform's
-   bundle is uploaded.
+Do not edit `CHANGELOG.md` or the version fields in a feature PR.
 
 ## Reporting bugs
 
