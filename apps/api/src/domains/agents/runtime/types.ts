@@ -3,7 +3,7 @@
  * model harness is driven: Claude Code through the Agent SDK today, Codex
  * later. The worker only ever sees events and an outcome.
  */
-import type { AgentCredentialProvider, AgentRuntime } from '@ordi/shared';
+import { isAllowedSecretVariable, type AgentCredentialProvider, type AgentRuntime } from '@ordi/shared';
 
 export interface RuntimeCredential {
   provider?: AgentCredentialProvider;
@@ -56,7 +56,11 @@ export interface RuntimeRunInput {
 export function withExtraEnv(base: Record<string, string>, extra: Record<string, string> | undefined): Record<string, string> {
   if (!extra) return base;
   const out = { ...base };
-  for (const [k, v] of Object.entries(extra)) if (!(k in out)) out[k] = v;
+  for (const [k, v] of Object.entries(extra)) {
+    // The same rule the secret was saved under, checked again where it matters.
+    if (k in out || !isAllowedSecretVariable(k)) continue;
+    out[k] = v;
+  }
   return out;
 }
 

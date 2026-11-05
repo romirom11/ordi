@@ -17,14 +17,42 @@ export type SecretFieldType = (typeof SECRET_FIELD_TYPES)[number];
 export const SECRET_VALUE_TYPES: readonly SecretFieldType[] = ['password', 'api_key', 'note'];
 
 /**
- * Environment variable names an agent run already uses (runtime/claude-code.ts
- * and the git checkout). A secret named after one of them would override it.
+ * Variables a secret may never become in an agent run. Not only the runtime's
+ * own (PATH, HOME, the credential): a variable that changes how a program
+ * behaves – what it loads (LD_PRELOAD, BASH_ENV, PYTHONPATH, NODE_OPTIONS),
+ * where it connects (HTTPS_PROXY would route the model credential through
+ * someone's proxy), which certificates it trusts – turns "may add a secret"
+ * into "may run code as the agent". Checked when a secret is saved and again
+ * when a run's environment is built, so a name saved under an older list
+ * cannot slip in.
  */
-export const RESERVED_SECRET_NAMES = ['PATH', 'HOME', 'LANG', 'TMPDIR', 'SHELL', 'USER', 'PWD', 'NODE_OPTIONS', 'MCP_TIMEOUT', 'MCP_TOOL_TIMEOUT'];
-export const RESERVED_SECRET_PREFIXES = ['ANTHROPIC_', 'CLAUDE_', 'CODEX_', 'OPENAI_', 'GIT_', 'ORDI_', 'NODE_', 'NPM_'];
+export const RESERVED_SECRET_NAMES = [
+  'PATH', 'HOME', 'LANG', 'LANGUAGE', 'TMPDIR', 'TMP', 'TEMP', 'SHELL', 'USER', 'LOGNAME', 'PWD', 'OLDPWD', 'TERM',
+  'IFS', 'ENV', 'BASH_ENV', 'CDPATH', 'PROMPT_COMMAND', 'EDITOR', 'VISUAL', 'PAGER', 'BROWSER',
+  'GCONV_PATH', 'HOSTALIASES', 'LOCALDOMAIN', 'RES_OPTIONS', 'TZ', 'TZDIR', 'NLSPATH', 'MALLOC_CHECK_',
+  'SSL_CERT_FILE', 'SSL_CERT_DIR', 'CURL_CA_BUNDLE', 'REQUESTS_CA_BUNDLE',
+  'JAVA_TOOL_OPTIONS', '_JAVA_OPTIONS', 'JDK_JAVA_OPTIONS', 'CLASSPATH', 'GOFLAGS', 'GOPROXY', 'CARGO_HOME', 'RUSTFLAGS',
+  'CI', 'NO_COLOR', 'DISABLE_AUTOUPDATER', 'DISABLE_TELEMETRY', 'MCP_TIMEOUT', 'MCP_TOOL_TIMEOUT',
+];
+export const RESERVED_SECRET_PREFIXES = [
+  'ANTHROPIC_', 'CLAUDE_', 'CODEX_', 'OPENAI_', 'ORDI_', 'MCP_',
+  'LD_', 'DYLD_', 'LC_', 'XDG_',
+  'NODE_', 'NPM_', 'YARN_', 'PNPM_', 'BUN_', 'DENO_', 'PYTHON', 'PIP_', 'PERL', 'RUBY', 'GEM_', 'BUNDLE_', 'COMPOSER_',
+  'GIT_', 'SSH_', 'GPG_', 'GNUPG',
+];
+/** Proxies route every request – the model credential with it – through someone else's server. */
+const RESERVED_SECRET_SUFFIXES = ['_PROXY'];
 
 export function isReservedSecretName(name: string): boolean {
-  return RESERVED_SECRET_NAMES.includes(name) || RESERVED_SECRET_PREFIXES.some((p) => name.startsWith(p));
+  const upper = name.toUpperCase();
+  return RESERVED_SECRET_NAMES.includes(upper)
+    || RESERVED_SECRET_PREFIXES.some((p) => upper.startsWith(p))
+    || RESERVED_SECRET_SUFFIXES.some((s) => upper.endsWith(s));
+}
+
+/** A variable name an agent run may receive: plain upper snake case, and not reserved. */
+export function isAllowedSecretVariable(name: string): boolean {
+  return /^[A-Z][A-Z0-9_]{0,127}$/.test(name) && !isReservedSecretName(name);
 }
 
 /** Upper snake case, so it reads as the environment variable it becomes in an agent run. */
@@ -107,8 +135,7 @@ export function secretEnvVars(
   fields: { key: string; hasValue: boolean }[],
 ): { field: string; variable: string }[] {
   const single = fields.length === 1;
-  return fields.filter((f) => f.hasValue).map((f) => ({
-    field: f.key,
-    variable: single ? secretName : `${secretName}__${f.key.toUpperCase()}`,
-  }));
+  return fields.filter((f) => f.hasValue)
+    .map((f) => ({ field: f.key, variable: single ? secretName : `${secretName}__${f.key.toUpperCase()}` }))
+    .filter((v) => isAllowedSecretVariable(v.variable));
 }

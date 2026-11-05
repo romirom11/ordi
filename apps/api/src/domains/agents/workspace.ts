@@ -401,11 +401,15 @@ export class SecretInBranchError extends Error {
 async function assertNoSecretsInBranch(dir: string, defaultBranch: string, branch: string, forbidden: { variable: string; value: string }[]): Promise<void> {
   const watch = forbidden.filter((f) => f.value.length >= 8);
   if (!watch.length) return;
+  // The content as stored, not as the repository would like it shown: no
+  // .gitattributes (binary, -diff), no textconv or external diff drivers, and
+  // merge commits diffed against each parent.
+  const show = ['-c', 'core.attributesFile=/dev/null', 'log', '-p', '--text', '--no-textconv', '--no-ext-diff', '-m', '--no-color', '--format=%B'];
   let patch: string;
   try {
-    patch = (await git(['log', '-p', '--no-color', '--format=%B', `origin/${defaultBranch}..${branch}`], { cwd: dir })).stdout;
+    patch = (await git([...show, `origin/${defaultBranch}..${branch}`], { cwd: dir })).stdout;
   } catch {
-    patch = (await git(['log', '-p', '--no-color', '--format=%B', branch, '--not', '--remotes=origin'], { cwd: dir })).stdout;
+    patch = (await git([...show, branch, '--not', '--remotes=origin'], { cwd: dir })).stdout;
   }
   const found = watch.filter((f) => patch.includes(f.value)).map((f) => f.variable);
   if (found.length) throw new SecretInBranchError([...new Set(found)]);

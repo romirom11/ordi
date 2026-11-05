@@ -43,11 +43,12 @@ function adapter(run: (input: RuntimeRunInput) => Promise<RuntimeOutcome>): Runt
 }
 
 /** A git runner with one commit ahead whose patch is `patch`; records whether it pushed. */
-function fakeGit(patch = 'fix: retry\n+const key = process.env.STRIPE_TEST;\n', pushed: string[][] = []): GitRunner {
+function fakeGit(patch = 'fix: retry\n+const key = process.env.STRIPE_TEST;\n', pushed: string[][] = [], logs: string[][] = []): GitRunner {
   return async (args) => {
+    if (args.includes('log')) logs.push(args);
     if (args[0] === 'clone') { await mkdir(args[args.length - 1]!, { recursive: true }); return { stdout: '', stderr: '' }; }
     if (args[0] === 'rev-list') return { stdout: '1\n', stderr: '' };
-    if (args[0] === 'log') return { stdout: patch, stderr: '' };
+    if (args.includes('log')) return { stdout: patch, stderr: '' };
     if (args[0] === 'push') pushed.push(args);
     return { stdout: '', stderr: '' };
   };
@@ -61,8 +62,8 @@ async function linkRepository(projectId: string): Promise<void> {
   await db.insert(schema.projectRepositories).values({ projectId, repositoryId: '01JREPOSECRETS000000000000' }).onConflictDoNothing();
 }
 
-async function runTask(title: string): Promise<{ runId: string }> {
-  const owner = reqAs(ws.users.owner!.cookie);
+async function runTask(title: string, by: 'owner' | 'member' = 'owner'): Promise<{ runId: string }> {
+  const owner = reqAs(ws.users[by]!.cookie);
   const { db } = getDb();
   await drainOutbox();
   await db.update(schema.agentRuns).set({ status: 'cancelled' }).where(and(eq(schema.agentRuns.agentUserId, agentId), eq(schema.agentRuns.status, 'queued')));
@@ -135,13 +136,51 @@ describe('a run gets its secrets in the environment, by name', () => {
   it('gives nothing to an agent that is not on the project', async () => {
     const outsider = await createAgent(ws.users, { name: 'Outsider' });
     const { resolveRunSecrets } = await import('../domains/secrets/service');
-    const resolved = await resolveRunSecrets({ id: 'x', projectId: ws.projectId, agentUserId: outsider.id, taskId: 'x' });
+    const resolved = await resolveRunSecrets({ id: 'x', projectId: ws.projectId, agentUserId: outsider.id, taskId: 'x', requestedBy: ws.users.owner!.userId });
     expect(resolved.vars).toEqual([]);
     expect(resolved.skipped.every((s) => s.reason === 'the agent is not a member of the project')).toBe(true);
   });
 
-  it('never lets a secret replace the runtime\'s own variables', () => {
-    expect(withExtraEnv({ PATH: '/usr/bin', HOME: '/h' }, { PATH: '/evil', STRIPE_TEST: 'x' })).toEqual({ PATH: '/usr/bin', HOME: '/h', STRIPE_TEST: 'x' });
+  it('never lets a secret replace the runtime\'s own variables or change how programs behave', () => {
+    expect(withExtraEnv({ PATH: '/usr/bin', HOME: '/h' }, {
+      PATH: '/evil', STRIPE_TEST: 'x', LD_PRELOAD: '/tmp/x.so', HTTPS_PROXY: 'http://evil', BASH_ENV: '/tmp/x', PYTHONPATH: '/tmp',
+    })).toEqual({ PATH: '/usr/bin', HOME: '/h', STRIPE_TEST: 'x' });
+  });
+
+  it('refuses to save a secret named after such a variable', async () => {
+    for (const name of ['HTTPS_PROXY', 'LD_PRELOAD', 'BASH_ENV', 'PYTHONPATH', 'NODE_OPTIONS', 'SSL_CERT_FILE']) {
+      const res = await secret({ name, fields: [{ key: 'v', label: 'V', type: 'password', value: 'whatever-value' }] });
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it('hands a restricted secret only to runs started by someone who could open it', async () => {
+    const owner = reqAs(ws.users.owner!.cookie);
+    expect((await owner.post(`/projects/${ws.projectId}/secrets`, {
+      name: 'PROD_DB', environment: 'staging', availableToAgents: true,
+      audience: [{ type: 'user', id: ws.users.owner!.userId }],
+      fields: [{ key: 'url', label: 'URL', type: 'password', value: 'postgres://prod-db-password@x' }],
+    })).status).toBe(201);
+
+    let seen: RuntimeRunInput | null = null;
+    restore = setRuntimeAdapter(adapter(async (input) => { seen = input; return done; }));
+    // `member` works on the project but is outside PROD_DB's audience.
+    const byMember = await runTask('Migrate the database', 'member');
+    expect(Object.keys(seen!.extraEnv ?? {})).not.toContain('PROD_DB');
+    expect(seen!.systemAppend).not.toContain('PROD_DB');
+    const memberLog = JSON.stringify(await eventsForRun(byMember.runId));
+    expect(memberLog).toContain('1 restricted project secret(s) left out');
+    expect(memberLog).not.toContain('PROD_DB');
+
+    restore();
+    restore = setRuntimeAdapter(adapter(async (input) => { seen = input; return done; }));
+    const byOwner = await runTask('Migrate the database again');
+    expect(seen!.extraEnv!.PROD_DB).toBe('postgres://prod-db-password@x');
+    const ownerLog = JSON.stringify(await eventsForRun(byOwner.runId));
+    expect(ownerLog).toContain('1 restricted');
+    expect(ownerLog).not.toContain('PROD_DB');
+    const { db } = getDb();
+    await db.delete(schema.projectSecrets).where(eq(schema.projectSecrets.name, 'PROD_DB'));
   });
 });
 
@@ -181,12 +220,40 @@ describe('what the run writes back', () => {
     expect(comments).toContain('[redacted]');
   });
 
+  it('refuses a write that splits a value across strings, or carries one in an upload', async () => {
+    let split = 0;
+    let upload = 0;
+    restore = setRuntimeAdapter(adapter(async (input) => {
+      const auth = (input.mcpServers.ordi!.headers as Record<string, string>).Authorization!;
+      const { db } = getDb();
+      const [running] = await db.select({ taskId: schema.agentRuns.taskId }).from(schema.agentRuns).where(eq(schema.agentRuns.status, 'running'));
+      const taskId = running!.taskId;
+      const half = KEY.length / 2;
+      split = (await app.request(`/api/v1/tasks/${taskId}/comments`, {
+        method: 'POST', headers: { authorization: auth, 'Content-Type': 'Application/JSON' },
+        body: JSON.stringify({ body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: KEY.slice(0, half) }, { type: 'text', text: KEY.slice(half) }] }] } }),
+      })).status;
+      const form = new FormData();
+      form.append('file', new File([`key=${KEY}\n`], 'notes.txt', { type: 'text/plain' }), 'notes.txt');
+      upload = (await app.request('/api/v1/attachments', { method: 'POST', headers: { authorization: auth }, body: form })).status;
+      return done;
+    }));
+    const { runId } = await runTask('Write the notes');
+    expect(split).toBe(422);
+    expect(upload).toBe(422);
+    expect(JSON.stringify(await eventsForRun(runId))).toContain('was refused: it carried a project secret');
+  });
+
   it('refuses to push a branch that carries a value, naming the variable only', async () => {
     const pushed: string[][] = [];
     setGitRunner(fakeGit(`feat: add config\n+STRIPE_KEY = "${KEY}"\n`, pushed));
     restore = setRuntimeAdapter(adapter(async () => done));
+    const logs: string[][] = [];
+    setGitRunner(fakeGit(`feat: add config\n+STRIPE_KEY = "${KEY}"\n`, pushed, logs));
     const { runId } = await runTask('Add the payment config');
     expect(pushed).toEqual([]);
+    // Shown as stored: no repository attributes, drivers or textconv between the scan and the bytes.
+    expect(logs[0]).toEqual(expect.arrayContaining(['core.attributesFile=/dev/null', '--text', '--no-textconv', '--no-ext-diff', '-m']));
     const events = JSON.stringify(await eventsForRun(runId));
     expect(events).toContain('contains the value of STRIPE_TEST');
     expect(events).not.toContain(KEY);

@@ -189,7 +189,7 @@ export async function prepare(runId: string): Promise<RunBundle> {
   }
   const repo = await resolveRepository(project.id);
   const projectSecrets = await resolveRunSecrets(
-    { id: run.id, projectId: project.id, agentUserId: run.agentUserId, taskId: task.id }, { record: true },
+    { id: run.id, projectId: project.id, agentUserId: run.agentUserId, taskId: task.id, requestedBy: run.requestedBy }, { record: true },
   );
   secretsPending.set(runId, [
     ...credentials.map((c) => c.secret),
@@ -198,11 +198,16 @@ export async function prepare(runId: string): Promise<RunBundle> {
     ...projectSecrets.vars.map((v) => v.value),
   ]);
   // Names only: which secrets this run has, and which it does not and why.
-  if (projectSecrets.used.length) {
-    await recordRunEvent(runId, 'log', { message: `Project secrets in the environment: ${projectSecrets.used.join(', ')}` });
+  // The run log is read by everyone on the project: restricted secrets are counted, not named.
+  if (projectSecrets.used.length || projectSecrets.usedRestricted) {
+    const names = [...projectSecrets.used, ...(projectSecrets.usedRestricted ? [`${projectSecrets.usedRestricted} restricted`] : [])];
+    await recordRunEvent(runId, 'log', { message: `Project secrets in the environment: ${names.join(', ')}` });
   }
   for (const s of projectSecrets.skipped) {
     await recordRunEvent(runId, 'log', { message: `Project secret ${s.name} left out: ${s.reason}` });
+  }
+  if (projectSecrets.withheld) {
+    await recordRunEvent(runId, 'log', { message: `${projectSecrets.withheld} restricted project secret(s) left out: the person who started the run cannot open them` });
   }
 
   return {
@@ -243,9 +248,15 @@ export async function start(runId: string, input: StartInput): Promise<RunStart 
     resumedAfterStop: started.run.trigger === 'retry' && Boolean(started.run.sessionId),
     connectorSlugs: connectors.map((c) => c.slug),
     pullRequestTemplate: input.pullRequestTemplate,
-    secretVars: (await agentSecretPlan(project.id, started.run.agentUserId)).use.flatMap((u) => u.vars),
+    secretVars: (await agentSecretPlan(project.id, started.run.agentUserId, started.run.requestedBy)).use.flatMap((u) => u.vars),
   };
-  registerRunSecrets(runId, [...(secretsPending.get(runId) ?? []), started.token]);
+  // The worker's prepare and start may reach different replicas: whatever this
+  // one did not prepare, it resolves again, so every replica scrubs the run's
+  // project secrets.
+  const projectValues = (await resolveRunSecrets({
+    id: runId, projectId: project.id, agentUserId: started.run.agentUserId, taskId: task.id, requestedBy: started.run.requestedBy,
+  })).vars.map((v) => v.value);
+  registerRunSecrets(runId, [...(secretsPending.get(runId) ?? []), ...projectValues, started.token]);
   secretsPending.delete(runId);
   return {
     token: started.token,
