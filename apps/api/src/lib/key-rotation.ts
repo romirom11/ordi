@@ -72,9 +72,14 @@ function rotateJson(ring: Keyring, node: unknown, acc: { changed: number; curren
   return node;
 }
 
-export async function rotateEncryptedData(sql: Sql, ring: Keyring, opts: { dryRun?: boolean } = {}): Promise<RotationReport> {
+export async function rotateEncryptedData(
+  sql: Sql, ring: Keyring,
+  /** `tables` narrows the scan (tests); by default every table in the public schema. */
+  opts: { dryRun?: boolean; tables?: string[] } = {},
+): Promise<RotationReport> {
   const report: RotationReport = { rotated: {}, current: 0, undecryptable: {} };
-  for (const col of await candidateColumns(sql)) {
+  const columns = (await candidateColumns(sql)).filter((c) => !opts.tables || opts.tables.includes(c.table));
+  for (const col of columns) {
     const key = `${col.table}.${col.column}`;
     await sql.begin(async (tx) => {
       // ctid addresses the row whatever its primary key is; FOR UPDATE keeps
