@@ -280,7 +280,8 @@ describe('editing', () => {
     expect((await member.patch(`/project-secrets/${id}`, { description: 'x' })).status).toBe(403);
     expect((await create(member, { name: 'MEMBER_CANNOT_ADD' })).status).toBe(403);
     expect((await create(manager, { name: 'MEMBER_CANNOT_EDIT' })).status).toBe(422);
-    expect((await create(manager, { name: 'ANTHROPIC_API_KEY' })).status).toBe(400);
+    // Any upper-snake name is fine – agents get it as SECRET_<NAME> – but a double underscore is the field separator.
+    expect((await create(manager, { name: 'STRIPE__KEY' })).status).toBe(400);
     expect((await create(manager, { name: 'lower_case' })).status).toBe(400);
     // A url field is opened with a click: http(s) only.
     for (const value of ['javascript:alert(1)', 'file:///etc/passwd', 'not a url']) {

@@ -40,25 +40,29 @@ function scrubDeep(value: unknown, secrets: string[]): unknown {
 
 /**
  * The ways a value could be spread over several strings and still read as
- * one: every string in document order, every key, and – for rich-text
- * documents – the `text` nodes alone, which is what a reader sees.
+ * one: every scalar in document order, every key, each key followed by its
+ * value, and – for rich-text documents – the `text` nodes alone, which is
+ * what a reader sees. Numbers and booleans count as their text.
  */
 function readings(value: unknown): string[] {
   const all: string[] = [];
   const keys: string[] = [];
+  const interleaved: string[] = [];
   const text: string[] = [];
   const walk = (v: unknown, key: string | null) => {
-    if (typeof v === 'string') {
-      all.push(v);
-      if (key === 'text') text.push(v);
+    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+      const s = String(v);
+      all.push(s);
+      interleaved.push(s);
+      if (key === 'text') text.push(s);
     } else if (Array.isArray(v)) {
       v.forEach((x) => walk(x, null));
     } else if (v && typeof v === 'object') {
-      for (const [k, x] of Object.entries(v as Record<string, unknown>)) { keys.push(k); walk(x, k); }
+      for (const [k, x] of Object.entries(v as Record<string, unknown>)) { keys.push(k); interleaved.push(k); walk(x, k); }
     }
   };
   walk(value, null);
-  return [all.join(''), keys.join(''), text.join('')];
+  return [all.join(''), keys.join(''), interleaved.join(''), text.join('')];
 }
 
 async function refuse(c: Parameters<MiddlewareHandler<AppEnv>>[0], runId: string) {
@@ -81,20 +85,18 @@ export const scrubAgentWrites: MiddlewareHandler<AppEnv> = async (c, next) => {
   const values = [...new Set([...registeredRunSecrets(run.id), ...fresh])].filter((v) => v.length >= MIN_LENGTH);
   if (!values.length) return next();
 
-  const isJson = /json/i.test(c.req.header('content-type') ?? '');
-  if (!isJson) {
-    // Uploads and other bodies cannot be rewritten safely: refused whole when
-    // a value is anywhere in the bytes.
-    const bytes = Buffer.from(await c.req.raw.clone().arrayBuffer());
-    if (values.some((v) => bytes.includes(Buffer.from(v, 'utf8')))) return refuse(c, run.id);
-    return next();
-  }
-
+  // Whatever the content type says: routes parse JSON bodies regardless of
+  // it, so a body is read as JSON when it parses as JSON. Anything else – an
+  // upload, text – cannot be rewritten safely and is refused when a value is
+  // anywhere in its bytes.
+  const raw = await c.req.raw.clone().arrayBuffer();
   let body: unknown;
   try {
-    body = JSON.parse(await c.req.raw.clone().text());
+    body = JSON.parse(new TextDecoder().decode(raw));
   } catch {
-    return next(); // not JSON after all: the route will refuse it
+    const bytes = Buffer.from(raw);
+    if (values.some((v) => bytes.includes(Buffer.from(v, 'utf8')))) return refuse(c, run.id);
+    return next();
   }
   const cleaned = scrubDeep(body, values);
   // A value split across strings – sibling text nodes of a rich-text document,

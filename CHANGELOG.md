@@ -35,7 +35,9 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   `PATCH /attachments/:id` and MCP tool `rename_attachment`.
 - **Agent runs use project secrets without seeing them in text**: a secret
   switched on for agents reaches a run of an agent on that project as
-  environment variables (`STRIPE_TEST`, `ADMIN_PANEL__PASSWORD`), and the
+  environment variables prefixed `SECRET_` (`SECRET_STRIPE_TEST`,
+  `SECRET_ADMIN_PANEL__PASSWORD`) – a prefix no program reads on its own, so
+  no secret name can change how the agent's tools behave – and the
   agent's instructions name the variables, never the values. The values are
   replaced with `[redacted]` in the run log and in everything the run writes
   back to ordi (comments, task fields, pages, updates), and a branch whose
@@ -50,7 +52,7 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   `list_project_secrets` and `check_project_secret` return names,
   descriptions, environment, fields and whether each is set, expiry, agent
   availability and the environment variable each field becomes in an agent
-  run (`NAME`, or `NAME__FIELD` for a secret with several fields). No tool
+  run (`SECRET_NAME`, or `SECRET_NAME__FIELD` for a secret with several fields). No tool
   returns a value: not a password, not a login or URL, not an API-key hint.
 - **Project secrets, API first** (the UI follows): credentials a client
   hands over, stored with the project as a new resource kind. Values are

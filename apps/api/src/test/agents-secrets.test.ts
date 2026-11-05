@@ -112,10 +112,10 @@ describe('a run gets its secrets in the environment, by name', () => {
     const { runId } = await runTask('Charge a test card');
 
     expect(seen!.extraEnv).toEqual({
-      STRIPE_TEST: KEY, ADMIN_PANEL__LOGIN: 'ops@acme.test', ADMIN_PANEL__PASSWORD: PASSWORD,
+      SECRET_STRIPE_TEST: KEY, SECRET_ADMIN_PANEL__LOGIN: 'ops@acme.test', SECRET_ADMIN_PANEL__PASSWORD: PASSWORD,
     });
-    expect(seen!.systemAppend).toContain('STRIPE_TEST: STRIPE_TEST – Secret key');
-    expect(seen!.systemAppend).toContain('ADMIN_PANEL__PASSWORD');
+    expect(seen!.systemAppend).toContain('SECRET_STRIPE_TEST: STRIPE_TEST – Secret key');
+    expect(seen!.systemAppend).toContain('SECRET_ADMIN_PANEL__PASSWORD');
     for (const value of [KEY, PASSWORD]) {
       expect(seen!.systemAppend).not.toContain(value);
       expect(seen!.prompt).not.toContain(value);
@@ -142,16 +142,21 @@ describe('a run gets its secrets in the environment, by name', () => {
   });
 
   it('never lets a secret replace the runtime\'s own variables or change how programs behave', () => {
+    // Only SECRET_ variables pass, so nothing a secret is called can reach PATH, LD_PRELOAD or a proxy.
     expect(withExtraEnv({ PATH: '/usr/bin', HOME: '/h' }, {
-      PATH: '/evil', STRIPE_TEST: 'x', LD_PRELOAD: '/tmp/x.so', HTTPS_PROXY: 'http://evil', BASH_ENV: '/tmp/x', PYTHONPATH: '/tmp',
-    })).toEqual({ PATH: '/usr/bin', HOME: '/h', STRIPE_TEST: 'x' });
+      PATH: '/evil', SECRET_STRIPE_TEST: 'x', LD_PRELOAD: '/tmp/x.so', HTTPS_PROXY: 'http://evil', BASH_ENV: '/tmp/x',
+    })).toEqual({ PATH: '/usr/bin', HOME: '/h', SECRET_STRIPE_TEST: 'x' });
   });
 
-  it('refuses to save a secret named after such a variable', async () => {
-    for (const name of ['HTTPS_PROXY', 'LD_PRELOAD', 'BASH_ENV', 'PYTHONPATH', 'NODE_OPTIONS', 'SSL_CERT_FILE']) {
-      const res = await secret({ name, fields: [{ key: 'v', label: 'V', type: 'password', value: 'whatever-value' }] });
-      expect(res.status).toBe(400);
-    }
+  it('turns a secret named like a dangerous variable into a harmless one', async () => {
+    expect((await secret({ name: 'HTTPS_PROXY', availableToAgents: true, fields: [{ key: 'v', label: 'V', type: 'password', value: 'http://proxy.example' }] })).status).toBe(201);
+    let seen: RuntimeRunInput | null = null;
+    restore = setRuntimeAdapter(adapter(async (input) => { seen = input; return done; }));
+    await runTask('Use the proxy setting');
+    expect(seen!.extraEnv!.SECRET_HTTPS_PROXY).toBe('http://proxy.example');
+    expect(seen!.extraEnv!.HTTPS_PROXY).toBeUndefined();
+    const { db } = getDb();
+    await db.delete(schema.projectSecrets).where(eq(schema.projectSecrets.name, 'HTTPS_PROXY'));
   });
 
   it('hands a restricted secret only to runs started by someone who could open it', async () => {
@@ -166,7 +171,7 @@ describe('a run gets its secrets in the environment, by name', () => {
     restore = setRuntimeAdapter(adapter(async (input) => { seen = input; return done; }));
     // `member` works on the project but is outside PROD_DB's audience.
     const byMember = await runTask('Migrate the database', 'member');
-    expect(Object.keys(seen!.extraEnv ?? {})).not.toContain('PROD_DB');
+    expect(Object.keys(seen!.extraEnv ?? {})).not.toContain('SECRET_PROD_DB');
     expect(seen!.systemAppend).not.toContain('PROD_DB');
     const memberLog = JSON.stringify(await eventsForRun(byMember.runId));
     expect(memberLog).toContain('1 restricted project secret(s) left out');
@@ -175,7 +180,7 @@ describe('a run gets its secrets in the environment, by name', () => {
     restore();
     restore = setRuntimeAdapter(adapter(async (input) => { seen = input; return done; }));
     const byOwner = await runTask('Migrate the database again');
-    expect(seen!.extraEnv!.PROD_DB).toBe('postgres://prod-db-password@x');
+    expect(seen!.extraEnv!.SECRET_PROD_DB).toBe('postgres://prod-db-password@x');
     const ownerLog = JSON.stringify(await eventsForRun(byOwner.runId));
     expect(ownerLog).toContain('1 restricted');
     expect(ownerLog).not.toContain('PROD_DB');
@@ -223,6 +228,7 @@ describe('what the run writes back', () => {
   it('refuses a write that splits a value across strings, or carries one in an upload', async () => {
     let split = 0;
     let upload = 0;
+    let plain = 0;
     restore = setRuntimeAdapter(adapter(async (input) => {
       const auth = (input.mcpServers.ordi!.headers as Record<string, string>).Authorization!;
       const { db } = getDb();
@@ -233,6 +239,12 @@ describe('what the run writes back', () => {
         method: 'POST', headers: { authorization: auth, 'Content-Type': 'Application/JSON' },
         body: JSON.stringify({ body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: KEY.slice(0, half) }, { type: 'text', text: KEY.slice(half) }] }] } }),
       })).status;
+      // The same value sent as text/plain with \u escapes: the route would still parse it as JSON.
+      const escaped = JSON.stringify({ body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: KEY }] }] } })
+        .replace(KEY, [...KEY].map((ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`).join(''));
+      plain = (await app.request(`/api/v1/tasks/${taskId}/comments`, {
+        method: 'POST', headers: { authorization: auth, 'content-type': 'text/plain' }, body: escaped,
+      })).status;
       const form = new FormData();
       form.append('file', new File([`key=${KEY}\n`], 'notes.txt', { type: 'text/plain' }), 'notes.txt');
       upload = (await app.request('/api/v1/attachments', { method: 'POST', headers: { authorization: auth }, body: form })).status;
@@ -241,6 +253,11 @@ describe('what the run writes back', () => {
     const { runId } = await runTask('Write the notes');
     expect(split).toBe(422);
     expect(upload).toBe(422);
+    // Parsed as JSON despite its content type, and cleaned: the comment is stored without the value.
+    expect(plain).toBe(201);
+    const [runRow] = await getDb().db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, runId));
+    const comments = JSON.stringify(await json(reqAs(ws.users.owner!.cookie).get(`/tasks/${runRow!.taskId}/comments`)));
+    expect(comments).not.toContain(KEY);
     expect(JSON.stringify(await eventsForRun(runId))).toContain('was refused: it carried a project secret');
   });
 
@@ -253,15 +270,15 @@ describe('what the run writes back', () => {
     const { runId } = await runTask('Add the payment config');
     expect(pushed).toEqual([]);
     // Shown as stored: no repository attributes, drivers or textconv between the scan and the bytes.
-    expect(logs[0]).toEqual(expect.arrayContaining(['core.attributesFile=/dev/null', '--text', '--no-textconv', '--no-ext-diff', '-m']));
+    expect(logs[0]).toEqual(expect.arrayContaining(['--no-replace-objects', 'core.attributesFile=/dev/null', '--root', '--text', '--no-textconv', '--no-ext-diff', '-m']));
     const events = JSON.stringify(await eventsForRun(runId));
-    expect(events).toContain('contains the value of STRIPE_TEST');
+    expect(events).toContain('contains the value of SECRET_STRIPE_TEST');
     expect(events).not.toContain(KEY);
   });
 
   it('pushes a branch that only reads the variable', async () => {
     const pushed: string[][] = [];
-    setGitRunner(fakeGit('feat: read key\n+const key = process.env.STRIPE_TEST;\n', pushed));
+    setGitRunner(fakeGit('feat: read key\n+const key = process.env.SECRET_STRIPE_TEST;\n', pushed));
     restore = setRuntimeAdapter(adapter(async () => done));
     await runTask('Read the key from the environment');
     expect(pushed.length).toBe(1);

@@ -169,9 +169,9 @@ describe('project secrets in the runtime environment (plan 2026-11-05-001, U4)',
   it('adds them to the Claude Code environment without replacing its own variables', async () => {
     const seen: { options?: Options } = {};
     const adapter = createClaudeCodeAdapter(scripted([resultOk()], seen));
-    await adapter.run(input({ extraEnv: { STRIPE_TEST: 'sk_test_value', HOME: '/elsewhere' } }));
+    await adapter.run(input({ extraEnv: { SECRET_STRIPE_TEST: 'sk_test_value', HOME: '/elsewhere' } }));
     const env = seen.options!.env as Record<string, string>;
-    expect(env.STRIPE_TEST).toBe('sk_test_value');
+    expect(env.SECRET_STRIPE_TEST).toBe('sk_test_value');
     expect(env.HOME).toBe('/tmp/cfg');
   });
 
@@ -192,8 +192,8 @@ describe('project secrets in the runtime environment (plan 2026-11-05-001, U4)',
       return child;
     }) as never;
     const adapter = createCodexAdapter({ spawn, prepareHome: async () => {} });
-    await adapter.run(input({ configDir, credential: { kind: 'api_key', secret: 'sk-openai', provider: 'openai' } as never, extraEnv: { STRIPE_TEST: 'sk_test_value' } }));
-    expect(childEnv!.STRIPE_TEST).toBe('sk_test_value');
+    await adapter.run(input({ configDir, credential: { kind: 'api_key', secret: 'sk-openai', provider: 'openai' } as never, extraEnv: { SECRET_STRIPE_TEST: 'sk_test_value' } }));
+    expect(childEnv!.SECRET_STRIPE_TEST).toBe('sk_test_value');
     expect(childEnv!.DATABASE_URL).toBeUndefined();
     expect(childEnv!.ENCRYPTION_KEY).toBeUndefined();
     expect(childEnv!.CODEX_HOME).toBe(configDir);

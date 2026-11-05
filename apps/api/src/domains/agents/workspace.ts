@@ -404,7 +404,8 @@ async function assertNoSecretsInBranch(dir: string, defaultBranch: string, branc
   // The content as stored, not as the repository would like it shown: no
   // .gitattributes (binary, -diff), no textconv or external diff drivers, and
   // merge commits diffed against each parent.
-  const show = ['-c', 'core.attributesFile=/dev/null', 'log', '-p', '--text', '--no-textconv', '--no-ext-diff', '-m', '--no-color', '--format=%B'];
+  // Replace refs off too: they could show the scan other objects than the ones pushed.
+  const show = ['--no-replace-objects', '-c', 'core.attributesFile=/dev/null', 'log', '-p', '--root', '--text', '--no-textconv', '--no-ext-diff', '-m', '--no-color', '--format=%B'];
   let patch: string;
   try {
     patch = (await git([...show, `origin/${defaultBranch}..${branch}`], { cwd: dir })).stdout;
