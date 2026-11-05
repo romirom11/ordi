@@ -8,3 +8,4 @@ export * from './ledger';
 export * from './people';
 export * from './integrations';
 export * from './agents';
+export * from './resources';

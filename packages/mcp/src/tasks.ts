@@ -440,6 +440,60 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
     return { action: 'updated', milestone: { id: updated.id, name: updated.name, targetDate: updated.targetDate ?? null, done: !!updated.done, position: updated.position } };
   }));
 
+  // ── Resources: the project's links, files and KB pages in one list ──
+
+  const resourceOut = (r: Row) => ({
+    id: r.id, kind: r.kind, label: r.label, url: r.url ?? null,
+    ...(r.file ? { file: r.file } : {}),
+    ...(r.page ? { page: r.page } : {}),
+  });
+
+  server.tool('list_project_resources', 'The project\'s resources in their order: links (label + url), files (name, size, type – download through the app) and pinned knowledge-base pages (title, id; read one with get_kb_page). Pages the token owner cannot open are left out.', {
+    project: z.string().describe('Project key or id'),
+  }, ({ project }) => wrap(async () => {
+    const projectId = await resolveProjectId(client, project);
+    const res = await client.get<{ data: Row[] }>(`/projects/${projectId}/resources`);
+    return { data: res.data.map(resourceOut) };
+  }));
+
+  server.tool('add_project_resource', 'Add a resource to a project: kind "link" with a label and an http(s) url (designs, staging, a client\'s drive), or kind "kb_page" with a knowledge-base page id (find_kb_page) to pin it. A file becomes a resource by uploading it with upload_attachment {entityType:"project", entityId}; rename it with rename_attachment.', {
+    project: z.string().describe('Project key or id'),
+    kind: z.enum(['link', 'kb_page']),
+    label: z.string().min(1).max(200).optional().describe('For a link: what it is, e.g. "Figma designs"'),
+    url: z.string().optional().describe('For a link: the http(s) address'),
+    kbPageId: z.string().optional().describe('For a page: the knowledge-base page id'),
+  }, ({ project, kind, label, url, kbPageId }) => wrap(async () => {
+    const projectId = await resolveProjectId(client, project);
+    let body: Record<string, unknown>;
+    if (kind === 'link') {
+      if (!url) throw new Error('A link needs url.');
+      body = { kind, label: label?.trim() || url, url };
+    } else {
+      if (!kbPageId) throw new Error('A page needs kbPageId (find it with find_kb_page).');
+      body = { kind, kbPageId };
+    }
+    const created = await client.post<Row>(`/projects/${projectId}/resources`, body);
+    return { action: 'created', resource: resourceOut(created) };
+  }));
+
+  server.tool('update_project_link', 'Change a link resource\'s label or url. Files rename with rename_attachment; a page keeps its knowledge-base title.', {
+    resourceId: z.string(),
+    label: z.string().min(1).max(200).optional(),
+    url: z.string().optional().describe('New http(s) address'),
+  }, ({ resourceId, label, url }) => wrap(async () => {
+    const body = Object.fromEntries(Object.entries({ label, url }).filter(([, v]) => v !== undefined));
+    if (!Object.keys(body).length) throw new Error('Nothing to update – pass label or url.');
+    const updated = await client.patch<Row>(`/project-resources/${resourceId}`, body);
+    return { action: 'updated', resource: resourceOut(updated) };
+  }));
+
+  server.tool('remove_project_resource', 'Remove a resource from its project. A link is dropped and a page unpinned (the page itself stays in the knowledge base), but a file is deleted.', {
+    resourceId: z.string(),
+  }, ({ resourceId }) => wrap(async () => {
+    await client.del(`/project-resources/${resourceId}`);
+    return { action: 'removed', resourceId };
+  }));
+
   server.tool('create_cycle', 'Start a cycle – a time box (usually one or two weeks) the team commits a set of tasks to. Put tasks in it with create_task / update_task `cycle`. Refused where the project has cycles switched off.', {
     project: z.string().describe('Project key or id'),
     name: z.string().min(1).describe('e.g. "Sprint 12" or "Week 46"'),

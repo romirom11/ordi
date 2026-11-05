@@ -309,6 +309,13 @@
       "when": 1793806256263,
       "tag": "0043_projects_key_unique_when_live",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1793890198318,
+      "tag": "0044_project_resources",
+      "breakpoints": true
     }
   ]
 }

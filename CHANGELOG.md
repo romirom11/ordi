@@ -16,6 +16,22 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   under it, while the stored bytes and every embedded link stay the same.
   Blocked extensions are refused on rename as on upload. New API
   `PATCH /attachments/:id` and MCP tool `rename_attachment`.
+- **One Resources block on the project overview**: links, files and
+  knowledge-base pages now live in a single ordered list instead of link
+  chips plus a separate Files section. "Add" offers a link, a file upload
+  or a page from the knowledge base (search and pin); rows drag to
+  reorder, and files dropped from the desktop upload straight into the
+  list. Links edit in place, files preview, download, rename and are
+  deleted when removed, pages open in the knowledge base and only unpin.
+  A page someone cannot open is left out of their list, title included.
+  Migration `0044` moves each project's links and files into the new
+  `project_resources` table (links first, in their order, then files)
+  and drops `projects.links`; `PATCH /projects/:id` no longer takes
+  `links`. New API: `GET/POST /projects/:id/resources`,
+  `PUT /projects/:id/resources/order`, `PATCH/DELETE /project-resources/:id`;
+  a file uploaded onto a project joins its resources. New MCP tools:
+  `list_project_resources`, `add_project_resource`,
+  `update_project_link`, `remove_project_resource`.
 - **The blocked-extension check reads names the way they land on disk**:
   `run.exe.` (Windows drops the trailing dot on save), an extension split
   by an invisible character, and names with right-to-left override or

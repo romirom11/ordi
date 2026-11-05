@@ -128,7 +128,7 @@ describe('progress endpoint', () => {
   });
 });
 
-describe('project PATCH: summary / priority / links / labels', () => {
+describe('project PATCH: summary / priority / labels', () => {
   it('persists the new overview fields and label joins', async () => {
     const owner = reqAs(users.owner!.cookie);
     const label = await json(owner.post('/labels', { name: 'Overview label', color: '#5e6ad2', scope: 'project' }));
@@ -136,22 +136,19 @@ describe('project PATCH: summary / priority / links / labels', () => {
     const patched = await json(owner.patch(`/projects/${projectId}`, {
       summary: 'Short summary',
       priority: 'high',
-      links: [{ label: 'Docs', url: 'https://example.com/docs' }],
       labelIds: [label.id],
       version: before.version,
     }));
     expect(patched.summary).toBe('Short summary');
     expect(patched.priority).toBe('high');
-    expect(patched.links).toEqual([{ label: 'Docs', url: 'https://example.com/docs' }]);
     const fresh = await json(owner.get(`/projects/${projectId}`));
     expect(fresh.labelIds).toEqual([label.id]);
   });
 
-  it('rejects bad priority and bad link urls', async () => {
+  it('rejects a bad priority', async () => {
     const owner = reqAs(users.owner!.cookie);
     const fresh = await json(owner.get(`/projects/${projectId}`));
     expect([400, 422]).toContain((await owner.patch(`/projects/${projectId}`, { priority: 'asap', version: fresh.version })).status);
-    expect([400, 422]).toContain((await owner.patch(`/projects/${projectId}`, { links: [{ label: 'x', url: 'not-a-url' }], version: fresh.version })).status);
   });
 });
 
