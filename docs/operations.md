@@ -217,12 +217,14 @@ again, which needs the public callback URL to be reachable (deployment.md §3b).
 ## 7. Secrets
 
 All secrets come exclusively from env (PRD §19.1): `AUTH_SECRET`,
-`ENCRYPTION_KEY` (32-byte hex, AES-256-GCM for git credentials), `DATABASE_URL`,
-`SMTP_URL`, `S3_*`. Rotate `ENCRYPTION_KEY` by re-encrypting `git_connections`
-(reconnect integrations) – the key is never stored in the DB. The same key
-encrypts the workspace Claude credential and the MCP connector secrets, so a
-rotation means reconnecting those too (deployment.md §3b): agents show
-"credential required" and connectors `needs_auth` until you do.
+`ENCRYPTION_KEY` (32-byte hex, AES-256-GCM for every stored credential), `DATABASE_URL`,
+`SMTP_URL`, `S3_*`. The key is never stored in the DB. Rotate it without
+reconnecting anything: set the new key as `ENCRYPTION_KEY` and the old one as
+`ENCRYPTION_KEY_PREVIOUS`, restart, then run
+`pnpm --filter @ordi/api exec tsx src/rotate-encryption-key.ts`, which
+re-encrypts every stored credential (git and Slack connections, SMTP and
+mailbox passwords, the GitHub App key, the workspace Claude credential, MCP
+connector secrets). Details in deployment.md §3c.
 
 ## 8. Sensitive-audit retention (PRD §14.4)
 

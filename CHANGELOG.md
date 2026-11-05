@@ -3,6 +3,26 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## Unreleased
+
+- **Breaking for installs on the all-zero encryption key**: in production the
+  api now refuses to start without `ENCRYPTION_KEY`, with a malformed key, or
+  with the all-zero key, which the quick-start compose file used to default to.
+  That key is public, so everything encrypted with it was readable from a
+  database dump. The new quick-start `docker-compose.yml` generates a random
+  key into an `ordi_keys` volume on first start (`ENCRYPTION_KEY_FILE`) and
+  still reads data stored under the old key. An install that keeps its old
+  compose file has to set `ENCRYPTION_KEY` in `.env`, with
+  `ENCRYPTION_KEY_PREVIOUS` set to the old key (64 zeros). Then run the
+  rotation command below once. See docs/deployment.md §3c.
+- **The encryption key can be rotated** without reconnecting integrations:
+  `ENCRYPTION_KEY_PREVIOUS` keeps old data readable, and
+  `pnpm --filter @ordi/api exec tsx src/rotate-encryption-key.ts`
+  re-encrypts every stored credential with the new key. It finds them by
+  scanning the database, so new features are covered without a list.
+  Encrypted values now carry a version and the id of their key
+  (`v1:<keyId>:…`), and values written before are still read.
+
 ## v1.42.0
 
 - **Deleted projects can be restored**: the Projects page lists them with a
