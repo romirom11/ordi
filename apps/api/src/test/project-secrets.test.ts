@@ -125,6 +125,30 @@ describe('a project-wide secret', () => {
   });
 });
 
+describe('tokens and general feeds', () => {
+  it('refuses writes over a read-only token', async () => {
+    const minted = await json(owner.post('/auth/tokens', { name: 'ro', scopes: ['projects.read', 'secrets.read', 'secrets.write'], readOnly: true }));
+    const res = await app.request(`/api/v1/projects/${projectId}/secrets`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${minted.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'READ_ONLY_WRITE', environment: 'test', audience: [{ type: 'project' }], fields: [{ key: 'v', label: 'V', type: 'password', value: 'x' }] }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it('keeps secret trails out of the audit log and the home feed, even for audit.read', async () => {
+    const { id } = await json(create(owner, { name: 'HIDDEN_TRAIL', audience: [{ type: 'user', id: users.owner!.userId }] }));
+    await reveal(owner, id, 'password');
+    const audit = await json(owner.get('/audit'));
+    expect((audit.data as any[]).some((a) => a.entityType === 'project_secret')).toBe(false);
+    expect(JSON.stringify(audit)).not.toContain('HIDDEN_TRAIL');
+    expect((await json(owner.get(`/audit/entity/project_secret/${id}`))).data).toEqual([]);
+    expect(JSON.stringify(await json(owner.get('/dashboard')))).not.toContain('HIDDEN_TRAIL');
+    // The secret itself still answers for its trail.
+    expect(((await json(owner.get(`/project-secrets/${id}/activity`))).data as any[]).length).toBeGreaterThan(0);
+  });
+});
+
 describe('the project role', () => {
   it('lets a viewer list but not reveal', async () => {
     const type = await json(owner.post('/project-types', { name: 'Private', revenueSource: 'none' }));

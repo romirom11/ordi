@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
-import { getDb, schema, eq, and, desc, lt, or } from '@ordi/db';
+import { getDb, schema, eq, and, desc, lt, or, notInArray } from '@ordi/db';
 import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { guard } from '../../core/rbac';
-import { activityFeedPermission, scopeActivityToResources } from '../../core/activity';
+import { activityFeedPermission, scopeActivityToResources, PRIVATE_ACTIVITY_TYPES } from '../../core/activity';
 import { err } from '../../lib/errors';
 
 export function auditRoutes() {
@@ -21,6 +21,8 @@ export function auditRoutes() {
     const before = c.req.query('before');
     const rows = await db.select().from(schema.activityLog).where(and(
       canSeeSensitive ? undefined : eq(schema.activityLog.sensitivity, 'normal'),
+      // A secret's trail is served by the secret, under its own access rule.
+      notInArray(schema.activityLog.entityType, [...PRIVATE_ACTIVITY_TYPES]),
       entityType ? eq(schema.activityLog.entityType, entityType) : undefined,
       actorId ? eq(schema.activityLog.actorId, actorId) : undefined,
       before ? lt(schema.activityLog.createdAt, new Date(before)) : undefined,

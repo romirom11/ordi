@@ -14,6 +14,7 @@ import { Hono } from 'hono';
 import { secretInputSchema, secretPatchSchema, secretRevealSchema } from '@ordi/shared';
 import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
+import { rejectReadOnlyWrites } from '../../core/rbac';
 import {
   actorContext, createSecret, deleteSecret, getSecret, listSecrets, revealSecretField, secretActivity, updateSecret,
 } from './service';
@@ -21,6 +22,8 @@ import {
 export function projectSecretsRoutes() {
   const app = new Hono<AppEnv>();
   app.use('*', requireAuth);
+  // Access is per secret (secretAccess), not through guard(), so read-only tokens are refused here.
+  app.use('*', rejectReadOnlyWrites());
 
   app.get('/projects/:id/secrets', async (c) => {
     const ctx = await actorContext(currentActor(c));

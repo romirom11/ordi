@@ -70,6 +70,14 @@ export function activityFeedPermission(entityType: string): Permission | undefin
   return FEED_VISIBILITY[entityType];
 }
 
+/**
+ * Activity that no general feed shows, not even to audit.read: a secret's
+ * trail names restricted secrets and who reached them, and answers to the
+ * secret's own access rule (secrets/service secretActivity) instead.
+ */
+export const PRIVATE_ACTIVITY_TYPES: readonly string[] = ['project_secret'];
+const PRIVATE_ACTIVITY = new Set(PRIVATE_ACTIVITY_TYPES);
+
 /** Where an activity record lives: entity type -> the project or space that owns it. */
 const PROJECT_SCOPED = new Set(['project', 'task', 'comment', 'cycle']);
 const SPACE_SCOPED = new Set(['kb_space', 'kb_page', 'kb_page_comment']);
@@ -147,8 +155,9 @@ export async function activityOwners(rows: { entityType: string; entityId: strin
  */
 export async function scopeActivityToResources<T extends { entityType: string; entityId: string }>(
   actor: Actor,
-  rows: T[],
+  all: T[],
 ): Promise<T[]> {
+  const rows = all.filter((r) => !PRIVATE_ACTIVITY.has(r.entityType));
   if (actor.access.permissions.has('audit.read')) return rows;
   const scoped = rows.filter((r) => PROJECT_SCOPED.has(r.entityType) || SPACE_SCOPED.has(r.entityType));
   if (!scoped.length) return rows;
