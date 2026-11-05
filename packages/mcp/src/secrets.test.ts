@@ -22,6 +22,11 @@ const SECRETS = [
     id: 's-2', name: 'STRIPE_TEST', description: null, environment: 'test', expiresAt: null, availableToAgents: true,
     fields: [{ key: 'api_key', label: 'API key', type: 'api_key', hasValue: true, hint: 'Wxyz' }],
   },
+  {
+    id: 's-3', name: 'DOPPLER_KEY', description: null, environment: 'test', expiresAt: null, availableToAgents: true, source: 'provider',
+    provider: { connectionId: 'c-1', kind: 'doppler', label: 'Acme dev', state: 'error', error: 'Doppler refused the token' },
+    fields: [{ key: 'api_key', label: 'API key', type: 'api_key', hasValue: true, ref: 'STRIPE_KEY' }],
+  },
 ];
 
 function fake() {
@@ -57,6 +62,15 @@ describe('secrets over MCP', () => {
     // A one-field secret is its own variable.
     expect(body.data[1].envVars).toEqual([{ field: 'api_key', variable: 'SECRET_STRIPE_TEST' }]);
     for (const leak of ['admin.acme.test', 'ops@acme.test', 'Wxyz', '"hint"', '"value"']) expect(text(res)).not.toContain(leak);
+  });
+
+  it('says where the values live, and whether a provider can supply them', async () => {
+    const client = await connect(fake());
+    const body = JSON.parse(text(await client.callTool({ name: 'list_project_secrets', arguments: { project: 'ACM' } })));
+    expect(body.data[1]).toMatchObject({ storedIn: 'ordi', reachable: true });
+    expect(body.data[2]).toMatchObject({ name: 'DOPPLER_KEY', storedIn: 'doppler', reachable: false, envVars: [{ field: 'api_key', variable: 'SECRET_DOPPLER_KEY' }] });
+    // The provider's own names and errors stay with the people who manage it.
+    expect(JSON.stringify(body.data[2])).not.toContain('STRIPE_KEY');
   });
 
   it('checks one secret by name, case-insensitively, and says when there is none', async () => {

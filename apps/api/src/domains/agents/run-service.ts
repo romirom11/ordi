@@ -209,6 +209,9 @@ export async function prepare(runId: string): Promise<RunBundle> {
   if (projectSecrets.withheld) {
     await recordRunEvent(runId, 'log', { message: `${projectSecrets.withheld} restricted project secret(s) left out: the person who started the run cannot open them` });
   }
+  if (projectSecrets.unavailable) {
+    await recordRunEvent(runId, 'log', { message: `${projectSecrets.unavailable} restricted project secret(s) left out: their provider could not supply them` });
+  }
 
   return {
     run: toClaimedRun(run),
@@ -248,14 +251,19 @@ export async function start(runId: string, input: StartInput): Promise<RunStart 
     resumedAfterStop: started.run.trigger === 'retry' && Boolean(started.run.sessionId),
     connectorSlugs: connectors.map((c) => c.slug),
     pullRequestTemplate: input.pullRequestTemplate,
-    secretVars: (await agentSecretPlan(project.id, started.run.agentUserId, started.run.requestedBy)).use.flatMap((u) => u.vars),
+    secretVars: [],
   };
   // The worker's prepare and start may reach different replicas: whatever this
   // one did not prepare, it resolves again, so every replica scrubs the run's
-  // project secrets.
-  const projectValues = (await resolveRunSecrets({
+  // project secrets. The instructions name only the variables that resolved:
+  // a provider secret Doppler could not supply is not in the environment.
+  const resolved = await resolveRunSecrets({
     id: runId, projectId: project.id, agentUserId: started.run.agentUserId, taskId: task.id, requestedBy: started.run.requestedBy,
-  })).vars.map((v) => v.value);
+  });
+  const present = new Set(resolved.vars.map((v) => v.variable));
+  ctx.secretVars = (await agentSecretPlan(project.id, started.run.agentUserId, started.run.requestedBy)).use
+    .flatMap((u) => u.vars).filter((v) => present.has(v.variable));
+  const projectValues = resolved.vars.map((v) => v.value);
   registerRunSecrets(runId, [...(secretsPending.get(runId) ?? []), ...projectValues, started.token]);
   secretsPending.delete(runId);
   return {

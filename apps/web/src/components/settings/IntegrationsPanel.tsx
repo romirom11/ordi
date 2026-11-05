@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { EVENT_TYPES, GIT_PROVIDERS } from '@ordi/shared';
 import {
-  Github, Slack, GitBranch, Plus, Trash2, ChevronRight, ExternalLink, Copy, Webhook as WebhookIcon, RefreshCw,
+  Github, Slack, GitBranch, Plus, Trash2, ChevronRight, ExternalLink, Copy, Webhook as WebhookIcon, RefreshCw, KeyRound,
 } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { BitbucketIcon } from '../BitbucketIcon';
@@ -14,12 +14,13 @@ import {
 import { Dialog, ConfirmDialog, SidePanel, toast } from '../overlays';
 import { SectionHead, Field, RowList, Disclosure, StatusChip } from './primitives';
 import { OAuthCredentials } from './integrationsConfig';
+import { DopplerCard, useDopplerConnections } from './DopplerCard';
 import { Hint } from '../Hint';
 import { useT, extendDict } from '../../lib/i18n';
 
 extendDict({
   en: {
-    'settings.integrationsDesc': 'Connect GitHub, Bitbucket and Slack, and send outgoing webhooks.',
+    'settings.integrationsDesc': 'Connect GitHub, Bitbucket, Slack and Doppler, and send outgoing webhooks.',
     // GitHub
     'settings.stateConnected': 'Connected',
     'settings.stateReady': 'OAuth app ready',
@@ -113,7 +114,7 @@ extendDict({
     'settings.deleteWebhookBody': 'Delete this webhook? Deliveries will stop immediately.',
   },
   uk: {
-    'settings.integrationsDesc': 'Підключіть GitHub, Bitbucket і Slack та надсилайте вихідні вебхуки.',
+    'settings.integrationsDesc': 'Підключіть GitHub, Bitbucket, Slack і Doppler та надсилайте вихідні вебхуки.',
     // GitHub
     'settings.stateConnected': 'Підключено',
     'settings.stateReady': 'OAuth-застосунок готовий',
@@ -942,7 +943,7 @@ function AddWebhookDialog({ open, onClose }: { open: boolean; onClose: () => voi
 
 /* ─────────────── Panel ─────────────── */
 
-type IntegrationKey = 'github' | 'bitbucket' | 'slack' | 'webhooks';
+type IntegrationKey = 'github' | 'bitbucket' | 'slack' | 'doppler' | 'webhooks';
 
 /**
  * Integrations as a short list – one row per service with its state – and
@@ -986,6 +987,7 @@ export function IntegrationsPanel() {
   const gitConns = useQuery({ queryKey: ['gitConnections'], queryFn: () => api.get<{ data: GitConnection[] }>('/integrations/git/connections') });
   const slack = useQuery({ queryKey: ['slackStatus'], queryFn: () => api.get<SlackStatus>('/integrations/slack/status') });
   const webhooks = useQuery({ queryKey: ['webhooks'], queryFn: () => api.get<{ data: Webhook[] }>('/webhooks') });
+  const doppler = useDopplerConnections();
 
   const githubConnected = (gitConns.data?.data ?? []).some((c) => c.provider === 'github');
   const bitbucketConnected = (gitConns.data?.data ?? []).some((c) => c.provider === 'bitbucket');
@@ -1014,6 +1016,14 @@ export function IntegrationsPanel() {
       state: slack.isSuccess ? (
         <StatusChip tone={slack.data.connected ? 'ok' : slack.data.configured ? 'muted' : 'off'}>
           {slack.data.connected ? t('settings.stateConnected') : slack.data.configured ? t('settings.stateReady') : t('settings.stateNone')}
+        </StatusChip>
+      ) : null,
+    },
+    {
+      key: 'doppler', icon: <KeyRound size={18} />, title: t('doppler.title'), desc: t('doppler.desc'),
+      state: doppler.isSuccess ? (
+        <StatusChip tone={doppler.data.some((c) => c.status === 'error') ? 'muted' : doppler.data.length ? 'ok' : 'off'}>
+          {doppler.data.some((c) => c.status === 'error') ? t('doppler.stateError') : doppler.data.length ? t('settings.stateConnected') : t('settings.stateNone')}
         </StatusChip>
       ) : null,
     },
@@ -1054,6 +1064,7 @@ export function IntegrationsPanel() {
         {open === 'github' && <GitHubCard />}
         {open === 'bitbucket' && <BitbucketCard />}
         {open === 'slack' && <SlackCard />}
+        {open === 'doppler' && <DopplerCard />}
         {open === 'webhooks' && <WebhooksSection />}
       </SidePanel>
     </div>

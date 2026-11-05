@@ -326,6 +326,26 @@ writes back to ordi, and a branch whose commits contain one is not pushed.
 An agent with network access could still send a value elsewhere: give agents
 test keys, and keep production secrets switched off unless a run needs them.
 
+**Project secrets from Doppler.** A workspace admin connects Doppler in
+**Settings → Integrations → Doppler** with a service token. A service token is
+scoped to one config, and read access is enough. The admin links the
+connection to the projects that may use it. People on those projects add its
+secrets by name from **Resources → Add → Add from Doppler**. ordi stores the
+token encrypted with `ENCRYPTION_KEY`, together with the Doppler name each
+field reads. It never stores the values: the API fetches them from
+`https://api.doppler.com` when someone opens a field and when an agent run
+starts. A value rotated in Doppler is therefore what the next reveal or run
+gets.
+
+The **api** container needs outbound HTTPS to `api.doppler.com`; the worker
+does not, because it gets the values with the run, as above. If Doppler is
+unreachable or the token is revoked:
+
+- the secret shows the error;
+- a run starts without that secret and notes why in its log;
+- removing the connection keeps its secrets, marked disconnected, until
+  someone deletes them or links them to another connection.
+
 **Why the worker is a separate container.** An agent run is the only place in
 ordi where code written by the model is executed. The child process already
 gets a rebuilt environment without `DATABASE_URL`, `ENCRYPTION_KEY`,

@@ -25,7 +25,9 @@ at v1.43.0.
 
 ## In flight
 
-Nothing at the moment.
+| Feature | PR |
+|---|---|
+| Project secrets from Doppler: connect a service token, link projects, add secrets by name; values fetched on reveal and run start, never stored (plan 2026-11-05-001, U5) | `feature/project-secrets-doppler` |
 
 ## Shipped
 

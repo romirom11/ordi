@@ -34,12 +34,18 @@ export function isHttpUrl(value: string): boolean {
   }
 }
 
+/** The name of a secret in an external provider (Doppler: letters, digits, underscores). */
+export const providerSecretRefSchema = z.string().trim()
+  .regex(/^[A-Za-z_][A-Za-z0-9_]{0,255}$/, 'A provider secret name is letters, digits and underscores');
+
 export const secretFieldInputSchema = z.object({
   key: secretFieldKeySchema,
   label: z.string().trim().min(1).max(80),
   type: z.enum(SECRET_FIELD_TYPES),
   /** Omitted on update: keep the stored value. An empty string clears it. */
   value: z.string().max(10_000).optional(),
+  /** Provider secrets only: the provider secret this field reads. Its value is never stored in ordi. */
+  ref: providerSecretRefSchema.optional(),
 }).refine((f) => f.type !== 'url' || !f.value || isHttpUrl(f.value.trim()), {
   message: 'A URL field takes an http(s) address', path: ['value'],
 });
@@ -55,6 +61,8 @@ const fieldsSchema = z.array(secretFieldInputSchema).min(1).max(20)
 const audienceSchema = z.array(secretAudienceSchema).min(1, 'Choose who can see the values').max(100);
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD');
 
+export const SECRET_SOURCES = ['ordi', 'provider'] as const;
+
 export const secretInputSchema = z.object({
   name: secretNameSchema,
   description: z.string().trim().max(500).optional(),
@@ -63,6 +71,22 @@ export const secretInputSchema = z.object({
   availableToAgents: z.boolean().optional(),
   audience: audienceSchema,
   fields: fieldsSchema,
+  /** provider: the values stay in the connection's store; each field names its secret there (`ref`). */
+  source: z.enum(SECRET_SOURCES).default('ordi'),
+  connectionId: idSchema.optional(),
+}).superRefine((s, ctx) => {
+  if (s.source === 'provider') {
+    if (!s.connectionId) ctx.addIssue({ code: 'custom', path: ['connectionId'], message: 'Choose the connection the secret lives in' });
+    s.fields.forEach((f, i) => {
+      if (!f.ref) ctx.addIssue({ code: 'custom', path: ['fields', i, 'ref'], message: 'Choose which provider secret this field reads' });
+      if (f.value) ctx.addIssue({ code: 'custom', path: ['fields', i, 'value'], message: 'A provider secret keeps its values in the provider' });
+    });
+  } else {
+    if (s.connectionId) ctx.addIssue({ code: 'custom', path: ['connectionId'], message: 'Only a provider secret has a connection' });
+    s.fields.forEach((f, i) => {
+      if (f.ref) ctx.addIssue({ code: 'custom', path: ['fields', i, 'ref'], message: 'Only a provider secret reads from a provider' });
+    });
+  }
 });
 
 export const secretPatchSchema = z.object({
@@ -73,8 +97,38 @@ export const secretPatchSchema = z.object({
   audience: audienceSchema.optional(),
   /** The full field list: a field left out is removed, a value left out is kept. */
   fields: fieldsSchema.optional(),
+  /** Provider secrets: relink to another connection the project may use (a disconnected secret, a new token). */
+  connectionId: idSchema.optional(),
   version: z.number().int().optional(),
 });
+
+// ── External providers (plan U5) ──
+
+export const SECRET_PROVIDER_KINDS = ['doppler'] as const;
+export type SecretProviderKind = (typeof SECRET_PROVIDER_KINDS)[number];
+
+/** Doppler project and config slugs. */
+const providerSlugSchema = z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/, 'Letters, digits, dots, dashes and underscores');
+
+export const secretProviderConnectionInputSchema = z.object({
+  kind: z.enum(SECRET_PROVIDER_KINDS),
+  label: z.string().trim().max(80).optional(),
+  /** A read-only service token scoped to one config. Write-only: never returned. */
+  token: z.string().trim().min(8).max(1000),
+  /** Read back from the token when left out. */
+  project: providerSlugSchema.optional(),
+  config: providerSlugSchema.optional(),
+});
+
+export const secretProviderConnectionPatchSchema = z.object({
+  label: z.string().trim().min(1).max(80).optional(),
+  /** A new token replaces the old one, verified first. */
+  token: z.string().trim().min(8).max(1000).optional(),
+  project: providerSlugSchema.optional(),
+  config: providerSlugSchema.optional(),
+});
+
+export const secretProviderLinksSchema = z.object({ projectIds: z.array(idSchema).max(1000) });
 
 export const secretAudiencePreviewSchema = z.object({ audience: z.array(secretAudienceSchema).max(100) });
 

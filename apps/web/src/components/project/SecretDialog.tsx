@@ -5,6 +5,10 @@
  *
  * Editing never loads a value: a secret field left empty keeps what is
  * stored, so values travel to the browser only through Show and Copy.
+ *
+ * A provider secret (Doppler) is the same dialog with no values at all: each
+ * field picks the provider secret it reads, from the names of a connection
+ * linked to the project.
  */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -16,9 +20,10 @@ import { pasteToFields, fieldKeyFor } from '../../lib/pasteToFields';
 import { Avatar, Button, IconButton, Input, SegmentedControl, Select, Spinner, Switch, Textarea, cn } from '../ui';
 import { Dialog, DropdownMenu, MenuItem, toast } from '../overlays';
 import { DateField } from '../DatePicker';
+import { SearchSelect } from '../SearchSelect';
 import {
-  ENV_TONE, SECRET_ENVIRONMENTS, SECRET_FIELD_TYPES, isSecretValueType,
-  type AudiencePrincipal, type SecretEnvironment, type SecretFieldType, type SecretView,
+  ENV_TONE, PROVIDER_NAME, SECRET_ENVIRONMENTS, SECRET_FIELD_TYPES, fieldFromRef, isSecretValueType,
+  type AudiencePrincipal, type ProviderConnection, type SecretEnvironment, type SecretFieldType, type SecretView,
 } from './secretsShared';
 
 interface FieldDraft {
@@ -31,6 +36,8 @@ interface FieldDraft {
   /** Existing field: an empty value means "keep". */
   existing: boolean;
   hasValue: boolean;
+  /** Provider secrets: the provider name the field reads. */
+  ref: string;
 }
 
 interface AudienceOptions {
@@ -41,19 +48,26 @@ interface AudienceOptions {
 let draftSeq = 0;
 const nextId = () => `f${++draftSeq}`;
 
-function draftsFrom(secret: SecretView | null): FieldDraft[] {
+function draftsFrom(secret: SecretView | null, fromProvider: boolean): FieldDraft[] {
   if (!secret) {
+    if (fromProvider) return [{ id: nextId(), key: 'value', label: '', type: 'api_key', value: '', existing: false, hasValue: false, ref: '' }];
     return [
-      { id: nextId(), key: 'login', label: '', type: 'text', value: '', existing: false, hasValue: false },
-      { id: nextId(), key: 'password', label: '', type: 'password', value: '', existing: false, hasValue: false },
+      { id: nextId(), key: 'login', label: '', type: 'text', value: '', existing: false, hasValue: false, ref: '' },
+      { id: nextId(), key: 'password', label: '', type: 'password', value: '', existing: false, hasValue: false, ref: '' },
     ];
   }
   return secret.fields.map((f) => ({
     id: nextId(), key: f.key, label: f.label, type: f.type,
     // Plain fields come back in the clear and are edited in place; secret ones start empty (= keep).
     value: isSecretValueType(f.type) ? '' : f.value ?? '',
-    existing: true, hasValue: f.hasValue,
+    existing: true, hasValue: f.hasValue, ref: f.ref ?? '',
   }));
+}
+
+/** A provider name as an ordi secret name: upper snake case, no double underscores. */
+function nameFromRef(ref: string): string {
+  const name = ref.toUpperCase().replace(/[^A-Z0-9_]/g, '_').replace(/_+/g, '_').replace(/^[^A-Z]+/, '').replace(/_$/, '');
+  return name.slice(0, 64);
 }
 
 function uniqueKeys(fields: FieldDraft[]): FieldDraft[] {
@@ -66,10 +80,12 @@ function uniqueKeys(fields: FieldDraft[]): FieldDraft[] {
   });
 }
 
-export function SecretDialog({ projectId, secret, open, onClose, onSaved }: {
+export function SecretDialog({ projectId, secret, provider, open, onClose, onSaved }: {
   projectId: string;
   /** null: add a new secret. */
   secret: SecretView | null;
+  /** A new secret read from this connection (Resources → Add → From Doppler). */
+  provider?: ProviderConnection | null;
   open: boolean;
   onClose: () => void;
   onSaved: (saved: SecretView) => void;
@@ -85,7 +101,8 @@ export function SecretDialog({ projectId, secret, open, onClose, onSaved }: {
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [agents, setAgents] = useState(false);
   const [audience, setAudience] = useState<AudiencePrincipal[]>([{ type: 'project' }]);
-  const [fields, setFields] = useState<FieldDraft[]>(() => draftsFrom(null));
+  const [fields, setFields] = useState<FieldDraft[]>(() => draftsFrom(null, false));
+  const [connectionId, setConnectionId] = useState<string | null>(null);
   const [paste, setPaste] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -93,7 +110,7 @@ export function SecretDialog({ projectId, secret, open, onClose, onSaved }: {
   const openedFor = useRef<string | null | undefined>(undefined);
   useEffect(() => {
     if (!open) { openedFor.current = undefined; return; }
-    const target = secret?.id ?? null;
+    const target = secret?.id ?? (provider ? `provider:${provider.id}` : null);
     if (openedFor.current === target) return;
     openedFor.current = target;
     setName(secret?.name ?? '');
@@ -102,12 +119,14 @@ export function SecretDialog({ projectId, secret, open, onClose, onSaved }: {
     setExpiresAt(secret?.expiresAt ?? null);
     setAgents(secret?.availableToAgents ?? false);
     setAudience(secret?.audience ?? [{ type: 'project' }]);
-    setFields(draftsFrom(secret));
+    setFields(draftsFrom(secret, !!provider));
+    setConnectionId(secret?.provider?.connectionId ?? provider?.id ?? null);
     setPaste('');
     setError(null);
-  }, [open, secret]);
+  }, [open, secret, provider]);
 
   const editing = !!secret;
+  const fromProvider = editing ? secret.source === 'provider' : !!provider;
   const canEditContent = !editing || secret.access.write;
   const canGovern = !editing || secret.access.write || secret.access.manage;
 
@@ -117,6 +136,33 @@ export function SecretDialog({ projectId, secret, open, onClose, onSaved }: {
     enabled: open && canGovern,
     staleTime: 60_000,
   });
+
+  // Provider secrets: the connections the project may use, and the names in the chosen one.
+  const linkedQ = useQuery<ProviderConnection[]>({
+    queryKey: ['project-secret-providers', projectId],
+    queryFn: () => api.get<{ data: ProviderConnection[] }>(`/projects/${projectId}/secret-providers`).then((r) => r.data),
+    enabled: open && fromProvider && canEditContent,
+    staleTime: 60_000,
+  });
+  const connection = linkedQ.data?.find((c) => c.id === connectionId) ?? (provider?.id === connectionId ? provider : null);
+  const providerName = PROVIDER_NAME[connection?.kind ?? secret?.provider?.kind ?? 'doppler'] ?? 'Doppler';
+  const namesQ = useQuery<string[]>({
+    queryKey: ['project-secret-provider-names', projectId, connectionId],
+    queryFn: () => api.get<{ names: string[] }>(`/projects/${projectId}/secret-providers/${connectionId}/names`).then((r) => r.names),
+    enabled: open && fromProvider && canEditContent && !!connection,
+    staleTime: 30_000,
+    retry: false,
+  });
+
+  const chooseRef = (id: string, ref: string) => {
+    const f = fields.find((x) => x.id === id);
+    if (!f) return;
+    const guess = fieldFromRef(ref);
+    const patch: Partial<FieldDraft> = { ref };
+    if (!f.label.trim()) Object.assign(patch, guess);
+    setField(id, patch);
+    if (!editing && !name.trim()) setName(nameFromRef(ref));
+  };
 
   const audienceKey = JSON.stringify(audience);
   const [debouncedAudience, setDebouncedAudience] = useState(audienceKey);
@@ -143,7 +189,7 @@ export function SecretDialog({ projectId, secret, open, onClose, onSaved }: {
     if (!proposed.length) { toast.error(t('secrets.pasteNothing')); return; }
     // Proposed fields replace the empty starter rows, and add to rows already filled in.
     const kept = fields.filter((f) => f.existing || f.value.trim() !== '');
-    setFields(uniqueKeys([...kept, ...proposed.map((p) => ({ id: nextId(), ...p, existing: false, hasValue: false }))]));
+    setFields(uniqueKeys([...kept, ...proposed.map((p) => ({ id: nextId(), ...p, existing: false, hasValue: false, ref: '' }))]));
     setPaste('');
     toast(t('secrets.pasteDone').replace('{n}', String(proposed.length)));
   };
@@ -159,19 +205,23 @@ export function SecretDialog({ projectId, secret, open, onClose, onSaved }: {
 
   const save = useMutation({
     mutationFn: async () => {
-      const payloadFields = uniqueKeys(fields.filter((f) => f.label.trim())).map((f) => ({
-        key: f.key, label: f.label.trim(), type: f.type,
-        // An existing secret field left empty keeps its stored value.
-        ...(f.existing && isSecretValueType(f.type) && f.value === '' ? {} : { value: f.value }),
-      }));
+      const payloadFields = uniqueKeys(fields.filter((f) => f.label.trim())).map((f) => (fromProvider
+        ? { key: f.key, label: f.label.trim(), type: f.type, ref: f.ref }
+        : {
+          key: f.key, label: f.label.trim(), type: f.type,
+          // An existing secret field left empty keeps its stored value.
+          ...(f.existing && isSecretValueType(f.type) && f.value === '' ? {} : { value: f.value }),
+        }));
       if (!editing) {
         return api.post<SecretView>(`/projects/${projectId}/secrets`, {
           name: name.trim(), description: description.trim() || undefined, environment,
           expiresAt, availableToAgents: agents, audience, fields: payloadFields,
+          ...(fromProvider ? { source: 'provider', connectionId } : {}),
         });
       }
       const body: Record<string, unknown> = { version: secret.version };
       if (canEditContent) Object.assign(body, { description: description.trim() || null, expiresAt, fields: payloadFields });
+      if (canEditContent && fromProvider && connectionId && connectionId !== secret.provider?.connectionId) body.connectionId = connectionId;
       if (canGovern) Object.assign(body, { environment, availableToAgents: agents, audience });
       return api.patch<SecretView>(`/project-secrets/${secret.id}`, body);
     },
@@ -183,6 +233,10 @@ export function SecretDialog({ projectId, secret, open, onClose, onSaved }: {
     e.preventDefault();
     setError(null);
     if (!audience.length) { setError(t('secrets.audienceEmpty')); return; }
+    if (fromProvider && fields.some((f) => f.label.trim() && !f.ref)) {
+      setError(t('secrets.providerRef').replace('{provider}', providerName) + ': ' + t('secrets.providerRefPick'));
+      return;
+    }
     save.mutate();
   };
 
@@ -201,7 +255,12 @@ export function SecretDialog({ projectId, secret, open, onClose, onSaved }: {
   const addPrincipal = (p: AudiencePrincipal) => setAudience((a) => (a.some((x) => JSON.stringify(x) === JSON.stringify(p)) ? a : [...a, p]));
 
   return (
-    <Dialog open={open} onClose={onClose} title={editing ? t('secrets.edit') : t('secrets.add')} width={600}>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={editing ? t('secrets.edit') : fromProvider ? t('secrets.addFromProvider').replace('{provider}', providerName) : t('secrets.add')}
+      width={600}
+    >
       <form onSubmit={submit} className="max-h-[75vh] space-y-5 overflow-y-auto px-4 pb-4 pt-1">
         {/* Name and environment */}
         <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
@@ -236,8 +295,66 @@ export function SecretDialog({ projectId, secret, open, onClose, onSaved }: {
           <Input id="secret-desc" value={description} disabled={!canEditContent} placeholder={t('secrets.descriptionPh')} onChange={(e) => setDescription(e.target.value)} />
         </div>
 
+        {/* Provider fields: each reads one provider secret */}
+        {canEditContent && fromProvider && (
+          <section className="space-y-2">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-faint">{t('secrets.fields')}</h3>
+            <p className="text-xs text-muted-foreground">{t('secrets.providerIntro').replaceAll('{provider}', providerName)}</p>
+            {(editing ? secret.provider?.state === 'disconnected' || (linkedQ.data?.length ?? 0) > 1 : (linkedQ.data?.length ?? 0) > 1) && (
+              <div className="space-y-1">
+                <span className="block text-xs text-muted-foreground">{t('secrets.providerConnection')}</span>
+                <SearchSelect
+                  className="w-full"
+                  value={connectionId}
+                  placeholder={t('secrets.providerRelink')}
+                  options={(linkedQ.data ?? []).map((c) => ({ value: c.id, label: c.label }))}
+                  onChange={(v) => setConnectionId(v)}
+                />
+              </div>
+            )}
+            {namesQ.isError && (
+              <p className="text-xs text-destructive">
+                {namesQ.error instanceof ApiError ? namesQ.error.message : t('secrets.providerNamesFailed').replace('{provider}', providerName)}
+              </p>
+            )}
+            <div className="space-y-1.5">
+              {fields.map((f) => (
+                <div key={f.id} className="grid grid-cols-[minmax(0,1fr)_120px_minmax(0,1.4fr)_auto] items-center gap-1.5">
+                  <Input value={f.label} placeholder={t('secrets.fieldLabel')} aria-label={t('secrets.fieldLabel')} onChange={(e) => setField(f.id, { label: e.target.value })} />
+                  <Select value={f.type} aria-label={t('secrets.fieldType')} onChange={(e) => setField(f.id, { type: e.target.value as SecretFieldType })}>
+                    {SECRET_FIELD_TYPES.map((type) => <option key={type} value={type}>{t(`secrets.type.${type}`)}</option>)}
+                  </Select>
+                  <SearchSelect
+                    className="w-full"
+                    triggerClassName="font-mono"
+                    width={260}
+                    value={f.ref || null}
+                    placeholder={namesQ.isLoading ? '…' : t('secrets.providerRefPick')}
+                    disabled={!connection}
+                    menuLabel={t('secrets.providerRef').replace('{provider}', providerName)}
+                    options={[...new Set([...(namesQ.data ?? []), ...(f.ref ? [f.ref] : [])])].map((n) => ({
+                      value: n, label: n,
+                      disabled: n !== f.ref && fields.some((x) => x.id !== f.id && x.ref === n),
+                    }))}
+                    onChange={(v) => chooseRef(f.id, v)}
+                  />
+                  <IconButton size="sm" aria-label={t('common.delete')} onClick={() => setFields((list) => list.filter((x) => x.id !== f.id))}>
+                    <X size={13} />
+                  </IconButton>
+                </div>
+              ))}
+              <Button
+                type="button" size="xs" variant="ghost"
+                onClick={() => setFields((list) => [...list, { id: nextId(), key: 'field', label: '', type: 'api_key', value: '', existing: false, hasValue: false, ref: '' }])}
+              >
+                <Plus size={13} /> {t('secrets.addField')}
+              </Button>
+            </div>
+          </section>
+        )}
+
         {/* Fields, with the paste box */}
-        {canEditContent && (
+        {canEditContent && !fromProvider && (
           <section className="space-y-2">
             <div className="flex items-center justify-between">
               <h3 className="text-[11px] font-semibold uppercase tracking-wider text-faint">{t('secrets.fields')}</h3>
@@ -280,7 +397,7 @@ export function SecretDialog({ projectId, secret, open, onClose, onSaved }: {
               ))}
               <Button
                 type="button" size="xs" variant="ghost"
-                onClick={() => setFields((list) => [...list, { id: nextId(), key: 'field', label: '', type: 'password', value: '', existing: false, hasValue: false }])}
+                onClick={() => setFields((list) => [...list, { id: nextId(), key: 'field', label: '', type: 'password', value: '', existing: false, hasValue: false, ref: '' }])}
               >
                 <Plus size={13} /> {t('secrets.addField')}
               </Button>

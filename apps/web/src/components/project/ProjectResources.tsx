@@ -12,7 +12,7 @@
 import { useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  BookOpen, Bot, Download, FileText, FolderOpen, GripVertical, KeyRound, Link2, Pencil, Plus, Search, Trash2, Upload,
+  AlertTriangle, BookOpen, Bot, Cloud, Download, FileText, FolderOpen, GripVertical, KeyRound, Link2, Pencil, Plus, Search, Trash2, Upload,
 } from 'lucide-react';
 import { api, qs, ApiError } from '../../lib/api';
 import { openExternal } from '../../lib/desktop';
@@ -27,7 +27,7 @@ import { useT, extendDict } from '../../lib/i18n';
 import type { UserLite } from './pickers';
 import { SecretDialog } from './SecretDialog';
 import { ExpiryHint, SecretPanel } from './SecretPanel';
-import { ENV_TONE, type SecretView } from './secretsShared';
+import { ENV_TONE, PROVIDER_NAME, type ProviderConnection, type SecretView } from './secretsShared';
 
 extendDict({
   en: {
@@ -128,7 +128,18 @@ export function ProjectResources({ projectId, canWrite, users = [] }: { projectI
   const params = useSearchParams();
   // A notification links here with ?secret=<id> to open that secret.
   const [openSecret, setOpenSecret] = useState<string | null>(params.get('secret'));
-  const [secretDialog, setSecretDialog] = useState<SecretView | 'new' | null>(null);
+  const [secretDialog, setSecretDialog] = useState<SecretView | 'new' | { provider: ProviderConnection } | null>(null);
+  // Connections to Doppler and the like that this project may add secrets from.
+  const providersQ = useQuery<ProviderConnection[]>({
+    queryKey: ['project-secret-providers', projectId],
+    queryFn: () => api.get<{ data: ProviderConnection[] }>(`/projects/${projectId}/secret-providers`).then((r) => r.data),
+    enabled: can('secrets.write') && canWrite,
+    staleTime: 60_000,
+    retry: false,
+  });
+  const providers = providersQ.data ?? [];
+  const dialogSecret = secretDialog && secretDialog !== 'new' && 'id' in secretDialog ? secretDialog : null;
+  const dialogProvider = secretDialog && secretDialog !== 'new' && !('id' in secretDialog) ? secretDialog.provider : null;
   const [renaming, setRenaming] = useState<string | null>(null);
   const [preview, setPreview] = useState<FileRow | null>(null);
   const [toDelete, setToDelete] = useState<ProjectResource | null>(null);
@@ -265,6 +276,11 @@ export function ProjectResources({ projectId, canWrite, users = [] }: { projectI
         {can('secrets.write') && (
           <MenuItem icon={<KeyRound size={14} />} onSelect={() => setSecretDialog('new')}>{t('secrets.secret')}</MenuItem>
         )}
+        {can('secrets.write') && providers.map((p) => (
+          <MenuItem key={p.id} icon={<Cloud size={14} />} onSelect={() => setSecretDialog({ provider: p })}>
+            {t('secrets.addFromProvider').replace('{provider}', providers.length > 1 ? p.label : PROVIDER_NAME[p.kind] ?? p.label)}
+          </MenuItem>
+        ))}
       </DropdownMenu>
     </>
   );
@@ -358,6 +374,13 @@ export function ProjectResources({ projectId, canWrite, users = [] }: { projectI
                     {r.secret.availableToAgents && (
                       <Tooltip label={t('secrets.agents')}><Bot size={13} className="hidden shrink-0 text-faint sm:block" /></Tooltip>
                     )}
+                    {r.secret.provider && (
+                      r.secret.provider.state === 'ok' ? (
+                        <Tooltip label={r.secret.provider.label ?? ''}><Cloud size={13} className="hidden shrink-0 text-faint sm:block" /></Tooltip>
+                      ) : (
+                        <Tooltip label={r.secret.provider.error ?? ''}><AlertTriangle size={13} className="shrink-0 text-warning" /></Tooltip>
+                      )
+                    )}
                     <span className="hidden shrink-0 truncate text-xs text-faint md:block">{r.secret.fields.map((f) => f.label).join(', ')}</span>
                     <span className={cn('shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium', ENV_TONE[r.secret.environment])}>
                       {t(`secrets.env.${r.secret.environment}`)}
@@ -420,13 +443,14 @@ export function ProjectResources({ projectId, canWrite, users = [] }: { projectI
       <SecretDialog
         projectId={projectId}
         open={secretDialog !== null}
-        secret={secretDialog === 'new' ? null : secretDialog}
+        secret={dialogSecret}
+        provider={dialogProvider}
         onClose={() => setSecretDialog(null)}
         onSaved={(saved) => {
           invalidate();
           qc.invalidateQueries({ queryKey: ['project-secret', saved.id] });
           qc.invalidateQueries({ queryKey: ['project-secret-trail', saved.id] });
-          if (secretDialog === 'new') setOpenSecret(saved.id);
+          if (!dialogSecret) setOpenSecret(saved.id);
         }}
       />
       <PagePickerDialog

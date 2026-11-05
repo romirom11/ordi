@@ -330,6 +330,13 @@
       "when": 1793906183918,
       "tag": "0046_intake_form_config",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1793918872159,
+      "tag": "0047_secret_providers",
+      "breakpoints": true
     }
   ]
 }
