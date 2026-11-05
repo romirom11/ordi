@@ -22,6 +22,7 @@ import {
 } from '@ordi/shared';
 import type { Actor, AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
+import { rejectReadOnlyWrites } from '../../core/rbac';
 import { assertProject, accessibleSpaceIds, editableSpaceIds } from '../../core/access';
 import { writeActivity } from '../../core/activity';
 import { err } from '../../lib/errors';
@@ -156,6 +157,7 @@ async function viewOf(actor: Actor, row: ResourceRow): Promise<ProjectResourceVi
 export function projectResourcesRoutes() {
   const app = new Hono<AppEnv>();
   app.use('*', requireAuth);
+  app.use('*', rejectReadOnlyWrites());
 
   app.get('/projects/:id/resources', async (c) => {
     const actor = currentActor(c);

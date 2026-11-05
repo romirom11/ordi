@@ -82,6 +82,20 @@ export function isWritePermission(p: string): boolean {
  * mutating method – the permission name alone is not enough (finance.settings
  * guards both the reads and the writes of the same settings).
  */
+/**
+ * Refuse every write from a read-only token. `guard()` checks this for the
+ * routes it covers; routes whose access is decided per resource (project
+ * membership, a secret's audience) mount this instead, or a read-only token
+ * would write wherever its owner can.
+ */
+export function rejectReadOnlyWrites(): MiddlewareHandler<AppEnv> {
+  return async (c, next) => {
+    const actor = c.get('actor') as Actor | undefined;
+    if (actor?.readOnly && isMutatingMethod(c.req.method)) throw err.forbidden('Read-only token');
+    await next();
+  };
+}
+
 export function isMutatingMethod(method: string): boolean {
   return !['GET', 'HEAD', 'OPTIONS'].includes(method.toUpperCase());
 }
