@@ -55,16 +55,19 @@ export function LeadPicker({ value, users, onSelect, disabled }: {
   );
   if (disabled) return trigger;
   return (
-    <DropdownMenu trigger={trigger} align="start" width={220} className="w-full">
-      <MenuLabel>{t('projects.lead')}</MenuLabel>
-      <MenuItem icon={<UserCircle2 size={16} />} onSelect={() => onSelect(null)} checked={!value}>{t('projects.noLead')}</MenuItem>
-      <MenuSeparator />
-      {activeUsers(users).map((u) => (
-        <MenuItem key={u.id} icon={<Avatar name={u.name} src={u.avatar} size={18} />} onSelect={() => onSelect(u.id)} checked={value === u.id}>
-          {u.name}
-        </MenuItem>
-      ))}
-    </DropdownMenu>
+    <SearchSelect
+      align="start"
+      width={230}
+      className="w-full"
+      value={value ?? ''}
+      onChange={(id) => onSelect(id || null)}
+      menuLabel={t('projects.lead')}
+      trigger={trigger}
+      options={[
+        { value: '', label: t('projects.noLead'), icon: <UserCircle2 size={16} /> },
+        ...byName(activeUsers(users)).map((u) => ({ value: u.id, label: u.name, icon: <Avatar name={u.name} src={u.avatar} size={18} /> })),
+      ]}
+    />
   );
 }
 
@@ -176,6 +179,7 @@ export function CompanyPicker({ value, companyName, companies, onSelect, disable
       align="start"
       width={230}
       className="w-full"
+      searchable
       value={value ?? ''}
       onChange={(id) => onSelect(id || null)}
       menuLabel={t('projects.company')}

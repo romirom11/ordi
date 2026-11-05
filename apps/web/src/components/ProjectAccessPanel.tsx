@@ -91,13 +91,14 @@ export function ProjectAccessPanel({ projectId, canManage }: { projectId: string
   const upsertMember = useMutation({
     mutationFn: (m: { userId: string; role: MemberRole; canWriteTasks: boolean }) =>
       api.post(`/projects/${projectId}/members`, m),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['project-members', projectId] }),
+    // /me carries your own role here, so a change to yourself shows at once.
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['project-members', projectId] }); qc.invalidateQueries({ queryKey: ['me'] }); },
     onError: () => toast.error(t('access.saveFailed')),
   });
 
   const removeMember = useMutation({
     mutationFn: (userId: string) => api.del(`/projects/${projectId}/members/${userId}`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['project-members', projectId] }); toast(t('access.updated')); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['project-members', projectId] }); qc.invalidateQueries({ queryKey: ['me'] }); toast(t('access.updated')); },
     onError: () => toast.error(t('access.saveFailed')),
   });
 
