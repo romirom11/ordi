@@ -415,6 +415,81 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
     };
   }));
 
+  server.tool('create_project', 'Create a project – the container tasks, milestones and cycles live in. Needs a name and a short key (2-5 uppercase letters, becomes the task prefix: KEY-12). '
+    + 'type is a project type by name or id; omitted, the workspace default is used. Some types require a client (companyId, see list_companies). '
+    + 'You become the project admin; leadId and memberIds (ids from list_users) join as members. Returns the id and key the other project tools take.', {
+    name: z.string().min(1),
+    key: z.string().regex(/^[A-Z]{2,5}$/, '2-5 uppercase letters').describe('e.g. MKT; must be unused'),
+    type: z.string().optional().describe('Project type name or id; defaults to the workspace default'),
+    companyId: z.string().optional().describe('Client company id (list_companies)'),
+    leadId: z.string().optional().describe('User id of the project lead (list_users)'),
+    memberIds: z.array(z.string()).optional().describe('User ids to add as members (list_users)'),
+    visibility: z.enum(['workspace', 'private']).optional().describe('workspace (default): everyone with project access sees it; private: members only'),
+    summary: z.string().max(500).optional().describe('One-line summary'),
+    description: z.string().optional().describe('Longer description, plain text; blank lines separate paragraphs'),
+    priority: z.enum(TASK_PRIORITIES).optional(),
+    startDate: z.string().optional().describe('YYYY-MM-DD'),
+    targetDate: z.string().optional().describe('YYYY-MM-DD'),
+    customFields: z.record(z.string(), z.unknown()).optional().describe('Project custom field values by key (list_custom_fields entityType=projects)'),
+  }, (args) => wrap(async () => {
+    const types = (await client.get<{ data: Row[] }>('/project-types')).data;
+    let type: Row | undefined;
+    if (args.type) {
+      const wanted = args.type.trim().toLowerCase();
+      type = types.find((x) => x.id === args.type!.trim() || String(x.name).toLowerCase() === wanted);
+      if (!type) throw new Error(`Unknown project type "${args.type}". Available: ${types.map((x) => x.name).join(', ') || '(none)'}.`);
+    } else {
+      type = types.find((x) => x.isDefault) ?? types[0];
+      if (!type) throw new Error('This workspace has no project types yet – create one in Settings → Projects first.');
+    }
+    if (type.requiresClient && !args.companyId) {
+      throw new Error(`Project type "${type.name}" requires a client – pass companyId (see list_companies), or pick another type: ${types.filter((x) => !x.requiresClient).map((x) => x.name).join(', ') || '(none)'}.`);
+    }
+
+    const created = await client.post<{ id: string; key: string }>('/projects', {
+      name: args.name,
+      key: args.key,
+      projectTypeId: type.id,
+      ...(args.companyId ? { companyId: args.companyId } : {}),
+      ...(args.visibility ? { visibility: args.visibility } : {}),
+      ...(args.leadId ? { leadId: args.leadId } : {}),
+      ...(args.startDate ? { startDate: args.startDate } : {}),
+      ...(args.targetDate ? { targetDate: args.targetDate } : {}),
+      // The project page reads the description as stored tiptap JSON.
+      ...(args.description?.trim() ? { description: JSON.stringify(textToDoc(fromAgent(args.description.trim()))) } : {}),
+      ...(args.customFields ? { customFields: args.customFields } : {}),
+    });
+
+    // Summary and priority are project edits, not creation fields.
+    const patch: Row = {};
+    if (args.summary?.trim()) patch.summary = args.summary.trim();
+    if (args.priority && args.priority !== 'none') patch.priority = args.priority;
+    if (Object.keys(patch).length) await client.patch(`/projects/${created.id}`, patch);
+
+    // The creator is already the admin: re-adding them as a member would
+    // demote them, so anyone already on the project is skipped.
+    const existing = (await client.get<{ data: Row[] }>(`/projects/${created.id}/members`)).data.map((m) => m.userId);
+    const invite = [...new Set([...(args.memberIds ?? []), ...(args.leadId ? [args.leadId] : [])])].filter((id) => !existing.includes(id));
+    const failed: { userId: string; error: string }[] = [];
+    for (const userId of invite) {
+      try {
+        await client.post(`/projects/${created.id}/members`, { userId, role: 'member', canWriteTasks: true });
+      } catch (e) {
+        failed.push({ userId, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
+    return {
+      action: 'created',
+      project: {
+        id: created.id, key: created.key, name: args.name, type: type.name,
+        companyId: args.companyId ?? null, leadId: args.leadId ?? null,
+        visibility: args.visibility ?? 'workspace',
+      },
+      members: { added: invite.filter((id) => !failed.some((f) => f.userId === id)), ...(failed.length ? { failed } : {}) },
+    };
+  }));
+
   // ── Plan: milestones (what, by when) and cycles (time boxes) ──
 
   server.tool('create_milestone', 'Add a milestone – a stage of the project such as "Design sign-off" or "Launch", with an optional target date. Tasks join it through create_task / update_task `milestone`. A milestone is about scope; for a time box use a cycle.', {

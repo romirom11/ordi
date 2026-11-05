@@ -95,9 +95,9 @@ export function SearchSelect({
     >
       {menuLabel && <MenuLabel>{menuLabel}</MenuLabel>}
       <OptionList
-        value={value ?? ''}
+        selected={[value ?? '']}
         options={options}
-        onChange={onChange}
+        onPick={(next) => { if (next !== (value ?? '')) onChange(next); }}
         withSearch={searchable ?? options.length >= SEARCH_FROM}
       />
       {footer && (
@@ -111,14 +111,50 @@ export function SearchSelect({
 }
 
 /**
+ * The multi-select flavour: the same searchable list, but a pick toggles the
+ * option and the menu stays open, so choosing five people is five clicks
+ * instead of five trips through the trigger.
+ */
+export function SearchMultiSelect({
+  values, options, onChange, disabled, className, width = 220, align = 'start',
+  searchable, trigger, menuLabel,
+}: {
+  values: string[];
+  options: SearchSelectOption[];
+  onChange: (values: string[]) => void;
+  disabled?: boolean;
+  className?: string;
+  width?: number;
+  align?: 'start' | 'end';
+  searchable?: boolean;
+  trigger: ReactNode;
+  menuLabel?: string;
+}) {
+  return (
+    <DropdownMenu align={align} width={width} disabled={disabled} className={className} trigger={trigger}>
+      {menuLabel && <MenuLabel>{menuLabel}</MenuLabel>}
+      <OptionList
+        selected={values}
+        multi
+        options={options}
+        onPick={(next) => onChange(values.includes(next) ? values.filter((v) => v !== next) : [...values, next])}
+        withSearch={searchable ?? options.length >= SEARCH_FROM}
+      />
+    </DropdownMenu>
+  );
+}
+
+/**
  * Menu body – its own component so the query resets with each open (the menu
  * unmounts when closed). The search input owns the keyboard: arrows move the
  * highlight, Enter picks it, Escape falls through to close the menu.
  */
-function OptionList({ value, options, onChange, withSearch }: {
-  value: string;
+function OptionList({ selected, multi = false, options, onPick, withSearch }: {
+  selected: string[];
+  /** Toggle rows and keep the menu open instead of picking one and closing. */
+  multi?: boolean;
   options: SearchSelectOption[];
-  onChange: (value: string) => void;
+  onPick: (value: string) => void;
   withSearch: boolean;
 }) {
   const t = useT();
@@ -133,8 +169,8 @@ function OptionList({ value, options, onChange, withSearch }: {
     : options;
 
   const pick = (next: string) => {
-    close();
-    if (next !== value) onChange(next);
+    if (!multi) close();
+    onPick(next);
   };
   const move = (delta: number) => {
     if (matches.length === 0) return;
@@ -171,8 +207,8 @@ function OptionList({ value, options, onChange, withSearch }: {
           <button
             key={option.value || '__empty__'}
             type="button"
-            role="menuitemradio"
-            aria-checked={option.value === value}
+            role={multi ? 'menuitemcheckbox' : 'menuitemradio'}
+            aria-checked={selected.includes(option.value)}
             disabled={option.disabled}
             onClick={() => pick(option.value)}
             onMouseEnter={() => setActive(index)}
@@ -186,7 +222,7 @@ function OptionList({ value, options, onChange, withSearch }: {
             {/* Options wrap too – a picker whose choices cannot be read defeats itself. */}
             <span className="min-w-0 flex-1 break-words">{option.render ?? option.label}</span>
             {option.hint && <span className="shrink-0 text-[11px] text-faint">{option.hint}</span>}
-            {option.value === value && <Check size={13} className="shrink-0 text-primary" />}
+            {selected.includes(option.value) && <Check size={13} className="shrink-0 text-primary" />}
           </button>
         ))}
         {matches.length === 0 && <p className="px-2.5 py-2 text-xs text-faint">{t('select.noMatches')}</p>}

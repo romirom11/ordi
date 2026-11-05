@@ -42,7 +42,15 @@ services:
       APP_URL: http://localhost:8080
       API_URL: http://localhost:3000
       AUTH_SECRET: ${AUTH_SECRET:-change-me}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      # The key that encrypts every stored credential. Left empty, the api
+      # generates one into the ordi_keys volume on first start – back that
+      # volume up with the database, or set ENCRYPTION_KEY in .env yourself.
+      # The zero key is listed as previous so installs from before this
+      # change still read what they stored; `rotate-encryption-key` moves
+      # it onto the new key (docs/deployment.md, "Encryption key").
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      ENCRYPTION_KEY_FILE: /data/keys/encryption.key
+      ENCRYPTION_KEY_PREVIOUS: ${ENCRYPTION_KEY_PREVIOUS:-0000000000000000000000000000000000000000000000000000000000000000}
       CORS_ORIGINS: http://localhost:8080,tauri://localhost
       S3_ENDPOINT: http://s3:9000
       S3_BUCKET: ordi
@@ -66,6 +74,8 @@ services:
       timeout: 5s
       retries: 10
       start_period: 90s
+    volumes:
+      - ordi_keys:/data/keys
     depends_on:
       db:
         condition: service_healthy
@@ -106,3 +116,4 @@ volumes:
   db_data:
   s3_data:
   agent_work:
+  ordi_keys:

@@ -12,16 +12,16 @@ import {
   Avatar, AvatarGroup, PriorityIcon, ProgressRing, Tooltip, fmtDate, cn,
 } from '../components/ui';
 import { Calendar } from '../components/DatePicker';
-import { byName, useLabels, useUsersLookup } from '../lib/queries';
+import { activeUsers, byName, useLabels, useUsersLookup } from '../lib/queries';
 import { Dialog, DropdownMenu, MenuItem, MenuLabel, MenuSeparator, useMenuClose } from '../components/overlays';
-import { SearchSelect } from '../components/SearchSelect';
+import { SearchMultiSelect, SearchSelect } from '../components/SearchSelect';
 import { toast } from '../components/overlays';
 import { ProjectIcon } from '../components/project/ProjectIcon';
 import { ProjectContextMenu } from '../components/project/contextMenus';
 import { ProjectSettingsPanel } from '../components/project/ProjectSettingsPanel';
 import { DeletedProjectsPanel } from '../components/project/DeletedProjectsPanel';
 import { PRIORITIES, PRIORITY_LABEL_KEY } from '../components/project/taskViewPrefs';
-import { textToDoc } from '@ordi/shared';
+import { textToDoc, type MeResponse } from '@ordi/shared';
 import { useT, extendDict } from '../lib/i18n';
 import { usePersistedState, oneOfPref } from '../lib/prefs';
 import { QueryFeedback } from '../components/QueryFeedback';
@@ -376,6 +376,7 @@ export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: 
   open: boolean; onClose: () => void; onCreated: (id: string) => void; defaultCompanyId?: string;
 }) {
   const t = useT();
+  const qc = useQueryClient();
   const canCrm = useCan()('crm.read');
   const meId = useMe().user.id;
   const [name, setName] = useState('');
@@ -423,6 +424,9 @@ export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: 
   const noClientsYet = canCrm && companiesQ.isSuccess && companies.length === 0;
   const usersQ = useUsersLookup();
   const users = usersQ.data ?? [];
+  // Deactivated people can't lead or join a new project – they only stay
+  // visible on records they already belong to.
+  const pickable = activeUsers(users);
   const labelsQ = useLabels('project');
   const labels = labelsQ.data ?? [];
 
@@ -477,7 +481,20 @@ export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: 
       }
       return project;
     },
-    onSuccess: (p) => onCreated(p.id),
+    onSuccess: (p) => {
+      // The project page decides what you may edit from /me's memberships,
+      // which predate this project: without the new admin row a private
+      // project opened read-only – no description editor, no upload.
+      qc.setQueryData<MeResponse>(['me'], (me) => (me ? {
+        ...me,
+        projectMemberships: [
+          ...me.projectMemberships.filter((m) => m.projectId !== p.id),
+          { projectId: p.id, role: 'admin', canWriteTasks: true },
+        ],
+      } : me));
+      qc.invalidateQueries({ queryKey: ['me'] });
+      onCreated(p.id);
+    },
     onError: (e) => { const m = e instanceof ApiError ? e.message : t('projects.createFailed'); setError(m); toast.error(m); },
   });
 
@@ -579,6 +596,7 @@ export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: 
             <SearchSelect
               align="start"
               width={240}
+              searchable
               value={companyId}
               onChange={setCompanyId}
               menuLabel={t('crm.client')}
@@ -639,29 +657,30 @@ export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: 
             ))}
           </DropdownMenu>
 
-          <DropdownMenu
+          <SearchSelect
             align="start"
-            width={230}
+            width={240}
+            value={leadId ?? ''}
+            onChange={(id) => setLeadId(id || null)}
+            menuLabel={t('projects.lead')}
             trigger={(
               <FormChip active={!!lead} label={t('projects.lead')}>
                 {lead ? <Avatar name={lead.name} src={lead.avatar} size={16} /> : <UserCircle2 size={13} />}
                 {lead ? lead.name : t('projects.lead')}
               </FormChip>
             )}
-          >
-            <MenuLabel>{t('projects.lead')}</MenuLabel>
-            <MenuItem icon={<UserCircle2 size={16} />} checked={!leadId} onSelect={() => setLeadId(null)}>{t('projects.noLead')}</MenuItem>
-            <MenuSeparator />
-            {users.map((u) => (
-              <MenuItem key={u.id} icon={<Avatar name={u.name} src={u.avatar} size={18} />} checked={leadId === u.id} onSelect={() => setLeadId(u.id)}>
-                {u.name}
-              </MenuItem>
-            ))}
-          </DropdownMenu>
+            options={[
+              { value: '', label: t('projects.noLead'), icon: <UserCircle2 size={16} /> },
+              ...byName(pickable).map((u) => ({ value: u.id, label: u.name, icon: <Avatar name={u.name} src={u.avatar} size={18} /> })),
+            ]}
+          />
 
-          <DropdownMenu
+          <SearchMultiSelect
             align="start"
-            width={230}
+            width={240}
+            values={memberIds}
+            onChange={setMemberIds}
+            menuLabel={t('access.members')}
             trigger={(
               <FormChip active={memberIds.length > 0} label={t('access.members')}>
                 {memberIds.length > 0
@@ -670,46 +689,30 @@ export function NewProjectModal({ open, onClose, onCreated, defaultCompanyId }: 
                 {memberIds.length > 0 ? String(memberIds.length) : t('access.members')}
               </FormChip>
             )}
-          >
-            <MenuLabel>{t('access.members')}</MenuLabel>
-            {users.map((u) => (
-              <MenuItem
-                key={u.id}
-                icon={<Avatar name={u.name} src={u.avatar} size={18} />}
-                checked={memberIds.includes(u.id)}
-                onSelect={() => setMemberIds((ids) => (ids.includes(u.id) ? ids.filter((x) => x !== u.id) : [...ids, u.id]))}
-              >
-                {u.name}
-              </MenuItem>
-            ))}
-          </DropdownMenu>
+            options={byName(pickable).map((u) => ({ value: u.id, label: u.name, icon: <Avatar name={u.name} src={u.avatar} size={18} /> }))}
+          />
 
           <DateChip value={startDate} onChange={setStartDate} label={t('projects.startDate')} />
           <DateChip value={targetDate} onChange={setTargetDate} label={t('projects.targetDate')} min={startDate} />
 
           {labels.length > 0 && (
-            <DropdownMenu
+            <SearchMultiSelect
               align="start"
               width={230}
+              values={labelIds}
+              onChange={setLabelIds}
+              menuLabel={t('projects.labels')}
               trigger={(
                 <FormChip active={labelIds.length > 0} label={t('projects.labels')}>
                   <TagIcon size={13} />
                   {labelIds.length > 0 ? String(labelIds.length) : t('projects.labels')}
                 </FormChip>
               )}
-            >
-              <MenuLabel>{t('projects.labels')}</MenuLabel>
-              {labels.map((l) => (
-                <MenuItem
-                  key={l.id}
-                  icon={<span className="h-2 w-2 rounded-full" style={{ backgroundColor: l.color ?? '#8a8f98' }} />}
-                  checked={labelIds.includes(l.id)}
-                  onSelect={() => setLabelIds((ids) => (ids.includes(l.id) ? ids.filter((x) => x !== l.id) : [...ids, l.id]))}
-                >
-                  {l.name}
-                </MenuItem>
-              ))}
-            </DropdownMenu>
+              options={labels.map((l) => ({
+                value: l.id, label: l.name,
+                icon: <span className="block h-2 w-2 rounded-full" style={{ backgroundColor: l.color ?? '#8a8f98' }} />,
+              }))}
+            />
           )}
         </div>
 
