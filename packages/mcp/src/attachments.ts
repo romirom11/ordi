@@ -124,4 +124,28 @@ export function registerAttachmentTools(server: McpServer, client: OrdiClient): 
         };
       }),
   );
+
+  server.tool(
+    'rename_attachment',
+    'Rename a file in ordi storage (a record\'s Files section or an inline upload). '
+      + 'Only the name it shows and downloads under changes: the bytes, the id and every embedded src stay the same. '
+      + 'Keep the extension unless the user asks otherwise; blocked extensions are refused.',
+    {
+      id: z.string().min(1).describe('Attachment id, as upload_attachment returned it.'),
+      filename: z.string().min(1).max(255).describe('New filename with extension, e.g. "Brand guide v2.pdf".'),
+    },
+    ({ id, filename }) =>
+      wrap(async () => {
+        const name = filename.trim();
+        if (/[\\/]/.test(name)) throw new Error('filename cannot contain slashes.');
+        const ext = extOf(name);
+        if (ext && BLOCKED_FILE_EXTENSIONS.includes(ext)) {
+          throw new Error(`File type .${ext} is not allowed (blocked: ${BLOCKED_FILE_EXTENSIONS.join(', ')}).`);
+        }
+        const updated = await client.patch<{ id: string; filename: string; size: number; mime: string }>(
+          `/attachments/${encodeURIComponent(id)}`, { filename: name },
+        );
+        return { id: updated.id, filename: updated.filename, size: updated.size, mime: updated.mime };
+      }),
+  );
 }

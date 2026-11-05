@@ -3,6 +3,20 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## Unreleased
+
+- **Milestones open into a side panel**: a milestone's name in the Plan
+  tab opens its panel – rename it, set the target date, mark it done, see
+  its progress and every task in it with its status, open a task, or add
+  a new task straight into the milestone. "Open in Tasks" still jumps to
+  the Tasks tab filtered by the milestone.
+- **Files can be renamed**: the pencil on a file row (or a double-click on
+  its name in the Files section) renames it in place, with the extension
+  kept out of the selection. Only the name changes – downloads are saved
+  under it, while the stored bytes and every embedded link stay the same.
+  Blocked extensions are refused on rename as on upload. New API
+  `PATCH /attachments/:id` and MCP tool `rename_attachment`.
+
 ## v1.42.0
 
 - **Deleted projects can be restored**: the Projects page lists them with a

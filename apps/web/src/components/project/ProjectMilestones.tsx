@@ -1,6 +1,7 @@
 /**
- * Milestones block on the project overview: quick-add, done checkbox with
- * strikethrough, target date picker and up/down reordering.
+ * Milestones block in the Plan tab: quick-add, done checkbox with
+ * strikethrough, target date picker and up/down reordering. A milestone's name
+ * opens its side panel (MilestoneDetails) with its tasks.
  */
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -10,6 +11,8 @@ import { Checkbox, IconButton, ProgressRing, Skeleton, Tooltip, fmtDate, cn } fr
 import { DropdownMenu, MenuItem, MenuSeparator, toast, useMenuClose } from '../overlays';
 import { Calendar } from '../DatePicker';
 import { useT, extendDict } from '../../lib/i18n';
+import type { OpenIntent } from '../../lib/router';
+import { MilestoneDetailsPanel } from './MilestoneDetails';
 
 /** Picking a target date applies it and closes the menu. */
 function MilestoneCalendar({ value, onSelect }: { value?: string | null; onSelect: (day: string) => void }) {
@@ -27,6 +30,7 @@ extendDict({
     'projects.milestoneDown': 'Move down',
     'projects.milestoneSaveFailed': 'Could not save the milestone.',
     'projects.milestoneTasks': 'Show its tasks',
+    'projects.milestoneOpen': 'Open milestone',
     'projects.milestoneNoTasks': 'No tasks assigned yet',
     'projects.milestoneInCycle': '{n} in {cycle}',
     'projects.milestonePull': 'Pull {n} open tasks into {cycle}',
@@ -40,6 +44,7 @@ extendDict({
     'projects.milestoneDown': 'Перемістити вниз',
     'projects.milestoneSaveFailed': 'Не вдалося зберегти етап.',
     'projects.milestoneTasks': 'Показати задачі',
+    'projects.milestoneOpen': 'Відкрити етап',
     'projects.milestoneNoTasks': 'Задач ще не призначено',
     'projects.milestoneInCycle': '{n} у {cycle}',
     'projects.milestonePull': 'Взяти відкриті задачі ({n}) у {cycle}',
@@ -53,8 +58,10 @@ export interface Milestone {
   taskCount?: number; doneCount?: number;
 }
 
-export function ProjectMilestones({ projectId, canWrite, onOpenTasks, cycle }: {
-  projectId: string; canWrite: boolean;
+export function ProjectMilestones({ projectId, projectKey, canWrite, onOpenTasks, onOpenTask, cycle }: {
+  projectId: string; projectKey?: string; canWrite: boolean;
+  /** Open one task (from the milestone panel's list). */
+  onOpenTask?: (taskId: string, e?: OpenIntent) => void;
   /** Jump to the Tasks tab grouped by milestone, scrolled to this one. */
   onOpenTasks?: (milestoneId: string) => void;
   /** The running cycle, when the project uses cycles: how much of each milestone it carries, and pulling more in. */
@@ -63,6 +70,7 @@ export function ProjectMilestones({ projectId, canWrite, onOpenTasks, cycle }: {
   const t = useT();
   const qc = useQueryClient();
   const [draft, setDraft] = useState('');
+  const [openId, setOpenId] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery<Milestone[]>({
     queryKey: ['milestones', projectId],
@@ -138,9 +146,17 @@ export function ProjectMilestones({ projectId, canWrite, onOpenTasks, cycle }: {
             >
               <Diamond size={13} className={cn('shrink-0', m.done ? 'text-success' : 'text-faint')} fill={m.done ? 'currentColor' : 'none'} />
               <Checkbox checked={m.done} disabled={!canWrite} onChange={(v) => patch.mutate({ id: m.id, body: { done: v } })} />
-              <span className={cn('min-w-0 flex-1 truncate text-[13px]', m.done && 'text-muted-foreground line-through')}>
+              <button
+                type="button"
+                onClick={() => setOpenId(m.id)}
+                title={t('projects.milestoneOpen')}
+                className={cn(
+                  'min-w-0 flex-1 truncate text-left text-[13px] hover:underline',
+                  m.done && 'text-muted-foreground line-through',
+                )}
+              >
                 {m.name}
-              </span>
+              </button>
 
               {/* What the milestone actually holds: its tasks, and how far they are. */}
               <Tooltip label={m.taskCount ? t('projects.milestoneTasks') : t('projects.milestoneNoTasks')}>
@@ -250,6 +266,17 @@ export function ProjectMilestones({ projectId, canWrite, onOpenTasks, cycle }: {
           )}
         </div>
       )}
+
+      <MilestoneDetailsPanel
+        milestone={milestones.find((m) => m.id === openId) ?? null}
+        projectId={projectId}
+        projectKey={projectKey}
+        canWrite={canWrite}
+        onClose={() => setOpenId(null)}
+        onPatch={(id, body) => patch.mutate({ id, body })}
+        onOpenTask={onOpenTask}
+        onOpenInTasks={onOpenTasks}
+      />
     </section>
   );
 }

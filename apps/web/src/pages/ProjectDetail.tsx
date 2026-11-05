@@ -246,10 +246,12 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
         {tab === 'plan' && (
           <PlanTab
             projectId={id}
+            projectKey={project?.key}
             cyclesEnabled={!!project?.cyclesEnabled}
             canWrite={canWrite}
             isAdmin={isAdmin}
             onOpenMilestoneTasks={(mid) => navigate(`/projects/${id}?section=tasks&milestone=${mid}`)}
+            onOpenTask={openTask}
           />
         )}
         {tab === 'intake' && (canWrite

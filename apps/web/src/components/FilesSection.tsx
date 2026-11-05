@@ -1,6 +1,6 @@
 /**
  * Attachments for a record: presigned S3 upload (the app's standard file path,
- * PRD §14.5), list with download links, delete with confirm.
+ * PRD §14.5), list with download links, rename in place, delete with confirm.
  *
  * It lived among the CRM detail building blocks while only companies, leads and
  * deals had a Files section. Nothing about it is CRM — a project keeps files the
@@ -9,7 +9,7 @@
  */
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, FileText, Paperclip, Trash2, Upload } from 'lucide-react';
+import { Download, FileText, Paperclip, Pencil, Trash2, Upload } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
 import { openExternal } from '../lib/desktop';
 import { UploadError, resolveFileSrc, uploadAttachment } from '../lib/uploads';
@@ -23,6 +23,45 @@ export interface FileRow { id: string; filename: string; size?: number | null; m
 
 /** Every entity type the attachments API maps to a permission. */
 export type FileEntity = 'company' | 'lead' | 'deal' | 'task' | 'project';
+
+/**
+ * The name input that replaces a file's name while it is renamed. Focus
+ * selects the name without its extension, the way a file manager does, so
+ * typing keeps `.pdf`; Enter or leaving the field saves, Escape cancels.
+ */
+function RenameInput({ file, onSave, onCancel, className }: {
+  file: FileRow; onSave: (name: string) => void; onCancel: () => void; className?: string;
+}) {
+  const t = useT();
+  const [value, setValue] = useState(file.filename);
+  const done = useRef(false);
+  const finish = (save: boolean) => {
+    if (done.current) return;
+    done.current = true;
+    const name = value.trim();
+    if (save && name && name !== file.filename) onSave(name);
+    else onCancel();
+  };
+  return (
+    <input
+      autoFocus
+      value={value}
+      aria-label={t('crm.renameFile')}
+      maxLength={255}
+      onChange={(e) => setValue(e.target.value)}
+      onFocus={(e) => {
+        const dot = file.filename.lastIndexOf('.');
+        e.currentTarget.setSelectionRange(0, dot > 0 ? dot : file.filename.length);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
+      }}
+      onBlur={() => finish(true)}
+      className={cn('h-6 min-w-0 flex-1 rounded border border-border-strong bg-background px-1.5 text-[13px] outline-none focus:border-ring', className)}
+    />
+  );
+}
 
 function fmtSize(bytes?: number | null): string {
   if (!bytes) return '';
@@ -44,6 +83,7 @@ export function FilesSection({ entityType, entityId, canWrite, variant = 'sectio
   const [uploading, setUploading] = useState(false);
   const [toDelete, setToDelete] = useState<FileRow | null>(null);
   const [preview, setPreview] = useState<FileRow | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
 
   const queryKey = ['attachments', entityType, entityId];
   const { data, isLoading } = useQuery<FileRow[]>({
@@ -85,6 +125,31 @@ export function FilesSection({ entityType, entityId, canWrite, variant = 'sectio
     onSuccess: () => { setToDelete(null); qc.invalidateQueries({ queryKey }); toast(t('crm.fileDeleted')); },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
   });
+
+  const rename = useMutation({
+    mutationFn: (vars: { id: string; filename: string }) => api.patch(`/attachments/${vars.id}`, { filename: vars.filename }),
+    onMutate: async (vars) => {
+      setRenaming(null);
+      await qc.cancelQueries({ queryKey });
+      const prev = qc.getQueryData<FileRow[]>(queryKey);
+      qc.setQueryData<FileRow[]>(queryKey, (old) => (old ?? []).map((f) => (f.id === vars.id ? { ...f, filename: vars.filename } : f)));
+      return { prev };
+    },
+    onSuccess: () => toast(t('crm.fileRenamed')),
+    onError: (e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(queryKey, ctx.prev);
+      toast.error(e instanceof ApiError ? e.message : t('common.saveFailed'));
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey }),
+  });
+  const renameInput = (f: FileRow, className?: string) => (
+    <RenameInput
+      file={f}
+      className={className}
+      onSave={(filename) => rename.mutate({ id: f.id, filename })}
+      onCancel={() => setRenaming(null)}
+    />
+  );
 
   const picker = canWrite && (
     <input
@@ -132,14 +197,26 @@ export function FilesSection({ entityType, entityId, canWrite, variant = 'sectio
             {files.map((f) => (
               <div key={f.id} className="group/file flex min-h-7 items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-muted">
                 <FileText size={14} className="shrink-0 text-muted-foreground" />
-                <button
-                  onClick={() => setPreview(f)}
-                  className="min-w-0 flex-1 truncate text-left text-[13px]"
-                  title={`${f.filename} · ${fmtSize(f.size)} · ${fmtDate(f.createdAt)}`}
-                >
-                  {f.filename}
-                </button>
-                {canWrite && (
+                {renaming === f.id ? renameInput(f) : (
+                  <button
+                    onClick={() => setPreview(f)}
+                    className="min-w-0 flex-1 truncate text-left text-[13px]"
+                    title={`${f.filename} · ${fmtSize(f.size)} · ${fmtDate(f.createdAt)}`}
+                  >
+                    {f.filename}
+                  </button>
+                )}
+                {canWrite && renaming !== f.id && (
+                  <IconButton
+                    size="sm"
+                    aria-label={t('crm.renameFile')}
+                    onClick={() => setRenaming(f.id)}
+                    className="shrink-0 opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-hover/file:opacity-100"
+                  >
+                    <Pencil size={12} />
+                  </IconButton>
+                )}
+                {canWrite && renaming !== f.id && (
                   <IconButton
                     size="sm"
                     aria-label={t('common.delete')}
@@ -184,9 +261,16 @@ export function FilesSection({ entityType, entityId, canWrite, variant = 'sectio
             <div key={f.id} className={cn('group/file flex items-center gap-3 px-3 py-2', i > 0 && 'border-t border-border')}>
               <FileText size={16} className="shrink-0 text-muted-foreground" />
               {/* The name opens the preview; the icon on the right downloads. */}
-              <button onClick={() => setPreview(f)} className="min-w-0 flex-1 truncate text-left text-[13px] font-medium hover:underline" title={f.filename}>
-                {f.filename}
-              </button>
+              {renaming === f.id ? renameInput(f, 'font-medium') : (
+                <button
+                  onClick={() => setPreview(f)}
+                  onDoubleClick={canWrite ? () => setRenaming(f.id) : undefined}
+                  className="min-w-0 flex-1 truncate text-left text-[13px] font-medium hover:underline"
+                  title={f.filename}
+                >
+                  {f.filename}
+                </button>
+              )}
               <span className="shrink-0 text-xs tabular-nums text-faint">{fmtSize(f.size)}</span>
               <span className="shrink-0 text-xs text-faint">{fmtDate(f.createdAt)}</span>
               <Tooltip label={t('crm.downloadFile')}>
@@ -194,6 +278,14 @@ export function FilesSection({ entityType, entityId, canWrite, variant = 'sectio
                   <Download size={13} />
                 </IconButton>
               </Tooltip>
+              {canWrite && (
+                <Tooltip label={t('crm.renameFile')}>
+                  <IconButton size="sm" aria-label={t('crm.renameFile')} onClick={() => setRenaming(f.id)}
+                    className="opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-hover/file:opacity-100">
+                    <Pencil size={13} />
+                  </IconButton>
+                </Tooltip>
+              )}
               {canWrite && (
                 <Tooltip label={t('common.delete')}>
                   <IconButton size="sm" aria-label={t('common.delete')} onClick={() => setToDelete(f)}

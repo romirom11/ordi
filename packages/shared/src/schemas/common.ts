@@ -82,6 +82,17 @@ export const attachmentRefSchema = z.object({
   url: z.string().optional(),
 });
 
+/**
+ * PATCH /attachments/:id – renaming is the only edit a stored file takes. The
+ * name is what downloads are saved as, so no path separators or control
+ * characters; the storage key keeps the original name and never changes.
+ */
+export const attachmentPatchSchema = z.object({
+  filename: z.string().trim().min(1).max(255)
+    // eslint-disable-next-line no-control-regex
+    .refine((v) => !/[\\/\u0000-\u001f\u007f]/.test(v), 'Filename cannot contain slashes or control characters'),
+});
+
 export const moneySchema = z.object({
   amount: z.number(),
   currency: z.string().length(3),
