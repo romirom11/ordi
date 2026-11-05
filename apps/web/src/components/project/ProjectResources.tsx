@@ -6,22 +6,28 @@
  * - a link opens in a new tab and edits in a dialog (label + url),
  * - a file previews on click, downloads, renames in place (the attachment's
  *   name) and is deleted when removed,
- * - a page opens in the knowledge base; removing it only unpins it.
+ * - a page opens in the knowledge base; removing it only unpins it,
+ * - a secret opens its panel (SecretPanel); values never reach this list.
  */
 import { useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  BookOpen, Download, FileText, FolderOpen, GripVertical, KeyRound, Link2, Pencil, Plus, Search, Trash2, Upload,
+  BookOpen, Bot, Download, FileText, FolderOpen, GripVertical, KeyRound, Link2, Pencil, Plus, Search, Trash2, Upload,
 } from 'lucide-react';
 import { api, qs, ApiError } from '../../lib/api';
 import { openExternal } from '../../lib/desktop';
-import { useOpen } from '../../lib/router';
+import { useOpen, useSearchParams } from '../../lib/router';
+import { useCan } from '../../lib/auth';
 import { UploadError, resolveFileSrc, uploadAttachment } from '../../lib/uploads';
 import { Button, IconButton, Input, Skeleton, Spinner, Tooltip, cn } from '../ui';
 import { ConfirmDialog, Dialog, DropdownMenu, MenuItem, toast } from '../overlays';
 import { FilePreviewDialog } from '../FilePreview';
 import { RenameInput, fmtSize, type FileRow } from '../FilesSection';
 import { useT, extendDict } from '../../lib/i18n';
+import type { UserLite } from './pickers';
+import { SecretDialog } from './SecretDialog';
+import { ExpiryHint, SecretPanel } from './SecretPanel';
+import { ENV_TONE, type SecretView } from './secretsShared';
 
 extendDict({
   en: {
@@ -39,7 +45,7 @@ extendDict({
     'projects.removeResource': 'Remove',
     'projects.unpinPage': 'Unpin',
     'projects.editResourceAction': 'Edit',
-    'projects.resourcesEmpty': 'Links, files and knowledge base pages the team needs for this project.',
+    'projects.resourcesEmpty': 'Links, files, knowledge base pages and secrets the team needs for this project.',
     'projects.resourcesDrop': 'Drop files to upload',
     'projects.resourceMoved': 'Order saved',
     'projects.pickPage': 'Pin a knowledge base page',
@@ -65,7 +71,7 @@ extendDict({
     'projects.removeResource': 'Прибрати',
     'projects.unpinPage': 'Відкріпити',
     'projects.editResourceAction': 'Редагувати',
-    'projects.resourcesEmpty': 'Посилання, файли й сторінки бази знань, потрібні команді для цього проєкту.',
+    'projects.resourcesEmpty': 'Посилання, файли, сторінки бази знань і секрети, потрібні команді для цього проєкту.',
     'projects.resourcesDrop': 'Відпустіть файли, щоб завантажити',
     'projects.resourceMoved': 'Порядок збережено',
     'projects.pickPage': 'Закріпити сторінку бази знань',
@@ -86,6 +92,7 @@ export interface ProjectResource {
   position: number;
   file?: { id: string; filename: string; size: number; mime: string };
   page?: { id: string; title: string; icon: string | null; spaceId: string; url: string };
+  secret?: SecretView;
 }
 
 function isValidUrl(v: string): boolean {
@@ -102,7 +109,7 @@ function hostOf(url: string | null): string {
 
 const KIND_ICON = { link: Link2, file: FileText, kb_page: BookOpen, secret: KeyRound } as const;
 
-export function ProjectResources({ projectId, canWrite }: { projectId: string; canWrite: boolean }) {
+export function ProjectResources({ projectId, canWrite, users = [] }: { projectId: string; canWrite: boolean; users?: UserLite[] }) {
   const t = useT();
   const qc = useQueryClient();
   const open = useOpen();
@@ -111,14 +118,17 @@ export function ProjectResources({ projectId, canWrite }: { projectId: string; c
 
   const { data, isLoading } = useQuery<ProjectResource[]>({
     queryKey,
-    // Secrets get their own rows and panel in the next step; until then the list leaves them out
-    // rather than offer a Remove button that would delete one without asking.
-    queryFn: () => api.get<{ data: ProjectResource[] }>(`/projects/${projectId}/resources`).then((r) => r.data.filter((x) => x.kind !== 'secret')),
+    queryFn: () => api.get<{ data: ProjectResource[] }>(`/projects/${projectId}/resources`).then((r) => r.data),
   });
   const resources = data ?? [];
 
   const [linkDialog, setLinkDialog] = useState<ProjectResource | 'new' | null>(null);
   const [pagePicker, setPagePicker] = useState(false);
+  const can = useCan();
+  const params = useSearchParams();
+  // A notification links here with ?secret=<id> to open that secret.
+  const [openSecret, setOpenSecret] = useState<string | null>(params.get('secret'));
+  const [secretDialog, setSecretDialog] = useState<SecretView | 'new' | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [preview, setPreview] = useState<FileRow | null>(null);
   const [toDelete, setToDelete] = useState<ProjectResource | null>(null);
@@ -197,6 +207,7 @@ export function ProjectResources({ projectId, canWrite }: { projectId: string; c
     if (r.kind === 'link' && r.url && isValidUrl(r.url)) openExternal(r.url);
     else if (r.kind === 'file' && r.file) setPreview({ id: r.file.id, filename: r.file.filename, size: r.file.size, mime: r.file.mime });
     else if (r.kind === 'kb_page' && r.page) open(r.page.url, e);
+    else if (r.kind === 'secret' && r.secret) setOpenSecret(r.secret.id);
   };
 
   // ── Drag and drop: rows reorder; files from the desktop upload ──
@@ -251,6 +262,9 @@ export function ProjectResources({ projectId, canWrite }: { projectId: string; c
         <MenuItem icon={<Link2 size={14} />} onSelect={() => setLinkDialog('new')}>{t('projects.addLink')}</MenuItem>
         <MenuItem icon={<Upload size={14} />} onSelect={() => fileInput.current?.click()}>{t('projects.addFile')}</MenuItem>
         <MenuItem icon={<BookOpen size={14} />} onSelect={() => setPagePicker(true)}>{t('projects.addPage')}</MenuItem>
+        {can('secrets.write') && (
+          <MenuItem icon={<KeyRound size={14} />} onSelect={() => setSecretDialog('new')}>{t('secrets.secret')}</MenuItem>
+        )}
       </DropdownMenu>
     </>
   );
@@ -282,7 +296,7 @@ export function ProjectResources({ projectId, canWrite }: { projectId: string; c
             </p>
           ) : resources.map((r, i) => {
             const Icon = KIND_ICON[r.kind] ?? Link2;
-            const meta = r.kind === 'link' ? hostOf(r.url) : r.kind === 'file' ? fmtSize(r.file?.size) : t('projects.resourceKb');
+            const meta = r.kind === 'link' ? hostOf(r.url) : r.kind === 'file' ? fmtSize(r.file?.size) : r.kind === 'kb_page' ? t('projects.resourceKb') : '';
             const isRenaming = renaming === r.id && r.file;
             return (
               <div
@@ -338,6 +352,18 @@ export function ProjectResources({ projectId, canWrite }: { projectId: string; c
                   </button>
                 )}
                 {meta && !isRenaming && <span className="hidden shrink-0 truncate text-xs tabular-nums text-faint sm:block">{meta}</span>}
+                {r.secret && (
+                  <>
+                    <ExpiryHint date={r.secret.expiresAt} className="hidden shrink-0 sm:block" />
+                    {r.secret.availableToAgents && (
+                      <Tooltip label={t('secrets.agents')}><Bot size={13} className="hidden shrink-0 text-faint sm:block" /></Tooltip>
+                    )}
+                    <span className="hidden shrink-0 truncate text-xs text-faint md:block">{r.secret.fields.map((f) => f.label).join(', ')}</span>
+                    <span className={cn('shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium', ENV_TONE[r.secret.environment])}>
+                      {t(`secrets.env.${r.secret.environment}`)}
+                    </span>
+                  </>
+                )}
 
                 {r.kind === 'file' && r.file && !isRenaming && (
                   <Tooltip label={t('crm.downloadFile')}>
@@ -347,7 +373,7 @@ export function ProjectResources({ projectId, canWrite }: { projectId: string; c
                     </IconButton>
                   </Tooltip>
                 )}
-                {canWrite && !isRenaming && r.kind !== 'kb_page' && (
+                {canWrite && !isRenaming && (r.kind === 'link' || r.kind === 'file') && (
                   <Tooltip label={r.kind === 'file' ? t('crm.renameFile') : t('projects.editResourceAction')}>
                     <IconButton
                       size="sm"
@@ -359,7 +385,8 @@ export function ProjectResources({ projectId, canWrite }: { projectId: string; c
                     </IconButton>
                   </Tooltip>
                 )}
-                {canWrite && !isRenaming && (
+                {/* A secret is deleted from its panel, behind a confirmation and its own access rule. */}
+                {canWrite && !isRenaming && r.kind !== 'secret' && (
                   <Tooltip label={r.kind === 'file' ? t('common.delete') : r.kind === 'kb_page' ? t('projects.unpinPage') : t('projects.removeResource')}>
                     <IconButton
                       size="sm"
@@ -382,6 +409,25 @@ export function ProjectResources({ projectId, canWrite }: { projectId: string; c
         resource={linkDialog}
         onClose={() => setLinkDialog(null)}
         onSaved={invalidate}
+      />
+      <SecretPanel
+        secretId={openSecret}
+        users={users}
+        onClose={() => setOpenSecret(null)}
+        onEdit={(s) => setSecretDialog(s)}
+        onDeleted={invalidate}
+      />
+      <SecretDialog
+        projectId={projectId}
+        open={secretDialog !== null}
+        secret={secretDialog === 'new' ? null : secretDialog}
+        onClose={() => setSecretDialog(null)}
+        onSaved={(saved) => {
+          invalidate();
+          qc.invalidateQueries({ queryKey: ['project-secret', saved.id] });
+          qc.invalidateQueries({ queryKey: ['project-secret-trail', saved.id] });
+          if (secretDialog === 'new') setOpenSecret(saved.id);
+        }}
       />
       <PagePickerDialog
         projectId={projectId}

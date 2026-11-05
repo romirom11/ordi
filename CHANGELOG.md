@@ -39,8 +39,16 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   availability and the environment variable each field becomes in an agent
   run (`SECRET_NAME`, or `SECRET_NAME__FIELD` for a secret with several fields). No tool
   returns a value: not a password, not a login or URL, not an API-key hint.
-- **Project secrets, API first** (the UI follows): credentials a client
-  hands over, stored with the project as a new resource kind. Values are
+- **Project secrets**: credentials a client hands over, stored with the
+  project as a new resource kind. Resources → Add → Secret: paste the
+  client's message and it becomes fields (login, URL, password, API key),
+  choose the environment and who can see the values – everyone on the
+  project, people or departments – and the dialog shows who will really be
+  able to open them. A secret opens in a side panel: plain fields show as
+  they are, Show reveals a value for 30 seconds, Copy puts it on the
+  clipboard without showing it, and the panel lists recent use. A daily
+  reminder goes out two weeks before a secret stops working and on the day.
+  Under the hood: Values are
   encrypted at rest. Field metadata (keys, labels, types) is readable without
   revealing anything, and url and text fields are shown as they are.
   Revealing or copying a value is one call per field, refused over API
