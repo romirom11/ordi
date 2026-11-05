@@ -703,3 +703,72 @@ describe('milestones and the plan', () => {
     expect(done.movedTo).toEqual({ cycleId: 'cy-nov' });
   });
 });
+
+describe('creating a project', () => {
+  /** The project endpoints create_project touches, layered over the task fake. */
+  function withProjects() {
+    const api = fakeOrdi();
+    const types = [
+      { id: 'pt-client', name: 'Client work', isDefault: true, requiresClient: true },
+      { id: 'pt-internal', name: 'Internal', isDefault: false, requiresClient: false },
+    ];
+    const members = [{ projectId: 'p-new', userId: 'u-me', role: 'admin' }];
+    const get = api.client.get.bind(api.client);
+    api.client.get = (async (path: string) => {
+      if (path === '/project-types') return { data: types };
+      if (path === '/projects/p-new/members') return { data: members };
+      return get(path);
+    }) as typeof api.client.get;
+    const post = api.client.post.bind(api.client);
+    api.client.post = (async (path: string, b?: any) => {
+      if (path === '/projects') { api.posts.push({ path, body: b }); return { id: 'p-new', key: b.key }; }
+      if (path === '/projects/p-new/members') {
+        api.posts.push({ path, body: b });
+        if (b.userId === 'u-gone') throw new OrdiApiError(404, 'not_found', 'User not found');
+        return { ok: true };
+      }
+      return post(path, b);
+    }) as typeof api.client.post;
+    const patch = api.client.patch.bind(api.client);
+    api.client.patch = (async (path: string, b?: any) => {
+      if (path === '/projects/p-new') { api.patches.push({ path, body: b }); return { id: 'p-new' }; }
+      return patch(path, b);
+    }) as typeof api.client.patch;
+    return api;
+  }
+
+  it('creates the project, resolves the type by name, and adds members without demoting the creator', async () => {
+    const api = withProjects();
+    const client = await connect(api.client);
+    const res = body(await client.callTool({ name: 'create_project', arguments: {
+      name: 'Website relaunch', key: 'WEB', type: 'internal', leadId: 'u-lead',
+      memberIds: ['u-me', 'u-ann', 'u-gone'], summary: 'New site', priority: 'high',
+      description: 'Scope\n\nPages and blog',
+    } }));
+
+    const create = api.posts.find((p) => p.path === '/projects')!;
+    expect(create.body).toMatchObject({ name: 'Website relaunch', key: 'WEB', projectTypeId: 'pt-internal', leadId: 'u-lead' });
+    expect(JSON.parse(create.body.description)).toEqual(textToDoc('Scope\n\nPages and blog'));
+    expect(api.patches).toContainEqual({ path: '/projects/p-new', body: { summary: 'New site', priority: 'high' } });
+
+    const invited = api.posts.filter((p) => p.path === '/projects/p-new/members').map((p) => p.body.userId);
+    expect(invited).toEqual(['u-ann', 'u-gone', 'u-lead']);
+    expect(res.project).toMatchObject({ id: 'p-new', key: 'WEB', type: 'Internal' });
+    expect(res.members.added).toEqual(['u-ann', 'u-lead']);
+    expect(res.members.failed).toEqual([{ userId: 'u-gone', error: expect.stringContaining('User not found') }]);
+  });
+
+  it('refuses a client-requiring type without a client, and an unknown type, naming the options', async () => {
+    const api = withProjects();
+    const client = await connect(api.client);
+    const noClient = await client.callTool({ name: 'create_project', arguments: { name: 'Acme site', key: 'ACME' } });
+    expect(noClient.isError).toBe(true);
+    expect(errorText(noClient)).toContain('requires a client');
+    expect(errorText(noClient)).toContain('Internal');
+
+    const unknown = await client.callTool({ name: 'create_project', arguments: { name: 'X', key: 'XX', type: 'Nope' } });
+    expect(unknown.isError).toBe(true);
+    expect(errorText(unknown)).toContain('Client work, Internal');
+    expect(api.posts.some((p) => p.path === '/projects')).toBe(false);
+  });
+});

@@ -105,8 +105,10 @@ function MembersPanel({ projectId, canManage, onManageAll }: {
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['project-members', projectId] });
-    // Membership decides who sees a private project, so the lists follow.
+    // Membership decides who sees a private project, so the lists follow –
+    // and /me, which the page reads your own role from.
     qc.invalidateQueries({ queryKey: ['projects'] });
+    qc.invalidateQueries({ queryKey: ['me'] });
   };
 
   const upsert = useMutation({
