@@ -10,6 +10,7 @@ import { Bot, Copy, ExternalLink, Eye, EyeOff, KeyRound, Lock, Pencil, Trash2 } 
 import { api, ApiError } from '../../lib/api';
 import { openExternal } from '../../lib/desktop';
 import { useT } from '../../lib/i18n';
+import { isHttpUrl } from '@ordi/shared';
 import { Badge, Button, IconButton, Skeleton, Spinner, Tooltip, cn, fmtDate, fmtRelative } from '../ui';
 import { ConfirmDialog, SidePanel, toast } from '../overlays';
 import type { UserLite } from './pickers';
@@ -121,7 +122,7 @@ export function SecretPanel({ secretId, users, onClose, onEdit, onDeleted }: {
           {!f.hasValue ? (
             <span className="flex-1 text-[13px] text-faint">{t('secrets.noValue')}</span>
           ) : !secretField ? (
-            f.type === 'url' ? (
+            f.type === 'url' && isHttpUrl(f.value!) ? (
               <button type="button" onClick={() => openExternal(f.value!)} className="min-w-0 flex-1 truncate text-left text-[13px] text-primary hover:underline">
                 {f.value}
               </button>
@@ -144,7 +145,7 @@ export function SecretPanel({ secretId, users, onClose, onEdit, onDeleted }: {
               <IconButton size="sm" aria-label={t('secrets.copy')} onClick={() => copyPlain(f.value!)}><Copy size={13} /></IconButton>
             </Tooltip>
           )}
-          {f.hasValue && f.type === 'url' && (
+          {f.hasValue && f.type === 'url' && isHttpUrl(f.value!) && (
             <Tooltip label={f.value!}>
               <IconButton size="sm" aria-label={f.value!} onClick={() => openExternal(f.value!)}><ExternalLink size={13} /></IconButton>
             </Tooltip>
