@@ -191,7 +191,8 @@ export function ProjectResources({ projectId, canWrite }: { projectId: string; c
   };
 
   const activate = (r: ProjectResource, e?: React.MouseEvent) => {
-    if (r.kind === 'link' && r.url) openExternal(r.url);
+    // The API takes http(s) only; checked again so nothing else is ever opened.
+    if (r.kind === 'link' && r.url && isValidUrl(r.url)) openExternal(r.url);
     else if (r.kind === 'file' && r.file) setPreview({ id: r.file.id, filename: r.file.filename, size: r.file.size, mime: r.file.mime });
     else if (r.kind === 'kb_page' && r.page) open(r.page.url, e);
   };

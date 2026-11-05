@@ -20,11 +20,13 @@ CREATE UNIQUE INDEX "project_resources_attachment_idx" ON "project_resources" US
 CREATE UNIQUE INDEX "project_resources_page_idx" ON "project_resources" USING btree ("project_id","kb_page_id");--> statement-breakpoint
 -- Each kind fills its own columns and nothing else.
 ALTER TABLE "project_resources" ADD CONSTRAINT "project_resources_kind_check" CHECK (
-  ("kind" = 'link' AND "url" IS NOT NULL AND "attachment_id" IS NULL AND "kb_page_id" IS NULL)
+  ("kind" = 'link' AND "url" IS NOT NULL AND "url" ~* '^https?://' AND "attachment_id" IS NULL AND "kb_page_id" IS NULL)
   OR ("kind" = 'file' AND "attachment_id" IS NOT NULL AND "url" IS NULL AND "kb_page_id" IS NULL)
   OR ("kind" = 'kb_page' AND "kb_page_id" IS NOT NULL AND "url" IS NULL AND "attachment_id" IS NULL)
 );--> statement-breakpoint
--- The links a project kept in its jsonb column move over in their order.
+-- The links a project kept in its jsonb column move over in their order. The
+-- old API took any URL scheme; only http(s) links come across (a `javascript:`
+-- or `file:` one is dropped), which the check above enforces from here on.
 INSERT INTO "project_resources" ("id", "project_id", "kind", "label", "url", "position", "created_at", "updated_at")
 SELECT
   substring(md5('project-link:' || p."id" || ':' || l.ord), 1, 26),
@@ -34,7 +36,7 @@ FROM "projects" p
 CROSS JOIN LATERAL jsonb_array_elements(
   CASE WHEN jsonb_typeof(p."links") = 'array' THEN p."links" ELSE '[]'::jsonb END
 ) WITH ORDINALITY AS l(item, ord)
-WHERE coalesce(l.item->>'url', '') <> '';--> statement-breakpoint
+WHERE coalesce(l.item->>'url', '') ~* '^https?://';--> statement-breakpoint
 -- The project's files follow its links, oldest first: new resources are appended.
 INSERT INTO "project_resources" ("id", "project_id", "kind", "attachment_id", "position", "created_by", "created_at", "updated_at")
 SELECT
