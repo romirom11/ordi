@@ -15,7 +15,7 @@
 import { getDb, schema, eq, and, asc, desc, inArray, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import {
-  secretAccess, isProjectWideSecret, projectAccessRank,
+  secretAccess, isProjectWideSecret, projectAccessRank, secretEnvVars,
   SECRET_VALUE_TYPES,
   type SecretAccess, type SecretAudiencePrincipal, type SecretFieldType, type SecretEnvironment,
 } from '@ordi/shared';
@@ -609,4 +609,138 @@ export async function runSecretExpiry(now = new Date()): Promise<{ notified: num
     }
   }
   return { notified };
+}
+
+// ── Secrets in agent runs (plan U4, R21-R29) ──
+
+export interface AgentSecretVar {
+  variable: string;
+  secretName: string;
+  fieldLabel: string;
+}
+
+interface AgentSecretPlan {
+  /** Secrets the run gets, with the variables each field becomes. */
+  use: { secret: SecretRow; vars: (AgentSecretVar & { field: string })[]; restricted: boolean }[];
+  /** Secrets marked for agents that the run does not get, and why. */
+  skipped: { name: string; reason: string }[];
+  /** How many more were left out because the person behind the run cannot open them – unnamed: the run log is read by the whole project. */
+  withheld: number;
+}
+
+/** What the three layers make of one person on one project (the same inputs secretAccess takes for the actor). */
+async function personOnProject(userId: string, projectId: string): Promise<{ permissions: Set<string>; projectRole: 'admin' | 'member' | 'viewer' | null; departments: Set<string> } | null> {
+  const { db } = getDb();
+  const [user] = await db.select({ roleId: schema.users.roleId, isActive: schema.users.isActive, actorType: schema.users.actorType })
+    .from(schema.users).where(eq(schema.users.id, userId));
+  if (!user || !user.isActive || user.actorType !== 'user') return null;
+  const [project] = await db.select({ visibility: projects.visibility }).from(projects).where(eq(projects.id, projectId));
+  if (!project) return null;
+  const [membership] = await db.select({ role: projectMembers.role }).from(projectMembers)
+    .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId)));
+  const permissions = await loadRolePermissions(user.roleId);
+  const rank = projectAccessRank(
+    { permissions, projectMemberships: membership ? new Map([[projectId, membership.role as 'admin' | 'member' | 'viewer']]) : new Map(), spaceMemberships: new Map() },
+    { visibility: project.visibility as 'workspace' | 'private', projectId },
+  );
+  return { permissions, projectRole: rank ? (['viewer', 'member', 'admin'] as const)[rank - 1]! : null, departments: await departmentChain(userId) };
+}
+
+/**
+ * Which of a project's secrets an agent run gets. Three conditions:
+ *
+ * - the secret's agent switch is on (R21);
+ * - the agent is itself a member of the project (R21);
+ * - the person behind the run – who assigned the task, retried it, or wrote
+ *   the comment it answers – could reveal the secret themselves. An agent
+ *   holding a value can always find some way to show it (encoded, split), so
+ *   a run must never hand anyone more than they could open in the panel:
+ *   without this, assigning a task to an agent would be a way around a
+ *   secret's audience.
+ *
+ * An expired secret is left out with a reason. Metadata only: nothing is
+ * decrypted here.
+ */
+export async function agentSecretPlan(
+  projectId: string, agentUserId: string, requesterId: string | null, today = new Date().toISOString().slice(0, 10),
+): Promise<AgentSecretPlan> {
+  const { db } = getDb();
+  const [membership] = await db.select({ role: projectMembers.role }).from(projectMembers)
+    .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, agentUserId)));
+  const rows = await db.select().from(projectSecrets)
+    .where(and(eq(projectSecrets.projectId, projectId), eq(projectSecrets.availableToAgents, true)))
+    .orderBy(asc(projectSecrets.name));
+  const plan: AgentSecretPlan = { use: [], skipped: [], withheld: 0 };
+  if (!rows.length) return plan;
+  const audiences = await audiencesOf(rows.map((r) => r.id));
+  const requester = requesterId ? await personOnProject(requesterId, projectId) : null;
+  const requesterCanReveal = (secret: SecretRow) => !!requester && secretAccess({
+    permissions: requester.permissions, projectRole: requester.projectRole, audience: audiences.get(secret.id) ?? [],
+    userId: requesterId!, departmentIds: requester.departments,
+  }).reveal;
+  if (!membership || membership.role === 'viewer') {
+    // Named only where the whole project may know the name.
+    for (const r of rows) {
+      if (isProjectWideSecret(audiences.get(r.id) ?? [])) plan.skipped.push({ name: r.name, reason: 'the agent is not a member of the project' });
+      else plan.withheld += 1;
+    }
+    return plan;
+  }
+  for (const secret of rows) {
+    const restricted = !isProjectWideSecret(audiences.get(secret.id) ?? []);
+    if (!requesterCanReveal(secret)) {
+      if (restricted) plan.withheld += 1;
+      else plan.skipped.push({ name: secret.name, reason: 'the person who started the run cannot open it' });
+      continue;
+    }
+    if (secret.source !== 'ordi') { plan.skipped.push({ name: secret.name, reason: 'its provider is not connected' }); continue; }
+    if (secret.expiresAt && secret.expiresAt < today) { plan.skipped.push({ name: secret.name, reason: `it expired on ${secret.expiresAt}` }); continue; }
+    const fields = secret.fields as SecretFieldMeta[];
+    const label = new Map(fields.map((f) => [f.key, f.label]));
+    const vars = secretEnvVars(secret.name, fields).map((v) => ({ ...v, secretName: secret.name, fieldLabel: label.get(v.field) ?? v.field }));
+    if (vars.length) plan.use.push({ secret, vars, restricted });
+  }
+  return plan;
+}
+
+/**
+ * The values for a run: decrypted here, in the API, and handed to the worker
+ * with the bundle – the standalone worker holds no ENCRYPTION_KEY. Each
+ * secret a run receives is noted on the secret's own trail.
+ */
+export async function resolveRunSecrets(
+  run: { id: string; projectId: string; agentUserId: string; taskId: string; requestedBy: string | null },
+  opts: { record?: boolean } = {},
+): Promise<{
+  vars: { variable: string; value: string }[];
+  /** Names the whole project may see; restricted ones are only counted. */
+  used: string[]; usedRestricted: number;
+  skipped: { name: string; reason: string }[]; withheld: number;
+}> {
+  const plan = await agentSecretPlan(run.projectId, run.agentUserId, run.requestedBy);
+  const { db } = getDb();
+  const vars: { variable: string; value: string }[] = [];
+  for (const { secret, vars: wanted } of plan.use) {
+    const [payload] = await db.select().from(projectSecretPayloads).where(eq(projectSecretPayloads.secretId, secret.id));
+    const values = readPayload(payload?.ciphertext);
+    const meta = new Map((secret.fields as SecretFieldMeta[]).map((f) => [f.key, f]));
+    for (const v of wanted) {
+      const m = meta.get(v.field);
+      const value = m && isValueType(m.type) ? values[v.field] : m?.value;
+      if (value) vars.push({ variable: v.variable, value });
+    }
+    if (opts.record) {
+      await writeActivity(db, {
+        entityType: 'project_secret', entityId: secret.id, action: 'used_in_run', sensitivity: 'sensitive',
+        diff: { run: { to: run.id }, task: { to: run.taskId } }, actorId: run.agentUserId, actorType: 'agent',
+      });
+    }
+  }
+  return {
+    vars,
+    used: plan.use.filter((u) => !u.restricted).map((u) => u.secret.name),
+    usedRestricted: plan.use.filter((u) => u.restricted).length,
+    skipped: plan.skipped,
+    withheld: plan.withheld,
+  };
 }

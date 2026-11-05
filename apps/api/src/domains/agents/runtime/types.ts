@@ -3,7 +3,7 @@
  * model harness is driven: Claude Code through the Agent SDK today, Codex
  * later. The worker only ever sees events and an outcome.
  */
-import type { AgentCredentialProvider, AgentRuntime } from '@ordi/shared';
+import { isAllowedSecretVariable, type AgentCredentialProvider, type AgentRuntime } from '@ordi/shared';
 
 export interface RuntimeCredential {
   provider?: AgentCredentialProvider;
@@ -31,6 +31,11 @@ export interface RuntimeRunInput {
   /** Home for the harness's own state, kept per task so a later run can resume the session. */
   configDir: string;
   credential: RuntimeCredential;
+  /**
+   * Extra environment for the run: the project secrets the agent may use.
+   * Added after the runtime's own variables and never replacing one of them.
+   */
+  extraEnv?: Record<string, string>;
   model?: string | null;
   mcpServers: Record<string, RuntimeMcpServer>;
   maxTurns: number;
@@ -41,6 +46,22 @@ export interface RuntimeRunInput {
   disallowedTools: string[];
   signal: AbortSignal;
   onEvent: (event: RuntimeEvent) => void | Promise<void>;
+}
+
+/**
+ * Add a run's extra variables to a runtime environment without letting one
+ * replace what the runtime set itself (PATH, HOME, the credential …). Secret
+ * names are checked when they are saved; this is the second guard.
+ */
+export function withExtraEnv(base: Record<string, string>, extra: Record<string, string> | undefined): Record<string, string> {
+  if (!extra) return base;
+  const out = { ...base };
+  for (const [k, v] of Object.entries(extra)) {
+    // The same rule the secret was saved under, checked again where it matters.
+    if (k in out || !isAllowedSecretVariable(k)) continue;
+    out[k] = v;
+  }
+  return out;
 }
 
 export type RuntimeEvent =

@@ -22,6 +22,7 @@ import { closeRunConnections } from './gateway';
 import { buildRulesOfEngagement, buildTaskBrief, type PromptContext } from './prompt';
 import { resolveRepository } from './repository';
 import { forgetRunScope, forgetRunSecrets, recordRunEvent, registerRunScope, registerRunSecrets } from './run-events';
+import { agentSecretPlan, resolveRunSecrets } from '../secrets/service';
 import {
   cancelRequested, claimRuns, finishRun, loadRun, newestHumanCommentSince, parkRunForQuota, queueRun,
   recordRunProgress, requeueStaleRuns, startRun, touchRun, type RunRow,
@@ -187,11 +188,27 @@ export async function prepare(runId: string): Promise<RunBundle> {
     if (cred) credentials.push({ id, kind: cred.kind, secret: cred.secret, provider: cred.provider, baseUrl: cred.baseUrl ?? null });
   }
   const repo = await resolveRepository(project.id);
+  const projectSecrets = await resolveRunSecrets(
+    { id: run.id, projectId: project.id, agentUserId: run.agentUserId, taskId: task.id, requestedBy: run.requestedBy }, { record: true },
+  );
   secretsPending.set(runId, [
     ...credentials.map((c) => c.secret),
     repo?.token ?? '',
     ...setup.connectors.flatMap((c) => secretValues(c)),
+    ...projectSecrets.vars.map((v) => v.value),
   ]);
+  // Names only: which secrets this run has, and which it does not and why.
+  // The run log is read by everyone on the project: restricted secrets are counted, not named.
+  if (projectSecrets.used.length || projectSecrets.usedRestricted) {
+    const names = [...projectSecrets.used, ...(projectSecrets.usedRestricted ? [`${projectSecrets.usedRestricted} restricted`] : [])];
+    await recordRunEvent(runId, 'log', { message: `Project secrets in the environment: ${names.join(', ')}` });
+  }
+  for (const s of projectSecrets.skipped) {
+    await recordRunEvent(runId, 'log', { message: `Project secret ${s.name} left out: ${s.reason}` });
+  }
+  if (projectSecrets.withheld) {
+    await recordRunEvent(runId, 'log', { message: `${projectSecrets.withheld} restricted project secret(s) left out: the person who started the run cannot open them` });
+  }
 
   return {
     run: toClaimedRun(run),
@@ -206,6 +223,7 @@ export async function prepare(runId: string): Promise<RunBundle> {
     project: { id: project.id, key: project.key, name: project.name },
     connectors: setup.connectors.map((c) => c.slug),
     credentials,
+    secrets: projectSecrets.vars,
     repo,
     taskUrl: `${env.appUrl.replace(/\/$/, '')}/projects/${project.id}/tasks/${task.id}`,
   };
@@ -230,8 +248,15 @@ export async function start(runId: string, input: StartInput): Promise<RunStart 
     resumedAfterStop: started.run.trigger === 'retry' && Boolean(started.run.sessionId),
     connectorSlugs: connectors.map((c) => c.slug),
     pullRequestTemplate: input.pullRequestTemplate,
+    secretVars: (await agentSecretPlan(project.id, started.run.agentUserId, started.run.requestedBy)).use.flatMap((u) => u.vars),
   };
-  registerRunSecrets(runId, [...(secretsPending.get(runId) ?? []), started.token]);
+  // The worker's prepare and start may reach different replicas: whatever this
+  // one did not prepare, it resolves again, so every replica scrubs the run's
+  // project secrets.
+  const projectValues = (await resolveRunSecrets({
+    id: runId, projectId: project.id, agentUserId: started.run.agentUserId, taskId: task.id, requestedBy: started.run.requestedBy,
+  })).vars.map((v) => v.value);
+  registerRunSecrets(runId, [...(secretsPending.get(runId) ?? []), ...projectValues, started.token]);
   secretsPending.delete(runId);
   return {
     token: started.token,

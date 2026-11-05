@@ -16,22 +16,10 @@ export const SECRET_FIELD_TYPES = ['text', 'url', 'password', 'api_key', 'note']
 export type SecretFieldType = (typeof SECRET_FIELD_TYPES)[number];
 export const SECRET_VALUE_TYPES: readonly SecretFieldType[] = ['password', 'api_key', 'note'];
 
-/**
- * Environment variable names an agent run already uses (runtime/claude-code.ts
- * and the git checkout). A secret named after one of them would override it.
- */
-export const RESERVED_SECRET_NAMES = ['PATH', 'HOME', 'LANG', 'TMPDIR', 'SHELL', 'USER', 'PWD', 'NODE_OPTIONS', 'MCP_TIMEOUT', 'MCP_TOOL_TIMEOUT'];
-export const RESERVED_SECRET_PREFIXES = ['ANTHROPIC_', 'CLAUDE_', 'CODEX_', 'OPENAI_', 'GIT_', 'ORDI_', 'NODE_', 'NPM_'];
-
-export function isReservedSecretName(name: string): boolean {
-  return RESERVED_SECRET_NAMES.includes(name) || RESERVED_SECRET_PREFIXES.some((p) => name.startsWith(p));
-}
-
-/** Upper snake case, so it reads as the environment variable it becomes in an agent run. */
+/** Upper snake case: an agent run gets it as SECRET_<NAME> (SECRET_ENV_PREFIX). */
 export const secretNameSchema = z.string().trim()
   .regex(/^[A-Z][A-Z0-9_]{1,63}$/, 'Use capital letters, digits and underscores, starting with a letter (e.g. STRIPE_TEST)')
-  .refine((v) => !v.includes('__'), 'Double underscores separate a secret from its field in agent runs')
-  .refine((v) => !isReservedSecretName(v), 'This name is used by the agent runtime itself');
+  .refine((v) => !v.includes('__'), 'Double underscores separate a secret from its field in agent runs');
 
 export const secretFieldKeySchema = z.string().trim()
   .regex(/^[a-z][a-z0-9_]{0,31}$/, 'Use lower case letters, digits and underscores (e.g. api_key)');

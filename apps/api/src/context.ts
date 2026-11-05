@@ -12,6 +12,8 @@ export interface Actor {
   readOnly: boolean;
   /** null => full role scope (session); set => API-token scope subset. */
   tokenScopes: string[] | null;
+  /** The API token the request came with; agent runs are recognised by theirs. */
+  apiTokenId?: string | null;
   access: AccessContext;
 }
 

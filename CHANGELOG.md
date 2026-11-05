@@ -33,6 +33,21 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   under it, while the stored bytes and every embedded link stay the same.
   Blocked extensions are refused on rename as on upload. New API
   `PATCH /attachments/:id` and MCP tool `rename_attachment`.
+- **Agent runs use project secrets without seeing them in text**: a secret
+  switched on for agents reaches a run of an agent on that project as
+  environment variables prefixed `SECRET_` (`SECRET_STRIPE_TEST`,
+  `SECRET_ADMIN_PANEL__PASSWORD`) – a prefix no program reads on its own, so
+  no secret name can change how the agent's tools behave – and the
+  agent's instructions name the variables, never the values. The values are
+  replaced with `[redacted]` in the run log and in everything the run writes
+  back to ordi (comments, task fields, pages, updates), and a branch whose
+  commits contain one is not pushed – the run says which variable. Expired
+  secrets are left out with a note in the run log, and each secret's trail
+  shows the runs that used it.
+- **Security: the Codex runtime no longer inherits the worker's
+  environment.** It was started with the worker process's own variables on
+  top of the minimal environment built for it, so a worker running inside the
+  API handed the agent `DATABASE_URL`, `ENCRYPTION_KEY` and `AUTH_SECRET`.
 - **MCP: agents can check a project's secrets without reading them**:
   `list_project_secrets` and `check_project_secret` return names,
   descriptions, environment, fields and whether each is set, expiry, agent

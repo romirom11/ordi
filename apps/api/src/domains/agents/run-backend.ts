@@ -60,6 +60,12 @@ export interface RunBundle {
   connectors: string[];
   /** The credential chain in order, decrypted for this run. Empty means the run cannot start. */
   credentials: { id: string; kind: 'api_key' | 'subscription'; secret: string; provider: string; baseUrl: string | null }[];
+  /**
+   * Project secrets the agent may use (switched on for agents, the agent on
+   * the project), as environment variables of the runtime. Decrypted by the
+   * API for this run only; registered for scrubbing like the credential.
+   */
+  secrets?: { variable: string; value: string }[];
   repo: RepoBinding | null;
   /** The task in ordi, for the pull request description. */
   taskUrl: string;

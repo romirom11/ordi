@@ -32,6 +32,7 @@ version.
 | Project secrets in Resources: add with paste-to-fields, audience picker with an effective-access preview, side panel with Show/Copy and recent use | `feature/project-secrets-ui` |
 | MCP `list_project_secrets` / `check_project_secret`: metadata and env var names, never values | `feature/project-secrets-mcp` |
 | Configurable intake form: editor with live preview (texts, accent colour, built-in and nine types of custom fields), file uploads, receipt email, token rotation, a database-backed rate limit and a website embed (`/api/v1/embed/intake.js`); fixes the public form, which could not submit. Migration `0046_intake_form_config` | `feature/intake-form-builder-and-embed` |
+| Project secrets in agent runs: env vars, redaction of run writes, push refused on a leaked value | `feature/project-secrets-agent-runs` |
 
 ## Shipped
 

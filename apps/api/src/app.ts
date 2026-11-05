@@ -5,6 +5,7 @@ import type { AppEnv } from './context';
 import { env } from './env';
 import { handleError } from './lib/errors';
 import { authMiddleware } from './core/auth';
+import { scrubAgentWrites } from './core/agent-write-scrub';
 import { moduleGate } from './core/modules';
 import { SERVER_VERSION } from './version';
 import { oauthRoutes } from './domains/core/oauth.routes';
@@ -132,6 +133,8 @@ export function createApp() {
   // Authenticated API
   const api = new Hono<AppEnv>();
   api.use('*', authMiddleware);
+  // An agent run's writes are cleaned of its secrets before any route reads them.
+  api.use('*', scrubAgentWrites);
   api.use('*', moduleGate); // a module switched off answers 404, not just hidden nav
   api.route('/auth', authRoutes());
   api.route('/setup', setupRoutes()); // first-run setup (public; locked once an owner exists)
