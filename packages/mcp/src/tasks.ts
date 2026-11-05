@@ -22,7 +22,7 @@
 import { createHash } from 'node:crypto';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { MAX_SUBTASK_DEPTH, TASK_PRIORITIES, docToText, textToDoc } from '@ordi/shared';
+import { MAX_SUBTASK_DEPTH, TASK_PRIORITIES, docToText, secretEnvVars, textToDoc } from '@ordi/shared';
 import { OrdiApiError, type OrdiClient } from './client';
 import { absolutizeImageSrcs, relativizeImageSrcs, wrap } from './format';
 
@@ -567,6 +567,51 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
   }, ({ resourceId }) => wrap(async () => {
     await client.del(`/project-resources/${resourceId}`);
     return { action: 'removed', resourceId };
+  }));
+
+  // ── Secrets: names and fields only, never a value ──
+
+  /**
+   * What an agent may know about a secret. Built field by field from the API's
+   * metadata so nothing else – a url or login value, an API-key hint – can slip
+   * through even if the API one day sends more.
+   */
+  const secretOut = (s: Row) => {
+    const fields = ((s.fields as Row[] | undefined) ?? []).map((f) => ({
+      key: f.key as string, label: f.label as string, type: f.type as string, hasValue: !!f.hasValue,
+    }));
+    const expiresAt = (s.expiresAt as string | null) ?? null;
+    return {
+      name: s.name as string,
+      description: (s.description as string | null) ?? null,
+      environment: s.environment as string,
+      fields,
+      expiresAt,
+      expired: !!expiresAt && expiresAt < new Date().toISOString().slice(0, 10),
+      availableToAgents: !!s.availableToAgents,
+      // The variables an ordi agent run gets when availableToAgents is on.
+      envVars: secretEnvVars(s.name as string, fields),
+    };
+  };
+  const SECRET_VALUES_NOTE = 'Values are never returned here. An ordi agent run receives the secrets marked availableToAgents as environment variables (envVars) – read them from the environment and never print, commit or post them. Anyone else gets a value from a person, who reveals it in the project\'s Resources.';
+
+  server.tool('list_project_secrets', `The secrets of a project the token owner may see – credentials a client handed over (logins, test API keys): name, description, environment (test/staging/production/other), fields (key, label, type, whether set), expiry and agent availability. ${SECRET_VALUES_NOTE}`, {
+    project: z.string().describe('Project key or id'),
+  }, ({ project }) => wrap(async () => {
+    const projectId = await resolveProjectId(client, project);
+    const res = await client.get<{ data: Row[] }>(`/projects/${projectId}/secrets`);
+    return { data: res.data.map(secretOut) };
+  }));
+
+  server.tool('check_project_secret', `Check that a project has a secret before relying on it: exists, its fields and whether each is set, expired, and whether agent runs get it (with the environment variable names). A secret the token owner may not see answers exists: false. ${SECRET_VALUES_NOTE}`, {
+    project: z.string().describe('Project key or id'),
+    name: z.string().min(1).describe('Secret name, e.g. STRIPE_TEST'),
+  }, ({ project, name }) => wrap(async () => {
+    const projectId = await resolveProjectId(client, project);
+    const res = await client.get<{ data: Row[] }>(`/projects/${projectId}/secrets`);
+    const wanted = name.trim().toUpperCase();
+    const hit = res.data.find((s) => String(s.name).toUpperCase() === wanted);
+    return hit ? { exists: true, ...secretOut(hit) } : { exists: false, name: wanted };
   }));
 
   server.tool('create_cycle', 'Start a cycle – a time box (usually one or two weeks) the team commits a set of tasks to. Put tasks in it with create_task / update_task `cycle`. Refused where the project has cycles switched off.', {
