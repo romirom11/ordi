@@ -11,16 +11,32 @@
  *   GET    /project-secrets/:id/activity    the secret's own trail
  *   GET    /projects/:id/secret-audience            people and departments an audience can name
  *   POST   /projects/:id/secret-audience/preview    who an audience really lets reveal values
+ *
+ * External stores (U5):
+ *   GET    /projects/:id/secret-providers                 connections the project may add from
+ *   GET    /projects/:id/secret-providers/:cid/names      the names in one, for the picker
+ *   GET    /secret-providers                              the workspace's connections (integrations.manage)
+ *   POST   /secret-providers                              connect: the token is verified, then stored encrypted
+ *   PATCH  /secret-providers/:id                          rename, or a new token
+ *   POST   /secret-providers/:id/check                    ask the provider again
+ *   DELETE /secret-providers/:id                          its secrets stay, disconnected
+ *   PUT    /secret-providers/:id/projects                 the projects linked to it
  */
 import { Hono } from 'hono';
-import { secretInputSchema, secretPatchSchema, secretRevealSchema, secretAudiencePreviewSchema } from '@ordi/shared';
+import {
+  secretInputSchema, secretPatchSchema, secretRevealSchema, secretAudiencePreviewSchema,
+  secretProviderConnectionInputSchema, secretProviderConnectionPatchSchema, secretProviderLinksSchema,
+} from '@ordi/shared';
 import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
-import { rejectReadOnlyWrites } from '../../core/rbac';
+import { guard, rejectReadOnlyWrites } from '../../core/rbac';
 import {
   actorContext, audienceOptions, audiencePreview, createSecret, deleteSecret, getSecret, listSecrets,
-  revealSecretField, secretActivity, updateSecret,
+  projectProviders, providerNames, revealSecretField, secretActivity, updateSecret,
 } from './service';
+import {
+  checkConnection, createConnection, deleteConnection, listConnections, setConnectionProjects, updateConnection,
+} from './connections';
 
 export function projectSecretsRoutes() {
   const app = new Hono<AppEnv>();
@@ -79,6 +95,46 @@ export function projectSecretsRoutes() {
   app.get('/project-secrets/:id/activity', async (c) => {
     const ctx = await actorContext(currentActor(c));
     return c.json({ data: await secretActivity(ctx, c.req.param('id')) });
+  });
+
+  // ── External stores ──
+
+  app.get('/projects/:id/secret-providers', async (c) => {
+    const ctx = await actorContext(currentActor(c));
+    return c.json({ data: await projectProviders(ctx, c.req.param('id')) });
+  });
+
+  app.get('/projects/:id/secret-providers/:cid/names', async (c) => {
+    const ctx = await actorContext(currentActor(c));
+    return c.json(await providerNames(ctx, c.req.param('id'), c.req.param('cid')));
+  });
+
+  app.get('/secret-providers', guard('integrations.manage'), async (c) => {
+    return c.json({ data: await listConnections(currentActor(c)) });
+  });
+
+  app.post('/secret-providers', guard('integrations.manage'), async (c) => {
+    const body = secretProviderConnectionInputSchema.parse(await c.req.json());
+    return c.json(await createConnection(currentActor(c), body), 201);
+  });
+
+  app.patch('/secret-providers/:id', guard('integrations.manage'), async (c) => {
+    const body = secretProviderConnectionPatchSchema.parse(await c.req.json());
+    return c.json(await updateConnection(currentActor(c), c.req.param('id'), body));
+  });
+
+  app.post('/secret-providers/:id/check', guard('integrations.manage'), async (c) => {
+    return c.json(await checkConnection(currentActor(c), c.req.param('id')));
+  });
+
+  app.delete('/secret-providers/:id', guard('integrations.manage'), async (c) => {
+    await deleteConnection(currentActor(c), c.req.param('id'));
+    return c.json({ ok: true });
+  });
+
+  app.put('/secret-providers/:id/projects', guard('integrations.manage'), async (c) => {
+    const { projectIds } = secretProviderLinksSchema.parse(await c.req.json());
+    return c.json(await setConnectionProjects(currentActor(c), c.req.param('id'), projectIds));
   });
 
   return app;

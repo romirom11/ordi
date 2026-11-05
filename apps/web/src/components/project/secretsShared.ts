@@ -15,7 +15,37 @@ export interface SecretFieldMeta {
   value?: string;
   /** api_key only: last four characters. */
   hint?: string;
+  /** Provider secrets: the provider secret this field reads. */
+  ref?: string;
 }
+
+/** Where a provider secret's values come from, and whether they can be reached. */
+export interface SecretProviderState {
+  connectionId: string | null;
+  kind: string | null;
+  label: string | null;
+  state: 'ok' | 'error' | 'disconnected';
+  error: string | null;
+  /** Provider names that are gone; filled when one secret is opened. */
+  missing?: string[];
+}
+
+/** A connection a project may add secrets from. */
+export interface ProviderConnection {
+  id: string;
+  kind: 'doppler';
+  label: string;
+  project: string | null;
+  config: string | null;
+  status: 'ok' | 'error';
+  lastError: string | null;
+  checkedAt: string | null;
+  createdAt: string;
+  projectIds?: string[];
+  secretCount?: number;
+}
+
+export const PROVIDER_NAME: Record<string, string> = { doppler: 'Doppler' };
 
 export interface SecretView {
   id: string;
@@ -33,6 +63,23 @@ export interface SecretView {
   createdAt: string;
   version: number;
   access: { reveal: boolean; write: boolean; manage: boolean };
+  source: 'ordi' | 'provider';
+  provider: SecretProviderState | null;
+}
+
+/** A provider field is always fetched on reveal, whatever its type: ordi holds no value to show. */
+export const revealsValue = (secret: Pick<SecretView, 'source'>, type: SecretFieldType) => secret.source === 'provider' || isSecretValueType(type);
+
+/** Guess a field from a provider secret's name: ACME_ADMIN_PASSWORD → Password, password. */
+export function fieldFromRef(ref: string): { label: string; type: SecretFieldType } {
+  const n = ref.toUpperCase();
+  const type: SecretFieldType = /(PASSWORD|PASS|PWD)$/.test(n) ? 'password'
+    : /(URL|URI|HOST|ENDPOINT)$/.test(n) ? 'url'
+      : /(USER|USERNAME|LOGIN|EMAIL)$/.test(n) ? 'text'
+        : 'api_key';
+  const last = ref.split('_').filter(Boolean).pop() ?? ref;
+  const label = last.charAt(0).toUpperCase() + last.slice(1).toLowerCase();
+  return { label, type };
 }
 
 export const SECRET_ENVIRONMENTS: SecretEnvironment[] = ['test', 'staging', 'production', 'other'];
@@ -124,6 +171,18 @@ extendDict({
     'secrets.deleted': 'Secret deleted',
     'secrets.restricted': 'Restricted',
     'secrets.forAgents': 'Agents',
+    'secrets.fromProvider': 'From {provider}',
+    'secrets.addFromProvider': 'Add from {provider}',
+    'secrets.providerIntro': 'Pick the {provider} secrets this one reads. Their values stay in {provider}: ordi asks for them when someone opens a field or an agent run starts, and stores nothing.',
+    'secrets.providerRef': '{provider} secret',
+    'secrets.providerRefPick': 'Choose…',
+    'secrets.providerConnection': 'Connection',
+    'secrets.providerNamesFailed': 'Could not load the names from {provider}.',
+    'secrets.providerReads': 'reads {ref}',
+    'secrets.providerState.error': '{provider} could not be reached: {error}',
+    'secrets.providerState.disconnected': 'Disconnected: {error}. The name and fields stay; values cannot be opened until it is linked again.',
+    'secrets.providerState.missing': '{provider} has no secret named {names} – renamed or deleted there. Edit the secret to point at the new name.',
+    'secrets.providerRelink': 'Link to a connection',
   },
   uk: {
     'secrets.secret': 'Секрет',
@@ -194,5 +253,17 @@ extendDict({
     'secrets.deleted': 'Секрет видалено',
     'secrets.restricted': 'Обмежено',
     'secrets.forAgents': 'Агенти',
+    'secrets.fromProvider': 'З {provider}',
+    'secrets.addFromProvider': 'Додати з {provider}',
+    'secrets.providerIntro': 'Оберіть секрети {provider}, які він читає. Значення лишаються в {provider}: ordi запитує їх, коли хтось відкриває поле або стартує запуск агента, і нічого не зберігає.',
+    'secrets.providerRef': 'Секрет у {provider}',
+    'secrets.providerRefPick': 'Оберіть…',
+    'secrets.providerConnection': 'Підключення',
+    'secrets.providerNamesFailed': 'Не вдалося завантажити назви з {provider}.',
+    'secrets.providerReads': 'читає {ref}',
+    'secrets.providerState.error': '{provider} недоступний: {error}',
+    'secrets.providerState.disconnected': 'Відключено: {error}. Назва й поля лишаються; значення не відкриються, доки його не прив’яжуть знову.',
+    'secrets.providerState.missing': 'У {provider} немає секрету {names} – його там перейменували чи видалили. Відредагуйте секрет і вкажіть нову назву.',
+    'secrets.providerRelink': 'Прив’язати до підключення',
   },
 });

@@ -6,7 +6,7 @@
  */
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bot, Copy, ExternalLink, Eye, EyeOff, KeyRound, Lock, Pencil, Trash2 } from 'lucide-react';
+import { AlertTriangle, Bot, Cloud, Copy, ExternalLink, Eye, EyeOff, KeyRound, Lock, Pencil, Trash2 } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { openExternal } from '../../lib/desktop';
 import { useT } from '../../lib/i18n';
@@ -14,7 +14,7 @@ import { isHttpUrl } from '@ordi/shared';
 import { Badge, Button, IconButton, Skeleton, Spinner, Tooltip, cn, fmtDate, fmtRelative } from '../ui';
 import { ConfirmDialog, SidePanel, toast } from '../overlays';
 import type { UserLite } from './pickers';
-import { ENV_TONE, daysUntil, isSecretValueType, type SecretFieldMeta, type SecretView } from './secretsShared';
+import { ENV_TONE, PROVIDER_NAME, daysUntil, revealsValue, type SecretFieldMeta, type SecretView } from './secretsShared';
 
 const SHOW_FOR_MS = 30_000;
 
@@ -106,6 +106,16 @@ export function SecretPanel({ secretId, users, onClose, onEdit, onDeleted }: {
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.error')),
   });
 
+  const providerName = PROVIDER_NAME[secret?.provider?.kind ?? 'doppler'] ?? 'Doppler';
+  const providerWarning = (() => {
+    const p = secret?.provider;
+    if (!p) return null;
+    if (p.state === 'disconnected') return t('secrets.providerState.disconnected').replace('{error}', p.error ?? '');
+    if (p.state === 'error') return t('secrets.providerState.error').replace('{provider}', providerName).replace('{error}', p.error ?? '');
+    if (p.missing?.length) return t('secrets.providerState.missing').replace('{provider}', providerName).replace('{names}', p.missing.join(', '));
+    return null;
+  })();
+
   const userName = (uid: string | null) => users.find((u) => u.id === uid)?.name ?? '—';
   const copyPlain = async (value: string) => {
     if (await toClipboard(value)) toast(t('secrets.copied'));
@@ -114,10 +124,14 @@ export function SecretPanel({ secretId, users, onClose, onEdit, onDeleted }: {
 
   const fieldRow = (f: SecretFieldMeta) => {
     const open = shown[f.key];
-    const secretField = isSecretValueType(f.type);
+    // A provider field has no value in ordi: it is always fetched, whatever its type.
+    const secretField = !!secret && revealsValue(secret, f.type);
     return (
       <div key={f.key} className="space-y-1 py-2.5">
-        <div className="text-xs text-muted-foreground">{f.label}</div>
+        <div className="flex items-baseline gap-1.5 text-xs text-muted-foreground">
+          {f.label}
+          {f.ref && <span className="font-mono text-[11px] text-faint">{t('secrets.providerReads').replace('{ref}', f.ref)}</span>}
+        </div>
         <div className="flex min-h-7 items-center gap-1.5">
           {!f.hasValue ? (
             <span className="flex-1 text-[13px] text-faint">{t('secrets.noValue')}</span>
@@ -150,7 +164,7 @@ export function SecretPanel({ secretId, users, onClose, onEdit, onDeleted }: {
               <IconButton size="sm" aria-label={f.value!} onClick={() => openExternal(f.value!)}><ExternalLink size={13} /></IconButton>
             </Tooltip>
           )}
-          {f.hasValue && secretField && secret?.access.reveal && (
+          {f.hasValue && secretField && secret?.access.reveal && secret.provider?.state !== 'disconnected' && (
             <>
               <Button
                 size="xs" variant="ghost"
@@ -185,6 +199,9 @@ export function SecretPanel({ secretId, users, onClose, onEdit, onDeleted }: {
             <Badge className={ENV_TONE[secret.environment]}>{t(`secrets.env.${secret.environment}`)}</Badge>
             {!secret.audience.some((p) => p.type === 'project') && <Badge><Lock size={11} /> {t('secrets.restricted')}</Badge>}
             {secret.availableToAgents && <Badge><Bot size={11} /> {t('secrets.forAgents')}</Badge>}
+            {secret.source === 'provider' && (
+              <Badge><Cloud size={11} /> {secret.provider?.label ?? t('secrets.fromProvider').replace('{provider}', providerName)}</Badge>
+            )}
             <ExpiryHint date={secret.expiresAt} />
             {secret.expiresAt && (daysUntil(secret.expiresAt) ?? 99) > 30 && (
               <span className="text-xs text-muted-foreground">{t('secrets.expires')}: {fmtDate(secret.expiresAt)}</span>
@@ -192,6 +209,13 @@ export function SecretPanel({ secretId, users, onClose, onEdit, onDeleted }: {
           </div>
 
           {secret.description && <p className="text-[13px] text-muted-foreground">{secret.description}</p>}
+
+          {providerWarning && (
+            <div className="flex gap-2 rounded-md border border-warning/30 bg-warning/10 px-2.5 py-2 text-xs text-foreground">
+              <AlertTriangle size={14} className="mt-px shrink-0 text-warning" />
+              <span>{providerWarning}</span>
+            </div>
+          )}
 
           <div className="divide-y divide-border/60 rounded-lg border border-border bg-card px-3">
             {secret.fields.map(fieldRow)}

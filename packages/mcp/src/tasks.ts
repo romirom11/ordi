@@ -581,6 +581,7 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
       key: f.key as string, label: f.label as string, type: f.type as string, hasValue: !!f.hasValue,
     }));
     const expiresAt = (s.expiresAt as string | null) ?? null;
+    const provider = (s.provider as Row | null | undefined) ?? null;
     return {
       name: s.name as string,
       description: (s.description as string | null) ?? null,
@@ -591,11 +592,15 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
       availableToAgents: !!s.availableToAgents,
       // The variables an ordi agent run gets when availableToAgents is on.
       envVars: secretEnvVars(s.name as string, fields),
+      // ordi, or the external store (doppler) the values are fetched from at run start.
+      storedIn: s.source === 'provider' ? ((provider?.kind as string | null) ?? 'provider') : 'ordi',
+      // A provider secret whose store is unreachable or unlinked is left out of runs.
+      reachable: s.source !== 'provider' || provider?.state === 'ok',
     };
   };
   const SECRET_VALUES_NOTE = 'Values are never returned here. An ordi agent run receives the secrets marked availableToAgents as environment variables (envVars) – read them from the environment and never print, commit or post them. Anyone else gets a value from a person, who reveals it in the project\'s Resources.';
 
-  server.tool('list_project_secrets', `The secrets of a project the token owner may see – credentials a client handed over (logins, test API keys): name, description, environment (test/staging/production/other), fields (key, label, type, whether set), expiry and agent availability. ${SECRET_VALUES_NOTE}`, {
+  server.tool('list_project_secrets', `The secrets of a project the token owner may see – credentials a client handed over (logins, test API keys): name, description, environment (test/staging/production/other), fields (key, label, type, whether set), expiry, agent availability, and where the values live (storedIn: ordi or doppler; reachable false when the store cannot be reached). ${SECRET_VALUES_NOTE}`, {
     project: z.string().describe('Project key or id'),
   }, ({ project }) => wrap(async () => {
     const projectId = await resolveProjectId(client, project);

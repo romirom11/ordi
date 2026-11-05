@@ -11,6 +11,10 @@
  * `project_secret` entity, marked sensitive and never carrying a value. The
  * project's own activity – read by everyone on the project – hears only of
  * project-wide secrets; a restricted secret leaves no trace there.
+ *
+ * A provider secret (U5) has the same metadata, audience and trail, but no
+ * payload: each field names a secret in Doppler (`ref`), read at the moment
+ * of a reveal or a run start and dropped afterwards.
  */
 import { getDb, schema, eq, and, asc, desc, inArray, sql } from '@ordi/db';
 import { ulid } from 'ulid';
@@ -28,7 +32,9 @@ import { writeActivity } from '../../core/activity';
 import { assertVersion } from '../../core/locking';
 import { encrypt, decrypt } from '../../lib/crypto';
 import { checkRate } from '../../lib/rate-limit';
-import { err } from '../../lib/errors';
+import { err, ApiException } from '../../lib/errors';
+import { callProvider, connectionForProject, connectionView, linkedConnections } from './connections';
+import { cachedNames } from './providers';
 
 const { projectSecrets, projectSecretAudience, projectSecretPayloads, projectResources, projects, employees, departments, projectMembers, notifications } = schema;
 
@@ -48,6 +54,20 @@ export interface SecretFieldMeta {
   value?: string;
   /** api_key only: the last four characters, for telling keys apart. Never in MCP. */
   hint?: string;
+  /** Provider secrets: the name of the provider secret the field reads. */
+  ref?: string;
+}
+
+/** Where a provider secret's values come from, and whether they can be reached. */
+export interface SecretProviderState {
+  connectionId: string | null;
+  kind: string | null;
+  label: string | null;
+  /** disconnected: the connection was removed, or the project is no longer linked to it. */
+  state: 'ok' | 'error' | 'disconnected';
+  error: string | null;
+  /** Fields whose provider secret is gone (renamed or deleted there). Checked when one secret is opened. */
+  missing?: string[];
 }
 
 export interface SecretView {
@@ -68,6 +88,8 @@ export interface SecretView {
   updatedAt: string;
   version: number;
   access: Pick<SecretAccess, 'reveal' | 'write' | 'manage'>;
+  /** source = provider only. */
+  provider: SecretProviderState | null;
 }
 
 const isValueType = (t: SecretFieldType) => SECRET_VALUE_TYPES.includes(t);
@@ -143,7 +165,32 @@ async function lastReveals(secretIds: string[]): Promise<Map<string, LastReveal>
   return out;
 }
 
-function toView(row: SecretRow, audience: SecretAudiencePrincipal[], access: SecretAccess, last?: LastReveal): SecretView {
+type ConnectionRow = typeof schema.secretProviderConnections.$inferSelect;
+
+/** The provider state of each provider secret among `rows`, from the project's links; no call to the provider. */
+async function providerStates(projectId: string, rows: SecretRow[]): Promise<Map<string, SecretProviderState>> {
+  const out = new Map<string, SecretProviderState>();
+  const provider = rows.filter((r) => r.source === 'provider');
+  if (!provider.length) return out;
+  const linked = await linkedConnections(projectId);
+  const unlinkedIds = [...new Set(provider.map((r) => r.providerConnectionId).filter((id): id is string => !!id && !linked.has(id)))];
+  const { db } = getDb();
+  const others = unlinkedIds.length
+    ? new Map((await db.select().from(schema.secretProviderConnections).where(inArray(schema.secretProviderConnections.id, unlinkedIds))).map((c) => [c.id, c]))
+    : new Map<string, ConnectionRow>();
+  for (const r of provider) {
+    const conn = r.providerConnectionId ? linked.get(r.providerConnectionId) ?? others.get(r.providerConnectionId) : undefined;
+    const isLinked = !!r.providerConnectionId && linked.has(r.providerConnectionId);
+    out.set(r.id, {
+      connectionId: r.providerConnectionId, kind: conn?.kind ?? null, label: conn?.label ?? null,
+      state: !conn || !isLinked ? 'disconnected' : conn.status === 'error' ? 'error' : 'ok',
+      error: !conn ? 'The connection was removed' : !isLinked ? 'This project is no longer linked to the connection' : conn.lastError,
+    });
+  }
+  return out;
+}
+
+function toView(row: SecretRow, audience: SecretAudiencePrincipal[], access: SecretAccess, last?: LastReveal, provider?: SecretProviderState): SecretView {
   return {
     id: row.id, projectId: row.projectId, name: row.name, description: row.description,
     environment: row.environment as SecretEnvironment, source: row.source,
@@ -156,6 +203,7 @@ function toView(row: SecretRow, audience: SecretAudiencePrincipal[], access: Sec
     createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(),
     version: row.version,
     access: { reveal: access.reveal, write: access.write, manage: access.manage },
+    provider: row.source === 'provider' ? provider ?? null : null,
   };
 }
 
@@ -174,13 +222,14 @@ export async function listSecrets(ctx: ActorContext, projectId: string, ids?: st
   const rows = await db.select().from(projectSecrets).where(where).orderBy(asc(projectSecrets.name));
   const audiences = await audiencesOf(rows.map((r) => r.id));
   const reveals = await lastReveals(rows.map((r) => r.id));
+  const states = await providerStates(projectId, rows);
   for (const row of rows) {
     const audience = audiences.get(row.id) ?? [];
     const access = secretAccess({
       permissions: ctx.actor.access.permissions, projectRole: role, audience,
       userId: ctx.actor.userId, departmentIds: ctx.departments,
     });
-    if (access.list) out.set(row.id, toView(row, audience, access, reveals.get(row.id)));
+    if (access.list) out.set(row.id, toView(row, audience, access, reveals.get(row.id), states.get(row.id)));
   }
   return out;
 }
@@ -201,9 +250,25 @@ async function load(ctx: ActorContext, id: string): Promise<Loaded> {
   return { row, audience, access };
 }
 
+/**
+ * One secret. For a provider secret this also asks the provider which of its
+ * names still exist (names only, cached a minute), so the panel can say
+ * "Doppler: secret not found" before anyone tries a reveal (R35).
+ */
 export async function getSecret(ctx: ActorContext, id: string): Promise<SecretView> {
   const { row, audience, access } = await load(ctx, id);
-  return toView(row, audience, access, (await lastReveals([id])).get(id));
+  let provider = (await providerStates(row.projectId, [row])).get(id);
+  if (provider && provider.state !== 'disconnected' && row.providerConnectionId) {
+    const conn = (await linkedConnections(row.projectId)).get(row.providerConnectionId)!;
+    try {
+      const names = new Set(await callProvider(conn, (p) => cachedNames(conn.id, p)));
+      const missing = (row.fields as SecretFieldMeta[]).filter((f) => f.ref && !names.has(f.ref)).map((f) => f.ref!);
+      provider = { ...provider, state: 'ok', error: null, missing };
+    } catch (e) {
+      provider = { ...provider, state: 'error', error: e instanceof Error ? e.message : 'The provider could not be reached' };
+    }
+  }
+  return toView(row, audience, access, (await lastReveals([id])).get(id), provider);
 }
 
 // ── Writing ──
@@ -236,6 +301,27 @@ function splitFields(fields: FieldInput[], previous: { meta: SecretFieldMeta[]; 
     meta.push(m);
   }
   return { meta, values };
+}
+
+/**
+ * A provider secret's fields: metadata and the provider name each reads,
+ * never a value. `previous` lets an edit leave a field's ref out to keep it.
+ */
+function providerFields(fields: FieldInput[], previous: SecretFieldMeta[] = []): SecretFieldMeta[] {
+  const before = new Map(previous.map((m) => [m.key, m]));
+  return fields.map((f) => {
+    if (f.value) throw err.validation('A provider secret keeps its values in the provider');
+    const ref = f.ref ?? before.get(f.key)?.ref;
+    if (!ref) throw err.validation(`Choose which provider secret the field ${f.label} reads`);
+    return { key: f.key, label: f.label, type: f.type, hasValue: true, ref };
+  });
+}
+
+/** Every ref must exist in the provider when it is chosen; a typo would otherwise surface only at the next run. */
+async function assertRefsExist(conn: ConnectionRow, meta: SecretFieldMeta[]): Promise<void> {
+  const names = new Set(await callProvider(conn, (p) => cachedNames(conn.id, p)));
+  const missing = meta.filter((m) => m.ref && !names.has(m.ref)).map((m) => m.ref!);
+  if (missing.length) throw err.validation(`The provider has no secret named ${missing.join(', ')}`);
 }
 
 /** People and departments named in an audience must exist. */
@@ -297,16 +383,27 @@ export async function createSecret(ctx: ActorContext, projectId: string, input: 
     .where(and(eq(projectSecrets.projectId, projectId), eq(projectSecrets.name, input.name)));
   if (dupe) throw err.domain(`This project already has a secret named ${input.name}`);
 
-  const { meta, values } = splitFields(input.fields, { meta: [], values: {} });
+  const fromProvider = input.source === 'provider';
+  let meta: SecretFieldMeta[];
+  let values: Record<string, string> = {};
+  if (fromProvider) {
+    const conn = await connectionForProject(projectId, input.connectionId!);
+    meta = providerFields(input.fields);
+    await assertRefsExist(conn, meta);
+  } else {
+    ({ meta, values } = splitFields(input.fields, { meta: [], values: {} }));
+  }
   const id = ulid();
   await db.transaction(async (tx) => {
     await tx.insert(projectSecrets).values({
       id, projectId, name: input.name, description: input.description || null,
       environment: input.environment, expiresAt: input.expiresAt ?? null,
       availableToAgents: !!input.availableToAgents, fields: meta, createdBy: actor.userId,
+      source: input.source, providerConnectionId: fromProvider ? input.connectionId! : null,
     });
     await writeAudience(tx as unknown as Db, id, audience);
-    await tx.insert(projectSecretPayloads).values({ secretId: id, ciphertext: encrypt(JSON.stringify(values)) });
+    // A provider secret has no payload: its values never enter ordi's database.
+    if (!fromProvider) await tx.insert(projectSecretPayloads).values({ secretId: id, ciphertext: encrypt(JSON.stringify(values)) });
     const [pos] = await tx.select({ max: sql<number | null>`max(${projectResources.position})` })
       .from(projectResources).where(eq(projectResources.projectId, projectId));
     await tx.insert(projectResources).values({
@@ -314,6 +411,7 @@ export async function createSecret(ctx: ActorContext, projectId: string, input: 
     });
     await writeActivity(tx, sensitive(actor, id, 'created', {
       name: { to: input.name }, fields: { to: meta.map((m) => m.key) }, environment: { to: input.environment },
+      ...(fromProvider ? { source: { to: 'provider' }, refs: { to: meta.map((m) => m.ref) } } : {}),
     }));
     if (isProjectWideSecret(audience)) {
       await writeActivity(tx, {
@@ -336,7 +434,8 @@ export async function updateSecret(ctx: ActorContext, id: string, patch: SecretP
   const { row, audience, access } = await load(ctx, id);
   assertVersion(row, patch.version);
 
-  const touchesContent = patch.fields !== undefined || patch.description !== undefined || patch.expiresAt !== undefined;
+  const touchesContent = patch.fields !== undefined || patch.description !== undefined || patch.expiresAt !== undefined
+    || patch.connectionId !== undefined;
   const touchesGovernance = patch.audience !== undefined || patch.environment !== undefined || patch.availableToAgents !== undefined;
   if (touchesContent && !access.write) throw err.forbidden('Editing this secret needs secrets.write and a place in its audience', 'secrets.write');
   if (touchesGovernance && !access.write && !access.manage) throw err.forbidden('Changing who can use this secret needs secrets.manage', 'secrets.manage');
@@ -363,9 +462,26 @@ export async function updateSecret(ctx: ActorContext, id: string, patch: SecretP
     if (!after.inAudience && !after.manage) throw err.domain('This change would leave you without access; keep yourself in the audience');
   }
 
+  const isProvider = row.source === 'provider';
+  if (!isProvider && patch.connectionId) throw err.validation('Only a provider secret has a connection');
+  if (!isProvider && patch.fields?.some((f) => f.ref)) throw err.validation('Only a provider secret reads from a provider');
+  let providerMeta: SecretFieldMeta[] | null = null;
+  const connectionId = patch.connectionId ?? row.providerConnectionId;
+  if (isProvider && (patch.fields || (patch.connectionId && patch.connectionId !== row.providerConnectionId))) {
+    // Relinking a disconnected secret, or new refs: both must exist in a connection the project may use.
+    if (!connectionId) throw err.domain('This secret is disconnected; choose a connection for it');
+    const conn = await connectionForProject(row.projectId, connectionId);
+    providerMeta = patch.fields ? providerFields(patch.fields, row.fields as SecretFieldMeta[]) : row.fields as SecretFieldMeta[];
+    await assertRefsExist(conn, providerMeta);
+  }
+
   const { db } = getDb();
   const diff: Record<string, unknown> = {};
   const set: Partial<SecretRow> = {};
+  if (isProvider && patch.connectionId && patch.connectionId !== row.providerConnectionId) {
+    set.providerConnectionId = patch.connectionId;
+    diff.connection = { from: row.providerConnectionId, to: patch.connectionId };
+  }
   if (patch.description !== undefined && (patch.description || null) !== row.description) {
     set.description = patch.description || null;
     diff.description = { changed: true };
@@ -386,7 +502,13 @@ export async function updateSecret(ctx: ActorContext, id: string, patch: SecretP
   if (audienceChanged) diff.audience = { from: audience, to: nextAudience };
 
   await db.transaction(async (tx) => {
-    if (patch.fields) {
+    if (patch.fields && providerMeta) {
+      set.fields = providerMeta;
+      diff.fields = {
+        from: (row.fields as SecretFieldMeta[]).map((m) => m.key), to: providerMeta.map((m) => m.key),
+        refs: providerMeta.map((m) => m.ref),
+      };
+    } else if (patch.fields) {
       const [payload] = await tx.select().from(projectSecretPayloads).where(eq(projectSecretPayloads.secretId, id));
       const { meta, values } = splitFields(patch.fields, { meta: row.fields as SecretFieldMeta[], values: readPayload(payload?.ciphertext) });
       set.fields = meta;
@@ -479,7 +601,9 @@ export async function revealSecretField(
 
   const { db } = getDb();
   let value = '';
-  if (isValueType(meta.type)) {
+  if (row.source === 'provider') {
+    value = await providerValue(row, meta);
+  } else if (isValueType(meta.type)) {
     const [payload] = await db.select().from(projectSecretPayloads).where(eq(projectSecretPayloads.secretId, id));
     value = readPayload(payload?.ciphertext)[field] ?? '';
   } else {
@@ -487,6 +611,16 @@ export async function revealSecretField(
   }
   await writeActivity(db, sensitive(actor, id, purpose === 'copy' ? 'copied' : 'revealed', { field: { to: field } }));
   return { field, value };
+}
+
+/** One field of a provider secret, fetched for this request only (R33). */
+async function providerValue(row: SecretRow, meta: SecretFieldMeta): Promise<string> {
+  if (!row.providerConnectionId) throw err.domain('This secret is disconnected: its connection was removed');
+  const conn = (await linkedConnections(row.projectId)).get(row.providerConnectionId);
+  if (!conn) throw err.domain('This secret is disconnected: the project is no longer linked to its connection');
+  const got = await callProvider(conn, (p) => p.getValues([meta.ref!]));
+  if (!(meta.ref! in got)) throw err.domain(`The provider has no secret named ${meta.ref}; it may have been renamed or deleted there`);
+  return got[meta.ref!]!;
 }
 
 /** The secret's own trail, for those who may reveal it or govern it. */
@@ -545,6 +679,28 @@ async function assertCanShare(ctx: ActorContext, projectId: string): Promise<voi
   if (!role) throw err.notFound('Project not found');
   const writer = perms.has('secrets.write') && role !== 'viewer';
   if (!writer && !perms.has('secrets.manage')) throw err.forbidden('Sharing secrets needs secrets.write', 'secrets.write');
+}
+
+// ── Adding from a provider ──
+
+/** The connections a project may add secrets from, for those who may add secrets. */
+export async function projectProviders(ctx: ActorContext, projectId: string) {
+  await assertCanAdd(ctx, projectId);
+  return [...(await linkedConnections(projectId)).values()].map(connectionView);
+}
+
+/** The names in a linked connection, for the "From Doppler" picker (R31). Names only, never values. */
+export async function providerNames(ctx: ActorContext, projectId: string, connectionId: string): Promise<{ names: string[] }> {
+  await assertCanAdd(ctx, projectId);
+  const conn = await connectionForProject(projectId, connectionId);
+  return { names: await callProvider(conn, (p) => cachedNames(conn.id, p)) };
+}
+
+async function assertCanAdd(ctx: ActorContext, projectId: string): Promise<void> {
+  const role = await projectRole(ctx.actor, projectId);
+  if (!role) throw err.notFound('Project not found');
+  if (!ctx.actor.access.permissions.has('secrets.write')) throw err.forbidden('Adding secrets needs secrets.write', 'secrets.write');
+  if (role === 'viewer') throw err.forbidden('Adding secrets needs member access to the project');
 }
 
 /** Who and what an audience can name in this project: people on it, and departments. */
@@ -626,6 +782,8 @@ interface AgentSecretPlan {
   skipped: { name: string; reason: string }[];
   /** How many more were left out because the person behind the run cannot open them – unnamed: the run log is read by the whole project. */
   withheld: number;
+  /** Restricted secrets left out because their provider could not supply them – counted, not named, for the same reason. */
+  unavailable: number;
 }
 
 /** What the three layers make of one person on one project (the same inputs secretAccess takes for the actor). */
@@ -670,9 +828,10 @@ export async function agentSecretPlan(
   const rows = await db.select().from(projectSecrets)
     .where(and(eq(projectSecrets.projectId, projectId), eq(projectSecrets.availableToAgents, true)))
     .orderBy(asc(projectSecrets.name));
-  const plan: AgentSecretPlan = { use: [], skipped: [], withheld: 0 };
+  const plan: AgentSecretPlan = { use: [], skipped: [], withheld: 0, unavailable: 0 };
   if (!rows.length) return plan;
   const audiences = await audiencesOf(rows.map((r) => r.id));
+  const linked = rows.some((r) => r.source === 'provider') ? await linkedConnections(projectId) : new Map<string, ConnectionRow>();
   const requester = requesterId ? await personOnProject(requesterId, projectId) : null;
   const requesterCanReveal = (secret: SecretRow) => !!requester && secretAccess({
     permissions: requester.permissions, projectRole: requester.projectRole, audience: audiences.get(secret.id) ?? [],
@@ -693,7 +852,11 @@ export async function agentSecretPlan(
       else plan.skipped.push({ name: secret.name, reason: 'the person who started the run cannot open it' });
       continue;
     }
-    if (secret.source !== 'ordi') { plan.skipped.push({ name: secret.name, reason: 'its provider is not connected' }); continue; }
+    if (secret.source === 'provider' && (!secret.providerConnectionId || !linked.has(secret.providerConnectionId))) {
+      if (restricted) plan.unavailable += 1;
+      else plan.skipped.push({ name: secret.name, reason: 'its provider connection was removed or unlinked' });
+      continue;
+    }
     if (secret.expiresAt && secret.expiresAt < today) { plan.skipped.push({ name: secret.name, reason: `it expired on ${secret.expiresAt}` }); continue; }
     const fields = secret.fields as SecretFieldMeta[];
     const label = new Map(fields.map((f) => [f.key, f.label]));
@@ -705,8 +868,11 @@ export async function agentSecretPlan(
 
 /**
  * The values for a run: decrypted here, in the API, and handed to the worker
- * with the bundle – the standalone worker holds no ENCRYPTION_KEY. Each
- * secret a run receives is noted on the secret's own trail.
+ * with the bundle – the standalone worker holds no ENCRYPTION_KEY. Provider
+ * secrets are fetched now, one request per connection, and held only in the
+ * bundle (R33); one the provider cannot supply is left out with the reason,
+ * and the run still starts (R29). Each secret a run receives is noted on the
+ * secret's own trail.
  */
 export async function resolveRunSecrets(
   run: { id: string; projectId: string; agentUserId: string; taskId: string; requestedBy: string | null },
@@ -716,19 +882,69 @@ export async function resolveRunSecrets(
   /** Names the whole project may see; restricted ones are only counted. */
   used: string[]; usedRestricted: number;
   skipped: { name: string; reason: string }[]; withheld: number;
+  /** Restricted secrets their provider could not supply. */
+  unavailable: number;
 }> {
   const plan = await agentSecretPlan(run.projectId, run.agentUserId, run.requestedBy);
   const { db } = getDb();
+  const skipped = [...plan.skipped];
+  let unavailable = plan.unavailable;
+
+  // Provider values, one call per connection for every ref the run needs.
+  const fetched = new Map<string, Record<string, string> | Error>();
+  const byConnection = new Map<string, Set<string>>();
+  for (const { secret } of plan.use) {
+    if (secret.source !== 'provider') continue;
+    const refs = byConnection.get(secret.providerConnectionId!) ?? new Set<string>();
+    for (const f of secret.fields as SecretFieldMeta[]) if (f.ref) refs.add(f.ref);
+    byConnection.set(secret.providerConnectionId!, refs);
+  }
+  if (byConnection.size) {
+    const linked = await linkedConnections(run.projectId);
+    for (const [connectionId, refs] of byConnection) {
+      const conn = linked.get(connectionId);
+      try {
+        if (!conn) throw new Error('its provider connection was removed or unlinked');
+        fetched.set(connectionId, await callProvider(conn, (p) => p.getValues([...refs])));
+      } catch (e) {
+        fetched.set(connectionId, e instanceof Error ? e : new Error('its provider could not be reached'));
+      }
+    }
+  }
+
   const vars: { variable: string; value: string }[] = [];
-  for (const { secret, vars: wanted } of plan.use) {
-    const [payload] = await db.select().from(projectSecretPayloads).where(eq(projectSecretPayloads.secretId, secret.id));
-    const values = readPayload(payload?.ciphertext);
+  const delivered: typeof plan.use = [];
+  for (const entry of plan.use) {
+    const { secret, vars: wanted, restricted } = entry;
     const meta = new Map((secret.fields as SecretFieldMeta[]).map((f) => [f.key, f]));
+    let valueOf: (field: string) => string | undefined;
+    if (secret.source === 'provider') {
+      const got = fetched.get(secret.providerConnectionId!);
+      const missing = got instanceof Error ? [] : (secret.fields as SecretFieldMeta[]).filter((f) => f.ref && !(f.ref in got!)).map((f) => f.ref!);
+      if (got instanceof Error || missing.length) {
+        if (restricted) unavailable += 1;
+        else skipped.push({
+          name: secret.name,
+          reason: got instanceof Error
+            ? (got instanceof ApiException ? `the provider failed: ${got.message}` : got.message)
+            : `the provider has no secret named ${missing.join(', ')}`,
+        });
+        continue;
+      }
+      valueOf = (field) => got![meta.get(field)!.ref!];
+    } else {
+      const [payload] = await db.select().from(projectSecretPayloads).where(eq(projectSecretPayloads.secretId, secret.id));
+      const values = readPayload(payload?.ciphertext);
+      valueOf = (field) => {
+        const m = meta.get(field);
+        return m && isValueType(m.type) ? values[field] : m?.value;
+      };
+    }
     for (const v of wanted) {
-      const m = meta.get(v.field);
-      const value = m && isValueType(m.type) ? values[v.field] : m?.value;
+      const value = valueOf(v.field);
       if (value) vars.push({ variable: v.variable, value });
     }
+    delivered.push(entry);
     if (opts.record) {
       await writeActivity(db, {
         entityType: 'project_secret', entityId: secret.id, action: 'used_in_run', sensitivity: 'sensitive',
@@ -738,9 +954,10 @@ export async function resolveRunSecrets(
   }
   return {
     vars,
-    used: plan.use.filter((u) => !u.restricted).map((u) => u.secret.name),
-    usedRestricted: plan.use.filter((u) => u.restricted).length,
-    skipped: plan.skipped,
+    used: delivered.filter((u) => !u.restricted).map((u) => u.secret.name),
+    usedRestricted: delivered.filter((u) => u.restricted).length,
+    skipped,
     withheld: plan.withheld,
+    unavailable,
   };
 }
