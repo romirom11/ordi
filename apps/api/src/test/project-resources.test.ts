@@ -113,6 +113,18 @@ describe('knowledge-base pages', () => {
     expect((await owner.post(`/projects/${projectId}/resources`, { kind: 'kb_page', kbPageId: ulid() })).status).toBe(404);
   });
 
+  it('keeps a hidden page\'s title out of the project activity', async () => {
+    const row = (await list()).find((r) => r.page?.id === hiddenPage);
+    await owner.del(`/project-resources/${row.id}`);
+    // `member` is on the project and reads its trail, but not the private space.
+    const trail = await json(reqAs(users.member!.cookie).get(`/audit/entity/project/${projectId}`));
+    expect(JSON.stringify(trail)).not.toContain('Pricing strategy');
+    // It was pinned and unpinned all the same.
+    const actions = (trail.data as any[]).map((a) => a.action);
+    expect(actions).toEqual(expect.arrayContaining(['resource_added', 'resource_removed']));
+    await owner.post(`/projects/${projectId}/resources`, { kind: 'kb_page', kbPageId: hiddenPage });
+  });
+
   it('unpinning leaves the page itself alone', async () => {
     const row = (await list()).find((r) => r.page?.id === openPage);
     expect((await owner.del(`/project-resources/${row.id}`)).status).toBe(200);

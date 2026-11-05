@@ -136,7 +136,7 @@ export async function appendFileResource(
   });
   await writeActivity(db, {
     entityType: 'project', entityId: projectId, action: 'resource_added',
-    after: { name: filename, kind: 'file' }, actorId: actor.userId, actorType: actor.actorType,
+    after: { kind: 'file', name: filename }, actorId: actor.userId, actorType: actor.actorType,
   });
 }
 
@@ -171,10 +171,13 @@ export function projectResourcesRoutes() {
     const body = projectResourceInputSchema.parse(await c.req.json());
     const { db } = getDb();
     const id = ulid();
-    let name: string;
+    // What the project's activity records. Everyone on the project reads that
+    // trail, so a page goes in by id only: its title may come from a space
+    // some of them cannot open.
+    let logged: Record<string, unknown>;
 
     if (body.kind === 'link') {
-      name = body.label;
+      logged = { kind: 'link', name: body.label };
       await db.insert(projectResources).values({
         id, projectId, kind: 'link', label: body.label, url: body.url,
         position: await nextPosition(db, projectId), createdBy: actor.userId,
@@ -185,7 +188,7 @@ export function projectResourcesRoutes() {
       const [dupe] = await db.select({ id: projectResources.id }).from(projectResources)
         .where(and(eq(projectResources.projectId, projectId), eq(projectResources.kbPageId, page.id)));
       if (dupe) throw err.domain('This page is already one of the project’s resources');
-      name = page.title;
+      logged = { kind: 'kb_page', kbPageId: page.id };
       await db.insert(projectResources).values({
         id, projectId, kind: 'kb_page', kbPageId: page.id,
         position: await nextPosition(db, projectId), createdBy: actor.userId,
@@ -194,7 +197,7 @@ export function projectResourcesRoutes() {
 
     await writeActivity(db, {
       entityType: 'project', entityId: projectId, action: 'resource_added',
-      after: { name, kind: body.kind }, actorId: actor.userId, actorType: actor.actorType,
+      after: logged, actorId: actor.userId, actorType: actor.actorType,
     });
     return c.json(await viewOf(actor, await loadResource(id)), 201);
   });
@@ -250,32 +253,30 @@ export function projectResourcesRoutes() {
     const row = await loadResource(c.req.param('id'));
     await assertProject(actor, row.projectId, 'member');
     const { db } = getDb();
-    let name = row.label ?? row.url ?? '';
+    // Same rule as on adding: a page is logged by id, never by title.
+    let logged: Record<string, unknown> = row.kind === 'kb_page'
+      ? { kind: 'kb_page', kbPageId: row.kbPageId }
+      : { kind: row.kind, name: row.label ?? row.url ?? '' };
 
     if (row.kind === 'file' && row.attachmentId) {
       const [att] = await db.select().from(attachments).where(eq(attachments.id, row.attachmentId));
       // The row goes with its attachment (ON DELETE CASCADE). The S3 object
       // stays behind, as with every other delete.
       if (att) {
-        name = att.filename;
+        logged = { kind: 'file', name: att.filename };
         await db.delete(attachments).where(eq(attachments.id, att.id));
         await writeActivity(db, {
           entityType: 'attachment', entityId: att.id, action: 'deleted',
           diff: { file: { from: att.filename } }, actorId: actor.userId, actorType: actor.actorType,
         });
       }
-    } else {
-      if (row.kind === 'kb_page' && row.kbPageId) {
-        const [pg] = await db.select({ title: kbPages.title }).from(kbPages).where(eq(kbPages.id, row.kbPageId));
-        name = pg?.title ?? name;
-      }
-      // Unpinning a page leaves the page itself alone.
     }
+    // Unpinning a page leaves the page itself alone.
     await db.delete(projectResources).where(eq(projectResources.id, row.id));
 
     await writeActivity(db, {
       entityType: 'project', entityId: row.projectId, action: 'resource_removed',
-      after: { name, kind: row.kind }, actorId: actor.userId, actorType: actor.actorType,
+      after: logged, actorId: actor.userId, actorType: actor.actorType,
     });
     return c.json({ ok: true });
   });
