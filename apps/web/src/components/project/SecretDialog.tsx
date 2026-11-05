@@ -10,7 +10,7 @@
  * field picks the provider secret it reads, from the names of a connection
  * linked to the project.
  */
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Building2, ClipboardPaste, Plus, Users, X } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
@@ -22,7 +22,7 @@ import { Dialog, DropdownMenu, MenuItem, toast } from '../overlays';
 import { DateField } from '../DatePicker';
 import { SearchSelect } from '../SearchSelect';
 import {
-  ENV_TONE, PROVIDER_NAME, SECRET_ENVIRONMENTS, SECRET_FIELD_TYPES, fieldFromRef, isSecretValueType,
+  ENV_DOT, PROVIDER_NAME, SECRET_ENVIRONMENTS, SECRET_FIELD_TYPES, fieldFromRef, isSecretValueType,
   type AudiencePrincipal, type ProviderConnection, type SecretEnvironment, type SecretFieldType, type SecretView,
 } from './secretsShared';
 
@@ -104,6 +104,7 @@ export function SecretDialog({ projectId, secret, provider, open, onClose, onSav
   const [fields, setFields] = useState<FieldDraft[]>(() => draftsFrom(null, false));
   const [connectionId, setConnectionId] = useState<string | null>(null);
   const [paste, setPaste] = useState('');
+  const [pasteOpen, setPasteOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Reset whenever the dialog opens for a (different) secret.
@@ -122,6 +123,7 @@ export function SecretDialog({ projectId, secret, provider, open, onClose, onSav
     setFields(draftsFrom(secret, !!provider));
     setConnectionId(secret?.provider?.connectionId ?? provider?.id ?? null);
     setPaste('');
+    setPasteOpen(false);
     setError(null);
   }, [open, secret, provider]);
 
@@ -191,6 +193,7 @@ export function SecretDialog({ projectId, secret, provider, open, onClose, onSav
     const kept = fields.filter((f) => f.existing || f.value.trim() !== '');
     setFields(uniqueKeys([...kept, ...proposed.map((p) => ({ id: nextId(), ...p, existing: false, hasValue: false, ref: '' }))]));
     setPaste('');
+    setPasteOpen(false);
     toast(t('secrets.pasteDone').replace('{n}', String(proposed.length)));
   };
 
@@ -254,6 +257,44 @@ export function SecretDialog({ projectId, secret, provider, open, onClose, onSav
   const removePrincipal = (p: AudiencePrincipal) => setAudience((a) => a.filter((x) => JSON.stringify(x) !== JSON.stringify(p)));
   const addPrincipal = (p: AudiencePrincipal) => setAudience((a) => (a.some((x) => JSON.stringify(x) === JSON.stringify(p)) ? a : [...a, p]));
 
+  // What agent runs will call it: the one variable, or the per-field pattern.
+  const filledFields = fields.filter((f) => f.label.trim());
+  // Several fields: the first variable in full, the rest by their suffix.
+  const envVar = name.trim()
+    ? filledFields.length > 1
+      ? [`SECRET_${name.trim()}__${filledFields[0]!.key.toUpperCase()}`, ...filledFields.slice(1, 4).map((f) => `__${f.key.toUpperCase()}`)]
+        .join(', ') + (filledFields.length > 4 ? ', …' : '')
+      : `SECRET_${name.trim()}`
+    : null;
+
+  const sectionLabel = 'block text-xs font-medium text-muted-foreground';
+
+  /** One field: label, type and – depending on the source – a value or a provider name. */
+  const fieldRow = (f: FieldDraft, control: ReactNode) => (
+    <div
+      key={f.id}
+      className="grid grid-cols-[minmax(0,1fr)_116px_28px] items-center gap-1.5 sm:grid-cols-[minmax(0,0.85fr)_116px_minmax(0,1.3fr)_28px]"
+    >
+      <Input value={f.label} placeholder={t(`secrets.labelPh.${f.type}`)} aria-label={t('secrets.fieldLabel')} onChange={(e) => setField(f.id, { label: e.target.value })} />
+      <Select value={f.type} aria-label={t('secrets.fieldType')} onChange={(e) => setField(f.id, { type: e.target.value as SecretFieldType })} className="w-full">
+        {SECRET_FIELD_TYPES.map((type) => <option key={type} value={type}>{t(`secrets.type.${type}`)}</option>)}
+      </Select>
+      <div className="order-last col-span-3 min-w-0 sm:order-none sm:col-span-1">{control}</div>
+      <IconButton size="sm" aria-label={t('common.delete')} onClick={() => setFields((list) => list.filter((x) => x.id !== f.id))}>
+        <X size={14} />
+      </IconButton>
+    </div>
+  );
+
+  const addFieldButton = (type: SecretFieldType) => (
+    <Button
+      type="button" size="xs" variant="ghost" className="-ml-1.5 text-muted-foreground"
+      onClick={() => setFields((list) => [...list, { id: nextId(), key: 'field', label: '', type, value: '', existing: false, hasValue: false, ref: '' }])}
+    >
+      <Plus size={13} /> {t('secrets.addField')}
+    </Button>
+  );
+
   return (
     <Dialog
       open={open}
@@ -261,75 +302,117 @@ export function SecretDialog({ projectId, secret, provider, open, onClose, onSav
       title={editing ? t('secrets.edit') : fromProvider ? t('secrets.addFromProvider').replace('{provider}', providerName) : t('secrets.add')}
       width={600}
     >
-      <form onSubmit={submit} className="max-h-[75vh] space-y-5 overflow-y-auto px-4 pb-4 pt-1">
-        {/* Name and environment */}
-        <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground" htmlFor="secret-name">{t('secrets.name')}</label>
-            <Input
-              id="secret-name"
-              autoFocus={!editing}
-              disabled={editing}
-              value={name}
-              placeholder="ACME_ADMIN"
-              onChange={(e) => setName(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_'))}
-              className="font-mono"
-            />
-            {!editing && <p className="text-[11px] text-faint">{t('secrets.nameHint')}</p>}
-          </div>
-          <div className="space-y-1">
-            <span className="block text-xs text-muted-foreground">{t('secrets.environment')}</span>
-            <SegmentedControl
-              value={environment}
-              onChange={(v) => canGovern && setEnvironment(v)}
-              options={SECRET_ENVIRONMENTS.map((env) => ({
-                key: env,
-                label: <span className={cn('rounded px-1', environment === env && ENV_TONE[env])}>{t(`secrets.env.${env}`)}</span>,
-              }))}
-            />
-          </div>
-        </div>
-
-        <div className="space-y-1">
-          <label className="text-xs text-muted-foreground" htmlFor="secret-desc">{t('secrets.description')}</label>
-          <Input id="secret-desc" value={description} disabled={!canEditContent} placeholder={t('secrets.descriptionPh')} onChange={(e) => setDescription(e.target.value)} />
-        </div>
-
-        {/* Provider fields: each reads one provider secret */}
-        {canEditContent && fromProvider && (
-          <section className="space-y-2">
-            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-faint">{t('secrets.fields')}</h3>
-            <p className="text-xs text-muted-foreground">{t('secrets.providerIntro').replaceAll('{provider}', providerName)}</p>
-            {(editing ? secret.provider?.state === 'disconnected' || (linkedQ.data?.length ?? 0) > 1 : (linkedQ.data?.length ?? 0) > 1) && (
-              <div className="space-y-1">
-                <span className="block text-xs text-muted-foreground">{t('secrets.providerConnection')}</span>
-                <SearchSelect
-                  className="w-full"
-                  value={connectionId}
-                  placeholder={t('secrets.providerRelink')}
-                  options={(linkedQ.data ?? []).map((c) => ({ value: c.id, label: c.label }))}
-                  onChange={(v) => setConnectionId(v)}
-                />
-              </div>
-            )}
-            {namesQ.isError && (
-              <p className="text-xs text-destructive">
-                {namesQ.error instanceof ApiError ? namesQ.error.message : t('secrets.providerNamesFailed').replace('{provider}', providerName)}
-              </p>
-            )}
+      <form onSubmit={submit} className="flex max-h-[min(82vh,820px)] flex-col">
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-4 pb-5 pt-4">
+          {/* Identity: name, environment, description */}
+          <div className="space-y-4">
             <div className="space-y-1.5">
-              {fields.map((f) => (
-                <div key={f.id} className="grid grid-cols-[minmax(0,1fr)_120px_minmax(0,1.4fr)_auto] items-center gap-1.5">
-                  <Input value={f.label} placeholder={t('secrets.fieldLabel')} aria-label={t('secrets.fieldLabel')} onChange={(e) => setField(f.id, { label: e.target.value })} />
-                  <Select value={f.type} aria-label={t('secrets.fieldType')} onChange={(e) => setField(f.id, { type: e.target.value as SecretFieldType })}>
-                    {SECRET_FIELD_TYPES.map((type) => <option key={type} value={type}>{t(`secrets.type.${type}`)}</option>)}
-                  </Select>
+              <label className={sectionLabel} htmlFor="secret-name">{t('secrets.name')}</label>
+              <Input
+                id="secret-name"
+                autoFocus={!editing}
+                disabled={editing}
+                value={name}
+                placeholder="ACME_ADMIN"
+                onChange={(e) => setName(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_'))}
+                className="font-mono placeholder:font-sans"
+              />
+              <p className="text-[11px] leading-4 text-faint">
+                {envVar
+                  ? <>{t('secrets.envVarHint')} <code className="break-all font-mono text-muted-foreground">{envVar}</code></>
+                  : t('secrets.nameHint')}
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <span className={sectionLabel}>{t('secrets.environment')}</span>
+              <SegmentedControl
+                className="w-full"
+                value={environment}
+                onChange={(v) => canGovern && setEnvironment(v)}
+                options={SECRET_ENVIRONMENTS.map((env) => ({
+                  key: env,
+                  label: (
+                    <span className="inline-flex items-center gap-1.5">
+                      <span aria-hidden className={cn('h-1.5 w-1.5 rounded-full', ENV_DOT[env])} />
+                      {t(`secrets.env.${env}`)}
+                    </span>
+                  ),
+                  title: t(`secrets.env.${env}`),
+                }))}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className={sectionLabel} htmlFor="secret-desc">
+                {t('secrets.description')} <span className="font-normal text-faint">· {t('secrets.optional')}</span>
+              </label>
+              <Input id="secret-desc" value={description} disabled={!canEditContent} placeholder={t('secrets.descriptionPh')} onChange={(e) => setDescription(e.target.value)} />
+            </div>
+          </div>
+
+          {/* Fields */}
+          {canEditContent && (
+            <section className="space-y-2">
+              <div className="flex min-h-6 items-center justify-between gap-2">
+                <span className={sectionLabel}>{t('secrets.fields')}</span>
+                {!fromProvider && !pasteOpen && (
+                  <Button type="button" size="xs" variant="ghost" className="-mr-1.5 text-muted-foreground" onClick={() => setPasteOpen(true)}>
+                    <ClipboardPaste size={13} /> {t('secrets.pasteOpen')}
+                  </Button>
+                )}
+              </div>
+
+              {fromProvider && (
+                <>
+                  <p className="text-xs leading-5 text-muted-foreground">{t('secrets.providerIntro').replaceAll('{provider}', providerName)}</p>
+                  {(editing ? secret.provider?.state === 'disconnected' || (linkedQ.data?.length ?? 0) > 1 : (linkedQ.data?.length ?? 0) > 1) && (
+                    <SearchSelect
+                      className="w-full"
+                      value={connectionId}
+                      placeholder={t('secrets.providerRelink')}
+                      menuLabel={t('secrets.providerConnection')}
+                      options={(linkedQ.data ?? []).map((c) => ({ value: c.id, label: c.label }))}
+                      onChange={(v) => setConnectionId(v)}
+                    />
+                  )}
+                  {namesQ.isError && (
+                    <p className="text-xs text-destructive">
+                      {namesQ.error instanceof ApiError ? namesQ.error.message : t('secrets.providerNamesFailed').replace('{provider}', providerName)}
+                    </p>
+                  )}
+                </>
+              )}
+
+              {!fromProvider && pasteOpen && (
+                <div className="space-y-2 rounded-lg border border-border bg-muted/40 p-2.5">
+                  <p className="text-xs text-muted-foreground">{t('secrets.pasteIntro')}</p>
+                  <Textarea
+                    autoFocus
+                    rows={4}
+                    value={paste}
+                    placeholder={t('secrets.pastePh')}
+                    aria-label={t('secrets.paste')}
+                    onChange={(e) => setPaste(e.target.value)}
+                    className="resize-none bg-card font-mono text-xs placeholder:font-mono"
+                  />
+                  <div className="flex justify-end gap-1.5">
+                    <Button type="button" size="xs" variant="ghost" onClick={() => { setPaste(''); setPasteOpen(false); }}>{t('common.cancel')}</Button>
+                    <Button type="button" size="xs" disabled={!paste.trim()} onClick={applyPaste}>
+                      {t('secrets.pasteApply')}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-3 sm:space-y-1.5">
+                {fields.map((f) => fieldRow(f, fromProvider ? (
                   <SearchSelect
                     className="w-full"
                     triggerClassName="font-mono"
                     width={260}
                     value={f.ref || null}
-                    placeholder={namesQ.isLoading ? '…' : t('secrets.providerRefPick')}
+                    placeholder={namesQ.isLoading ? '…' : t('secrets.providerRefPick').replace('{provider}', providerName)}
                     disabled={!connection}
                     menuLabel={t('secrets.providerRef').replace('{provider}', providerName)}
                     options={[...new Set([...(namesQ.data ?? []), ...(f.ref ? [f.ref] : [])])].map((n) => ({
@@ -338,152 +421,108 @@ export function SecretDialog({ projectId, secret, provider, open, onClose, onSav
                     }))}
                     onChange={(v) => chooseRef(f.id, v)}
                   />
-                  <IconButton size="sm" aria-label={t('common.delete')} onClick={() => setFields((list) => list.filter((x) => x.id !== f.id))}>
-                    <X size={13} />
-                  </IconButton>
-                </div>
-              ))}
-              <Button
-                type="button" size="xs" variant="ghost"
-                onClick={() => setFields((list) => [...list, { id: nextId(), key: 'field', label: '', type: 'api_key', value: '', existing: false, hasValue: false, ref: '' }])}
-              >
-                <Plus size={13} /> {t('secrets.addField')}
-              </Button>
-            </div>
-          </section>
-        )}
-
-        {/* Fields, with the paste box */}
-        {canEditContent && !fromProvider && (
-          <section className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-faint">{t('secrets.fields')}</h3>
-            </div>
-            <div className="rounded-lg border border-dashed border-border p-2">
-              <Textarea
-                rows={3}
-                value={paste}
-                placeholder={t('secrets.pastePh')}
-                aria-label={t('secrets.paste')}
-                onChange={(e) => setPaste(e.target.value)}
-                className="min-h-0 resize-none border-0 bg-transparent font-mono text-xs focus:ring-0"
-              />
-              <div className="flex justify-end">
-                <Button type="button" size="xs" variant="outline" disabled={!paste.trim()} onClick={applyPaste}>
-                  <ClipboardPaste size={13} /> {t('secrets.pasteApply')}
-                </Button>
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              {fields.map((f) => (
-                <div key={f.id} className="grid grid-cols-[minmax(0,1fr)_120px_minmax(0,1.4fr)_auto] items-center gap-1.5">
-                  <Input value={f.label} placeholder={t('secrets.fieldLabel')} aria-label={t('secrets.fieldLabel')} onChange={(e) => setField(f.id, { label: e.target.value })} />
-                  <Select value={f.type} aria-label={t('secrets.fieldType')} onChange={(e) => setField(f.id, { type: e.target.value as SecretFieldType })}>
-                    {SECRET_FIELD_TYPES.map((type) => <option key={type} value={type}>{t(`secrets.type.${type}`)}</option>)}
-                  </Select>
+                ) : (
                   <Input
                     value={f.value}
                     type={isSecretValueType(f.type) && f.type !== 'note' ? 'password' : 'text'}
                     autoComplete="new-password"
-                    placeholder={f.existing && isSecretValueType(f.type) && f.hasValue ? t('secrets.keepValue') : t('secrets.fieldValue')}
+                    placeholder={f.existing && isSecretValueType(f.type) && f.hasValue ? t('secrets.keepValue') : t(`secrets.valuePh.${f.type}`)}
                     aria-label={t('secrets.fieldValue')}
                     onChange={(e) => setField(f.id, { value: e.target.value })}
-                    className={cn(isSecretValueType(f.type) && 'font-mono')}
+                    className={cn(isSecretValueType(f.type) && 'font-mono placeholder:font-sans')}
                   />
-                  <IconButton size="sm" aria-label={t('common.delete')} onClick={() => setFields((list) => list.filter((x) => x.id !== f.id))}>
-                    <X size={13} />
-                  </IconButton>
-                </div>
-              ))}
-              <Button
-                type="button" size="xs" variant="ghost"
-                onClick={() => setFields((list) => [...list, { id: nextId(), key: 'field', label: '', type: 'password', value: '', existing: false, hasValue: false, ref: '' }])}
-              >
-                <Plus size={13} /> {t('secrets.addField')}
-              </Button>
-            </div>
-          </section>
-        )}
-
-        {/* Audience */}
-        {canGovern && (
-          <section className="space-y-2">
-            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-faint">{t('secrets.audience')}</h3>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => (hasProject ? removePrincipal({ type: 'project' }) : addPrincipal({ type: 'project' }))}
-                className={cn(
-                  'inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[13px] transition-colors duration-150',
-                  hasProject ? 'border-primary/40 bg-primary/10 text-foreground' : 'border-dashed border-border text-muted-foreground hover:bg-muted',
-                )}
-              >
-                <Users size={13} /> {t('secrets.audienceProject')}
-              </button>
-              {people.map((p) => (
-                <span key={p.id} className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-card pl-1.5 pr-1 text-[13px]">
-                  <Avatar name={personName(p.id)} size={16} /> {personName(p.id)}
-                  <IconButton size="sm" aria-label={t('common.delete')} onClick={() => removePrincipal(p)}><X size={12} /></IconButton>
-                </span>
-              ))}
-              {depts.map((d) => (
-                <span key={d.id} className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-card pl-2 pr-1 text-[13px]">
-                  <Building2 size={13} className="text-muted-foreground" /> {deptName(d.id)}
-                  <IconButton size="sm" aria-label={t('common.delete')} onClick={() => removePrincipal(d)}><X size={12} /></IconButton>
-                </span>
-              ))}
-              <DropdownMenu
-                width={260}
-                trigger={<Button type="button" size="xs" variant="ghost"><Plus size={13} /> {t('secrets.audienceAdd')}</Button>}
-              >
-                {(options.data?.people ?? []).filter((p) => !people.some((x) => x.id === p.id)).length > 0 && (
-                  <div className="px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('secrets.audiencePeople')}</div>
-                )}
-                {(options.data?.people ?? []).filter((p) => !people.some((x) => x.id === p.id)).map((p) => (
-                  <MenuItem key={p.id} icon={<Avatar name={p.name} src={p.avatar} size={16} />} onSelect={() => addPrincipal({ type: 'user', id: p.id })}>{p.name}</MenuItem>
-                ))}
-                {(options.data?.departments ?? []).filter((d) => !depts.some((x) => x.id === d.id)).length > 0 && (
-                  <div className="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-faint">{t('secrets.audienceDepartments')}</div>
-                )}
-                {(options.data?.departments ?? []).filter((d) => !depts.some((x) => x.id === d.id)).map((d) => (
-                  <MenuItem key={d.id} icon={<Building2 size={14} />} onSelect={() => addPrincipal({ type: 'department', id: d.id })}>{d.name}</MenuItem>
-                ))}
-              </DropdownMenu>
-            </div>
-            <div className="rounded-md bg-muted/50 px-2.5 py-2 text-xs text-muted-foreground">
-              {!audience.length ? t('secrets.audienceEmpty') : preview.data ? (
-                preview.data.canReveal.length ? (
-                  <>
-                    <span className="font-medium text-foreground">{t('secrets.previewCount').replace('{n}', String(preview.data.canReveal.length))}</span>
-                    {': '}{preview.data.canReveal.map((p) => p.name).join(', ')}
-                    <span className="mt-0.5 block text-faint">{t('secrets.previewNote')}</span>
-                  </>
-                ) : <span className="text-destructive">{t('secrets.previewNone')}</span>
-              ) : <Spinner />}
-            </div>
-          </section>
-        )}
-
-        {/* Expiry and agents */}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-1">
-            <span className="text-xs text-muted-foreground">{t('secrets.expires')}</span>
-            <DateField value={expiresAt} onChange={setExpiresAt} disabled={!canEditContent} aria-label={t('secrets.expires')} />
-            <p className="text-[11px] text-faint">{t('secrets.expiresHint')}</p>
-          </div>
-          {canGovern && (
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <Switch checked={agents} disabled={agentsLocked} onChange={setAgents} label={t('secrets.agents')} />
-                <span className="text-[13px]">{t('secrets.agents')}</span>
+                )))}
+                {!fields.length && <p className="py-1 text-xs text-faint">{t('secrets.noFields')}</p>}
               </div>
-              <p className="text-[11px] text-faint">{agentsLocked ? t('secrets.agentsProduction') : t('secrets.agentsHint')}</p>
-            </div>
+              {addFieldButton(fromProvider ? 'api_key' : 'password')}
+            </section>
           )}
+
+          {/* Audience */}
+          {canGovern && (
+            <section className="space-y-2">
+              <span className={sectionLabel}>{t('secrets.audience')}</span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  aria-pressed={hasProject}
+                  onClick={() => (hasProject ? removePrincipal({ type: 'project' }) : addPrincipal({ type: 'project' }))}
+                  className={cn(
+                    'inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[13px] transition-colors duration-150',
+                    hasProject ? 'border-primary/40 bg-primary/10 text-foreground' : 'border-dashed border-border text-muted-foreground hover:bg-muted',
+                  )}
+                >
+                  <Users size={13} /> {t('secrets.audienceProject')}
+                </button>
+                {people.map((p) => (
+                  <span key={p.id} className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-card pl-1.5 pr-0.5 text-[13px]">
+                    <Avatar name={personName(p.id)} size={16} /> {personName(p.id)}
+                    <IconButton size="sm" aria-label={t('common.delete')} onClick={() => removePrincipal(p)}><X size={12} /></IconButton>
+                  </span>
+                ))}
+                {depts.map((d) => (
+                  <span key={d.id} className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-card pl-2 pr-0.5 text-[13px]">
+                    <Building2 size={13} className="text-muted-foreground" /> {deptName(d.id)}
+                    <IconButton size="sm" aria-label={t('common.delete')} onClick={() => removePrincipal(d)}><X size={12} /></IconButton>
+                  </span>
+                ))}
+                <DropdownMenu
+                  width={260}
+                  trigger={<Button type="button" size="xs" variant="ghost" className="text-muted-foreground"><Plus size={13} /> {t('secrets.audienceAdd')}</Button>}
+                >
+                  {(options.data?.people ?? []).filter((p) => !people.some((x) => x.id === p.id)).length > 0 && (
+                    <div className="px-2 pb-1 pt-1.5 text-[11px] font-medium text-faint">{t('secrets.audiencePeople')}</div>
+                  )}
+                  {(options.data?.people ?? []).filter((p) => !people.some((x) => x.id === p.id)).map((p) => (
+                    <MenuItem key={p.id} icon={<Avatar name={p.name} src={p.avatar} size={16} />} onSelect={() => addPrincipal({ type: 'user', id: p.id })}>{p.name}</MenuItem>
+                  ))}
+                  {(options.data?.departments ?? []).filter((d) => !depts.some((x) => x.id === d.id)).length > 0 && (
+                    <div className="px-2 pb-1 pt-2 text-[11px] font-medium text-faint">{t('secrets.audienceDepartments')}</div>
+                  )}
+                  {(options.data?.departments ?? []).filter((d) => !depts.some((x) => x.id === d.id)).map((d) => (
+                    <MenuItem key={d.id} icon={<Building2 size={14} />} onSelect={() => addPrincipal({ type: 'department', id: d.id })}>{d.name}</MenuItem>
+                  ))}
+                </DropdownMenu>
+              </div>
+              <p className="flex min-h-4 items-start gap-1.5 text-xs leading-4 text-muted-foreground">
+                {!audience.length ? <span className="text-destructive">{t('secrets.audienceEmpty')}</span> : preview.data ? (
+                  preview.data.canReveal.length ? (
+                    <span>
+                      <span className="text-foreground">{t('secrets.previewCount').replace('{n}', String(preview.data.canReveal.length))}</span>
+                      {' – '}{preview.data.canReveal.map((p) => p.name).join(', ')}
+                      <span className="text-faint">. {t('secrets.previewNote')}</span>
+                    </span>
+                  ) : <span className="text-destructive">{t('secrets.previewNone')}</span>
+                ) : <Spinner />}
+              </p>
+            </section>
+          )}
+
+          {/* Expiry and agents, as settings rows */}
+          <div className="divide-y divide-border rounded-lg border border-border">
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 py-2.5">
+              <div className="min-w-0 flex-1 basis-56">
+                <div className="text-[13px]">{t('secrets.expires')}</div>
+                <p className="mt-0.5 text-[11px] leading-4 text-faint">{t('secrets.expiresHint')}</p>
+              </div>
+              <div className="w-44 shrink-0">
+                <DateField value={expiresAt} onChange={setExpiresAt} disabled={!canEditContent} aria-label={t('secrets.expires')} />
+              </div>
+            </div>
+            {canGovern && (
+              <label className="flex cursor-pointer items-start justify-between gap-4 px-3 py-2.5">
+                <div className="min-w-0">
+                  <div className="text-[13px]">{t('secrets.agents')}</div>
+                  <p className="mt-0.5 text-[11px] leading-4 text-faint">{agentsLocked ? t('secrets.agentsProduction') : t('secrets.agentsHint')}</p>
+                </div>
+                <span className="pt-0.5"><Switch checked={agents} disabled={agentsLocked} onChange={setAgents} label={t('secrets.agents')} /></span>
+              </label>
+            )}
+          </div>
         </div>
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        <div className="flex justify-end gap-2 pt-1">
+        <div className="flex items-center gap-3 border-t border-border px-4 py-3">
+          <p role="alert" className="min-w-0 flex-1 text-xs text-destructive">{error}</p>
           <Button type="button" size="sm" variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
           <Button type="submit" size="sm" disabled={save.isPending || (!editing && !name.trim())}>
             {save.isPending ? <Spinner /> : t('common.save')}

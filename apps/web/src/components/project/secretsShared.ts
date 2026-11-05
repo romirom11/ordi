@@ -93,6 +93,14 @@ export const ENV_TONE: Record<SecretEnvironment, string> = {
   other: 'bg-muted text-muted-foreground',
 };
 
+/** The environment as a dot of colour, where a chip would be too loud (the dialog's switcher). */
+export const ENV_DOT: Record<SecretEnvironment, string> = {
+  test: 'bg-success',
+  staging: 'bg-warning',
+  production: 'bg-destructive',
+  other: 'bg-faint',
+};
+
 /** Days until the credential stops working; negative once it has. */
 export function daysUntil(date: string | null, today = new Date()): number | null {
   if (!date) return null;
@@ -107,7 +115,22 @@ extendDict({
     'secrets.add': 'Add secret',
     'secrets.edit': 'Edit secret',
     'secrets.name': 'Name',
-    'secrets.nameHint': 'Capital letters and underscores, e.g. STRIPE_TEST. Agent runs get it as the variable SECRET_STRIPE_TEST.',
+    'secrets.nameHint': 'Capital letters, digits and underscores, e.g. STRIPE_TEST.',
+    'secrets.envVarHint': 'Agent runs get it as',
+    'secrets.optional': 'optional',
+    'secrets.labelPh.text': 'Label, e.g. Login',
+    'secrets.labelPh.url': 'Label, e.g. Admin panel',
+    'secrets.labelPh.password': 'Label, e.g. Password',
+    'secrets.labelPh.api_key': 'Label, e.g. Secret key',
+    'secrets.labelPh.note': 'Label, e.g. Recovery codes',
+    'secrets.valuePh.text': 'admin@client.com',
+    'secrets.valuePh.url': 'https://admin.client.com',
+    'secrets.valuePh.password': 'Password',
+    'secrets.valuePh.api_key': 'sk_test_…',
+    'secrets.valuePh.note': 'Anything else they sent',
+    'secrets.noFields': 'No fields yet.',
+    'secrets.pasteOpen': 'Paste from a message',
+    'secrets.pasteIntro': 'Paste what the client sent – logins, passwords, links, keys. It is split into fields for you to check; nothing is saved until you press Save.',
     'secrets.description': 'Description',
     'secrets.descriptionPh': 'What it opens, who sent it',
     'secrets.environment': 'Environment',
@@ -189,7 +212,22 @@ extendDict({
     'secrets.add': 'Додати секрет',
     'secrets.edit': 'Редагувати секрет',
     'secrets.name': 'Назва',
-    'secrets.nameHint': 'Великі літери й підкреслення, напр. STRIPE_TEST. Запуски агентів отримують її як змінну SECRET_STRIPE_TEST.',
+    'secrets.nameHint': 'Великі літери, цифри й підкреслення, напр. STRIPE_TEST.',
+    'secrets.envVarHint': 'Запуски агентів отримують його як',
+    'secrets.optional': 'необов’язково',
+    'secrets.labelPh.text': 'Назва, напр. Логін',
+    'secrets.labelPh.url': 'Назва, напр. Адмінка',
+    'secrets.labelPh.password': 'Назва, напр. Пароль',
+    'secrets.labelPh.api_key': 'Назва, напр. Секретний ключ',
+    'secrets.labelPh.note': 'Назва, напр. Коди відновлення',
+    'secrets.valuePh.text': 'admin@client.com',
+    'secrets.valuePh.url': 'https://admin.client.com',
+    'secrets.valuePh.password': 'Пароль',
+    'secrets.valuePh.api_key': 'sk_test_…',
+    'secrets.valuePh.note': 'Усе інше, що надіслали',
+    'secrets.noFields': 'Полів ще немає.',
+    'secrets.pasteOpen': 'Вставити з повідомлення',
+    'secrets.pasteIntro': 'Вставте те, що надіслав клієнт: логіни, паролі, посилання, ключі. Текст розкладеться на поля, які ви перевірите; нічого не збережеться, доки ви не натиснете «Зберегти».',
     'secrets.description': 'Опис',
     'secrets.descriptionPh': 'Що відкриває, хто надіслав',
     'secrets.environment': 'Середовище',
