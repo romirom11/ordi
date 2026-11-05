@@ -22,7 +22,7 @@
 import { createHash } from 'node:crypto';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { MAX_SUBTASK_DEPTH, TASK_PRIORITIES, docToText, textToDoc } from '@ordi/shared';
+import { MAX_SUBTASK_DEPTH, TASK_PRIORITIES, docToText, secretEnvVars, textToDoc } from '@ordi/shared';
 import { OrdiApiError, type OrdiClient } from './client';
 import { absolutizeImageSrcs, relativizeImageSrcs, wrap } from './format';
 
@@ -513,6 +513,105 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
     if (!Object.keys(body).length) throw new Error('Nothing to update – pass name, targetDate, done or position.');
     const updated = await client.patch<Row>(`/milestones/${milestoneId}`, body);
     return { action: 'updated', milestone: { id: updated.id, name: updated.name, targetDate: updated.targetDate ?? null, done: !!updated.done, position: updated.position } };
+  }));
+
+  // ── Resources: the project's links, files and KB pages in one list ──
+
+  const resourceOut = (r: Row) => ({
+    id: r.id, kind: r.kind, label: r.label, url: r.url ?? null,
+    ...(r.file ? { file: r.file } : {}),
+    ...(r.page ? { page: r.page } : {}),
+  });
+
+  server.tool('list_project_resources', 'The project\'s resources in their order: links (label + url), files (name, size, type – download through the app) and pinned knowledge-base pages (title, id; read one with get_kb_page). Pages the token owner cannot open are left out.', {
+    project: z.string().describe('Project key or id'),
+  }, ({ project }) => wrap(async () => {
+    const projectId = await resolveProjectId(client, project);
+    const res = await client.get<{ data: Row[] }>(`/projects/${projectId}/resources`);
+    return { data: res.data.map(resourceOut) };
+  }));
+
+  server.tool('add_project_resource', 'Add a resource to a project: kind "link" with a label and an http(s) url (designs, staging, a client\'s drive), or kind "kb_page" with a knowledge-base page id (find_kb_page) to pin it. A file becomes a resource by uploading it with upload_attachment {entityType:"project", entityId}; rename it with rename_attachment.', {
+    project: z.string().describe('Project key or id'),
+    kind: z.enum(['link', 'kb_page']),
+    label: z.string().min(1).max(200).optional().describe('For a link: what it is, e.g. "Figma designs"'),
+    url: z.string().optional().describe('For a link: the http(s) address'),
+    kbPageId: z.string().optional().describe('For a page: the knowledge-base page id'),
+  }, ({ project, kind, label, url, kbPageId }) => wrap(async () => {
+    const projectId = await resolveProjectId(client, project);
+    let body: Record<string, unknown>;
+    if (kind === 'link') {
+      if (!url) throw new Error('A link needs url.');
+      body = { kind, label: label?.trim() || url, url };
+    } else {
+      if (!kbPageId) throw new Error('A page needs kbPageId (find it with find_kb_page).');
+      body = { kind, kbPageId };
+    }
+    const created = await client.post<Row>(`/projects/${projectId}/resources`, body);
+    return { action: 'created', resource: resourceOut(created) };
+  }));
+
+  server.tool('update_project_link', 'Change a link resource\'s label or url. Files rename with rename_attachment; a page keeps its knowledge-base title.', {
+    resourceId: z.string(),
+    label: z.string().min(1).max(200).optional(),
+    url: z.string().optional().describe('New http(s) address'),
+  }, ({ resourceId, label, url }) => wrap(async () => {
+    const body = Object.fromEntries(Object.entries({ label, url }).filter(([, v]) => v !== undefined));
+    if (!Object.keys(body).length) throw new Error('Nothing to update – pass label or url.');
+    const updated = await client.patch<Row>(`/project-resources/${resourceId}`, body);
+    return { action: 'updated', resource: resourceOut(updated) };
+  }));
+
+  server.tool('remove_project_resource', 'Remove a resource from its project. A link is dropped and a page unpinned (the page itself stays in the knowledge base), but a file is deleted.', {
+    resourceId: z.string(),
+  }, ({ resourceId }) => wrap(async () => {
+    await client.del(`/project-resources/${resourceId}`);
+    return { action: 'removed', resourceId };
+  }));
+
+  // ── Secrets: names and fields only, never a value ──
+
+  /**
+   * What an agent may know about a secret. Built field by field from the API's
+   * metadata so nothing else – a url or login value, an API-key hint – can slip
+   * through even if the API one day sends more.
+   */
+  const secretOut = (s: Row) => {
+    const fields = ((s.fields as Row[] | undefined) ?? []).map((f) => ({
+      key: f.key as string, label: f.label as string, type: f.type as string, hasValue: !!f.hasValue,
+    }));
+    const expiresAt = (s.expiresAt as string | null) ?? null;
+    return {
+      name: s.name as string,
+      description: (s.description as string | null) ?? null,
+      environment: s.environment as string,
+      fields,
+      expiresAt,
+      expired: !!expiresAt && expiresAt < new Date().toISOString().slice(0, 10),
+      availableToAgents: !!s.availableToAgents,
+      // The variables an ordi agent run gets when availableToAgents is on.
+      envVars: secretEnvVars(s.name as string, fields),
+    };
+  };
+  const SECRET_VALUES_NOTE = 'Values are never returned here. An ordi agent run receives the secrets marked availableToAgents as environment variables (envVars) – read them from the environment and never print, commit or post them. Anyone else gets a value from a person, who reveals it in the project\'s Resources.';
+
+  server.tool('list_project_secrets', `The secrets of a project the token owner may see – credentials a client handed over (logins, test API keys): name, description, environment (test/staging/production/other), fields (key, label, type, whether set), expiry and agent availability. ${SECRET_VALUES_NOTE}`, {
+    project: z.string().describe('Project key or id'),
+  }, ({ project }) => wrap(async () => {
+    const projectId = await resolveProjectId(client, project);
+    const res = await client.get<{ data: Row[] }>(`/projects/${projectId}/secrets`);
+    return { data: res.data.map(secretOut) };
+  }));
+
+  server.tool('check_project_secret', `Check that a project has a secret before relying on it: exists, its fields and whether each is set, expired, and whether agent runs get it (with the environment variable names). A secret the token owner may not see answers exists: false. ${SECRET_VALUES_NOTE}`, {
+    project: z.string().describe('Project key or id'),
+    name: z.string().min(1).describe('Secret name, e.g. STRIPE_TEST'),
+  }, ({ project, name }) => wrap(async () => {
+    const projectId = await resolveProjectId(client, project);
+    const res = await client.get<{ data: Row[] }>(`/projects/${projectId}/secrets`);
+    const wanted = name.trim().toUpperCase();
+    const hit = res.data.find((s) => String(s.name).toUpperCase() === wanted);
+    return hit ? { exists: true, ...secretOut(hit) } : { exists: false, name: wanted };
   }));
 
   server.tool('create_cycle', 'Start a cycle – a time box (usually one or two weeks) the team commits a set of tasks to. Put tasks in it with create_task / update_task `cycle`. Refused where the project has cycles switched off.', {

@@ -3,6 +3,97 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
+## Unreleased
+
+- **Breaking for installs on the all-zero encryption key**: in production the
+  api now refuses to start without `ENCRYPTION_KEY`, with a malformed key, or
+  with the all-zero key, which the quick-start compose file used to default to.
+  That key is public, so everything encrypted with it was readable from a
+  database dump. The new quick-start `docker-compose.yml` generates a random
+  key into an `ordi_keys` volume on first start (`ENCRYPTION_KEY_FILE`) and
+  still reads data stored under the old key. An install that keeps its old
+  compose file has to set `ENCRYPTION_KEY` in `.env`, with
+  `ENCRYPTION_KEY_PREVIOUS` set to the old key (64 zeros). Then run the
+  rotation command below once. See docs/deployment.md §3c.
+- **The encryption key can be rotated** without reconnecting integrations:
+  `ENCRYPTION_KEY_PREVIOUS` keeps old data readable, and
+  `pnpm --filter @ordi/api exec tsx src/rotate-encryption-key.ts`
+  re-encrypts every stored credential with the new key. It finds them by
+  scanning the database, so new features are covered without a list.
+  Encrypted values now carry a version and the id of their key
+  (`v1:<keyId>:…`), and values written before are still read.
+- **Milestones open into a side panel**: a milestone's name in the Plan
+  tab opens its panel – rename it, set the target date, mark it done, see
+  its progress and every task in it with its status, open a task, or add
+  a new task straight into the milestone. "Open in Tasks" still jumps to
+  the Tasks tab filtered by the milestone.
+- **Files can be renamed**: the pencil on a file row (or a double-click on
+  its name in the Files section) renames it in place, with the extension
+  kept out of the selection. Only the name changes – downloads are saved
+  under it, while the stored bytes and every embedded link stay the same.
+  Blocked extensions are refused on rename as on upload. New API
+  `PATCH /attachments/:id` and MCP tool `rename_attachment`.
+- **MCP: agents can check a project's secrets without reading them**:
+  `list_project_secrets` and `check_project_secret` return names,
+  descriptions, environment, fields and whether each is set, expiry, agent
+  availability and the environment variable each field becomes in an agent
+  run (`SECRET_NAME`, or `SECRET_NAME__FIELD` for a secret with several fields). No tool
+  returns a value: not a password, not a login or URL, not an API-key hint.
+- **Project secrets**: credentials a client hands over, stored with the
+  project as a new resource kind. Resources → Add → Secret: paste the
+  client's message and it becomes fields (login, URL, password, API key),
+  choose the environment and who can see the values – everyone on the
+  project, people or departments – and the dialog shows who will really be
+  able to open them. A secret opens in a side panel: plain fields show as
+  they are, Show reveals a value for 30 seconds, Copy puts it on the
+  clipboard without showing it, and the panel lists recent use. A daily
+  reminder goes out two weeks before a secret stops working and on the day.
+  Under the hood: Values are
+  encrypted at rest. Field metadata (keys, labels, types) is readable without
+  revealing anything, and url and text fields are shown as they are.
+  Revealing or copying a value is one call per field, refused over API
+  tokens, rate-limited, and logged as a sensitive activity entry without the
+  value. Access is three layers that must all agree:
+  - the workspace role, through the new `secrets.read`, `secrets.reveal`,
+    `secrets.write` and `secrets.manage` permissions (Owner all four; Admin
+    and Manager read, reveal, write; Member read and reveal; migration `0045`
+    grants them to existing roles);
+  - the project role (viewers list, members reveal);
+  - the secret's audience, chosen per secret: the whole project, named people,
+    or departments including their sub-departments.
+
+  A secret restricted to people or departments is invisible to everyone
+  outside its audience, in lists, the resources block and the project
+  activity alike. `secrets.manage` can change any secret's audience without
+  seeing values, and the secret's creator is notified when it does. Each
+  secret is marked test, staging, production or other, and only
+  `secrets.manage` may let agents use a production one. New API:
+  `GET/POST /projects/:id/secrets`, `GET/PATCH/DELETE /project-secrets/:id`,
+  `POST /project-secrets/:id/reveal`, `GET /project-secrets/:id/activity`.
+- **One Resources block on the project overview**: links, files and
+  knowledge-base pages now live in a single ordered list instead of link
+  chips plus a separate Files section. "Add" offers a link, a file upload
+  or a page from the knowledge base (search and pin); rows drag to
+  reorder, and files dropped from the desktop upload straight into the
+  list. Links edit in place, files preview, download, rename and are
+  deleted when removed, pages open in the knowledge base and only unpin.
+  A page someone cannot open is left out of their list, title included.
+  Migration `0044` moves each project's links and files into the new
+  `project_resources` table (links first, in their order, then files)
+  and drops `projects.links`. Only http(s) links come across: the old
+  API also took `javascript:` and `file:` addresses, which are dropped
+  and refused from now on; `PATCH /projects/:id` no longer takes
+  `links`. New API: `GET/POST /projects/:id/resources`,
+  `PUT /projects/:id/resources/order`, `PATCH/DELETE /project-resources/:id`;
+  a file uploaded onto a project joins its resources. New MCP tools:
+  `list_project_resources`, `add_project_resource`,
+  `update_project_link`, `remove_project_resource`.
+- **The blocked-extension check reads names the way they land on disk**:
+  `run.exe.` (Windows drops the trailing dot on save), an extension split
+  by an invisible character, and names with right-to-left override or
+  other bidi controls are refused on upload, rename, mail intake and in
+  the MCP tools.
+
 ## v1.42.0
 
 - **Deleted projects can be restored**: the Projects page lists them with a

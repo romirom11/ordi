@@ -8,7 +8,7 @@
 import { getDb, schema, and, eq, gt, isNotNull, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import {
-  MAX_UPLOAD_BYTES, BLOCKED_FILE_EXTENSIONS,
+  MAX_UPLOAD_BYTES, isBlockedFilename,
   normalizeIntakeFormConfig, validateIntakeSubmission, intakeAnswerText, intakeSubmitSchema,
   type IntakeAnswer,
 } from '@ordi/shared';
@@ -48,8 +48,10 @@ export function intakeFileProblem(file: IntakeFile): 'empty' | 'too_large' | 'bl
   const size = file.content.length;
   if (size < 1) return 'empty';
   if (size > MAX_UPLOAD_BYTES) return 'too_large';
-  const ext = safeFilename(file.filename).split('.').pop()?.toLowerCase() ?? '';
-  if (BLOCKED_FILE_EXTENSIONS.includes(ext)) return 'blocked';
+  // The name as it will be stored, read by the shared check (NFKC, zero-width
+  // characters, bidi controls), so a form upload is held to the same rule as
+  // any other upload.
+  if (isBlockedFilename(safeFilename(file.filename))) return 'blocked';
   return null;
 }
 

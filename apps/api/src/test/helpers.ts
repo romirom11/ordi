@@ -13,7 +13,7 @@ const TABLES = [
   'invoices', 'quote_items', 'quotes', 'recurring_invoices', 'expenses', 'expense_categories', 'reminder_log',
   'ledger_postings', 'ledger_transactions', 'accounts', 'recurring_payments',
   'comments', 'task_assignees', 'task_labels', 'task_relations', 'task_links', 'tasks',
-  'cycle_snapshots', 'cycles', 'task_statuses', 'task_types', 'project_members', 'projects',
+  'cycle_snapshots', 'cycles', 'task_statuses', 'task_types', 'project_resources', 'project_secret_audience', 'project_secret_payloads', 'project_secrets', 'project_members', 'projects',
   'kb_page_versions', 'kb_page_comments', 'kb_page_links', 'kb_pages', 'space_members', 'kb_spaces',
   'leave_requests', 'leave_balances', 'compensation', 'employees', 'applicants', 'job_openings', 'interviews',
   'git_links', 'project_repositories', 'git_automation_rules', 'git_repositories',

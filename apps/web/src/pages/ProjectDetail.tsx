@@ -19,11 +19,10 @@ import { CalendarView } from '../components/views/CalendarView';
 import { TimelineView } from '../components/views/TimelineView';
 import { SpreadsheetView } from '../components/views/SpreadsheetView';
 import { RichEditor, EMPTY_DOC } from '../components/richtext/RichEditor';
-import { FilesSection } from '../components/FilesSection';
 import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
 import { ProjectIcon } from '../components/project/ProjectIcon';
 import { PropertiesRail } from '../components/project/PropertiesRail';
-import { ProjectResources, type ProjectLink } from '../components/project/ProjectResources';
+import { ProjectResources } from '../components/project/ProjectResources';
 import { ProjectUpdates } from '../components/project/ProjectUpdates';
 import { type Milestone } from '../components/project/ProjectMilestones';
 import { ProjectActivity } from '../components/project/ProjectActivity';
@@ -130,7 +129,7 @@ interface Project {
   companyId?: string | null; companyName?: string | null; description?: unknown;
   leadId?: string | null; startDate?: string | null; targetDate?: string | null;
   visibility?: 'workspace' | 'private'; version?: number; settings?: Record<string, unknown>;
-  summary?: string; priority?: string; links?: ProjectLink[]; labelIds?: string[];
+  summary?: string; priority?: string; labelIds?: string[];
   customFields?: Record<string, unknown>;
   /** Derived by the API: cycles are opt-in per project; intake shows once a channel is on. */
   cyclesEnabled?: boolean; intakeEnabled?: boolean;
@@ -246,10 +245,12 @@ export function ProjectDetailPage({ id }: { id: string; taskId?: string }) {
         {tab === 'plan' && (
           <PlanTab
             projectId={id}
+            projectKey={project?.key}
             cyclesEnabled={!!project?.cyclesEnabled}
             canWrite={canWrite}
             isAdmin={isAdmin}
             onOpenMilestoneTasks={(mid) => navigate(`/projects/${id}?section=tasks&milestone=${mid}`)}
+            onOpenTask={openTask}
           />
         )}
         {tab === 'intake' && (canWrite
@@ -1182,8 +1183,8 @@ function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageM
 
   return (
     <PageBody width="full" style={rail.railStyle} className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_var(--rail-w,280px)]">
-      {/* Left: what the project is (description, links), then what is
-          happening (updates, files), then its trail. Milestones live in the
+      {/* Left: what the project is (description, resources), then what is
+          happening (updates), then its trail. Milestones live in the
           Plan tab; empty blocks stay out of the way. */}
       <div className="order-2 min-w-0 space-y-7 lg:order-1">
         {project ? (
@@ -1195,16 +1196,11 @@ function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageM
               <div className="project-description">
                 <RichEditor key={project.id} value={doc} onChange={onDescChange} editable={canWrite} placeholder={t('projects.aboutPlaceholder')} compact />
               </div>
-              <ProjectResources
-                links={(project.links ?? []) as ProjectLink[]}
-                canWrite={canWrite}
-                onChange={(next) => onPatch({ links: next })}
-              />
             </div>
 
-            <ProjectUpdates projectId={id} canWrite={canWrite} isAdmin={isAdmin} />
+            <ProjectResources projectId={id} canWrite={canWrite} users={users} />
 
-            <FilesSection entityType="project" entityId={id} canWrite={canWrite} quietEmpty />
+            <ProjectUpdates projectId={id} canWrite={canWrite} isAdmin={isAdmin} />
 
             <CustomFieldsSection
               entityType="projects"

@@ -255,7 +255,7 @@ export async function updateProject(actor: Actor, id: string, input: any) {
   if (!before) throw err.notFound('Project not found');
   assertVersion(before, input.version, before);
   const patch: Record<string, unknown> = {};
-  for (const k of ['name', 'status', 'visibility', 'leadId', 'startDate', 'targetDate', 'description', 'summary', 'priority', 'links']) {
+  for (const k of ['name', 'status', 'visibility', 'leadId', 'startDate', 'targetDate', 'description', 'summary', 'priority']) {
     if (input[k] !== undefined) patch[k] = input[k];
   }
   if (input.customFields !== undefined) patch.customFields = mergeCustomFields(before.customFields, input.customFields);

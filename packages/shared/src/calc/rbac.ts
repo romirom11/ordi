@@ -127,3 +127,81 @@ export function validateTokenScope(ownerPermissions: Set<string>, requestedScope
   const invalid = requestedScopes.filter((s) => !ownerPermissions.has(s));
   return { ok: invalid.length === 0, invalid };
 }
+
+/**
+ * Project secrets (plan 2026-11-05-001, R43-R56): three layers that must all
+ * agree, each answering one question.
+ *
+ *   workspace role  – what may this person do with secrets at all
+ *                     (secrets.read / reveal / write / manage);
+ *   project role    – where: viewer lists, member or admin reveals and writes;
+ *   audience        – which secret: the whole project, named people,
+ *                     departments, chosen per secret.
+ *
+ * No layer widens another. `secrets.manage` is the one exception to the
+ * audience: it may change who has access to any secret in a project the
+ * person can open, without seeing a value. Every surface (routes, MCP,
+ * resources, activity) asks this one function, so the rule lives once.
+ */
+export type SecretAudiencePrincipal =
+  | { type: 'project' }
+  | { type: 'user'; id: string }
+  | { type: 'department'; id: string };
+
+export interface SecretAccessInput {
+  permissions: Set<string>;
+  /** The actor's effective role on the secret's project; null = cannot open it. */
+  projectRole: 'admin' | 'member' | 'viewer' | null;
+  audience: SecretAudiencePrincipal[];
+  userId: string;
+  /** The actor's department and every department above it. */
+  departmentIds: ReadonlySet<string>;
+}
+
+export interface SecretAccess {
+  /** Sees the secret exists: its name, fields and metadata. */
+  list: boolean;
+  /** Reveals and copies values. */
+  reveal: boolean;
+  /** Edits fields, values and description; deletes. */
+  write: boolean;
+  /** Changes audience, environment and agent use without being in the audience. */
+  manage: boolean;
+  /** The audience names the actor, by project, person or department. */
+  inAudience: boolean;
+}
+
+/** Whether the audience names this person (the project principal names everyone on the project). */
+export function secretAudienceIncludes(
+  audience: SecretAudiencePrincipal[],
+  userId: string,
+  departmentIds: ReadonlySet<string>,
+): boolean {
+  return audience.some((p) => p.type === 'project'
+    || (p.type === 'user' && p.id === userId)
+    || (p.type === 'department' && departmentIds.has(p.id)));
+}
+
+/** A secret open to the whole project, as opposed to one restricted to people or departments. */
+export function isProjectWideSecret(audience: SecretAudiencePrincipal[]): boolean {
+  return audience.some((p) => p.type === 'project');
+}
+
+export function secretAccess(input: SecretAccessInput): SecretAccess {
+  const none = { list: false, reveal: false, write: false, manage: false, inAudience: false };
+  if (!input.projectRole) return none;
+  const rank = PROJECT_ROLE_RANK[input.projectRole] ?? 0;
+  const contributor = rank >= PROJECT_ROLE_RANK.member!;
+  const inAudience = secretAudienceIncludes(input.audience, input.userId, input.departmentIds);
+  const manage = input.permissions.has('secrets.manage');
+  const read = input.permissions.has('secrets.read') || manage;
+  // A restricted secret is invisible outside its audience: its name alone can say too much.
+  const list = read && (isProjectWideSecret(input.audience) || inAudience || manage);
+  return {
+    list,
+    reveal: contributor && inAudience && input.permissions.has('secrets.reveal'),
+    write: contributor && inAudience && input.permissions.has('secrets.write'),
+    manage,
+    inAudience,
+  };
+}

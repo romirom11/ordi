@@ -40,7 +40,7 @@ been removed; if you still pinned it, see step 3 below.)
 2. **Environment** (the minimum for production):
    ```bash
    AUTH_SECRET=$(openssl rand -hex 32)
-   ENCRYPTION_KEY=$(openssl rand -hex 32)     # AES-256-GCM for git credentials
+   ENCRYPTION_KEY=$(openssl rand -hex 32)     # AES-256-GCM for every stored credential, §3c
    AGENT_WORKER_SECRET=$(openssl rand -hex 32) # api ↔ agent-worker, §3b
    SMTP_URL=smtps://user:pass@smtp.example.com:465
    ```
@@ -351,10 +351,62 @@ delete it, so that it does not pick up runs alongside the worker. The
 it up with `--scale agent-worker=0`. The worker inside `api` calls the same
 functions directly.
 
+## 3c. Encryption key
+
+`ENCRYPTION_KEY` encrypts every credential ordi stores: git, Slack and SMTP
+passwords and tokens, the GitHub App key, mailbox passwords, the workspace
+Claude credential and MCP connector secrets. Anyone holding a database dump
+*and* the key can read them, so keep the key out of the database host's
+backups and treat it like the database password.
+
+**Production refuses to start** without a key, with one that is not 64
+hexadecimal characters, or with the all-zero development key – the server
+logs what to do and exits. Generate a key with `openssl rand -hex 32`.
+
+**Where the key comes from**, first match wins:
+
+1. `ENCRYPTION_KEY` – the key itself.
+2. `ENCRYPTION_KEY_FILE` – a file holding it. If the file does not exist, the
+   api generates a random key into it on first start (mode `0600`). The
+   quick-start `docker-compose.yml` uses this with the `ordi_keys` volume, so
+   a fresh install has a real key with nothing to configure. **Back up that
+   volume together with the database** – without it, stored credentials
+   cannot be read.
+3. Outside production only, the all-zero development key.
+
+Do not use `ENCRYPTION_KEY_FILE` on a platform without persistent volumes:
+the next redeploy would generate a different key. Set `ENCRYPTION_KEY` there.
+
+**Rotating the key**, or moving an install off the zero key:
+
+1. Set the new key as `ENCRYPTION_KEY` and the old one as
+   `ENCRYPTION_KEY_PREVIOUS` (comma-separated if there are several), then
+   restart. Everything stays readable: values name the key they were
+   written with, and new writes use the new key.
+2. Re-encrypt what is stored (safe while the app is running, and safe to
+   repeat):
+   ```bash
+   docker compose exec api pnpm --filter @ordi/api exec tsx src/rotate-encryption-key.ts --dry-run
+   docker compose exec api pnpm --filter @ordi/api exec tsx src/rotate-encryption-key.ts
+   ```
+   It scans every text and jsonb column for encrypted values, so there is
+   no list of tables to keep up to date. It exits non-zero and names the
+   column when a value opens with none of the known keys: add the key that
+   value was written with to `ENCRYPTION_KEY_PREVIOUS` and run it again.
+3. When it reports nothing left to re-encrypt, remove `ENCRYPTION_KEY_PREVIOUS`.
+
+An install started from the quick-start compose file before this change
+used the all-zero key. If you download the new `docker-compose.yml`, it
+already lists the zero key as previous. Run step 2 once to move everything
+onto the generated key. If you keep the old compose file, set a key in
+`.env` (`ENCRYPTION_KEY=…` and `ENCRYPTION_KEY_PREVIOUS=000…0`, 64 zeros)
+and do the same.
+
 ## 4. Required for production (checklist)
 
 - [ ] `AUTH_SECRET`, `ENCRYPTION_KEY` and `AGENT_WORKER_SECRET` – random
-      32-byte values, in env only.
+      32-byte values, in env only (or `ENCRYPTION_KEY_FILE` on a persistent
+      volume, §3c). The api refuses the all-zero key in production.
 - [ ] `APP_URL`/`CORS_ORIGINS` = the real https domain.
 - [ ] SMTP configured (without it emails are only logged), `SMTP_FROM` on
       your domain, SPF/DKIM/DMARC published – see §3a.

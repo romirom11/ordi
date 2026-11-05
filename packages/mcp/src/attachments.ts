@@ -14,7 +14,7 @@
  */
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { BLOCKED_FILE_EXTENSIONS, MAX_UPLOAD_BYTES } from '@ordi/shared';
+import { BLOCKED_FILE_EXTENSIONS, MAX_UPLOAD_BYTES, fileExtension, isBlockedFilename } from '@ordi/shared';
 import type { OrdiClient } from './client';
 import { wrap } from './format';
 import { fetchPublicUrl } from './remote-fetch';
@@ -69,8 +69,8 @@ export function registerAttachmentTools(server: McpServer, client: OrdiClient): 
         if (entityId && !entityType) throw new Error('entityType is required when entityId is set.');
 
         const ext = extOf(filename);
-        if (ext && BLOCKED_FILE_EXTENSIONS.includes(ext)) {
-          throw new Error(`File type .${ext} is not allowed (blocked: ${BLOCKED_FILE_EXTENSIONS.join(', ')}).`);
+        if (isBlockedFilename(filename)) {
+          throw new Error(`File type .${fileExtension(filename)} is not allowed (blocked: ${BLOCKED_FILE_EXTENSIONS.join(', ')}; names with bidi control characters are refused too).`);
         }
 
         let bytes: Uint8Array;
@@ -122,6 +122,29 @@ export function registerAttachmentTools(server: McpServer, client: OrdiClient): 
             ? `Embed inline with: ![${filename}](${absolute}) – or with the relative src inside text: ![${filename}](${uploaded.src}). The agent-facing text uses absolute URLs; stored docs keep the relative form.`
             : undefined,
         };
+      }),
+  );
+
+  server.tool(
+    'rename_attachment',
+    'Rename a file in ordi storage (a record\'s Files section or an inline upload). '
+      + 'Only the name it shows and downloads under changes: the bytes, the id and every embedded src stay the same. '
+      + 'Keep the extension unless the user asks otherwise; blocked extensions are refused.',
+    {
+      id: z.string().min(1).describe('Attachment id, as upload_attachment returned it.'),
+      filename: z.string().min(1).max(255).describe('New filename with extension, e.g. "Brand guide v2.pdf".'),
+    },
+    ({ id, filename }) =>
+      wrap(async () => {
+        const name = filename.trim();
+        if (/[\\/]/.test(name)) throw new Error('filename cannot contain slashes.');
+        if (isBlockedFilename(name)) {
+          throw new Error(`File type .${fileExtension(name)} is not allowed (blocked: ${BLOCKED_FILE_EXTENSIONS.join(', ')}; names with bidi control characters are refused too).`);
+        }
+        const updated = await client.patch<{ id: string; filename: string; size: number; mime: string }>(
+          `/attachments/${encodeURIComponent(id)}`, { filename: name },
+        );
+        return { id: updated.id, filename: updated.filename, size: updated.size, mime: updated.mime };
       }),
   );
 }

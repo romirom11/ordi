@@ -1,5 +1,5 @@
 {
-  "id": "c98c5204-0bc3-4b46-bbf1-fa0a4e1392f5",
+  "id": "95e79f60-d7e8-45a3-97bd-285d48c40f52",
   "prevId": "2488e096-1e9e-4cbf-b074-d21ab52671ef",
   "version": "7",
   "dialect": "postgresql",
@@ -5081,19 +5081,6 @@
           "notNull": true,
           "default": "'[]'::jsonb"
         },
-        "answers": {
-          "name": "answers",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "submitter_key": {
-          "name": "submitter_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "status": {
           "name": "status",
           "type": "text",
@@ -5140,27 +5127,6 @@
             },
             {
               "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "intake_submitter_idx": {
-          "name": "intake_submitter_idx",
-          "columns": [
-            {
-              "expression": "submitter_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -5228,12 +5194,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
-        },
-        "form_config": {
-          "name": "form_config",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
         },
         "mailbox": {
           "name": "mailbox",
@@ -6034,13 +5994,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'none'"
-        },
-        "links": {
-          "name": "links",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
         },
         "settings": {
           "name": "settings",
@@ -13587,6 +13540,186 @@
           ]
         }
       },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.project_resources": {
+      "name": "project_resources",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attachment_id": {
+          "name": "attachment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "kb_page_id": {
+          "name": "kb_page_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "project_resources_project_idx": {
+          "name": "project_resources_project_idx",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "position",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "project_resources_attachment_idx": {
+          "name": "project_resources_attachment_idx",
+          "columns": [
+            {
+              "expression": "attachment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "project_resources_page_idx": {
+          "name": "project_resources_page_idx",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "kb_page_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "project_resources_project_id_projects_id_fk": {
+          "name": "project_resources_project_id_projects_id_fk",
+          "tableFrom": "project_resources",
+          "tableTo": "projects",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "project_resources_attachment_id_attachments_id_fk": {
+          "name": "project_resources_attachment_id_attachments_id_fk",
+          "tableFrom": "project_resources",
+          "tableTo": "attachments",
+          "columnsFrom": [
+            "attachment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "project_resources_kb_page_id_kb_pages_id_fk": {
+          "name": "project_resources_kb_page_id_kb_pages_id_fk",
+          "tableFrom": "project_resources",
+          "tableTo": "kb_pages",
+          "columnsFrom": [
+            "kb_page_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

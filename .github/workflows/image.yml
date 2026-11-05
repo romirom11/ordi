@@ -156,7 +156,7 @@ jobs:
           docker run -d --name ordi --network ordi-img -p 3000:3000 \
             -e DATABASE_URL=postgres://postgres:postgres@pg:5432/ordi \
             -e AUTH_SECRET=image-check-secret \
-            -e ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000 \
+            -e ENCRYPTION_KEY="$(openssl rand -hex 32)" \
             "$REF"
           ok=""
           for i in $(seq 1 60); do

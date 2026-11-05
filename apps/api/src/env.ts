@@ -39,8 +39,21 @@ export const env = {
   slackClientSecret: process.env.SLACK_CLIENT_SECRET ?? '',
   /** Slack request-signing secret – verifies inbound events & slash commands. */
   slackSigningSecret: process.env.SLACK_SIGNING_SECRET ?? '',
-  /** 32-byte hex key for AES-256-GCM (git credentials, PRD §13.1). */
-  encryptionKey: process.env.ENCRYPTION_KEY ?? '0'.repeat(64),
+  /**
+   * 32-byte hex key for AES-256-GCM: every credential ordi stores (git, Slack,
+   * SMTP, agent credentials, MCP connectors, project secrets). Resolved and
+   * checked by lib/encryption-keys.ts – see there for ENCRYPTION_KEY_FILE and
+   * the production rules.
+   */
+  encryptionKey: process.env.ENCRYPTION_KEY ?? '',
+  /** A file holding the key; generated on first start when it does not exist (quick-start compose). */
+  encryptionKeyFile: process.env.ENCRYPTION_KEY_FILE ?? '',
+  /**
+   * Keys the data may still be encrypted with, comma-separated: set the old
+   * key here while rotating, until `rotate-encryption-key` has re-encrypted
+   * everything with ENCRYPTION_KEY.
+   */
+  encryptionKeysPrevious: (process.env.ENCRYPTION_KEY_PREVIOUS ?? '').split(',').map((k) => k.trim()).filter(Boolean),
   smtpUrl: process.env.SMTP_URL ?? '',
   smtpFrom: process.env.SMTP_FROM ?? 'ordi <no-reply@ordi.local>',
   s3: {

@@ -19,19 +19,19 @@ version.
 | Won deal → project in one click | Turning a sale into delivery without creating the project by hand | Carry over companyId, the name, the amount as the budget; the deal link stays |
 | Report: pipeline by project | How many leads/how much money is in the funnel for each product (Solovei vs services), conversion by line of business | The groundwork is already there: `deals.project_id` + `deal_stages` |
 | Several clients per project (m2m) | Joint projects for two customers with split billing | Open question: a rare case that drags a change to the financial model along with it |
+| Project updates, round two | Updates are hand-written status posts and it is not obvious what goes there or how they differ from Activity | Draft pre-filled from what happened since the last update, MCP `post_project_update`, a reminder after N days without one, a hint on the block |
 | Native file drop on desktop | Dragging files from the OS into tasks/notes | Needs care: `dragDropEnabled` is off for the sake of internal DnD; HTML5 drop via DOM events works anyway |
 
 ## In flight
 
-- Configurable intake form (branch `feature/intake-form-builder-and-embed`): an
-  editor with a live preview for the texts, accent colour and fields (built-in
-  ones relabelled, reordered or hidden; custom fields of nine types whose answers
-  reach the triage card and the task description), file uploads, a receipt email,
-  a "New link" button that rotates the token, a rate limit counted in the
-  database, and an embed loader (`/api/v1/embed/intake.js`) that puts the form on
-  any site in a self-resizing iframe. Also fixes the public form, which sent
-  field names the API did not accept and so could not submit a request.
-  Migration `0044_intake_form_config`.
+| Feature | PR |
+|---|---|
+| Milestone side panel (tasks, rename, quick add) and renaming files | `feature/milestone-panel-and-file-rename` |
+| One Resources block: links, files and KB pages in one ordered list (secrets join it next) | `feature/project-resources-block` |
+| Project secrets: data model, three-layer access (workspace role × project role × audience) and API; UI, MCP and agent runs follow (plan 2026-11-05-001) | `feature/project-secrets-api` |
+| Project secrets in Resources: add with paste-to-fields, audience picker with an effective-access preview, side panel with Show/Copy and recent use | `feature/project-secrets-ui` |
+| MCP `list_project_secrets` / `check_project_secret`: metadata and env var names, never values | `feature/project-secrets-mcp` |
+| Configurable intake form: editor with live preview (texts, accent colour, built-in and nine types of custom fields), file uploads, receipt email, token rotation, a database-backed rate limit and a website embed (`/api/v1/embed/intake.js`); fixes the public form, which could not submit. Migration `0046_intake_form_config` | `feature/intake-form-builder-and-embed` |
 
 ## Shipped
 

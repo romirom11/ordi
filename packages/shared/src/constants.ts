@@ -171,7 +171,38 @@ export type KbPageType = (typeof KB_PAGE_TYPES)[number];
 export const MAX_SUBTASK_DEPTH = 5;
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 export const SOFT_LOCK_TTL_SECONDS = 120;
+/** Longest filename accepted anywhere (the usual filesystem limit). */
+export const MAX_FILENAME_LENGTH = 255;
 export const BLOCKED_FILE_EXTENSIONS = ['exe', 'bat', 'cmd', 'sh', 'msi', 'com', 'scr', 'js', 'jar', 'app'];
+
+/** Bidi controls: they make a name read differently from what it is (`gpj.exe` shown as `exe.jpg`). */
+const BIDI_CONTROLS = /[\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
+/** Invisible characters dropped before reading the extension (U+200D also joins emoji, so it is not refused). */
+const ZERO_WIDTH = /[\u200b-\u200d\ufeff]/g;
+
+/**
+ * The extension a file really ends up with: NFKC-normalised, invisible
+ * characters dropped and trailing dots and spaces cut, because Windows strips
+ * those on save – `run.exe.` lands on disk as `run.exe`.
+ */
+export function fileExtension(filename: string): string {
+  const name = filename.normalize('NFKC').replace(ZERO_WIDTH, '');
+  // A loop, not /[.\s]+$/: that regex backtracks quadratically on ". . . x".
+  let end = name.length;
+  while (end > 0 && (name[end - 1] === '.' || /\s/u.test(name[end - 1]!))) end -= 1;
+  const dot = name.lastIndexOf('.', end - 1);
+  return dot >= 0 ? name.slice(dot + 1, end).toLowerCase() : '';
+}
+
+/**
+ * One check for every way a file gets a name: upload, rename, mail intake,
+ * MCP. A name past MAX_FILENAME_LENGTH counts as blocked, so nothing
+ * downstream ever works on an unbounded string.
+ */
+export function isBlockedFilename(filename: string): boolean {
+  if (filename.length > MAX_FILENAME_LENGTH) return true;
+  return BIDI_CONTROLS.test(filename) || BLOCKED_FILE_EXTENSIONS.includes(fileExtension(filename));
+}
 
 /** Workspace feature modules (PRD §14.7). Missing key or true = enabled. */
 export const MODULE_KEYS = ['crm', 'kb', 'time', 'finance', 'people', 'resourcing', 'dashboards'] as const;
