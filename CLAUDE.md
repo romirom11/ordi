@@ -67,6 +67,11 @@ END_COMMIT_OVERRIDE
 The same block fixes the release line of a PR that is already merged: edit
 its description, and the next release-please run uses the new text.
 
+Write the two marker words only to open and close such a block. release-please
+treats everything after the opening marker as the commit message, even with no
+closing marker, so a description that merely mentions it loses its release
+line. Call it "the commit-override block" in prose.
+
 **Do not edit by hand** the `version` fields, `.release-please-manifest.json`
 or `CHANGELOG.md`: release-please writes them in the release PR. A release
 happens when someone merges that PR.
