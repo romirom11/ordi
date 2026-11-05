@@ -91,6 +91,25 @@ In the PR description, say what breaks if the change is wrong, and how you
 verified it. "Tested by clicking through the project page in both themes" is a
 useful sentence; "works" is not.
 
+A user-visible change adds its entry to `CHANGELOG.md` under `## Unreleased`
+(create the heading at the top if the last release removed it).
+
+## Cutting a release
+
+1. On a `release/v<version>` branch, run `pnpm release minor` (or `patch`,
+   `major`, or an exact `1.44.0`). It sets the version in the five files that
+   carry it (`package.json`, `apps/{api,web,desktop}/package.json`,
+   `tauri.conf.json`) and renames `## Unreleased` in the CHANGELOG to
+   `## v<version>`. It refuses when the files disagree, the version is not
+   newer, or there is nothing under Unreleased.
+2. Write `docs/releases/v<version>.md`, which becomes the GitHub release body,
+   and move the shipped rows of `docs/features.md` into a `### v<version>`
+   section under Shipped.
+3. Open the PR. Merging it releases: the Release workflow tags the version,
+   creates a draft release from the notes and starts the desktop and image
+   builds. The desktop workflow publishes the release once every platform's
+   bundle is uploaded.
+
 ## Reporting bugs
 
 Include the version, how you deployed, what you did, what happened and what you
