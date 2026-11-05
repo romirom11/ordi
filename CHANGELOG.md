@@ -37,7 +37,7 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   `list_project_secrets` and `check_project_secret` return names,
   descriptions, environment, fields and whether each is set, expiry, agent
   availability and the environment variable each field becomes in an agent
-  run (`NAME`, or `NAME__FIELD` for a secret with several fields). No tool
+  run (`SECRET_NAME`, or `SECRET_NAME__FIELD` for a secret with several fields). No tool
   returns a value: not a password, not a login or URL, not an API-key hint.
 - **Project secrets, API first** (the UI follows): credentials a client
   hands over, stored with the project as a new resource kind. Values are

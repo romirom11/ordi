@@ -97,18 +97,33 @@ export const secretRevealSchema = z.object({
 });
 
 /**
- * The environment variables a secret becomes in an agent run (plan R23): the
- * secret's name for a one-field secret, `<NAME>__<FIELD>` otherwise. Decided by
- * how many fields the secret has, not how many are filled, so a variable keeps
- * its name when a second value is added later. Only fields with a value appear.
+ * Every variable a secret becomes starts with this. No program reads a
+ * `SECRET_` variable on its own, so whatever a secret is named – PATH,
+ * HTTPS_PROXY, LD_PRELOAD – it cannot change how the agent's tools behave:
+ * an allowlist by construction, where a list of dangerous names never ends.
+ * Code that wants a particular name maps it: `STRIPE_KEY=$SECRET_STRIPE_TEST`.
+ */
+export const SECRET_ENV_PREFIX = 'SECRET_';
+
+/** A variable an agent run may receive: `SECRET_` followed by upper snake case. */
+export function isAllowedSecretVariable(name: string): boolean {
+  return /^SECRET_[A-Z][A-Z0-9_]{0,127}$/.test(name);
+}
+
+/**
+ * The environment variables a secret becomes in an agent run (plan R23):
+ * `SECRET_<NAME>` for a one-field secret, `SECRET_<NAME>__<FIELD>` otherwise.
+ * Decided by how many fields the secret has, not how many are filled, so a
+ * variable keeps its name when a second value is added later. Only fields
+ * with a value appear.
  */
 export function secretEnvVars(
   secretName: string,
   fields: { key: string; hasValue: boolean }[],
 ): { field: string; variable: string }[] {
   const single = fields.length === 1;
-  return fields.filter((f) => f.hasValue).map((f) => ({
-    field: f.key,
-    variable: single ? secretName : `${secretName}__${f.key.toUpperCase()}`,
-  }));
+  const base = `${SECRET_ENV_PREFIX}${secretName}`;
+  return fields.filter((f) => f.hasValue)
+    .map((f) => ({ field: f.key, variable: single ? base : `${base}__${f.key.toUpperCase()}` }))
+    .filter((v) => isAllowedSecretVariable(v.variable));
 }

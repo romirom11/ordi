@@ -52,10 +52,10 @@ describe('secrets over MCP', () => {
     expect(body.data[0]).toMatchObject({
       name: 'ACME_ADMIN', expired: true, availableToAgents: false,
       fields: [{ key: 'url', hasValue: true }, { key: 'login', hasValue: true }, { key: 'password', hasValue: true }],
-      envVars: [{ field: 'url', variable: 'ACME_ADMIN__URL' }, { field: 'login', variable: 'ACME_ADMIN__LOGIN' }, { field: 'password', variable: 'ACME_ADMIN__PASSWORD' }],
+      envVars: [{ field: 'url', variable: 'SECRET_ACME_ADMIN__URL' }, { field: 'login', variable: 'SECRET_ACME_ADMIN__LOGIN' }, { field: 'password', variable: 'SECRET_ACME_ADMIN__PASSWORD' }],
     });
     // A one-field secret is its own variable.
-    expect(body.data[1].envVars).toEqual([{ field: 'api_key', variable: 'STRIPE_TEST' }]);
+    expect(body.data[1].envVars).toEqual([{ field: 'api_key', variable: 'SECRET_STRIPE_TEST' }]);
     for (const leak of ['admin.acme.test', 'ops@acme.test', 'Wxyz', '"hint"', '"value"']) expect(text(res)).not.toContain(leak);
   });
 
