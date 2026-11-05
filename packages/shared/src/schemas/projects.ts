@@ -23,10 +23,33 @@ export const projectInputSchema = z.object({
   customFields: customFieldsSchema.optional(),
 });
 
-/** Resource link on the project overview. */
-export const projectLinkSchema = z.object({
-  label: z.string().min(1),
-  url: z.string().url(),
+/**
+ * Project resources (Overview → Resources): links, files and KB pages in one
+ * ordered list. Files are added by uploading with entityType "project"
+ * (POST /attachments), so only links and pages are created here.
+ */
+export const PROJECT_RESOURCE_KINDS = ['link', 'file', 'kb_page'] as const;
+export type ProjectResourceKind = (typeof PROJECT_RESOURCE_KINDS)[number];
+
+/** http(s) only: a resource link is opened by people, never a `javascript:` or `file:` target. */
+const resourceUrlSchema = z.string().trim().max(2048).url()
+  .refine((v) => /^https?:\/\//i.test(v), 'Only http(s) links');
+const resourceLabelSchema = z.string().trim().min(1).max(200);
+
+export const projectResourceInputSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('link'), label: resourceLabelSchema, url: resourceUrlSchema }),
+  z.object({ kind: z.literal('kb_page'), kbPageId: idSchema }),
+]);
+
+/** Only a link has a label and url of its own; files rename through PATCH /attachments/:id. */
+export const projectResourcePatchSchema = z.object({
+  label: resourceLabelSchema.optional(),
+  url: resourceUrlSchema.optional(),
+});
+
+/** PUT /projects/:id/resources/order – the full ordered list of resource ids. */
+export const projectResourceOrderSchema = z.object({
+  ids: z.array(idSchema).min(1).max(1000),
 });
 
 export const projectUpdateSchema = z.object({
@@ -42,7 +65,6 @@ export const projectUpdateSchema = z.object({
   description: z.string().nullable().optional(),
   summary: z.string().max(500).optional(),
   priority: z.enum(TASK_PRIORITIES).optional(),
-  links: z.array(projectLinkSchema).max(50).optional(),
   labelIds: z.array(idSchema).optional(),
   estimateUnit: z.enum(ESTIMATE_UNITS).optional(),
   customFields: customFieldsSchema.optional(),

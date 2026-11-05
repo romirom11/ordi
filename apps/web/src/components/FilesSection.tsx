@@ -29,7 +29,7 @@ export type FileEntity = 'company' | 'lead' | 'deal' | 'task' | 'project';
  * selects the name without its extension, the way a file manager does, so
  * typing keeps `.pdf`; Enter or leaving the field saves, Escape cancels.
  */
-function RenameInput({ file, onSave, onCancel, className }: {
+export function RenameInput({ file, onSave, onCancel, className }: {
   file: FileRow; onSave: (name: string) => void; onCancel: () => void; className?: string;
 }) {
   const t = useT();
@@ -63,7 +63,7 @@ function RenameInput({ file, onSave, onCancel, className }: {
   );
 }
 
-function fmtSize(bytes?: number | null): string {
+export function fmtSize(bytes?: number | null): string {
   if (!bytes) return '';
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;

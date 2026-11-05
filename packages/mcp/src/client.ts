@@ -67,6 +67,7 @@ export class OrdiClient {
   get<T>(path: string) { return this.request<T>('GET', path); }
   post<T>(path: string, body?: unknown) { return this.request<T>('POST', path, body); }
   patch<T>(path: string, body?: unknown) { return this.request<T>('PATCH', path, body); }
+  del<T>(path: string) { return this.request<T>('DELETE', path); }
 
   /** Multipart upload for /attachments – FormData with a File/Blob, no JSON Content-Type. */
   async postForm<T>(path: string, form: FormData): Promise<T> {

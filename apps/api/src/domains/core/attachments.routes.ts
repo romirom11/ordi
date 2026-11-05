@@ -9,6 +9,7 @@ import { writeActivity } from '../../core/activity';
 import { putObject } from '../../lib/s3';
 import { fileSrc } from '../../lib/file-tokens';
 import { err } from '../../lib/errors';
+import { appendFileResource } from '../projects/resources.routes';
 
 /** Which permission covers files hanging off each entity type. */
 const READ_PERM: Record<string, Permission> = { company: 'crm.read', lead: 'crm.read', deal: 'deals.read', task: 'projects.read', project: 'projects.read', employee: 'people.read_documents', intake_item: 'projects.read' };
@@ -111,6 +112,8 @@ export function attachmentsRoutes() {
         diff: { file: { to: file.name }, on: { to: `${entityType}:${entityId}` } },
         actorId: actor.userId, actorType: actor.actorType,
       });
+      // A project's files are listed among its resources.
+      if (entityType === 'project' && entityId) await appendFileResource(db, entityId, id, file.name, actor);
     }
     // `src` is what an editor stores in the document: a signed, non-expiring
     // path that an <img> can fetch with no session at all (lib/file-tokens).
