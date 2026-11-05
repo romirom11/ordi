@@ -95,3 +95,20 @@ export const secretRevealSchema = z.object({
   /** What the person did with it, for the trail: shown on screen or copied without showing. */
   purpose: z.enum(['reveal', 'copy']).default('reveal'),
 });
+
+/**
+ * The environment variables a secret becomes in an agent run (plan R23): the
+ * secret's name for a one-field secret, `<NAME>__<FIELD>` otherwise. Decided by
+ * how many fields the secret has, not how many are filled, so a variable keeps
+ * its name when a second value is added later. Only fields with a value appear.
+ */
+export function secretEnvVars(
+  secretName: string,
+  fields: { key: string; hasValue: boolean }[],
+): { field: string; variable: string }[] {
+  const single = fields.length === 1;
+  return fields.filter((f) => f.hasValue).map((f) => ({
+    field: f.key,
+    variable: single ? secretName : `${secretName}__${f.key.toUpperCase()}`,
+  }));
+}

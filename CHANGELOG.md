@@ -33,6 +33,12 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   under it, while the stored bytes and every embedded link stay the same.
   Blocked extensions are refused on rename as on upload. New API
   `PATCH /attachments/:id` and MCP tool `rename_attachment`.
+- **MCP: agents can check a project's secrets without reading them**:
+  `list_project_secrets` and `check_project_secret` return names,
+  descriptions, environment, fields and whether each is set, expiry, agent
+  availability and the environment variable each field becomes in an agent
+  run (`NAME`, or `NAME__FIELD` for a secret with several fields). No tool
+  returns a value: not a password, not a login or URL, not an API-key hint.
 - **Project secrets, API first** (the UI follows): credentials a client
   hands over, stored with the project as a new resource kind. Values are
   encrypted at rest. Field metadata (keys, labels, types) is readable without
