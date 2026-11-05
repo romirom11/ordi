@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { ulid } from 'ulid';
-import { resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
+import { resetDb, seedRolesAndUsers, reqAs, json, app } from './helpers';
 
 vi.mock('../lib/s3', () => import('./s3-mock'));
 
@@ -148,6 +148,17 @@ describe('order', () => {
 });
 
 describe('access', () => {
+  it('refuses writes over a read-only token', async () => {
+    const minted = await json(owner.post('/auth/tokens', { name: 'ro', scopes: ['projects.read', 'projects.write'], readOnly: true }));
+    const headers = { authorization: `Bearer ${minted.token}`, 'content-type': 'application/json' };
+    const post = await app.request(`/api/v1/projects/${projectId}/resources`, {
+      method: 'POST', headers, body: JSON.stringify({ kind: 'link', label: 'x', url: 'https://x.dev' }),
+    });
+    expect(post.status).toBe(403);
+    const get = await app.request(`/api/v1/projects/${projectId}/resources`, { headers });
+    expect(get.status).toBe(200);
+  });
+
   it('is membership-gated', async () => {
     const guest = reqAs(users.guest!.cookie);
     expect((await guest.get(`/projects/${projectId}/resources`)).status).toBe(404);
