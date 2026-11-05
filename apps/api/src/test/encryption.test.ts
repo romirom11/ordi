@@ -129,6 +129,8 @@ describe('rotating a database', () => {
     await sql.unsafe('drop table if exists rotation_probe');
   });
 
+  // Scoped to its own table: the worker database holds other test files' rows,
+  // encrypted under the development key, which later files still have to read.
   it('re-encrypts every value a known key opens, in text and inside jsonb, and leaves the rest', async () => {
     const zeroRing = createKeyring(ZERO_KEY);
     const settings = {
@@ -142,13 +144,13 @@ describe('rotating a database', () => {
     await sql`insert into rotation_probe values ('3', ${legacyEncrypt(OLD, 'lost-key')}, null, null)`;
 
     const ring = createKeyring(NEW, [ZERO_KEY]);
-    const dry = await rotateEncryptedData(sql, ring, { dryRun: true });
+    const dry = await rotateEncryptedData(sql, ring, { dryRun: true, tables: ['rotation_probe'] });
     expect(dry.rotated['rotation_probe.secret']).toBe(1);
     expect(dry.rotated['rotation_probe.settings']).toBe(2);
     const [unchanged] = await sql<{ secret: string }[]>`select secret from rotation_probe where id = '1'`;
     expect(ciphertextKeyId(unchanged!.secret)).toBeNull();
 
-    const report = await rotateEncryptedData(sql, ring);
+    const report = await rotateEncryptedData(sql, ring, { tables: ['rotation_probe'] });
     expect(report.rotated).toEqual({ 'rotation_probe.secret': 1, 'rotation_probe.settings': 2 });
     // The look-alike and the value under a key nobody supplied are reported, not touched.
     expect(report.undecryptable).toEqual({ 'rotation_probe.secret': 2 });
@@ -164,7 +166,7 @@ describe('rotating a database', () => {
     expect(rows[1]!.secret).toBe(lookalike);
 
     // A second run finds everything already under the current key.
-    const again = await rotateEncryptedData(sql, ring);
+    const again = await rotateEncryptedData(sql, ring, { tables: ['rotation_probe'] });
     expect(again.rotated).toEqual({});
     expect(again.current).toBe(3);
   });

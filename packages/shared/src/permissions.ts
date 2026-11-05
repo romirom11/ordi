@@ -16,6 +16,7 @@ export const PERMISSION_DOMAINS = [
   'people',
   'integrations',
   'agents',
+  'secrets',
   'settings',
 ] as const;
 
@@ -67,6 +68,12 @@ export const PERMISSIONS = [
   'integrations.manage',
 
   'agents.manage',
+  // secrets (plan 2026-11-05-001, R43): the workspace layer of secret access;
+  // project role and each secret's audience still decide (calc/rbac secretAccess).
+  'secrets.read',
+  'secrets.reveal',
+  'secrets.write',
+  'secrets.manage',
   // settings
   'settings.manage',
   'users.manage',
@@ -120,6 +127,10 @@ export const PERMISSION_META: Record<Permission, { domain: PermissionDomain; lab
   'people.recruit': { domain: 'people', label: 'Openings, applicants, interviews' },
   'integrations.manage': { domain: 'integrations', label: 'Manage git, webhooks & MCP connectors' },
   'agents.manage': { domain: 'agents', label: 'Connect Claude, create AI agents, grant them connectors' },
+  'secrets.read': { domain: 'secrets', label: 'See project secrets (names and fields, never values)' },
+  'secrets.reveal': { domain: 'secrets', label: 'Reveal and copy values of secrets shared with you' },
+  'secrets.write': { domain: 'secrets', label: 'Add secrets, edit those shared with you' },
+  'secrets.manage': { domain: 'secrets', label: 'Change who can access any secret (values stay hidden)' },
   'settings.manage': { domain: 'settings', label: 'Workspace settings, templates, custom fields' },
   'users.manage': { domain: 'settings', label: 'Invite/manage users' },
   'roles.manage': { domain: 'settings', label: 'Manage roles' },

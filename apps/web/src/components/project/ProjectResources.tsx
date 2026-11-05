@@ -11,7 +11,7 @@
 import { useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  BookOpen, Download, FileText, FolderOpen, GripVertical, Link2, Pencil, Plus, Search, Trash2, Upload,
+  BookOpen, Download, FileText, FolderOpen, GripVertical, KeyRound, Link2, Pencil, Plus, Search, Trash2, Upload,
 } from 'lucide-react';
 import { api, qs, ApiError } from '../../lib/api';
 import { openExternal } from '../../lib/desktop';
@@ -80,7 +80,7 @@ extendDict({
 
 export interface ProjectResource {
   id: string;
-  kind: 'link' | 'file' | 'kb_page';
+  kind: 'link' | 'file' | 'kb_page' | 'secret';
   label: string;
   url: string | null;
   position: number;
@@ -100,7 +100,7 @@ function hostOf(url: string | null): string {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
 }
 
-const KIND_ICON = { link: Link2, file: FileText, kb_page: BookOpen } as const;
+const KIND_ICON = { link: Link2, file: FileText, kb_page: BookOpen, secret: KeyRound } as const;
 
 export function ProjectResources({ projectId, canWrite }: { projectId: string; canWrite: boolean }) {
   const t = useT();
@@ -111,7 +111,9 @@ export function ProjectResources({ projectId, canWrite }: { projectId: string; c
 
   const { data, isLoading } = useQuery<ProjectResource[]>({
     queryKey,
-    queryFn: () => api.get<{ data: ProjectResource[] }>(`/projects/${projectId}/resources`).then((r) => r.data),
+    // Secrets get their own rows and panel in the next step; until then the list leaves them out
+    // rather than offer a Remove button that would delete one without asking.
+    queryFn: () => api.get<{ data: ProjectResource[] }>(`/projects/${projectId}/resources`).then((r) => r.data.filter((x) => x.kind !== 'secret')),
   });
   const resources = data ?? [];
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hasPermission, canAccessProject, canAccessSpace, canSeePage, validateTokenScope, type AccessContext } from './rbac';
+import { hasPermission, canAccessProject, canAccessSpace, canSeePage, validateTokenScope, secretAccess, type AccessContext } from './rbac';
 
 function ctx(
   perms: string[],
@@ -112,5 +112,45 @@ describe('validateTokenScope', () => {
   });
   it('accepts subset', () => {
     expect(validateTokenScope(new Set(['crm.read', 'finance.read']), ['crm.read']).ok).toBe(true);
+  });
+});
+
+describe('secretAccess – workspace role × project role × audience', () => {
+  const ALL = new Set(['secrets.read', 'secrets.reveal', 'secrets.write']);
+  const base = {
+    permissions: ALL,
+    projectRole: 'member' as const,
+    audience: [{ type: 'project' as const }],
+    userId: 'u1',
+    departmentIds: new Set<string>(),
+  };
+
+  it('opens a project-wide secret to a member with the permissions', () => {
+    expect(secretAccess(base)).toMatchObject({ list: true, reveal: true, write: true, manage: false, inAudience: true });
+  });
+
+  it('denies on each layer alone', () => {
+    // workspace role
+    expect(secretAccess({ ...base, permissions: new Set(['secrets.read']) })).toMatchObject({ list: true, reveal: false, write: false });
+    expect(secretAccess({ ...base, permissions: new Set() }).list).toBe(false);
+    // project role
+    expect(secretAccess({ ...base, projectRole: 'viewer' })).toMatchObject({ list: true, reveal: false, write: false });
+    expect(secretAccess({ ...base, projectRole: null })).toMatchObject({ list: false, reveal: false, manage: false });
+    // audience
+    const restricted = { ...base, audience: [{ type: 'user' as const, id: 'someone-else' }] };
+    expect(secretAccess(restricted)).toMatchObject({ list: false, reveal: false, write: false, inAudience: false });
+  });
+
+  it('matches people and departments', () => {
+    expect(secretAccess({ ...base, audience: [{ type: 'user', id: 'u1' }] }).reveal).toBe(true);
+    const dept = { ...base, audience: [{ type: 'department' as const, id: 'dev' }] };
+    expect(secretAccess({ ...dept, departmentIds: new Set(['frontend', 'dev']) }).reveal).toBe(true);
+    expect(secretAccess({ ...dept, departmentIds: new Set(['design']) }).list).toBe(false);
+  });
+
+  it('lets secrets.manage see and govern any secret on an open project, but not reveal it', () => {
+    const manager = { ...base, permissions: new Set(['secrets.manage']), audience: [{ type: 'user' as const, id: 'x' }] };
+    expect(secretAccess(manager)).toMatchObject({ list: true, reveal: false, write: false, manage: true });
+    expect(secretAccess({ ...manager, projectRole: null }).manage).toBe(false);
   });
 });

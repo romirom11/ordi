@@ -1,7 +1,7 @@
 /**
  * A project's resources: everything the team keeps "about" a project in one
- * ordered list – external links, uploaded files and knowledge-base pages.
- * Secrets join as another kind later.
+ * ordered list – external links, uploaded files, knowledge-base pages and
+ * secrets (schema/secrets.ts).
  *
  * A row owns only what is specific to its kind: a link carries its label and
  * url; a file points at its attachment (which keeps the name, size and bytes,
@@ -13,6 +13,7 @@ import { pk, timestamps, createdBy } from './_shared';
 import { attachments } from './core';
 import { projects } from './projects';
 import { kbPages } from './kb';
+import { projectSecrets } from './secrets';
 
 export const projectResources = pgTable('project_resources', {
   id: pk(),
@@ -24,6 +25,7 @@ export const projectResources = pgTable('project_resources', {
   url: text('url'),
   attachmentId: text('attachment_id').references(() => attachments.id, { onDelete: 'cascade' }),
   kbPageId: text('kb_page_id').references(() => kbPages.id, { onDelete: 'cascade' }),
+  secretId: text('secret_id').references(() => projectSecrets.id, { onDelete: 'cascade' }),
   position: integer('position').notNull().default(0),
   createdBy: createdBy(),
   ...timestamps,
@@ -33,4 +35,5 @@ export const projectResources = pgTable('project_resources', {
   attachmentIdx: uniqueIndex('project_resources_attachment_idx').on(t.attachmentId),
   /** Pinning the same page twice adds nothing. */
   pageIdx: uniqueIndex('project_resources_page_idx').on(t.projectId, t.kbPageId),
+  secretIdx: uniqueIndex('project_resources_secret_idx').on(t.secretId),
 }));

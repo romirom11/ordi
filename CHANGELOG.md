@@ -33,6 +33,29 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   under it, while the stored bytes and every embedded link stay the same.
   Blocked extensions are refused on rename as on upload. New API
   `PATCH /attachments/:id` and MCP tool `rename_attachment`.
+- **Project secrets, API first** (the UI follows): credentials a client
+  hands over, stored with the project as a new resource kind. Values are
+  encrypted at rest. Field metadata (keys, labels, types) is readable without
+  revealing anything, and url and text fields are shown as they are.
+  Revealing or copying a value is one call per field, refused over API
+  tokens, rate-limited, and logged as a sensitive activity entry without the
+  value. Access is three layers that must all agree:
+  - the workspace role, through the new `secrets.read`, `secrets.reveal`,
+    `secrets.write` and `secrets.manage` permissions (Owner all four; Admin
+    and Manager read, reveal, write; Member read and reveal; migration `0045`
+    grants them to existing roles);
+  - the project role (viewers list, members reveal);
+  - the secret's audience, chosen per secret: the whole project, named people,
+    or departments including their sub-departments.
+
+  A secret restricted to people or departments is invisible to everyone
+  outside its audience, in lists, the resources block and the project
+  activity alike. `secrets.manage` can change any secret's audience without
+  seeing values, and the secret's creator is notified when it does. Each
+  secret is marked test, staging, production or other, and only
+  `secrets.manage` may let agents use a production one. New API:
+  `GET/POST /projects/:id/secrets`, `GET/PATCH/DELETE /project-secrets/:id`,
+  `POST /project-secrets/:id/reveal`, `GET /project-secrets/:id/activity`.
 - **One Resources block on the project overview**: links, files and
   knowledge-base pages now live in a single ordered list instead of link
   chips plus a separate Files section. "Add" offers a link, a file upload

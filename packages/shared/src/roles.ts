@@ -15,8 +15,12 @@ export interface RoleSeed {
 
 const ALL: Permission[] = [...PERMISSIONS];
 
-/** Admin gets everything except the ability to manage the Owner (enforced in service, not via a permission). */
-const ADMIN: Permission[] = [...PERMISSIONS];
+/**
+ * Admin gets everything except the ability to manage the Owner (enforced in
+ * service, not via a permission) and secrets.manage: changing who can reach
+ * any secret is the Owner's break-glass, granted to others on purpose.
+ */
+const ADMIN: Permission[] = PERMISSIONS.filter((p) => p !== 'secrets.manage');
 
 const MANAGER: Permission[] = [
   'crm.read', 'crm.write', 'crm.export',
@@ -25,6 +29,7 @@ const MANAGER: Permission[] = [
   'kb.read', 'kb.write', 'kb.manage_spaces',
   'time.track', 'time.read_all', 'time.manage',
   'finance.read', 'finance.write', 'finance.send',
+  'secrets.read', 'secrets.reveal', 'secrets.write',
 ];
 
 /**
@@ -48,6 +53,7 @@ const MEMBER: Permission[] = [
   'projects.read', 'projects.create',
   'kb.read', 'kb.write',
   'time.track',
+  'secrets.read', 'secrets.reveal',
 ];
 
 const FINANCE: Permission[] = [
