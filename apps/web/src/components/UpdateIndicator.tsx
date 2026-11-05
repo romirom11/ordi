@@ -177,7 +177,7 @@ export function UpdateIndicator() {
 }
 
 /** Same shape as the sidebar's nav rows, tinted so it reads as a notice. */
-function rowCls(tone: 'info' | 'warn'): string {
+export function rowCls(tone: 'info' | 'warn'): string {
   return cn(
     'anim-fade-in flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] font-medium transition-colors duration-150 disabled:opacity-70',
     tone === 'warn'
