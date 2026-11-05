@@ -22,8 +22,6 @@ CREATE TABLE "project_secrets" (
 	"expires_at" text,
 	"available_to_agents" boolean DEFAULT false NOT NULL,
 	"fields" jsonb DEFAULT '[]'::jsonb NOT NULL,
-	"last_revealed_at" timestamp with time zone,
-	"last_revealed_by" text,
 	"created_by" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -34,7 +32,6 @@ ALTER TABLE "project_resources" ADD COLUMN "secret_id" text;--> statement-breakp
 ALTER TABLE "project_secret_audience" ADD CONSTRAINT "project_secret_audience_secret_id_project_secrets_id_fk" FOREIGN KEY ("secret_id") REFERENCES "public"."project_secrets"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "project_secret_payloads" ADD CONSTRAINT "project_secret_payloads_secret_id_project_secrets_id_fk" FOREIGN KEY ("secret_id") REFERENCES "public"."project_secrets"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "project_secrets" ADD CONSTRAINT "project_secrets_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "project_secrets" ADD CONSTRAINT "project_secrets_last_revealed_by_users_id_fk" FOREIGN KEY ("last_revealed_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "project_secret_audience_principal_idx" ON "project_secret_audience" USING btree ("principal_type","principal_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "project_secrets_name_idx" ON "project_secrets" USING btree ("project_id","name");--> statement-breakpoint
 ALTER TABLE "project_resources" ADD CONSTRAINT "project_resources_secret_id_project_secrets_id_fk" FOREIGN KEY ("secret_id") REFERENCES "public"."project_secrets"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint

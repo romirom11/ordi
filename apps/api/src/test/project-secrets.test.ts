@@ -10,6 +10,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { getDb, schema, eq } from '@ordi/db';
 import { ulid } from 'ulid';
 import { resetDb, seedRolesAndUsers, reqAs, json, app } from './helpers';
+import { runSecretExpiry } from '../domains/secrets/service';
 
 let users: Awaited<ReturnType<typeof seedRolesAndUsers>>;
 let owner: ReturnType<typeof reqAs>;
@@ -43,6 +44,8 @@ beforeAll(async () => {
     { id: frontend, name: 'Frontend', parentId: engineering },
   ]);
   await db.insert(schema.employees).values({ id: ulid(), userId: users.manager!.userId, firstName: 'Manager', departmentId: frontend });
+  // The seed gives every role a person; a real agent is an agent user.
+  await db.update(schema.users).set({ actorType: 'agent' }).where(eq(schema.users.id, users.agent!.userId));
 });
 
 const create = (who: ReturnType<typeof reqAs>, body: Record<string, unknown>) => who.post(`/projects/${projectId}/secrets`, {
@@ -96,7 +99,10 @@ describe('a project-wide secret', () => {
     const copied = trail.find((a) => a.action === 'copied');
     expect(copied).toMatchObject({ actorId: users.member!.userId, sensitivity: 'sensitive', diff: { field: { to: 'password' } } });
     expect(JSON.stringify(trail)).not.toContain(PASSWORD);
-    expect((await json(owner.get(`/project-secrets/${id}`))).lastRevealedBy).toBe(users.member!.userId);
+    const after = await json(owner.get(`/project-secrets/${id}`));
+    expect(after.lastRevealedBy).toBe(users.member!.userId);
+    // Revealing is not an edit: whoever is editing the secret keeps their version.
+    expect(after.version).toBe(1);
   });
 
   it('is announced in the project activity by name only', async () => {
@@ -217,7 +223,29 @@ describe('secrets.manage', () => {
     expect(trail.map((a) => a.action)).toContain('access_overridden');
     const { db } = getDb();
     const notes = await db.select().from(schema.notifications).where(eq(schema.notifications.userId, users.manager!.userId));
-    expect(notes.some((n) => n.type === 'secret_access_overridden' && n.entityRef === `project_secret:${id}`)).toBe(true);
+    expect(notes.some((n) => n.type === 'secret.access_overridden' && n.entityRef === `project_secret:${id}`)).toBe(true);
+  });
+});
+
+describe('choosing an audience', () => {
+  it('offers the people who work on the project and every department', async () => {
+    const options = await json(manager.get(`/projects/${projectId}/secret-audience`));
+    const names = (options.people as any[]).map((p) => p.id);
+    expect(names).toContain(users.member!.userId);
+    expect(names).not.toContain(users.agent!.userId);
+    expect((options.departments as any[]).map((d) => d.name)).toEqual(expect.arrayContaining(['Engineering', 'Frontend']));
+    expect((await reqAs(users.guest!.cookie).get(`/projects/${projectId}/secret-audience`)).status).toBe(403);
+  });
+
+  it('previews who really gets in, with all three layers applied', async () => {
+    const preview = async (audience: unknown[]) =>
+      ((await json(manager.post(`/projects/${projectId}/secret-audience/preview`, { audience }))).canReveal as any[]).map((p) => p.id);
+    const whole = await preview([{ type: 'project' }]);
+    expect(whole).toEqual(expect.arrayContaining([users.member!.userId, users.manager!.userId, users.owner!.userId]));
+    // On the project, but the Guest role holds no secrets permissions.
+    expect(whole).not.toContain(users.guest!.userId);
+    const dept = await preview([{ type: 'department', id: engineering }]);
+    expect(dept).toEqual([users.manager!.userId]);
   });
 });
 
@@ -291,5 +319,28 @@ describe('deleting and limits', () => {
     let last = 200;
     for (let i = 0; i < 40 && last === 200; i++) last = (await reveal(owner, id, 'password')).status;
     expect(last).toBe(429);
+  });
+});
+
+describe('expiry reminders', () => {
+  it('reminds the creator and project admins it is open to, two weeks ahead and on the day, once', async () => {
+    const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+    const soon = await json(create(manager, { name: 'TRIAL_KEY', expiresAt: day(14) }));
+    const hidden = await json(create(owner, { name: 'HIDDEN_EXPIRY', expiresAt: day(0), audience: [{ type: 'user', id: users.owner!.userId }] }));
+    // `member` is a project admin here, so it would be told – but not about a secret it cannot see.
+    await json(owner.post(`/projects/${projectId}/members`, { userId: users.member!.userId, role: 'admin', canWriteTasks: true }));
+
+    const first = await runSecretExpiry();
+    expect(first.notified).toBeGreaterThan(0);
+    expect((await runSecretExpiry()).notified).toBe(0);
+
+    const { db } = getDb();
+    const notes = await db.select().from(schema.notifications);
+    const about = (secretId: string) => notes.filter((n) => n.entityRef === `project_secret:${secretId}`);
+    expect(about(soon.id).map((n) => n.type)).toContain('secret.expiring');
+    expect(about(soon.id).map((n) => n.userId)).toEqual(expect.arrayContaining([users.manager!.userId, users.member!.userId]));
+    expect(about(hidden.id).map((n) => n.userId)).toEqual([users.owner!.userId]);
+    expect(about(hidden.id)[0]!.type).toBe('secret.expired');
+    await json(owner.post(`/projects/${projectId}/members`, { userId: users.member!.userId, role: 'member', canWriteTasks: true }));
   });
 });

@@ -12,10 +12,10 @@
  * project's own activity – read by everyone on the project – hears only of
  * project-wide secrets; a restricted secret leaves no trace there.
  */
-import { getDb, schema, eq, and, asc, inArray, sql } from '@ordi/db';
+import { getDb, schema, eq, and, asc, desc, inArray, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import {
-  secretAccess, isProjectWideSecret,
+  secretAccess, isProjectWideSecret, projectAccessRank,
   SECRET_VALUE_TYPES,
   type SecretAccess, type SecretAudiencePrincipal, type SecretFieldType, type SecretEnvironment,
 } from '@ordi/shared';
@@ -23,6 +23,7 @@ import type { z } from 'zod';
 import type { secretInputSchema, secretPatchSchema, secretFieldInputSchema } from '@ordi/shared';
 import type { Actor } from '../../context';
 import { effectiveProjectRole } from '../../core/access';
+import { loadRolePermissions } from '../../core/rbac';
 import { writeActivity } from '../../core/activity';
 import { assertVersion } from '../../core/locking';
 import { encrypt, decrypt } from '../../lib/crypto';
@@ -123,15 +124,34 @@ async function audiencesOf(secretIds: string[]): Promise<Map<string, SecretAudie
   return out;
 }
 
-function toView(row: SecretRow, audience: SecretAudiencePrincipal[], access: SecretAccess): SecretView {
+type LastReveal = { at: Date; by: string | null };
+
+/**
+ * When each secret was last shown or copied, from its trail. Not a column on
+ * the secret: an update there would bump its version under whoever is editing.
+ */
+async function lastReveals(secretIds: string[]): Promise<Map<string, LastReveal>> {
+  const out = new Map<string, LastReveal>();
+  if (!secretIds.length) return out;
+  const { db } = getDb();
+  const log = schema.activityLog;
+  const rows = await db.selectDistinctOn([log.entityId], { entityId: log.entityId, actorId: log.actorId, createdAt: log.createdAt })
+    .from(log)
+    .where(and(eq(log.entityType, 'project_secret'), inArray(log.action, ['revealed', 'copied']), inArray(log.entityId, secretIds)))
+    .orderBy(log.entityId, desc(log.createdAt));
+  for (const r of rows) out.set(r.entityId, { at: r.createdAt, by: r.actorId });
+  return out;
+}
+
+function toView(row: SecretRow, audience: SecretAudiencePrincipal[], access: SecretAccess, last?: LastReveal): SecretView {
   return {
     id: row.id, projectId: row.projectId, name: row.name, description: row.description,
     environment: row.environment as SecretEnvironment, source: row.source,
     expiresAt: row.expiresAt, availableToAgents: row.availableToAgents,
     fields: row.fields as SecretFieldMeta[],
     audience,
-    lastRevealedAt: row.lastRevealedAt?.toISOString() ?? null,
-    lastRevealedBy: row.lastRevealedBy,
+    lastRevealedAt: last?.at.toISOString() ?? null,
+    lastRevealedBy: last?.by ?? null,
     createdBy: row.createdBy,
     createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(),
     version: row.version,
@@ -153,13 +173,14 @@ export async function listSecrets(ctx: ActorContext, projectId: string, ids?: st
     : eq(projectSecrets.projectId, projectId);
   const rows = await db.select().from(projectSecrets).where(where).orderBy(asc(projectSecrets.name));
   const audiences = await audiencesOf(rows.map((r) => r.id));
+  const reveals = await lastReveals(rows.map((r) => r.id));
   for (const row of rows) {
     const audience = audiences.get(row.id) ?? [];
     const access = secretAccess({
       permissions: ctx.actor.access.permissions, projectRole: role, audience,
       userId: ctx.actor.userId, departmentIds: ctx.departments,
     });
-    if (access.list) out.set(row.id, toView(row, audience, access));
+    if (access.list) out.set(row.id, toView(row, audience, access, reveals.get(row.id)));
   }
   return out;
 }
@@ -182,7 +203,7 @@ async function load(ctx: ActorContext, id: string): Promise<Loaded> {
 
 export async function getSecret(ctx: ActorContext, id: string): Promise<SecretView> {
   const { row, audience, access } = await load(ctx, id);
-  return toView(row, audience, access);
+  return toView(row, audience, access, (await lastReveals([id])).get(id));
 }
 
 // ── Writing ──
@@ -409,8 +430,8 @@ async function notifyAccessOverride(db: Db, row: SecretRow, audience: SecretAudi
   if (!recipients.size) return;
   const stamp = Date.now();
   await db.insert(notifications).values([...recipients].map((userId) => ({
-    id: ulid(), userId, type: 'secret_access_overridden',
-    dedupeKey: `secret_access_overridden:${row.id}:${userId}:${stamp}`,
+    id: ulid(), userId, type: 'secret.access_overridden',
+    dedupeKey: `secret.access_overridden:${row.id}:${userId}:${stamp}`,
     entityRef: `project_secret:${row.id}`,
     payload: { secretId: row.id, projectId: row.projectId, title: row.name, actorName: actor.name },
   })));
@@ -464,8 +485,6 @@ export async function revealSecretField(
   } else {
     value = meta.value ?? '';
   }
-  await db.update(projectSecrets).set({ lastRevealedAt: new Date(), lastRevealedBy: actor.userId })
-    .where(eq(projectSecrets.id, id));
   await writeActivity(db, sensitive(actor, id, purpose === 'copy' ? 'copied' : 'revealed', { field: { to: field } }));
   return { field, value };
 }
@@ -479,4 +498,115 @@ export async function secretActivity(ctx: ActorContext, id: string) {
     .where(and(eq(schema.activityLog.entityType, 'project_secret'), eq(schema.activityLog.entityId, id)))
     .orderBy(sql`${schema.activityLog.createdAt} desc`)
     .limit(100);
+}
+
+// ── Choosing an audience ──
+
+interface Person { id: string; name: string; avatar: string | null }
+
+/**
+ * Everyone who could be in an audience, with what the three layers make of
+ * them. Computed for every active person at once: a workspace is a few dozen
+ * people, and the dialog must show who will really get in, not who was named.
+ */
+async function workspaceAccess(projectId: string) {
+  const { db } = getDb();
+  const [project] = await db.select({ visibility: projects.visibility }).from(projects).where(eq(projects.id, projectId));
+  const people = await db.select({
+    id: schema.users.id, name: schema.users.name, avatar: schema.users.avatar, roleId: schema.users.roleId,
+  }).from(schema.users).where(and(eq(schema.users.isActive, true), eq(schema.users.actorType, 'user')));
+  const memberships = new Map((await db.select({ userId: projectMembers.userId, role: projectMembers.role })
+    .from(projectMembers).where(eq(projectMembers.projectId, projectId))).map((m) => [m.userId, m.role as 'admin' | 'member' | 'viewer']));
+  const depts = await db.select({ id: departments.id, name: departments.name, parentId: departments.parentId }).from(departments);
+  const parent = new Map(depts.map((d) => [d.id, d.parentId]));
+  const staff = await db.select({ userId: employees.userId, departmentId: employees.departmentId }).from(employees)
+    .where(sql`${employees.userId} is not null and (${employees.exitDate} is null or ${employees.exitDate} > current_date::text)`);
+  const deptOf = new Map(staff.map((e) => [e.userId!, e.departmentId]));
+  const roleRanks = ['viewer', 'member', 'admin'] as const;
+
+  const rows = [];
+  for (const p of people) {
+    const permissions = await loadRolePermissions(p.roleId);
+    const rank = project ? projectAccessRank(
+      { permissions, projectMemberships: memberships.has(p.id) ? new Map([[projectId, memberships.get(p.id)!]]) : new Map(), spaceMemberships: new Map() },
+      { visibility: project.visibility as 'workspace' | 'private', projectId },
+    ) : 0;
+    const chain = new Set<string>();
+    let at = deptOf.get(p.id) ?? null;
+    while (at && !chain.has(at)) { chain.add(at); at = parent.get(at) ?? null; }
+    rows.push({ person: { id: p.id, name: p.name, avatar: p.avatar } as Person, permissions, projectRole: rank ? roleRanks[rank - 1]! : null, departments: chain });
+  }
+  return { rows, departments: depts };
+}
+
+async function assertCanShare(ctx: ActorContext, projectId: string): Promise<void> {
+  const role = await projectRole(ctx.actor, projectId);
+  const perms = ctx.actor.access.permissions;
+  if (!role) throw err.notFound('Project not found');
+  const writer = perms.has('secrets.write') && role !== 'viewer';
+  if (!writer && !perms.has('secrets.manage')) throw err.forbidden('Sharing secrets needs secrets.write', 'secrets.write');
+}
+
+/** Who and what an audience can name in this project: people on it, and departments. */
+export async function audienceOptions(ctx: ActorContext, projectId: string) {
+  await assertCanShare(ctx, projectId);
+  const { rows, departments: depts } = await workspaceAccess(projectId);
+  return {
+    people: rows.filter((r) => r.projectRole && r.projectRole !== 'viewer').map((r) => r.person)
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    departments: depts.map((d) => ({ id: d.id, name: d.name, parentId: d.parentId }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
+/** The people an audience really lets reveal values, all three layers applied. */
+export async function audiencePreview(ctx: ActorContext, projectId: string, audience: SecretAudiencePrincipal[]) {
+  await assertCanShare(ctx, projectId);
+  const { rows } = await workspaceAccess(projectId);
+  const canReveal: Person[] = [];
+  let canList = 0;
+  for (const r of rows) {
+    const a = secretAccess({ permissions: r.permissions, projectRole: r.projectRole, audience, userId: r.person.id, departmentIds: r.departments });
+    if (a.reveal) canReveal.push(r.person);
+    if (a.list) canList += 1;
+  }
+  return { canReveal: canReveal.sort((a, b) => a.name.localeCompare(b.name)), canList };
+}
+
+// ── Expiry reminders ──
+
+const EXPIRY_LEAD_DAYS = 14;
+
+/**
+ * Daily: a reminder two weeks before a secret's credential stops working, and
+ * one on the day. It goes to the secret's creator and the project's admins –
+ * only those of them the secret is open to, so a restricted secret's name
+ * reaches nobody outside its audience. Deduplicated per secret and milestone.
+ */
+export async function runSecretExpiry(now = new Date()): Promise<{ notified: number }> {
+  const { db } = getDb();
+  const day = (offset: number) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + offset)).toISOString().slice(0, 10);
+  const milestones = new Map([[day(EXPIRY_LEAD_DAYS), 'secret.expiring'], [day(0), 'secret.expired']]);
+  const due = await db.select().from(projectSecrets)
+    .innerJoin(projects, eq(projects.id, projectSecrets.projectId))
+    .where(and(inArray(projectSecrets.expiresAt, [...milestones.keys()]), sql`${projects.deletedAt} is null`));
+  let notified = 0;
+  for (const { project_secrets: secret } of due) {
+    const type = milestones.get(secret.expiresAt!)!;
+    const audience = (await audiencesOf([secret.id])).get(secret.id) ?? [];
+    const { rows } = await workspaceAccess(secret.projectId);
+    for (const r of rows) {
+      const access = secretAccess({ permissions: r.permissions, projectRole: r.projectRole, audience, userId: r.person.id, departmentIds: r.departments });
+      const concerned = r.person.id === secret.createdBy || r.projectRole === 'admin';
+      if (!access.list || !concerned) continue;
+      const inserted = await db.insert(notifications).values({
+        id: ulid(), userId: r.person.id, type,
+        dedupeKey: `${type}:${secret.id}:${secret.expiresAt}:${r.person.id}`,
+        entityRef: `project_secret:${secret.id}`,
+        payload: { secretId: secret.id, projectId: secret.projectId, title: secret.name, expiresAt: secret.expiresAt },
+      }).onConflictDoNothing().returning({ id: notifications.id });
+      notified += inserted.length;
+    }
+  }
+  return { notified };
 }

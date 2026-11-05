@@ -13,6 +13,7 @@ import { logger } from '../lib/logger';
 import { runtimeConfig } from '../lib/runtime-config';
 import { enqueueEmail, type QueuedEmailInput } from './email-delivery';
 import { sweepCredentialExpiry } from '../domains/agents/credentials';
+import { runSecretExpiry } from '../domains/secrets/service';
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -267,6 +268,7 @@ export async function runAllDailyJobs(): Promise<void> {
   await runCycleSnapshots();
   await runQuoteExpiry();
   await runAgentCredentialExpiry();
+  await runSecretExpiry();
 }
 
 /** R11: expire subscription tokens and warn agents.manage holders two weeks ahead (once a day per credential). */

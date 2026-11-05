@@ -8,12 +8,15 @@
  * accident. `fields` on the secret holds only what lists may show: keys,
  * labels, types and whether a value is set.
  *
+ * When it was last opened is read from its trail (activity_log), not kept
+ * here: every update bumps `version`, and a reveal must not make the person
+ * editing the secret at that moment lose their edit to a conflict.
+ *
  * Who may reach a secret is three layers (calc/rbac secretAccess): the
  * workspace role, the project role, and the audience below.
  */
-import { pgTable, text, boolean, jsonb, timestamp, index, uniqueIndex, primaryKey } from 'drizzle-orm/pg-core';
+import { pgTable, text, boolean, jsonb, index, uniqueIndex, primaryKey } from 'drizzle-orm/pg-core';
 import { pk, timestamps, createdBy, version } from './_shared';
-import { users } from './core';
 import { projects } from './projects';
 
 export const projectSecrets = pgTable('project_secrets', {
@@ -31,8 +34,6 @@ export const projectSecrets = pgTable('project_secrets', {
   availableToAgents: boolean('available_to_agents').notNull().default(false),
   /** [{ key, label, type, hasValue }] – metadata only, never a value. */
   fields: jsonb('fields').notNull().default([]),
-  lastRevealedAt: timestamp('last_revealed_at', { withTimezone: true }),
-  lastRevealedBy: text('last_revealed_by').references(() => users.id, { onDelete: 'set null' }),
   createdBy: createdBy(),
   ...timestamps,
   version: version(),

@@ -9,14 +9,17 @@
  *   DELETE /project-secrets/:id
  *   POST   /project-secrets/:id/reveal      one field's value; POST so nothing caches or prefetches it
  *   GET    /project-secrets/:id/activity    the secret's own trail
+ *   GET    /projects/:id/secret-audience            people and departments an audience can name
+ *   POST   /projects/:id/secret-audience/preview    who an audience really lets reveal values
  */
 import { Hono } from 'hono';
-import { secretInputSchema, secretPatchSchema, secretRevealSchema } from '@ordi/shared';
+import { secretInputSchema, secretPatchSchema, secretRevealSchema, secretAudiencePreviewSchema } from '@ordi/shared';
 import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { rejectReadOnlyWrites } from '../../core/rbac';
 import {
-  actorContext, createSecret, deleteSecret, getSecret, listSecrets, revealSecretField, secretActivity, updateSecret,
+  actorContext, audienceOptions, audiencePreview, createSecret, deleteSecret, getSecret, listSecrets,
+  revealSecretField, secretActivity, updateSecret,
 } from './service';
 
 export function projectSecretsRoutes() {
@@ -34,6 +37,18 @@ export function projectSecretsRoutes() {
     const ctx = await actorContext(currentActor(c));
     const body = secretInputSchema.parse(await c.req.json());
     return c.json(await createSecret(ctx, c.req.param('id'), body), 201);
+  });
+
+  app.get('/projects/:id/secret-audience', async (c) => {
+    const ctx = await actorContext(currentActor(c));
+    return c.json(await audienceOptions(ctx, c.req.param('id')));
+  });
+
+  // POST although it changes nothing: the audience travels as a body.
+  app.post('/projects/:id/secret-audience/preview', async (c) => {
+    const ctx = await actorContext(currentActor(c));
+    const { audience } = secretAudiencePreviewSchema.parse(await c.req.json());
+    return c.json(await audiencePreview(ctx, c.req.param('id'), audience));
   });
 
   app.get('/project-secrets/:id', async (c) => {

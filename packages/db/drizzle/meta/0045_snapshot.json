@@ -13949,18 +13949,6 @@
           "notNull": true,
           "default": "'[]'::jsonb"
         },
-        "last_revealed_at": {
-          "name": "last_revealed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_revealed_by": {
-          "name": "last_revealed_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -14024,19 +14012,6 @@
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "project_secrets_last_revealed_by_users_id_fk": {
-          "name": "project_secrets_last_revealed_by_users_id_fk",
-          "tableFrom": "project_secrets",
-          "tableTo": "users",
-          "columnsFrom": [
-            "last_revealed_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },

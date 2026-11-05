@@ -76,6 +76,8 @@ export const secretPatchSchema = z.object({
   version: z.number().int().optional(),
 });
 
+export const secretAudiencePreviewSchema = z.object({ audience: z.array(secretAudienceSchema).max(100) });
+
 export const secretRevealSchema = z.object({
   field: secretFieldKeySchema,
   /** What the person did with it, for the trail: shown on screen or copied without showing. */
