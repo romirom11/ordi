@@ -6,8 +6,9 @@ what has already shipped. The details of what shipped are in the
 picture at a glance.
 
 How to use it: a new idea → a row in "Backlog". Picked up → move it to
-"In flight" with a link to the PR. Merged → into "Shipped" with the release
-version.
+"In flight" with a link to the PR. Merged → delete the row: what each release
+shipped is in the [CHANGELOG](../CHANGELOG.md). The "Shipped" list below ends
+at v1.43.0.
 
 ## Backlog
 

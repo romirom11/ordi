@@ -1,7 +1,9 @@
 # Changelog
 
-Release notes for each version live in [`docs/releases`](docs/releases) and are
-published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
+From v1.44.0 on, [release-please](https://github.com/googleapis/release-please)
+writes this file from the titles of the merged PRs, and each section is also the
+body of its [GitHub release](https://github.com/romirom11/ordi/releases). The
+hand-written notes of earlier versions are in [`docs/releases`](docs/releases).
 
 ## v1.43.0
 

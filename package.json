@@ -29,8 +29,7 @@
     "db:seed": "pnpm --filter @ordi/api seed",
     "api:dev": "pnpm --filter @ordi/api dev",
     "web:dev": "pnpm --filter @ordi/web dev",
-    "check:desktop-safe": "node scripts/check-desktop-safe.mjs",
-    "release": "node scripts/release.mjs"
+    "check:desktop-safe": "node scripts/check-desktop-safe.mjs"
   },
   "devDependencies": {
     "turbo": "^2.3.3",
