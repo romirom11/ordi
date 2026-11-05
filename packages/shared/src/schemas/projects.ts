@@ -28,7 +28,7 @@ export const projectInputSchema = z.object({
  * ordered list. Files are added by uploading with entityType "project"
  * (POST /attachments), so only links and pages are created here.
  */
-export const PROJECT_RESOURCE_KINDS = ['link', 'file', 'kb_page'] as const;
+export const PROJECT_RESOURCE_KINDS = ['link', 'file', 'kb_page', 'secret'] as const;
 export type ProjectResourceKind = (typeof PROJECT_RESOURCE_KINDS)[number];
 
 /** http(s) only: a resource link is opened by people, never a `javascript:` or `file:` target. */

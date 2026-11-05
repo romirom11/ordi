@@ -26,6 +26,7 @@ import { rejectReadOnlyWrites } from '../../core/rbac';
 import { assertProject, accessibleSpaceIds, editableSpaceIds } from '../../core/access';
 import { writeActivity } from '../../core/activity';
 import { err } from '../../lib/errors';
+import { actorContext, deleteSecret, listSecrets, type SecretView } from '../secrets/service';
 
 const { projectResources, attachments, kbPages } = schema;
 
@@ -43,6 +44,8 @@ export interface ProjectResourceView {
   createdAt: string;
   file?: { id: string; filename: string; size: number; mime: string };
   page?: { id: string; title: string; icon: string | null; spaceId: string; url: string };
+  /** Metadata only – values are revealed one field at a time (POST /project-secrets/:id/reveal). */
+  secret?: SecretView;
 }
 
 type Db = ReturnType<typeof getDb>['db'];
@@ -99,6 +102,9 @@ export async function listResources(actor: Actor, projectId: string): Promise<Pr
     : [];
   const fileById = new Map(files.map((f) => [f.id, f]));
   const pages = await visiblePages(actor, rows.map((r) => r.kbPageId).filter((id): id is string => !!id));
+  // A secret the actor may not list is left out entirely, like a hidden page (secretAccess).
+  const secretIds = rows.map((r) => r.secretId).filter((id): id is string => !!id);
+  const secrets = secretIds.length ? await listSecrets(await actorContext(actor), projectId, secretIds) : new Map<string, SecretView>();
 
   const out: ProjectResourceView[] = [];
   for (const r of rows) {
@@ -119,6 +125,9 @@ export async function listResources(actor: Actor, projectId: string): Promise<Pr
           page: { id: pg.id, title: pg.title, icon: pg.icon, spaceId: pg.spaceId, url: `/kb/${pg.spaceId}/${pg.id}` },
         });
       }
+    } else if (r.kind === 'secret') {
+      const secret = r.secretId ? secrets.get(r.secretId) : undefined;
+      if (secret) out.push({ ...base, label: secret.name, url: null, secret });
     }
   }
   return out;
@@ -238,7 +247,9 @@ export function projectResourcesRoutes() {
     if (row.kind !== 'link') {
       throw err.validation(row.kind === 'file'
         ? 'A file is renamed through PATCH /attachments/:id'
-        : 'A page takes its title from the knowledge base');
+        : row.kind === 'secret'
+          ? 'A secret is edited through PATCH /project-secrets/:id'
+          : 'A page takes its title from the knowledge base');
     }
     const patch: Partial<ResourceRow> = {};
     if (body.label !== undefined) patch.label = body.label;
@@ -253,6 +264,11 @@ export function projectResourcesRoutes() {
   app.delete('/project-resources/:id', async (c) => {
     const actor = currentActor(c);
     const row = await loadResource(c.req.param('id'));
+    // A secret answers to its own rules (secretAccess), not to project membership alone.
+    if (row.kind === 'secret' && row.secretId) {
+      await deleteSecret(await actorContext(actor), row.secretId);
+      return c.json({ ok: true });
+    }
     await assertProject(actor, row.projectId, 'member');
     const { db } = getDb();
     // Same rule as on adding: a page is logged by id, never by title.

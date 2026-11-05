@@ -112,6 +112,8 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-${APP_URL}}
       AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY (32-byte hex)}
+      # Only while rotating: the old key, until rotate-encryption-key has run.
+      ENCRYPTION_KEY_PREVIOUS: ${ENCRYPTION_KEY_PREVIOUS:-}
       SMTP_URL: ${SMTP_URL:-}
       SMTP_FROM: ${SMTP_FROM:-}
       S3_ENDPOINT: ${S3_ENDPOINT:-}

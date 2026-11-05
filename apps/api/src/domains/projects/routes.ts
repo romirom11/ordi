@@ -14,6 +14,7 @@ import { assertProject } from '../../core/access';
 import * as svc from './service';
 import { projectOverviewRoutes } from './overview.routes';
 import { projectResourcesRoutes } from './resources.routes';
+import { projectSecretsRoutes } from '../secrets/routes';
 import { ensureBitbucketHook } from '../integrations/bitbucket-sync';
 
 type Db = ReturnType<typeof getDb>['db'];
@@ -77,6 +78,8 @@ export function projectsRoutes() {
   app.route('/', projectOverviewRoutes());
   // Resources: links, files and KB pages in one list.
   app.route('/', projectResourcesRoutes());
+  // Secrets: one more resource kind, with access rules of their own.
+  app.route('/', projectSecretsRoutes());
 
   // ── Projects (reads are membership-gated, PRD §4.4) ──
   app.get('/projects', async (c) => {

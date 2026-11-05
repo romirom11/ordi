@@ -5,6 +5,23 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
 ## Unreleased
 
+- **Breaking for installs on the all-zero encryption key**: in production the
+  api now refuses to start without `ENCRYPTION_KEY`, with a malformed key, or
+  with the all-zero key, which the quick-start compose file used to default to.
+  That key is public, so everything encrypted with it was readable from a
+  database dump. The new quick-start `docker-compose.yml` generates a random
+  key into an `ordi_keys` volume on first start (`ENCRYPTION_KEY_FILE`) and
+  still reads data stored under the old key. An install that keeps its old
+  compose file has to set `ENCRYPTION_KEY` in `.env`, with
+  `ENCRYPTION_KEY_PREVIOUS` set to the old key (64 zeros). Then run the
+  rotation command below once. See docs/deployment.md §3c.
+- **The encryption key can be rotated** without reconnecting integrations:
+  `ENCRYPTION_KEY_PREVIOUS` keeps old data readable, and
+  `pnpm --filter @ordi/api exec tsx src/rotate-encryption-key.ts`
+  re-encrypts every stored credential with the new key. It finds them by
+  scanning the database, so new features are covered without a list.
+  Encrypted values now carry a version and the id of their key
+  (`v1:<keyId>:…`), and values written before are still read.
 - **Milestones open into a side panel**: a milestone's name in the Plan
   tab opens its panel – rename it, set the target date, mark it done, see
   its progress and every task in it with its status, open a task, or add
@@ -16,6 +33,29 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   under it, while the stored bytes and every embedded link stay the same.
   Blocked extensions are refused on rename as on upload. New API
   `PATCH /attachments/:id` and MCP tool `rename_attachment`.
+- **Project secrets, API first** (the UI follows): credentials a client
+  hands over, stored with the project as a new resource kind. Values are
+  encrypted at rest. Field metadata (keys, labels, types) is readable without
+  revealing anything, and url and text fields are shown as they are.
+  Revealing or copying a value is one call per field, refused over API
+  tokens, rate-limited, and logged as a sensitive activity entry without the
+  value. Access is three layers that must all agree:
+  - the workspace role, through the new `secrets.read`, `secrets.reveal`,
+    `secrets.write` and `secrets.manage` permissions (Owner all four; Admin
+    and Manager read, reveal, write; Member read and reveal; migration `0045`
+    grants them to existing roles);
+  - the project role (viewers list, members reveal);
+  - the secret's audience, chosen per secret: the whole project, named people,
+    or departments including their sub-departments.
+
+  A secret restricted to people or departments is invisible to everyone
+  outside its audience, in lists, the resources block and the project
+  activity alike. `secrets.manage` can change any secret's audience without
+  seeing values, and the secret's creator is notified when it does. Each
+  secret is marked test, staging, production or other, and only
+  `secrets.manage` may let agents use a production one. New API:
+  `GET/POST /projects/:id/secrets`, `GET/PATCH/DELETE /project-secrets/:id`,
+  `POST /project-secrets/:id/reveal`, `GET /project-secrets/:id/activity`.
 - **One Resources block on the project overview**: links, files and
   knowledge-base pages now live in a single ordered list instead of link
   chips plus a separate Files section. "Add" offers a link, a file upload

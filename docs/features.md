@@ -19,7 +19,6 @@ version.
 | Won deal → project in one click | Turning a sale into delivery without creating the project by hand | Carry over companyId, the name, the amount as the budget; the deal link stays |
 | Report: pipeline by project | How many leads/how much money is in the funnel for each product (Solovei vs services), conversion by line of business | The groundwork is already there: `deals.project_id` + `deal_stages` |
 | Several clients per project (m2m) | Joint projects for two customers with split billing | Open question: a rare case that drags a change to the financial model along with it |
-| Project secrets | Test API keys and platform logins handed over by a client need a place that is safe and still easy | AES-GCM at rest (`lib/crypto`), reveal/copy written to the audit log, project-member access. MCP sees names and which fields exist, never values; ordi's own agents get values as env vars at run time. External providers behind the same interface: Doppler first, then 1Password, Infisical, Vault and others. Prerequisite: refuse to start in production without a real `ENCRYPTION_KEY` |
 | Project updates, round two | Updates are hand-written status posts and it is not obvious what goes there or how they differ from Activity | Draft pre-filled from what happened since the last update, MCP `post_project_update`, a reminder after N days without one, a hint on the block |
 | Native file drop on desktop | Dragging files from the OS into tasks/notes | Needs care: `dragDropEnabled` is off for the sake of internal DnD; HTML5 drop via DOM events works anyway |
 
@@ -29,6 +28,7 @@ version.
 |---|---|
 | Milestone side panel (tasks, rename, quick add) and renaming files | `feature/milestone-panel-and-file-rename` |
 | One Resources block: links, files and KB pages in one ordered list (secrets join it next) | `feature/project-resources-block` |
+| Project secrets: data model, three-layer access (workspace role × project role × audience) and API; UI, MCP and agent runs follow (plan 2026-11-05-001) | `feature/project-secrets-api` |
 
 ## Shipped
 

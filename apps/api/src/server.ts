@@ -5,8 +5,24 @@ import { logger } from './lib/logger';
 import { installGlobalHandlers } from './lib/sentry';
 import { startWorkers } from './workers/index';
 import { ensureBucketAtBoot } from './lib/s3';
+import { keyring } from './lib/crypto';
+import { EncryptionKeyError } from './lib/encryption-keys';
 
 installGlobalHandlers();
+
+// Resolve and check the encryption key before serving anything: production
+// refuses a missing, malformed or all-zero key (lib/encryption-keys.ts), and
+// a quick-start install generates its key file here on first start.
+try {
+  keyring();
+} catch (e) {
+  if (!(e instanceof EncryptionKeyError)) throw e;
+  logger.fatal(e.message);
+  // eslint-disable-next-line no-console
+  console.error(`\n${e.message}\n`);
+  process.exit(1);
+}
+
 const app = createApp();
 
 serve({ fetch: app.fetch, port: env.port }, (info) => {
