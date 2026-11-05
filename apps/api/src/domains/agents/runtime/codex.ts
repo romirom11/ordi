@@ -21,7 +21,7 @@ import { promisify } from 'node:util';
 import { spawn } from 'node:child_process';
 import { logger } from '../../../lib/logger';
 import {
-  AGENT_REPORT_SCHEMA, parseReport,
+  AGENT_REPORT_SCHEMA, parseReport, withExtraEnv,
   type RuntimeAdapter, type RuntimeCredential, type RuntimeOutcome, type RuntimeRunInput, type RuntimeUsage,
 } from './types';
 
@@ -243,7 +243,7 @@ export function createCodexAdapter(deps: Partial<CodexDeps> = {}): RuntimeAdapte
       let lastText = '';
 
       await d.prepareHome(input.credential, input.configDir, input.model ?? null);
-      const env = d.buildEnv(input.credential, input.configDir);
+      const env = withExtraEnv(d.buildEnv(input.credential, input.configDir), input.extraEnv);
 
       // Map MCP servers to codex config: append [mcp_servers.*] stanzas to config.toml.
       // codex reads them from CODEX_HOME/config.toml as `mcp_servers.<name>`.
@@ -385,7 +385,10 @@ async function runCodexExec(
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
   return new Promise((resolve, reject) => {
     const child = deps.spawn('codex', opts.args, {
-      env: { ...process.env, ...opts.env },
+      // The built environment only, as for Claude Code: spread over process.env,
+      // a worker inside the API handed the agent DATABASE_URL, ENCRYPTION_KEY
+      // and AUTH_SECRET – everything needed to read every stored secret.
+      env: opts.env,
       cwd: opts.cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
