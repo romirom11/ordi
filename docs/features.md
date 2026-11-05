@@ -24,17 +24,35 @@ version.
 
 ## In flight
 
-| Feature | PR |
-|---|---|
-| Milestone side panel (tasks, rename, quick add) and renaming files | `feature/milestone-panel-and-file-rename` |
-| One Resources block: links, files and KB pages in one ordered list (secrets join it next) | `feature/project-resources-block` |
-| Project secrets: data model, three-layer access (workspace role × project role × audience) and API; UI, MCP and agent runs follow (plan 2026-11-05-001) | `feature/project-secrets-api` |
-| Project secrets in Resources: add with paste-to-fields, audience picker with an effective-access preview, side panel with Show/Copy and recent use | `feature/project-secrets-ui` |
-| MCP `list_project_secrets` / `check_project_secret`: metadata and env var names, never values | `feature/project-secrets-mcp` |
-| Configurable intake form: editor with live preview (texts, accent colour, built-in and nine types of custom fields), file uploads, receipt email, token rotation, a database-backed rate limit and a website embed (`/api/v1/embed/intake.js`); fixes the public form, which could not submit. Migration `0046_intake_form_config` | `feature/intake-form-builder-and-embed` |
-| Project secrets in agent runs: env vars, redaction of run writes, push refused on a leaked value | `feature/project-secrets-agent-runs` |
+Nothing at the moment.
 
 ## Shipped
+
+### v1.43.0
+
+- Project secrets: a new resource kind for client credentials, with
+  paste-to-fields, Show/Copy, expiry reminders and three-layer access
+  (workspace role × project role × audience; migration `0045`)
+  ([PR #149](https://github.com/romirom11/ordi/pull/149), [PR #151](https://github.com/romirom11/ordi/pull/151), [PR #152](https://github.com/romirom11/ordi/pull/152)); MCP `list_project_secrets` / `check_project_secret`
+  return metadata and env var names, never values ([PR #153](https://github.com/romirom11/ordi/pull/153)); agent runs
+  get them as `SECRET_*` env vars, with values redacted from run writes and
+  a push refused when a commit contains one ([PR #156](https://github.com/romirom11/ordi/pull/156)).
+- Encryption key hardening: production refuses a missing or all-zero key,
+  the quick-start compose generates one into `ordi_keys`, and the key can be
+  rotated with `ENCRYPTION_KEY_PREVIOUS` and `rotate-encryption-key.ts`
+  ([PR #150](https://github.com/romirom11/ordi/pull/150)).
+- One Resources block on the project overview: links, files and KB pages in
+  one ordered list (migration `0044`) ([PR #148](https://github.com/romirom11/ordi/pull/148)).
+- Milestone side panel (tasks, rename, quick add) and renaming files
+  ([PR #147](https://github.com/romirom11/ordi/pull/147)).
+- Configurable intake form with a live-preview editor, custom fields, file
+  uploads, receipts, token rotation, a database-backed rate limit and a
+  website embed; fixes the public form, which could not submit (migration
+  `0046`) ([PR #154](https://github.com/romirom11/ordi/pull/154)).
+- Profile split into sections, with personal MCP moved there from
+  workspace settings ([PR #155](https://github.com/romirom11/ordi/pull/155)).
+- Project creation: active-only searchable pickers, an editable page right
+  after create, MCP `create_project` ([PR #146](https://github.com/romirom11/ordi/pull/146)).
 
 ### v1.42.0
 

@@ -3,7 +3,7 @@
 Release notes for each version live in [`docs/releases`](docs/releases) and are
 published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
 
-## Unreleased
+## v1.43.0
 
 - **Breaking for installs on the all-zero encryption key**: in production the
   api now refuses to start without `ENCRYPTION_KEY`, with a malformed key, or
@@ -108,6 +108,40 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   by an invisible character, and names with right-to-left override or
   other bidi controls are refused on upload, rename, mail intake and in
   the MCP tools.
+- **The public intake form submits again, and it can be configured and
+  embedded.** The form sent fields the API did not accept, so every
+  submission failed validation. Project settings → Intake form → Customize
+  opens an editor with a live preview: heading, introduction, button label,
+  thank-you message and accent colour; the built-in fields can be
+  relabelled, reordered, made required or hidden (the title always stays);
+  up to 30 custom fields of nine types. Answers are stored on the request,
+  shown on the triage card and written into the task description on
+  accept. `/api/v1/embed/intake.js` turns
+  `<div data-ordi-intake="TOKEN">` into a self-sizing iframe
+  (`data-theme`, `data-lang`, an `ordi:intake-submitted` event), and the
+  Embed dialog gives the snippet or a plain iframe. The form can take file
+  uploads (with object storage configured), sends a receipt email (at most
+  3 per address and 50 per form an hour), and its link can be rotated,
+  which stops the old link and every embed. The rate limit is now kept in
+  the database per hashed IP (5 a minute, 30 an hour) and reads
+  `X-Forwarded-For` from the right, `TRUST_PROXY_HOPS` entries in (default
+  `1`; a CDN in front of the TLS terminator needs `2`). The careers form
+  uses the same client-IP logic. Migration `0046` adds
+  `intake_settings.form_config` and `intake_items.answers` /
+  `submitter_key`.
+- **The profile is split into sections**: Profile, Notifications,
+  Security and MCP & API, each at its own URL (`/profile`,
+  `/profile/notifications`, `/profile/security`, `/profile/mcp`), with a
+  side nav that becomes a row of tabs on a phone. Personal MCP moves here
+  from workspace settings (`/settings/mcp` redirects), and the profile's
+  duplicate API token list is gone: "Create token" sits in the MCP panel's
+  Access header.
+- **Creating a project**: Lead and Members list active people only and
+  are searchable, Members stays open across picks, client pickers always
+  search, and a freshly created private project opens editable instead of
+  read-only. New MCP tool `create_project` (type by name or id, client,
+  lead, members, visibility, dates, summary, description, priority, custom
+  fields).
 
 ## v1.42.0
 
