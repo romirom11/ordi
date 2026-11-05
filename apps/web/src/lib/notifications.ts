@@ -25,6 +25,9 @@ extendDict({
     'notif.agent.needs_input': 'An agent needs your input',
     'notif.agent.credential_expiring': 'A Claude credential expires soon',
     'notif.agent.credential_expired': 'A Claude credential expired',
+    'notif.secret.access_overridden': 'Someone changed who can access your secret',
+    'notif.secret.expiring': 'A secret stops working in two weeks',
+    'notif.secret.expired': 'A secret stops working today',
   },
   uk: {
     'notif.task.assigned': 'Вам призначено задачу',
@@ -44,6 +47,9 @@ extendDict({
     'notif.agent.needs_input': 'Агенту потрібна ваша відповідь',
     'notif.agent.credential_expiring': 'Доступ Claude скоро протермінується',
     'notif.agent.credential_expired': 'Доступ Claude протерміновано',
+    'notif.secret.access_overridden': 'Змінено доступ до вашого секрету',
+    'notif.secret.expiring': 'Секрет перестане працювати за два тижні',
+    'notif.secret.expired': 'Секрет сьогодні перестає працювати',
   },
 });
 
@@ -75,6 +81,9 @@ export function notifLink(n: NotifRef): string | null {
   if (n.type.startsWith('task.') || n.type.startsWith('comment.') || n.type.startsWith('git.')
     || n.type === 'agent.run_finished' || n.type === 'agent.needs_input') {
     return projectId && taskId ? `/projects/${projectId}/tasks/${taskId}` : '/my-tasks';
+  }
+  if (n.type.startsWith('secret.')) {
+    return projectId && p.secretId ? `/projects/${projectId}?secret=${p.secretId as string}` : null;
   }
   if (n.type === 'invoice.paid' || n.type === 'payment.recorded') {
     return p.invoiceId ? `/finance/invoices/${p.invoiceId as string}` : '/finance';

@@ -1198,7 +1198,7 @@ function OverviewTab({ id, project, users, canWrite, isAdmin, onPatch, onManageM
               </div>
             </div>
 
-            <ProjectResources projectId={id} canWrite={canWrite} />
+            <ProjectResources projectId={id} canWrite={canWrite} users={users} />
 
             <ProjectUpdates projectId={id} canWrite={canWrite} isAdmin={isAdmin} />
 
