@@ -19,6 +19,11 @@ export function registerRunSecrets(runId: string, values: string[]): void {
   secretsByRun.set(runId, values.filter((v) => v && v.length >= 8));
 }
 
+/** What this process registered for a run (empty on a replica that did not start it). */
+export function registeredRunSecrets(runId: string): string[] {
+  return secretsByRun.get(runId) ?? [];
+}
+
 export function forgetRunSecrets(runId: string): void {
   secretsByRun.delete(runId);
 }

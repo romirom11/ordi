@@ -21,6 +21,7 @@ async function resolveActor(c: Parameters<MiddlewareHandler<AppEnv>>[0]): Promis
   let userId: string | null = null;
   let tokenScopes: string[] | null = null;
   let readOnly = false;
+  let apiTokenId: string | null = null;
 
   if (authHeader?.startsWith('Bearer ')) {
     const raw = authHeader.slice(7).trim();
@@ -30,6 +31,7 @@ async function resolveActor(c: Parameters<MiddlewareHandler<AppEnv>>[0]): Promis
       userId = token.userId;
       tokenScopes = (token.scopes as string[]) ?? [];
       readOnly = token.readOnly;
+      apiTokenId = token.id;
       db.update(schema.apiTokens).set({ lastUsedAt: new Date() }).where(eq(schema.apiTokens.id, token.id)).catch(() => {});
     } else {
       // Bearer session token (desktop/Tauri client, PRD §18): the tauri://
@@ -65,6 +67,7 @@ async function resolveActor(c: Parameters<MiddlewareHandler<AppEnv>>[0]): Promis
     timezone: user.timezone,
     readOnly,
     tokenScopes,
+    apiTokenId,
     access,
   };
 }

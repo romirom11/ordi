@@ -10,7 +10,7 @@
 import { USAGE_LIMIT_ERROR_PREFIXES, query as sdkQuery, type Options, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { logger } from '../../../lib/logger';
 import {
-  AGENT_REPORT_SCHEMA, parseReport,
+  AGENT_REPORT_SCHEMA, parseReport, withExtraEnv,
   type RuntimeAdapter, type RuntimeCredential, type RuntimeOutcome, type RuntimeRunInput, type RuntimeUsage,
 } from './types';
 
@@ -141,7 +141,7 @@ export function createClaudeCodeAdapter(queryFn: QueryFn = sdkQuery as unknown a
     },
 
     async run(input): Promise<RuntimeOutcome> {
-      const env = buildRuntimeEnv(input.credential, input.configDir);
+      const env = withExtraEnv(buildRuntimeEnv(input.credential, input.configDir), input.extraEnv);
       const usage = emptyUsage();
       let sessionId: string | null = input.resume ?? null;
       let rateLimited = false;

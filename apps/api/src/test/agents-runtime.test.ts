@@ -164,3 +164,39 @@ describe('claude adapter', () => {
     expect((await bad.verify({ kind: 'api_key', secret: 'sk' }, { configDir: '/tmp' })).ok).toBe(false);
   });
 });
+
+describe('project secrets in the runtime environment (plan 2026-11-05-001, U4)', () => {
+  it('adds them to the Claude Code environment without replacing its own variables', async () => {
+    const seen: { options?: Options } = {};
+    const adapter = createClaudeCodeAdapter(scripted([resultOk()], seen));
+    await adapter.run(input({ extraEnv: { STRIPE_TEST: 'sk_test_value', HOME: '/elsewhere' } }));
+    const env = seen.options!.env as Record<string, string>;
+    expect(env.STRIPE_TEST).toBe('sk_test_value');
+    expect(env.HOME).toBe('/tmp/cfg');
+  });
+
+  it('gives Codex its built environment only, never the worker process\'s', async () => {
+    const { createCodexAdapter } = await import('../domains/agents/runtime/codex');
+    const { EventEmitter } = await import('node:events');
+    const { mkdtemp } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const configDir = await mkdtemp(join(tmpdir(), 'codex-env-'));
+    process.env.DATABASE_URL = 'postgres://worker-secret';
+    process.env.ENCRYPTION_KEY = 'f'.repeat(64);
+    let childEnv: Record<string, string> | undefined;
+    const spawn = ((_cmd: string, _args: string[], opts: { env: Record<string, string> }) => {
+      childEnv = opts.env;
+      const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), kill: () => true });
+      setImmediate(() => child.emit('close', 0));
+      return child;
+    }) as never;
+    const adapter = createCodexAdapter({ spawn, prepareHome: async () => {} });
+    await adapter.run(input({ configDir, credential: { kind: 'api_key', secret: 'sk-openai', provider: 'openai' } as never, extraEnv: { STRIPE_TEST: 'sk_test_value' } }));
+    expect(childEnv!.STRIPE_TEST).toBe('sk_test_value');
+    expect(childEnv!.DATABASE_URL).toBeUndefined();
+    expect(childEnv!.ENCRYPTION_KEY).toBeUndefined();
+    expect(childEnv!.CODEX_HOME).toBe(configDir);
+    delete process.env.ENCRYPTION_KEY;
+  });
+});

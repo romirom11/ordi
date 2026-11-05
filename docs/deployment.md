@@ -308,6 +308,15 @@ these two roles); it can be granted to any custom role in the role matrix. The
 agent itself works under an ordinary role – the `Agent` preset (projects.read,
 projects.write, kb.read) – and sees only the projects it is a member of.
 
+**Project secrets in runs.** A project secret with *Available to AI agents* on
+reaches the run of an agent that is a member of the project as environment
+variables, decrypted by the API and handed to the worker with the run, like
+the Claude credential. The agent's instructions name the variables, never the
+values. The values are redacted from the run log and from everything the run
+writes back to ordi, and a branch whose commits contain one is not pushed.
+An agent with network access could still send a value elsewhere: give agents
+test keys, and keep production secrets switched off unless a run needs them.
+
 **Why the worker is a separate container.** An agent run is the only place in
 ordi where code written by the model is executed. The child process already
 gets a rebuilt environment without `DATABASE_URL`, `ENCRYPTION_KEY`,
@@ -318,8 +327,9 @@ everything.
 
 So the worker runs **as a separate process without a database**: it talks to
 the API only over HTTP (`/api/v1/agent-worker/*`) and holds only what a single
-run needs – the Claude credential, the repository token and its own run token,
-each of which is scoped or revoked. The worker must have no `DATABASE_URL`,
+run needs – the Claude credential, the repository token, its own run token
+and the project secrets switched on for agents, each of which is scoped or
+revoked. The worker must have no `DATABASE_URL`,
 `ENCRYPTION_KEY` or `AUTH_SECRET` – it will not ask for them, and if a PaaS
 injects them into every container of the project, the worker writes a warning
 about it to the log. Runs are taken from the queue via `FOR UPDATE SKIP

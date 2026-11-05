@@ -15,7 +15,7 @@
 import { getDb, schema, eq, and, asc, desc, inArray, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import {
-  secretAccess, isProjectWideSecret, projectAccessRank,
+  secretAccess, isProjectWideSecret, projectAccessRank, secretEnvVars,
   SECRET_VALUE_TYPES,
   type SecretAccess, type SecretAudiencePrincipal, type SecretFieldType, type SecretEnvironment,
 } from '@ordi/shared';
@@ -609,4 +609,81 @@ export async function runSecretExpiry(now = new Date()): Promise<{ notified: num
     }
   }
   return { notified };
+}
+
+// ── Secrets in agent runs (plan U4, R21-R29) ──
+
+export interface AgentSecretVar {
+  variable: string;
+  secretName: string;
+  fieldLabel: string;
+}
+
+interface AgentSecretPlan {
+  /** Secrets the run gets, with the variables each field becomes. */
+  use: { secret: SecretRow; vars: (AgentSecretVar & { field: string })[] }[];
+  /** Secrets marked for agents that the run does not get, and why. */
+  skipped: { name: string; reason: string }[];
+}
+
+/**
+ * Which of a project's secrets an agent run gets. The rule is R21: the
+ * secret's agent switch is on, and the agent is itself a member of the
+ * project. Audiences do not apply – they govern people revealing values, and
+ * an agent never reveals – and an expired secret is left out with a reason.
+ * Metadata only: nothing is decrypted here.
+ */
+export async function agentSecretPlan(projectId: string, agentUserId: string, today = new Date().toISOString().slice(0, 10)): Promise<AgentSecretPlan> {
+  const { db } = getDb();
+  const [membership] = await db.select({ role: projectMembers.role }).from(projectMembers)
+    .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, agentUserId)));
+  const rows = await db.select().from(projectSecrets)
+    .where(and(eq(projectSecrets.projectId, projectId), eq(projectSecrets.availableToAgents, true)))
+    .orderBy(asc(projectSecrets.name));
+  const plan: AgentSecretPlan = { use: [], skipped: [] };
+  if (!rows.length) return plan;
+  if (!membership || membership.role === 'viewer') {
+    plan.skipped = rows.map((r) => ({ name: r.name, reason: 'the agent is not a member of the project' }));
+    return plan;
+  }
+  for (const secret of rows) {
+    if (secret.source !== 'ordi') { plan.skipped.push({ name: secret.name, reason: 'its provider is not connected' }); continue; }
+    if (secret.expiresAt && secret.expiresAt < today) { plan.skipped.push({ name: secret.name, reason: `it expired on ${secret.expiresAt}` }); continue; }
+    const fields = secret.fields as SecretFieldMeta[];
+    const label = new Map(fields.map((f) => [f.key, f.label]));
+    const vars = secretEnvVars(secret.name, fields).map((v) => ({ ...v, secretName: secret.name, fieldLabel: label.get(v.field) ?? v.field }));
+    if (vars.length) plan.use.push({ secret, vars });
+  }
+  return plan;
+}
+
+/**
+ * The values for a run: decrypted here, in the API, and handed to the worker
+ * with the bundle – the standalone worker holds no ENCRYPTION_KEY. Each
+ * secret a run receives is noted on the secret's own trail.
+ */
+export async function resolveRunSecrets(
+  run: { id: string; projectId: string; agentUserId: string; taskId: string },
+  opts: { record?: boolean } = {},
+): Promise<{ vars: { variable: string; value: string }[]; used: string[]; skipped: { name: string; reason: string }[] }> {
+  const plan = await agentSecretPlan(run.projectId, run.agentUserId);
+  const { db } = getDb();
+  const vars: { variable: string; value: string }[] = [];
+  for (const { secret, vars: wanted } of plan.use) {
+    const [payload] = await db.select().from(projectSecretPayloads).where(eq(projectSecretPayloads.secretId, secret.id));
+    const values = readPayload(payload?.ciphertext);
+    const meta = new Map((secret.fields as SecretFieldMeta[]).map((f) => [f.key, f]));
+    for (const v of wanted) {
+      const m = meta.get(v.field);
+      const value = m && isValueType(m.type) ? values[v.field] : m?.value;
+      if (value) vars.push({ variable: v.variable, value });
+    }
+    if (opts.record) {
+      await writeActivity(db, {
+        entityType: 'project_secret', entityId: secret.id, action: 'used_in_run', sensitivity: 'sensitive',
+        diff: { run: { to: run.id }, task: { to: run.taskId } }, actorId: run.agentUserId, actorType: 'agent',
+      });
+    }
+  }
+  return { vars, used: plan.use.map((u) => u.secret.name), skipped: plan.skipped };
 }

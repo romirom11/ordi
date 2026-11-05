@@ -46,6 +46,9 @@ export async function executeRun(backend: RunBackend, claimed: ClaimedRun): Prom
   try {
     const bundle = await backend.prepare(runId);
     const { profile, agent, task, project, credentials } = bundle;
+    // Project secrets for the runtime's environment, by variable name (secrets/service resolveRunSecrets).
+    const secretEnv = Object.fromEntries((bundle.secrets ?? []).map((s) => [s.variable, s.value]));
+    const secretValues = (bundle.secrets ?? []).map((s) => ({ variable: s.variable, value: s.value }));
     if (!credentials.length) {
       await backend.fail(runId, 'No active Claude credential; connect one under Settings → Agents');
       return;
@@ -118,6 +121,7 @@ export async function executeRun(backend: RunBackend, claimed: ClaimedRun): Prom
         await log(`Starting ${bundle.runtime} with credential ${cred.id === credentials[0]!.id ? '(primary)' : '(fallback)'}`);
         last = await runtime.run({
           prompt, systemAppend: started.systemAppend, cwd: workspace.dir, configDir, credential: { provider: (cred as { provider?: string }).provider as RuntimeCredential['provider'], kind: cred.kind, secret: cred.secret, baseUrl: (cred as { baseUrl?: string | null }).baseUrl ?? null },
+          extraEnv: secretEnv,
           model: profile.model, mcpServers, maxTurns: profile.maxTurns,
           maxBudgetUsd: cred.kind === 'api_key' && profile.maxBudgetUsd != null ? profile.maxBudgetUsd : null,
           resume, allowedTools: allowedToolsFor(Object.keys(mcpServers)), disallowedTools: DISALLOWED_TOOLS,
@@ -163,7 +167,7 @@ export async function executeRun(backend: RunBackend, claimed: ClaimedRun): Prom
     // the time the person replies.
     const preserveWork = async (): Promise<PublishOutcome> => {
       try {
-        const kept = await publishWorkspace(workspace, { ref, title: task.title, summary: '', existingPrUrl: claimed.prUrl ?? null, openPullRequest: false, refreshRepo });
+        const kept = await publishWorkspace(workspace, { ref, title: task.title, summary: '', existingPrUrl: claimed.prUrl ?? null, openPullRequest: false, refreshRepo, forbiddenValues: secretValues });
         if (kept.pushed) await log(`Pushed ${kept.commits ?? 'the'} commit(s) of unfinished work to ${workspace.branch}`);
         return { pushed: kept.pushed, prUrl: kept.prUrl, commits: kept.commits, error: null };
       } catch (e) {
@@ -186,7 +190,7 @@ export async function executeRun(backend: RunBackend, claimed: ClaimedRun): Prom
         const published = await publishWorkspace(workspace, {
           ref, title: task.title, summary, existingPrUrl: outcome.report?.prUrl ?? claimed.prUrl ?? null,
           verification: outcome.report?.verification ?? null, risks: outcome.report?.risks ?? null,
-          taskUrl: bundle.taskUrl, refreshRepo,
+          taskUrl: bundle.taskUrl, refreshRepo, forbiddenValues: secretValues,
         });
         if (published.pushed) await log(`Pushed ${published.commits ?? 'the'} commit(s) to ${workspace.branch}${published.prUrl ? `; pull request ${published.prUrl}` : ''}`);
         else if (workspace.repo) await log('No commits to push');

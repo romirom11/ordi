@@ -315,6 +315,8 @@ export async function publishWorkspace(ws: Workspace, input: {
    * clone is used.
    */
   refreshRepo?: () => Promise<RepoBinding | null>;
+  /** Project secrets the run held: a branch carrying one of their values is not pushed (plan R27). */
+  forbiddenValues?: { variable: string; value: string }[];
 }): Promise<PublishResult> {
   if (!ws.repo || !ws.branch) return { pushed: false, prUrl: null, commits: 0 };
   const { branch, dir } = ws;
@@ -330,6 +332,7 @@ export async function publishWorkspace(ws: Workspace, input: {
   await reconcileWithOrigin(dir, branch, repo);
   const commits = await commitsAhead(dir, repo.defaultBranch, branch);
   if (commits === 0) return { pushed: false, prUrl: input.existingPrUrl, commits: 0 };
+  await assertNoSecretsInBranch(dir, repo.defaultBranch, branch, input.forbiddenValues ?? []);
   await git(['push', '-u', 'origin', branch], { cwd: dir, repo });
   if (input.existingPrUrl || !openPr) return { pushed: true, prUrl: input.existingPrUrl, commits };
   if (repo.provider !== 'github' && repo.provider !== 'bitbucket') return { pushed: true, prUrl: null, commits };
@@ -382,6 +385,32 @@ async function reconcileWithOrigin(dir: string, branch: string, repo: RepoBindin
  * name, shallow grafts without a merge base) must not read as "nothing to
  * push": null means unknown, and the caller pushes.
  */
+/** Thrown instead of pushing a branch that carries a project secret's value; names the variable, never the value. */
+export class SecretInBranchError extends Error {
+  constructor(readonly variables: string[]) {
+    super(`The branch contains the value of ${variables.join(', ')} (a project secret), so it was not pushed. Remove it from the commits and read the value from the environment instead.`);
+  }
+}
+
+/**
+ * Plan R27: the commits about to be pushed – their messages and every line
+ * they add or remove – must not contain a value from the run's secrets.
+ * Values shorter than 8 characters are skipped, as the log scrubbing does:
+ * too short to tell from ordinary text.
+ */
+async function assertNoSecretsInBranch(dir: string, defaultBranch: string, branch: string, forbidden: { variable: string; value: string }[]): Promise<void> {
+  const watch = forbidden.filter((f) => f.value.length >= 8);
+  if (!watch.length) return;
+  let patch: string;
+  try {
+    patch = (await git(['log', '-p', '--no-color', '--format=%B', `origin/${defaultBranch}..${branch}`], { cwd: dir })).stdout;
+  } catch {
+    patch = (await git(['log', '-p', '--no-color', '--format=%B', branch, '--not', '--remotes=origin'], { cwd: dir })).stdout;
+  }
+  const found = watch.filter((f) => patch.includes(f.value)).map((f) => f.variable);
+  if (found.length) throw new SecretInBranchError([...new Set(found)]);
+}
+
 async function commitsAhead(dir: string, defaultBranch: string, branch: string): Promise<number | null> {
   try {
     const ahead = await git(['rev-list', '--count', `origin/${defaultBranch}..${branch}`], { cwd: dir });

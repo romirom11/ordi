@@ -33,6 +33,8 @@ export interface PromptContext {
   connectorSlugs: string[];
   /** The repository's pull request template, when the checkout has one. */
   pullRequestTemplate?: string | null;
+  /** Project secrets in the run's environment: variable names and what they hold, never values. */
+  secretVars?: { variable: string; secretName: string; fieldLabel: string }[];
 }
 
 export async function buildTaskBrief(ctx: PromptContext): Promise<string> {
@@ -146,6 +148,25 @@ function quote(text: string): string {
 }
 
 /** Appended to the harness system prompt: how to behave in ordi. */
+/**
+ * The project secrets the run holds, by variable name. The values are only
+ * in the environment: the agent uses them from there, and the platform
+ * redacts them from whatever the run writes back and refuses a push that
+ * contains one.
+ */
+function secretRules(ctx: PromptContext): string[] {
+  const vars = ctx.secretVars ?? [];
+  if (!vars.length) {
+    return ['', 'No project secrets are in your environment. If the task needs one (an API key, a login), check with check_project_secret and ask with needs_input rather than looking for it elsewhere.'];
+  }
+  return [
+    '',
+    'Project secrets are in your environment as variables (names only here; read the values from the environment):',
+    ...vars.map((v) => `- ${v.variable}: ${v.secretName} – ${v.fieldLabel}`),
+    'Use them from the environment in commands and code you run (e.g. `$VAR`, `process.env.VAR`). Never print them, echo them, write them into files, commit them, or put them in comments, task fields or your report: the platform replaces them with [redacted] in everything you write to ordi and refuses to push a branch that contains one. If a secret is missing or does not work, say so with needs_input.',
+  ];
+}
+
 export function buildRulesOfEngagement(ctx: PromptContext): string {
   const status = ctx.completionStatusName ? `"${ctx.completionStatusName}"` : `the project's ${ctx.completionCategory.replace('_', ' ')} status`;
   const connectors = ctx.connectorSlugs.length
@@ -166,6 +187,7 @@ export function buildRulesOfEngagement(ctx: PromptContext): string {
     '',
     'ordi is available to you as the MCP server named "ordi": get_task reads the full card, comment_on_task posts progress, add_task_link attaches a url, update_task_status changes status. Use the task id given in the brief.',
     connectors,
+    ...secretRules(ctx),
     '',
     'Rules:',
     ...codeRules,
