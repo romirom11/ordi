@@ -11,6 +11,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, CalendarDays, ChevronRight, Diamond, Plus } from 'lucide-react';
 import { api, getAllPages, ApiError } from '../../lib/api';
 import { useT, extendDict } from '../../lib/i18n';
+import type { OpenIntent } from '../../lib/router';
 import { Button, EmptyState, Input, PageBody, ProgressBar, Skeleton, Spinner, fmtDate, cn } from '../ui';
 import { Dialog, toast } from '../overlays';
 import { DateField } from '../DatePicker';
@@ -93,9 +94,10 @@ export function currentCycle(cycles: PlanCycle[]): PlanCycle | null {
     .sort((a, b) => (a.startDate ?? '').localeCompare(b.startDate ?? ''))[0] ?? null;
 }
 
-export function PlanTab({ projectId, cyclesEnabled, canWrite, isAdmin, onOpenMilestoneTasks }: {
-  projectId: string; cyclesEnabled: boolean; canWrite: boolean; isAdmin: boolean;
+export function PlanTab({ projectId, projectKey, cyclesEnabled, canWrite, isAdmin, onOpenMilestoneTasks, onOpenTask }: {
+  projectId: string; projectKey?: string; cyclesEnabled: boolean; canWrite: boolean; isAdmin: boolean;
   onOpenMilestoneTasks: (milestoneId: string) => void;
+  onOpenTask?: (taskId: string, e?: OpenIntent) => void;
 }) {
   const t = useT();
   const qc = useQueryClient();
@@ -154,8 +156,10 @@ export function PlanTab({ projectId, cyclesEnabled, canWrite, isAdmin, onOpenMil
         <p className="mb-2 text-xs text-muted-foreground">{t('plan.milestonesHint')}</p>
         <ProjectMilestones
           projectId={projectId}
+          projectKey={projectKey}
           canWrite={canWrite}
           onOpenTasks={onOpenMilestoneTasks}
+          onOpenTask={onOpenTask}
           cycle={current && canWrite ? {
             name: current.name,
             inCycle: (id) => inCurrent.get(id) ?? 0,

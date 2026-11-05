@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { getDb, schema, eq, and, desc } from '@ordi/db';
 import { ulid } from 'ulid';
-import { MAX_UPLOAD_BYTES, BLOCKED_FILE_EXTENSIONS, type Permission } from '@ordi/shared';
+import { MAX_FILENAME_LENGTH, MAX_UPLOAD_BYTES, attachmentPatchSchema, isBlockedFilename, type Permission } from '@ordi/shared';
 import type { Actor, AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { assertProject } from '../../core/access';
@@ -83,9 +83,9 @@ export function attachmentsRoutes() {
     const file = form['file'];
     if (!(file instanceof File)) throw err.validation('file field required (multipart/form-data)');
     if (!file.name) throw err.validation('filename required');
+    if (file.name.length > MAX_FILENAME_LENGTH) throw err.validation(`Filename is longer than ${MAX_FILENAME_LENGTH} characters`);
     if (file.size < 1 || file.size > MAX_UPLOAD_BYTES) throw err.validation('File exceeds the size cap');
-    const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
-    if (BLOCKED_FILE_EXTENSIONS.includes(ext)) throw err.domain('File type not allowed');
+    if (isBlockedFilename(file.name)) throw err.domain('File type not allowed');
     const entityType = typeof form['entityType'] === 'string' && form['entityType'] ? form['entityType'] : null;
     const entityId = typeof form['entityId'] === 'string' && form['entityId'] ? form['entityId'] : null;
     if (entityType) {
@@ -115,6 +115,37 @@ export function attachmentsRoutes() {
     // `src` is what an editor stores in the document: a signed, non-expiring
     // path that an <img> can fetch with no session at all (lib/file-tokens).
     return c.json({ id, src: fileSrc(id) }, 201);
+  });
+
+  /**
+   * Rename. Only the display/download name changes: the bytes and their
+   * storage key stay put, so every embedded src keeps working. The blocked
+   * extensions apply here too, or a rename would undo the upload check.
+   */
+  app.patch('/:id', async (c) => {
+    const actor = currentActor(c);
+    const { db } = getDb();
+    const [att] = await db.select().from(schema.attachments).where(eq(schema.attachments.id, c.req.param('id')));
+    if (!att) throw err.notFound();
+    if (att.entityType) {
+      requireEntityPerm(actor.access.permissions, WRITE_PERM, att.entityType);
+      await assertEntityAccess(actor, att.entityType, att.entityId, 'member');
+    } else if (att.createdBy !== actor.userId) {
+      // A file embedded in a document answers to no record: only its uploader renames it.
+      throw err.forbidden('Only the uploader can rename this file');
+    }
+    const { filename } = attachmentPatchSchema.parse(await c.req.json());
+    if (isBlockedFilename(filename)) throw err.domain('File type not allowed');
+    if (filename !== att.filename) {
+      await db.update(schema.attachments).set({ filename }).where(eq(schema.attachments.id, att.id));
+      await writeActivity(db, {
+        entityType: 'attachment', entityId: att.id, action: 'updated',
+        diff: { file: { from: att.filename, to: filename } },
+        actorId: actor.userId, actorType: actor.actorType,
+      });
+    }
+    const [updated] = await db.select().from(schema.attachments).where(eq(schema.attachments.id, att.id));
+    return c.json(updated);
   });
 
   app.delete('/:id', async (c) => {

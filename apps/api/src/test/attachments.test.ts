@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { getDb, schema } from '@ordi/db';
 import { ulid } from 'ulid';
-import { MAX_UPLOAD_BYTES } from '@ordi/shared';
+import { MAX_UPLOAD_BYTES, fileExtension } from '@ordi/shared';
 import { resetDb, seedRolesAndUsers, reqAs, anon, json } from './helpers';
 import { fileSrc, signFileToken } from '../lib/file-tokens';
 
@@ -54,6 +54,16 @@ describe('upload', () => {
 
   it('refuses a blocked extension', async () => {
     const res = await reqAs(users.owner!.cookie).postForm('/attachments', form('payload.exe', { mime: 'application/octet-stream' }));
+    expect(res.status).toBe(422);
+  });
+
+  it('refuses a filename past the length cap', async () => {
+    const res = await reqAs(users.owner!.cookie).postForm('/attachments', form(`${'a'.repeat(256)}.png`));
+    expect(res.status).toBe(400);
+  });
+
+  it('refuses a blocked extension hidden behind a trailing dot', async () => {
+    const res = await reqAs(users.owner!.cookie).postForm('/attachments', form('payload.exe.', { mime: 'application/octet-stream' }));
     expect(res.status).toBe(422);
   });
 
@@ -171,5 +181,81 @@ describe('project files', () => {
     expect((await outsider.get(`/attachments?entityType=project&entityId=${secret.id}`)).status).toBe(404);
     expect((await outsider.get(`/attachments/${id}/url`)).status).toBe(404);
     expect((await outsider.del(`/attachments/${id}`)).status).toBe(404);
+  });
+});
+
+/**
+ * Renaming changes what a file is called and downloaded as, never where its
+ * bytes live – an embedded src must keep resolving after a rename.
+ */
+describe('rename', () => {
+  const rename = (id: string, filename: unknown, cookie = users.owner!.cookie) =>
+    reqAs(cookie).patch(`/attachments/${id}`, { filename });
+
+  it('renames a file and serves the download under the new name', async () => {
+    const { id, src } = await json(await upload({ entityType: 'company', entityId: companyId }));
+    const res = await rename(id, '  Brand guide v2.png  ');
+    expect(res.status).toBe(200);
+    expect((await json(res)).filename).toBe('Brand guide v2.png');
+
+    const list = await json(reqAs(users.owner!.cookie).get(`/attachments?entityType=company&entityId=${companyId}`));
+    expect(list.data.find((f: any) => f.id === id).filename).toBe('Brand guide v2.png');
+
+    // Same signed src as before the rename; only the download name changed.
+    const file = await anon().get(src.replace('/api/v1', ''));
+    expect(file.status).toBe(200);
+    expect(file.headers.get('content-disposition')).toContain(encodeURIComponent('Brand guide v2.png'));
+  });
+
+  it('refuses an empty name, a path and a blocked extension', async () => {
+    const { id } = await json(await upload({ entityType: 'company', entityId: companyId }));
+    expect((await rename(id, '   ')).status).toBe(400);
+    expect((await rename(id, '../etc/passwd')).status).toBe(400);
+    expect((await rename(id, 'run.exe')).status).toBe(422);
+  });
+
+  it('reads the extension the way the file lands on disk', async () => {
+    const { id } = await json(await upload({ entityType: 'company', entityId: companyId }));
+    // Windows drops trailing dots and spaces on save; invisible characters hide the real ending.
+    expect((await rename(id, 'run.exe.')).status).toBe(422);
+    expect((await rename(id, 'run.EXE. . .')).status).toBe(422);
+    expect((await rename(id, 'run.e\u200bxe')).status).toBe(422);
+    // A right-to-left override shows `photo\u202Egnp.exe` as `photoexe.png`.
+    expect((await rename(id, 'photo\u202Egnp.exe')).status).toBe(422);
+    expect((await rename(id, 'photo\u202Egnp.png')).status).toBe(422);
+    // Emoji keep their joiners.
+    expect((await rename(id, 'team \u{1F468}\u200D\u{1F469}.png')).status).toBe(200);
+  });
+
+  it('needs write access to the record the file hangs off', async () => {
+    const { id } = await json(await upload({ entityType: 'company', entityId: companyId }));
+    expect((await rename(id, 'mine.png', users.guest!.cookie)).status).toBe(403);
+  });
+
+  it('lets only the uploader rename a file embedded in a document', async () => {
+    const { id } = await json(await upload());
+    expect((await rename(id, 'theirs.png', users.member!.cookie)).status).toBe(403);
+    expect((await rename(id, 'mine.png')).status).toBe(200);
+  });
+
+  it('answers 404 for an unknown file', async () => {
+    expect((await rename(ulid(), 'x.png')).status).toBe(404);
+  });
+});
+
+describe('fileExtension', () => {
+  it('reads the extension past trailing dots, spaces and invisible characters', () => {
+    expect(fileExtension('report.PDF')).toBe('pdf');
+    expect(fileExtension('run.exe. . ')).toBe('exe');
+    expect(fileExtension('run.e\u200bxe')).toBe('exe');
+    expect(fileExtension('README')).toBe('');
+    expect(fileExtension('...')).toBe('');
+  });
+
+  it('stays linear on a name built to make a regex backtrack', () => {
+    const evil = `a${'. '.repeat(200_000)}x`;
+    const started = performance.now();
+    expect(fileExtension(evil)).toBe(' x');
+    expect(performance.now() - started).toBeLessThan(500);
   });
 });

@@ -8,7 +8,7 @@ import { ImapFlow } from 'imapflow';
 import { simpleParser, type Attachment } from 'mailparser';
 import { getDb, schema, and, isNotNull } from '@ordi/db';
 import { ulid } from 'ulid';
-import { MAX_UPLOAD_BYTES, BLOCKED_FILE_EXTENSIONS } from '@ordi/shared';
+import { MAX_UPLOAD_BYTES, isBlockedFilename } from '@ordi/shared';
 import { logger } from '../lib/logger';
 import { decrypt } from '../lib/crypto';
 import { putObject } from '../lib/s3';
@@ -42,8 +42,7 @@ async function storeMailAttachments(itemId: string, attachments: Attachment[]): 
   for (const att of attachments.slice(0, MAX_MAIL_ATTACHMENTS)) {
     const filename = att.filename || 'attachment';
     const size = att.content?.length ?? 0;
-    const ext = filename.split('.').pop()?.toLowerCase() ?? '';
-    if (!att.content || size < 1 || size > MAX_UPLOAD_BYTES || BLOCKED_FILE_EXTENSIONS.includes(ext)) {
+    if (!att.content || size < 1 || size > MAX_UPLOAD_BYTES || isBlockedFilename(filename)) {
       logger.warn({ itemId, filename, size }, 'intake mail attachment skipped');
       continue;
     }

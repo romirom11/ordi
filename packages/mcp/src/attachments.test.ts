@@ -194,3 +194,31 @@ describe('interleaved images in task text (upload + create)', () => {
     expect(docToText(doc)).toBe(next);
   });
 });
+
+describe('rename_attachment', () => {
+  it('patches the attachment with the trimmed name', async () => {
+    const { api } = fakeClient();
+    const calls: { path: string; body: unknown }[] = [];
+    api.patch = async <T>(path: string, body?: unknown): Promise<T> => {
+      calls.push({ path, body });
+      return { id: 'att-1', filename: 'Brief v2.pdf', size: 10, mime: 'application/pdf' } as T;
+    };
+    const client = await connect(api);
+    const res: any = await client.callTool({ name: 'rename_attachment', arguments: { id: 'att-1', filename: ' Brief v2.pdf ' } });
+    expect(res.isError).toBeFalsy();
+    expect(calls).toEqual([{ path: '/attachments/att-1', body: { filename: 'Brief v2.pdf' } }]);
+    expect(JSON.parse(res.content[0].text).filename).toBe('Brief v2.pdf');
+  });
+
+  it('refuses a blocked extension before calling the API', async () => {
+    const { api } = fakeClient();
+    let called = false;
+    api.patch = async <T>(): Promise<T> => { called = true; return {} as T; };
+    const client = await connect(api);
+    for (const filename of ['run.exe', 'run.exe.', 'photo\u202Egnp.exe']) {
+      const res: any = await client.callTool({ name: 'rename_attachment', arguments: { id: 'att-1', filename } });
+      expect(res.isError).toBe(true);
+    }
+    expect(called).toBe(false);
+  });
+});
