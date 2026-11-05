@@ -36,12 +36,24 @@ export const secretNameSchema = z.string().trim()
 export const secretFieldKeySchema = z.string().trim()
   .regex(/^[a-z][a-z0-9_]{0,31}$/, 'Use lower case letters, digits and underscores (e.g. api_key)');
 
+/** People open a url field with a click: http(s) only, never `javascript:` or `file:`. */
+export function isHttpUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 export const secretFieldInputSchema = z.object({
   key: secretFieldKeySchema,
   label: z.string().trim().min(1).max(80),
   type: z.enum(SECRET_FIELD_TYPES),
   /** Omitted on update: keep the stored value. An empty string clears it. */
   value: z.string().max(10_000).optional(),
+}).refine((f) => f.type !== 'url' || !f.value || isHttpUrl(f.value.trim()), {
+  message: 'A URL field takes an http(s) address', path: ['value'],
 });
 
 export const secretAudienceSchema = z.discriminatedUnion('type', [
