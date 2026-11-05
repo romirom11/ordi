@@ -11,7 +11,7 @@ import { useT, extendDict } from '../../lib/i18n';
 extendDict({
   en: {
     'settings.mcp': 'MCP',
-    'settings.mcpDesc': 'Connect Claude, Cursor or any MCP client: the agent reads and manages ordi on your behalf. Agent rights = token rights.',
+    'settings.mcpDesc': 'Connect Claude, Cursor or any MCP client: the agent reads and manages ordi on your behalf, with your permissions. API tokens for scripts live here too.',
     'mcp.tokens': 'Access tokens',
     'mcp.tokensHint': 'Personal tokens the agent authenticates with. Scopes can only narrow your own permissions.',
     'mcp.createToken': 'Create token',
@@ -73,7 +73,7 @@ extendDict({
   },
   uk: {
     'settings.mcp': 'MCP',
-    'settings.mcpDesc': 'Підключіть Claude, Cursor чи інший MCP-клієнт: агент читає і керує ordi від вашого імені. Права агента = права токена.',
+    'settings.mcpDesc': 'Підключіть Claude, Cursor чи інший MCP-клієнт: агент читає і керує ordi від вашого імені, з вашими правами. Тут же API-токени для скриптів.',
     'mcp.tokens': 'Токени доступу',
     'mcp.tokensHint': 'Персональні токени, якими автентифікується агент. Скоупи лише звужують ваші власні права.',
     'mcp.createToken': 'Створити токен',
@@ -212,9 +212,14 @@ export function McpPanel() {
       </div>
 
       {/* ── Access: who can currently act as you ── */}
-      <div className="mb-2">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">{t('mcp.access')}</div>
-        <p className="mt-0.5 text-xs text-muted-foreground">{t('mcp.accessHint')}</p>
+      <div className="mb-2 flex items-end justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">{t('mcp.access')}</div>
+          <p className="mt-0.5 text-xs text-muted-foreground">{t('mcp.accessHint')}</p>
+        </div>
+        {/* Plain API tokens (CI, scripts) are made here too – this is the only
+          * token list, the profile no longer keeps a second one. */}
+        <Button size="sm" variant="outline" className="shrink-0" onClick={() => setCreateOpen(true)}><Plus size={14} /> {t('mcp.createToken')}</Button>
       </div>
 
       {createdToken && (
@@ -284,7 +289,6 @@ export function McpPanel() {
       <Disclosure label={t('mcp.stdioTitle')} className="mt-8">
         <div className="space-y-3 pt-3">
           <p className="text-xs text-muted-foreground">{t('mcp.connectHint')}</p>
-          <Button size="sm" variant="outline" onClick={() => setCreateOpen(true)}><Plus size={14} /> {t('mcp.createToken')}</Button>
           <ConfigSnippets tokenValue={createdToken ?? 'YOUR_TOKEN'} />
         </div>
       </Disclosure>

@@ -8,7 +8,10 @@ import {
   getDb, schema, eq, and, or, isNull, isNotNull, inArray, notInArray, lte, desc, asc, sql, type SQL,
 } from '@ordi/db';
 import { ulid } from 'ulid';
-import { MAX_SUBTASK_DEPTH, appendPosition, buildBranchName, type CustomFieldFilter, type LabelScope } from '@ordi/shared';
+import {
+  MAX_SUBTASK_DEPTH, appendPosition, buildBranchName, normalizeIntakeFormConfig,
+  type CustomFieldFilter, type IntakeAnswer, type LabelScope,
+} from '@ordi/shared';
 import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
@@ -24,6 +27,8 @@ import { encrypt, generateToken } from '../../lib/crypto';
 import { sendEmailNow } from '../../lib/email';
 import { asLocale, loadBranding, renderEmail, tr } from '../../lib/email-templates';
 import { pageById } from '../../lib/http';
+import { intakeTaskDescription } from './intake';
+import { isStorageConfigured } from '../../lib/s3';
 
 const { tasks, projects, taskStatuses, taskAssignees, taskLabels, projectMembers, cycles } = schema;
 
@@ -1260,9 +1265,11 @@ export async function cycleSnapshots(actor: Actor, id: string) {
 export async function listIntake(actor: Actor, projectId: string) {
   await assertProject(actor, projectId, 'member');
   const { db } = getDb();
-  return db.select().from(schema.intakeItems)
+  const rows = await db.select().from(schema.intakeItems)
     .where(and(eq(schema.intakeItems.projectId, projectId), eq(schema.intakeItems.status, 'pending')))
     .orderBy(desc(schema.intakeItems.createdAt));
+  // The submitter key only feeds the public form's rate limit.
+  return rows.map(({ submitterKey: _key, ...item }) => item);
 }
 
 async function loadIntakeItem(itemId: string) {
@@ -1276,9 +1283,7 @@ export async function acceptIntake(actor: Actor, itemId: string, input: any) {
   const item = await loadIntakeItem(itemId);
   await assertProject(actor, item.projectId, 'member');
   if (item.status !== 'pending') throw err.domain('Intake item already triaged');
-  const description = item.description
-    ? { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: item.description }] }] }
-    : null;
+  const description = intakeTaskDescription(item.description, (item.answers ?? []) as IntakeAnswer[]);
   const task = await createTask(actor, {
     projectId: item.projectId, title: item.title, description,
     statusId: input.statusId, typeId: input.typeId ?? null, assigneeIds: input.assigneeIds ?? [],
@@ -1312,7 +1317,37 @@ export async function getIntakeSettings(actor: Actor, projectId: string) {
   const { db } = getDb();
   const [settings] = await db.select().from(schema.intakeSettings).where(eq(schema.intakeSettings.projectId, projectId));
   if (!settings) throw err.notFound('Intake settings not found');
-  return redactMailbox(settings);
+  return presentIntakeSettings(settings);
+}
+
+/**
+ * Settings as the editor sees them: the form made whole, the mailbox password
+ * withheld, and whether file uploads can work here at all.
+ */
+function presentIntakeSettings<T extends { mailbox?: unknown; formConfig?: unknown }>(settings: T) {
+  return {
+    ...redactMailbox(settings),
+    formConfig: normalizeIntakeFormConfig(settings.formConfig),
+    storageConfigured: isStorageConfigured(),
+  };
+}
+
+/**
+ * A new form token: the old link and every page that embeds it stop working
+ * at once (404). For a link that leaked or a form that attracts spam.
+ */
+export async function rotateIntakeToken(actor: Actor, projectId: string) {
+  await assertProject(actor, projectId, 'admin');
+  const { db } = getDb();
+  const [settings] = await db.update(schema.intakeSettings).set({ formToken: generateToken(), updatedAt: new Date() })
+    .where(eq(schema.intakeSettings.projectId, projectId)).returning();
+  if (!settings) throw err.notFound('Intake settings not found');
+  await writeActivity(db, {
+    entityType: 'project', entityId: projectId, action: 'updated',
+    diff: { intakeFormToken: { to: 'rotated' } },
+    actorId: actor.userId, actorType: actor.actorType,
+  });
+  return presentIntakeSettings(settings);
 }
 
 /**
@@ -1346,9 +1381,11 @@ export async function updateIntakeSettings(actor: Actor, projectId: string, inpu
       patch.mailbox = { ...rest, ...(nextPass ? { pass: nextPass } : {}) };
     }
   }
+  if (input.formConfig !== undefined) patch.formConfig = normalizeIntakeFormConfig(input.formConfig);
   if (Object.keys(patch).length) await db.update(schema.intakeSettings).set(patch).where(eq(schema.intakeSettings.projectId, projectId));
   const [settings] = await db.select().from(schema.intakeSettings).where(eq(schema.intakeSettings.projectId, projectId));
-  return redactMailbox(settings);
+  if (!settings) throw err.notFound('Intake settings not found');
+  return presentIntakeSettings(settings);
 }
 
 // ─────────────────────────── My tasks (PRD §8.5) ───────────────────────────

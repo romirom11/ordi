@@ -127,7 +127,12 @@ function Root() {
   if (path.startsWith('/i/')) return <I18nProvider locale={guessLocale()}><PublicInvoicePage token={path.split('/i/')[1]!} /></I18nProvider>;
   if (path.startsWith('/q/')) return <I18nProvider locale={guessLocale()}><PublicQuotePage token={path.split('/q/')[1]!} /></I18nProvider>;
   if (path.startsWith('/portal/')) return <I18nProvider locale={guessLocale()}><PortalPage token={path.split('/portal/')[1]!} /></I18nProvider>;
-  if (path.startsWith('/intake/')) return <I18nProvider locale={guessLocale()}><IntakeFormPage token={path.split('/intake/')[1]!} /></I18nProvider>;
+  if (path.startsWith('/intake/')) {
+    // An embedding site may pin the form's language (`?lang=uk`, data-lang on the loader).
+    const lang = new URLSearchParams(window.location.search).get('lang');
+    const locale = lang === 'uk' || lang === 'en' ? lang : guessLocale();
+    return <I18nProvider locale={locale}><IntakeFormPage token={path.split('/intake/')[1]!.split('/')[0]!} /></I18nProvider>;
+  }
   if (path.startsWith('/careers/')) return <I18nProvider locale={guessLocale()}><CareersPage token={path.split('/careers/')[1]!} /></I18nProvider>;
 
   return <AuthedApp />;

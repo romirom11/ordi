@@ -6,13 +6,15 @@
  */
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Copy, Inbox, Mail, Paperclip, X } from 'lucide-react';
+import { Check, Code2, Copy, Inbox, Mail, Paperclip, RefreshCw, SlidersHorizontal, X } from 'lucide-react';
+import { intakeAnswerText, type IntakeAnswer, type IntakeFormConfig } from '@ordi/shared';
 import { api, appOrigin, ApiError } from '../../lib/api';
 import { useOpen } from '../../lib/router';
 import { resolveFileSrc } from '../../lib/uploads';
 import { openExternal } from '../../lib/desktop';
 import { Button, Card, EmptyState, Input, Select, Skeleton, Spinner, Switch, fmtDate } from '../ui';
-import { Dialog, toast } from '../overlays';
+import { ConfirmDialog, Dialog, toast } from '../overlays';
+import { IntakeEmbedDialog, IntakeFormEditor } from './IntakeFormEditor';
 import { useT, extendDict } from '../../lib/i18n';
 
 /** Fetch the signed URL for a request's file and open it in a new tab. */
@@ -64,6 +66,14 @@ extendDict({
     'intake.mailDisconnect': 'Disconnect',
     'intake.mailConnect': 'Connect mailbox',
     'intake.mailDisconnected': 'Mailbox disconnected',
+    'intake.customize': 'Customize',
+    'intake.customizeHint': 'Fields, texts, accent colour, files and the receipt email.',
+    'intake.embed': 'Embed',
+    'intake.rotate': 'New link',
+    'intake.rotateTitle': 'Replace the form link?',
+    'intake.rotateBody': 'The current link and every site that embeds the form stop working at once. Share the new link afterwards.',
+    'intake.rotated': 'The form has a new link',
+    'intake.formCustomized': '{n} fields',
   },
   uk: {
     'intake.title': 'Запити',
@@ -103,6 +113,14 @@ extendDict({
     'intake.mailDisconnect': 'Відключити',
     'intake.mailConnect': 'Підключити скриньку',
     'intake.mailDisconnected': 'Скриньку відключено',
+    'intake.customize': 'Налаштувати',
+    'intake.customizeHint': 'Поля, тексти, колір акценту, файли та лист-підтвердження.',
+    'intake.embed': 'Вбудувати',
+    'intake.rotate': 'Нове посилання',
+    'intake.rotateTitle': 'Замінити посилання на форму?',
+    'intake.rotateBody': 'Поточне посилання і форма на всіх сайтах, куди її вбудовано, одразу перестануть працювати. Потім поділіться новим посиланням.',
+    'intake.rotated': 'У форми нове посилання',
+    'intake.formCustomized': 'Полів: {n}',
   },
 });
 
@@ -113,8 +131,10 @@ export interface IntakeItem {
   requesterName?: string | null;
   requesterEmail?: string | null;
   createdAt?: string;
-  /** Files that arrived with the request (email attachments). */
+  /** Files that arrived with the request (form uploads or email attachments). */
   attachments?: Array<{ attachmentId: string; filename: string; size: number; mime: string }>;
+  /** Answers to the form's custom fields. */
+  answers?: IntakeAnswer[];
 }
 
 interface StatusLite { id: string; name: string; isDefault?: boolean }
@@ -170,6 +190,20 @@ export function ProjectIntakeTab({ projectId, statuses, users }: {
               </p>
               {item.description && (
                 <p className="mt-2 whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">{item.description}</p>
+              )}
+              {(item.answers ?? []).length > 0 && (
+                <dl className="mt-2 grid grid-cols-[minmax(0,13rem)_minmax(0,1fr)] gap-x-3 gap-y-1 text-[13px]">
+                  {item.answers!.map((answer) => (
+                    <div key={answer.key} className="contents">
+                      <dt className="text-faint">{answer.label}</dt>
+                      <dd className="break-words text-muted-foreground">
+                        {answer.type === 'url' && typeof answer.value === 'string'
+                          ? <a href={answer.value} target="_blank" rel="noreferrer noopener" className="underline underline-offset-2 hover:text-foreground">{answer.value}</a>
+                          : intakeAnswerText(answer)}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
               )}
               {(item.attachments ?? []).length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
@@ -331,6 +365,8 @@ function DeclineDialog({ item, onClose, onDeclined }: {
 interface IntakeSettings {
   formToken: string;
   formEnabled: boolean;
+  formConfig: IntakeFormConfig;
+  storageConfigured: boolean;
   mailbox?: {
     host?: string;
     port?: number | null;
@@ -341,9 +377,12 @@ interface IntakeSettings {
   } | null;
 }
 
-export function IntakeSettingsSection({ projectId }: { projectId: string }) {
+export function IntakeSettingsSection({ projectId, projectName }: { projectId: string; projectName: string }) {
   const t = useT();
   const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [embedding, setEmbedding] = useState(false);
+  const [rotating, setRotating] = useState(false);
   const settingsQ = useQuery<IntakeSettings>({
     queryKey: ['intake-settings', projectId],
     queryFn: () => api.get<IntakeSettings>(`/projects/${projectId}/intake-settings`),
@@ -352,6 +391,16 @@ export function IntakeSettingsSection({ projectId }: { projectId: string }) {
   const patch = useMutation({
     mutationFn: (formEnabled: boolean) => api.patch(`/projects/${projectId}/intake-settings`, { formEnabled }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['intake-settings', projectId] }),
+    onError: (cause) => toast.error(cause instanceof ApiError ? cause.message : t('common.saveFailed')),
+  });
+
+  const rotate = useMutation({
+    mutationFn: () => api.post(`/projects/${projectId}/intake-settings/rotate-token`),
+    onSuccess: () => {
+      setRotating(false);
+      qc.invalidateQueries({ queryKey: ['intake-settings', projectId] });
+      toast(t('intake.rotated'));
+    },
     onError: (cause) => toast.error(cause instanceof ApiError ? cause.message : t('common.saveFailed')),
   });
 
@@ -384,20 +433,63 @@ export function IntakeSettingsSection({ projectId }: { projectId: string }) {
               <Switch checked={settings.formEnabled} onChange={(next) => patch.mutate(next)} disabled={patch.isPending} />
             </div>
             {settings.formEnabled && (
-              <div className="flex items-center justify-between gap-4 border-t border-border py-3">
-                <div className="min-w-0">
-                  <p className="text-[13px] font-medium">{t('intake.formLink')}</p>
-                  <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground" title={link}>{link}</p>
+              <>
+                <div className="flex items-center justify-between gap-4 border-t border-border py-3">
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-medium">{t('intakeEditor.title')}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {t('intake.customizeHint')} <span className="text-faint">· {t('intake.formCustomized').replace('{n}', String(settings.formConfig.fields.filter((f) => !f.hidden).length))}</span>
+                    </p>
+                  </div>
+                  <Button size="xs" variant="outline" className="shrink-0" onClick={() => setEditing(true)}>
+                    <SlidersHorizontal size={12} /> {t('intake.customize')}
+                  </Button>
                 </div>
-                <Button size="xs" variant="outline" className="shrink-0" onClick={copy}>
-                  <Copy size={12} /> {t('intake.copyLink')}
-                </Button>
-              </div>
+                <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-border py-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-medium">{t('intake.formLink')}</p>
+                    <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground" title={link}>{link}</p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <Button size="xs" variant="outline" onClick={copy}>
+                      <Copy size={12} /> {t('intake.copyLink')}
+                    </Button>
+                    <Button size="xs" variant="outline" onClick={() => setEmbedding(true)}>
+                      <Code2 size={12} /> {t('intake.embed')}
+                    </Button>
+                    <Button size="xs" variant="ghost" onClick={() => setRotating(true)}>
+                      <RefreshCw size={12} /> {t('intake.rotate')}
+                    </Button>
+                  </div>
+                </div>
+              </>
             )}
             <MailboxSettings projectId={projectId} mailbox={settings.mailbox ?? null} />
           </>
         )}
       </div>
+      {editing && settings && (
+        <IntakeFormEditor
+          projectId={projectId}
+          projectName={projectName}
+          config={settings.formConfig}
+          storageConfigured={settings.storageConfigured}
+          onClose={() => setEditing(false)}
+        />
+      )}
+      {embedding && settings && (
+        <IntakeEmbedDialog origin={appOrigin()} token={settings.formToken} onClose={() => setEmbedding(false)} />
+      )}
+      <ConfirmDialog
+        open={rotating}
+        onClose={() => setRotating(false)}
+        onConfirm={() => rotate.mutate()}
+        title={t('intake.rotateTitle')}
+        body={t('intake.rotateBody')}
+        confirmLabel={t('intake.rotate')}
+        danger
+        pending={rotate.isPending}
+      />
     </section>
   );
 }

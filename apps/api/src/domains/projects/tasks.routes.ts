@@ -323,5 +323,8 @@ export function tasksRoutes() {
     return c.json(await svc.updateIntakeSettings(currentActor(c), c.req.param('id'), body));
   });
 
+  app.post('/projects/:id/intake-settings/rotate-token', async (c) =>
+    c.json(await svc.rotateIntakeToken(currentActor(c), c.req.param('id'))));
+
   return app;
 }
