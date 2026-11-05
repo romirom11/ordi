@@ -102,8 +102,7 @@ const EN: Dict = {
   'intake.reason': 'Reason: {reason}',
   'intakeReceived.subject': 'We received your request',
   'intakeReceived.heading': 'Request received',
-  'intakeReceived.body': 'Hi {name}, we received your request “{title}”.',
-  'intakeReceived.bodyNoName': 'We received your request “{title}”.',
+  'intakeReceived.body': 'We received your request “{title}”.',
   'intakeReceived.next': 'The team will review it and get back to you.',
 
   'notify.cta': 'Open in ordi',
@@ -205,8 +204,7 @@ const UK: Dict = {
   'intake.reason': 'Причина: {reason}',
   'intakeReceived.subject': 'Ми отримали вашу заявку',
   'intakeReceived.heading': 'Заявку отримано',
-  'intakeReceived.body': 'Вітаємо, {name}! Ми отримали вашу заявку «{title}».',
-  'intakeReceived.bodyNoName': 'Ми отримали вашу заявку «{title}».',
+  'intakeReceived.body': 'Ми отримали вашу заявку «{title}».',
   'intakeReceived.next': 'Команда розгляне її та зв’яжеться з вами.',
 
   'notify.cta': 'Відкрити в ordi',

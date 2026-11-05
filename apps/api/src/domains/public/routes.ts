@@ -14,7 +14,11 @@ import { emit } from '../../core/events';
 import { hmacSha256, encrypt, generateToken } from '../../lib/crypto';
 import { verifyFileToken } from '../../lib/file-tokens';
 import { getObject, isStorageConfigured } from '../../lib/s3';
-import { submitPublicIntake, type IntakeFile } from '../projects/intake';
+import {
+  submitPublicIntake, assertPublicIntakeRate, intakeBodyLimit, intakeSubmitterKey, type IntakeFile,
+} from '../projects/intake';
+import { bodyLimit } from 'hono/body-limit';
+import { clientIp } from '../../lib/client-ip';
 import { INTAKE_EMBED_SCRIPT } from './intake-embed';
 import { writeActivity } from '../../core/activity';
 import { verifyOAuthState, exchangeGithubCode, exchangeSlackCode } from '../integrations/oauth';
@@ -79,11 +83,6 @@ function rateLimitOk(key: string, limit = 5, windowMs = 60_000): boolean {
   hits.push(now);
   rateBuckets.set(key, hits);
   return true;
-}
-function clientIp(c: { req: { header: (name: string) => string | undefined } }): string {
-  const fwd = c.req.header('x-forwarded-for');
-  if (fwd) return fwd.split(',')[0]!.trim();
-  return c.req.header('x-real-ip') ?? 'unknown';
 }
 
 export function publicRoutes() {
@@ -387,27 +386,42 @@ export function publicRoutes() {
       .where(and(eq(schema.projects.id, settings.projectId), isNull(schema.projects.deletedAt)));
     if (!live) throw err.notFound();
 
+    // Refused before the body is read: a flood never gets its files buffered.
+    const submitterKey = intakeSubmitterKey(clientIp(c));
+    await assertPublicIntakeRate(submitterKey);
+
+    const config = normalizeIntakeFormConfig(settings.formConfig);
+    const takesFiles = config.allowAttachments && isStorageConfigured();
     let body: unknown;
     const files: IntakeFile[] = [];
-    if ((c.req.header('content-type') ?? '').includes('multipart/form-data')) {
-      const form = await c.req.parseBody({ all: true });
-      try {
-        body = typeof form['payload'] === 'string' ? JSON.parse(form['payload']) : {};
-      } catch {
-        throw err.validation('payload must be JSON');
+    const limit = bodyLimit({
+      maxSize: intakeBodyLimit(settings.formConfig),
+      onError: () => { throw err.validation('Request too large', { files: 'too_large' }); },
+    });
+    await limit(c, async () => {
+      if ((c.req.header('content-type') ?? '').includes('multipart/form-data')) {
+        const form = await c.req.parseBody({ all: true });
+        try {
+          body = typeof form['payload'] === 'string' ? JSON.parse(form['payload']) : {};
+        } catch {
+          throw err.validation('payload must be JSON');
+        }
+        const parts = [form['files']].flat().filter((part): part is File => part instanceof File);
+        // Counted and sized from the part headers, before any bytes are copied.
+        if (parts.length && !takesFiles) throw err.validation('This form does not take files', { files: 'not_allowed' });
+        if (parts.length > config.maxAttachments) throw err.validation('Too many files', { files: 'too_many' });
+        if (parts.some((part) => part.size > MAX_UPLOAD_BYTES)) throw err.validation('File too large', { files: 'too_large' });
+        for (const part of parts) {
+          files.push({ filename: part.name, mime: part.type, content: new Uint8Array(await part.arrayBuffer()) });
+        }
+      } else {
+        body = await c.req.json().catch(() => {
+          throw err.validation('Body must be JSON');
+        });
       }
-      const parts = form['files'];
-      for (const part of Array.isArray(parts) ? parts : parts ? [parts] : []) {
-        if (!(part instanceof File)) continue;
-        files.push({ filename: part.name, mime: part.type, content: new Uint8Array(await part.arrayBuffer()) });
-      }
-    } else {
-      body = await c.req.json().catch(() => {
-        throw err.validation('Body must be JSON');
-      });
-    }
+    });
 
-    await submitPublicIntake({ projectId: settings.projectId, formConfig: settings.formConfig, body, files, ip: clientIp(c) });
+    await submitPublicIntake({ projectId: settings.projectId, formConfig: settings.formConfig, body, files, submitterKey });
     return c.json({ ok: true });
   });
 

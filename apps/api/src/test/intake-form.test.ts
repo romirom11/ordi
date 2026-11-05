@@ -102,6 +102,13 @@ describe('the default form', () => {
     expect(mails).toHaveLength(1);
     expect(mails[0]!.subject).toBe('We received your request');
     expect(mails[0]!.body).toContain('Fix the footer');
+    // Nothing else a stranger typed rides along under the workspace's sender.
+    expect(mails[0]!.body).not.toContain('Olena');
+  });
+
+  it('refuses an oversized body before parsing it', async () => {
+    const res = await submit({ values: { requesterName: 'Big', title: 'x' }, padding: 'x'.repeat(300 * 1024) });
+    expect(res.status).toBe(400);
   });
 });
 
@@ -194,10 +201,12 @@ describe('files on the form', () => {
     for (const name of ['a.txt', 'b.txt', 'c.txt']) tooMany.append('files', new File(['x'], name));
     expect((await submitForm(tooMany)).status).toBe(400);
 
-    const blocked = new FormData();
-    blocked.append('payload', JSON.stringify({ values: answers }));
-    blocked.append('files', new File(['x'], 'setup.exe'));
-    expect((await submitForm(blocked)).status).toBe(400);
+    for (const name of ['setup.exe', 'setup.exe.', 'setup.exe .']) {
+      const blocked = new FormData();
+      blocked.append('payload', JSON.stringify({ values: answers }));
+      blocked.append('files', new File(['x'], name));
+      expect((await submitForm(blocked)).status).toBe(400);
+    }
   });
 });
 
@@ -209,6 +218,14 @@ describe('the rate limit', () => {
     expect(statuses.slice(0, 5)).toEqual([200, 200, 200, 200, 200]);
     expect(statuses[5]).toBe(429);
     expect((await submit({ values }, '192.0.2.8')).status).toBe(200);
+  });
+
+  it('is not dodged by a forged X-Forwarded-For entry', async () => {
+    // The proxy appends the real address; only the left part is the client's to choose.
+    const values = { title: 'Forged', requesterName: 'F', requesterEmail: 'forged@example.com', budget: '< $5k' };
+    const statuses: number[] = [];
+    for (let i = 0; i < 6; i += 1) statuses.push((await submit({ values }, `10.9.9.${i}, 192.0.2.50`)).status);
+    expect(statuses[5]).toBe(429);
   });
 
   it('caps receipts per recipient', async () => {

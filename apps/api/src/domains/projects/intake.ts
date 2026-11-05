@@ -36,7 +36,9 @@ export interface IntakeAttachmentRef {
 /** A name from outside, safe as the last segment of a storage key. */
 function safeFilename(name: string): string {
   const base = name.split(/[\\/]/).pop() ?? '';
-  const clean = base.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 200);
+  // Trailing dots and spaces are dropped too: `setup.exe.` must not pass the
+  // extension check as "no extension" and then be saved as setup.exe.
+  const clean = base.replace(/[\u0000-\u001f\u007f]/g, '').trim().replace(/[.\s]+$/, '').slice(0, 200);
   return clean || 'attachment';
 }
 
@@ -88,13 +90,31 @@ const PER_MINUTE = 5;
 const PER_HOUR = 30;
 /** Receipts one recipient may get per hour, so the form cannot mail-bomb someone. */
 const RECEIPTS_PER_HOUR = 3;
+/** Receipts one project's form may send per hour, whatever the addresses. */
+const PROJECT_RECEIPTS_PER_HOUR = 50;
+/** A JSON body, or a multipart one without files: answers only. */
+const ANSWERS_BODY_BYTES = 256 * 1024;
+
+/** The largest request body the form can legitimately send. */
+export function intakeBodyLimit(formConfig: unknown): number {
+  const config = normalizeIntakeFormConfig(formConfig);
+  return config.allowAttachments && isStorageConfigured()
+    ? ANSWERS_BODY_BYTES + config.maxAttachments * (MAX_UPLOAD_BYTES + 64 * 1024)
+    : ANSWERS_BODY_BYTES;
+}
+
+/** The IP is not kept: only an HMAC of it, enough to recognise the same submitter again. */
+export function intakeSubmitterKey(ip: string): string {
+  return hmacSha256(env.authSecret, `intake:${ip}`);
+}
 
 /**
  * Counted on the stored requests rather than in process memory, so the limit
- * survives a restart and holds across instances. The IP itself is not kept:
- * only an HMAC of it, enough to recognise the same submitter again.
+ * survives a restart and holds across instances. Checked before the body is
+ * read (a flood is refused without buffering its files) and again right
+ * before the insert.
  */
-async function assertSubmitRate(submitterKey: string): Promise<void> {
+export async function assertPublicIntakeRate(submitterKey: string): Promise<void> {
   const { db } = getDb();
   const [row] = await db.select({
     minute: sql<number>`count(*) filter (where ${schema.intakeItems.createdAt} > now() - interval '1 minute')`.mapWith(Number),
@@ -106,31 +126,37 @@ async function assertSubmitRate(submitterKey: string): Promise<void> {
   if ((row?.minute ?? 0) >= PER_MINUTE || (row?.hour ?? 0) >= PER_HOUR) throw err.rateLimited();
 }
 
-async function receiptAllowed(email: string): Promise<boolean> {
+async function receiptAllowed(projectId: string, email: string): Promise<boolean> {
   const { db } = getDb();
-  const [row] = await db.select({ n: sql<number>`count(*)`.mapWith(Number) }).from(schema.intakeItems).where(and(
-    eq(schema.intakeItems.requesterEmail, email),
+  const [row] = await db.select({
+    forAddress: sql<number>`count(*) filter (where ${schema.intakeItems.requesterEmail} = ${email})`.mapWith(Number),
+    forProject: sql<number>`count(*) filter (where ${schema.intakeItems.requesterEmail} is not null)`.mapWith(Number),
+  }).from(schema.intakeItems).where(and(
+    eq(schema.intakeItems.projectId, projectId),
     eq(schema.intakeItems.source, 'form'),
     gt(schema.intakeItems.createdAt, sql`now() - interval '1 hour'`),
   ));
   // The request just stored is one of them.
-  return (row?.n ?? 0) <= RECEIPTS_PER_HOUR;
+  return (row?.forAddress ?? 0) <= RECEIPTS_PER_HOUR && (row?.forProject ?? 0) <= PROJECT_RECEIPTS_PER_HOUR;
 }
 
-/** Queue the "we received your request" mail. Never fails the submission. */
-async function queueReceipt(itemId: string, to: string, name: string | null, title: string): Promise<void> {
+/**
+ * Queue the "we received your request" mail. Never fails the submission.
+ * The only text from the form in it is the title, cut short: anything a
+ * stranger types goes out under the workspace's sender, so the receipt
+ * must not be a vehicle for their message.
+ */
+async function queueReceipt(projectId: string, itemId: string, to: string, title: string): Promise<void> {
   try {
-    if (!(await receiptAllowed(to))) return;
+    if (!(await receiptAllowed(projectId, to))) return;
+    const shortTitle = title.length > 80 ? `${title.slice(0, 79).trimEnd()}…` : title;
     const branding = await loadBranding();
     const locale = asLocale(undefined);
     const rendered = renderEmail({
       locale,
       branding,
       heading: tr(locale, 'intakeReceived.heading'),
-      paragraphs: [
-        name ? tr(locale, 'intakeReceived.body', { name, title }) : tr(locale, 'intakeReceived.bodyNoName', { title }),
-        tr(locale, 'intakeReceived.next'),
-      ],
+      paragraphs: [tr(locale, 'intakeReceived.body', { title: shortTitle }), tr(locale, 'intakeReceived.next')],
     });
     await enqueueEmail({
       idempotencyKey: `intake-receipt:${itemId}`,
@@ -150,7 +176,7 @@ export interface PublicSubmission {
   /** The parsed JSON body, or the `payload` part of a multipart body. */
   body: unknown;
   files: IntakeFile[];
-  ip: string;
+  submitterKey: string;
 }
 
 /**
@@ -182,8 +208,8 @@ export async function submitPublicIntake(input: PublicSubmission): Promise<void>
     }
   }
 
-  const submitterKey = hmacSha256(env.authSecret, `intake:${input.ip}`);
-  await assertSubmitRate(submitterKey);
+  const { submitterKey } = input;
+  await assertPublicIntakeRate(submitterKey);
 
   const itemId = ulid();
   const attachments = input.files.length ? await storeIntakeFiles(itemId, input.files) : [];
@@ -203,7 +229,7 @@ export async function submitPublicIntake(input: PublicSubmission): Promise<void>
   });
 
   if (config.acknowledge && result.requesterEmail) {
-    await queueReceipt(itemId, result.requesterEmail, result.requesterName, result.title);
+    await queueReceipt(input.projectId, itemId, result.requesterEmail, result.title);
   }
 }
 

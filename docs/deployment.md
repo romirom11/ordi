@@ -135,6 +135,15 @@ Then put any TLS terminator (Caddy/Traefik/nginx) in front of `api` (host
 port 8080 or 3000) – it proxies everything to a single port, with no separate
 rules.
 
+The public forms (intake, careers) rate-limit by client IP, read from
+`X-Forwarded-For`. Only the entries your own proxies appended can be trusted,
+so the API counts them from the right: `TRUST_PROXY_HOPS` (default `1`) is how
+many proxies append to that header in front of `api`. One TLS terminator needs
+nothing; a CDN such as Cloudflare in front of it makes `2`. Set it too low and
+the limit keys on your own proxy, so every visitor shares one bucket; set it
+too high and a client can forge the address. `0` ignores the header and uses
+the socket address.
+
 <a id="updating"></a>
 
 ## 3. Updating (new releases)

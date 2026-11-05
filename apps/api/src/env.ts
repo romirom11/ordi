@@ -25,6 +25,12 @@ export const env = {
   appUrl: process.env.APP_URL ?? 'http://localhost:5173',
   apiUrl: normalizeApiUrl(process.env.API_URL ?? 'http://localhost:3000'),
   authSecret: process.env.AUTH_SECRET ?? 'dev-insecure-secret-change-me',
+  /**
+   * Reverse proxies in front of the API that append to X-Forwarded-For. The
+   * client IP is the entry this many hops from the right – the one the
+   * outermost trusted proxy saw. 0 ignores the header and uses the socket.
+   */
+  trustProxyHops: Math.max(0, Number.parseInt(process.env.TRUST_PROXY_HOPS ?? '1', 10) || 0),
   /** GitHub OAuth app credentials for connecting git accounts (PRD §13.1). */
   githubOAuthClientId: process.env.GITHUB_OAUTH_CLIENT_ID ?? '',
   githubOAuthClientSecret: process.env.GITHUB_OAUTH_CLIENT_SECRET ?? '',
