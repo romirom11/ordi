@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { getDb, schema, eq, and, desc } from '@ordi/db';
 import { ulid } from 'ulid';
-import { MAX_UPLOAD_BYTES, attachmentPatchSchema, isBlockedFilename, type Permission } from '@ordi/shared';
+import { MAX_FILENAME_LENGTH, MAX_UPLOAD_BYTES, attachmentPatchSchema, isBlockedFilename, type Permission } from '@ordi/shared';
 import type { Actor, AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { assertProject } from '../../core/access';
@@ -83,6 +83,7 @@ export function attachmentsRoutes() {
     const file = form['file'];
     if (!(file instanceof File)) throw err.validation('file field required (multipart/form-data)');
     if (!file.name) throw err.validation('filename required');
+    if (file.name.length > MAX_FILENAME_LENGTH) throw err.validation(`Filename is longer than ${MAX_FILENAME_LENGTH} characters`);
     if (file.size < 1 || file.size > MAX_UPLOAD_BYTES) throw err.validation('File exceeds the size cap');
     if (isBlockedFilename(file.name)) throw err.domain('File type not allowed');
     const entityType = typeof form['entityType'] === 'string' && form['entityType'] ? form['entityType'] : null;

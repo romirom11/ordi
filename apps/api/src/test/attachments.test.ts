@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { getDb, schema } from '@ordi/db';
 import { ulid } from 'ulid';
-import { MAX_UPLOAD_BYTES } from '@ordi/shared';
+import { MAX_UPLOAD_BYTES, fileExtension } from '@ordi/shared';
 import { resetDb, seedRolesAndUsers, reqAs, anon, json } from './helpers';
 import { fileSrc, signFileToken } from '../lib/file-tokens';
 
@@ -55,6 +55,11 @@ describe('upload', () => {
   it('refuses a blocked extension', async () => {
     const res = await reqAs(users.owner!.cookie).postForm('/attachments', form('payload.exe', { mime: 'application/octet-stream' }));
     expect(res.status).toBe(422);
+  });
+
+  it('refuses a filename past the length cap', async () => {
+    const res = await reqAs(users.owner!.cookie).postForm('/attachments', form(`${'a'.repeat(256)}.png`));
+    expect(res.status).toBe(400);
   });
 
   it('refuses a blocked extension hidden behind a trailing dot', async () => {
@@ -235,5 +240,22 @@ describe('rename', () => {
 
   it('answers 404 for an unknown file', async () => {
     expect((await rename(ulid(), 'x.png')).status).toBe(404);
+  });
+});
+
+describe('fileExtension', () => {
+  it('reads the extension past trailing dots, spaces and invisible characters', () => {
+    expect(fileExtension('report.PDF')).toBe('pdf');
+    expect(fileExtension('run.exe. . ')).toBe('exe');
+    expect(fileExtension('run.e\u200bxe')).toBe('exe');
+    expect(fileExtension('README')).toBe('');
+    expect(fileExtension('...')).toBe('');
+  });
+
+  it('stays linear on a name built to make a regex backtrack', () => {
+    const evil = `a${'. '.repeat(200_000)}x`;
+    const started = performance.now();
+    expect(fileExtension(evil)).toBe(' x');
+    expect(performance.now() - started).toBeLessThan(500);
   });
 });

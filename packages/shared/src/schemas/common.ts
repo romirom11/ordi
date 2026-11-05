@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   CUSTOM_FIELD_TYPES,
   CUSTOM_FIELD_ENTITIES,
+  MAX_FILENAME_LENGTH,
 } from '../constants';
 
 /** ULID-ish id (26 chars, Crockford base32). Loosened to be robust. */
@@ -88,7 +89,7 @@ export const attachmentRefSchema = z.object({
  * characters; the storage key keeps the original name and never changes.
  */
 export const attachmentPatchSchema = z.object({
-  filename: z.string().trim().min(1).max(255)
+  filename: z.string().max(4 * MAX_FILENAME_LENGTH).trim().min(1).max(MAX_FILENAME_LENGTH)
     // eslint-disable-next-line no-control-regex
     .refine((v) => !/[\\/\u0000-\u001f\u007f]/.test(v), 'Filename cannot contain slashes or control characters'),
 });
