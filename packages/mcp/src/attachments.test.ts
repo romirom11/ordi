@@ -215,8 +215,10 @@ describe('rename_attachment', () => {
     let called = false;
     api.patch = async <T>(): Promise<T> => { called = true; return {} as T; };
     const client = await connect(api);
-    const res: any = await client.callTool({ name: 'rename_attachment', arguments: { id: 'att-1', filename: 'run.exe' } });
-    expect(res.isError).toBe(true);
+    for (const filename of ['run.exe', 'run.exe.', 'photo\u202Egnp.exe']) {
+      const res: any = await client.callTool({ name: 'rename_attachment', arguments: { id: 'att-1', filename } });
+      expect(res.isError).toBe(true);
+    }
     expect(called).toBe(false);
   });
 });

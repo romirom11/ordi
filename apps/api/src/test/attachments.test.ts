@@ -57,6 +57,11 @@ describe('upload', () => {
     expect(res.status).toBe(422);
   });
 
+  it('refuses a blocked extension hidden behind a trailing dot', async () => {
+    const res = await reqAs(users.owner!.cookie).postForm('/attachments', form('payload.exe.', { mime: 'application/octet-stream' }));
+    expect(res.status).toBe(422);
+  });
+
   it('refuses a file over the size cap', async () => {
     const res = await reqAs(users.owner!.cookie).postForm('/attachments', form('huge.png', {
       bytes: new Uint8Array(MAX_UPLOAD_BYTES + 1),
@@ -202,6 +207,19 @@ describe('rename', () => {
     expect((await rename(id, '   ')).status).toBe(400);
     expect((await rename(id, '../etc/passwd')).status).toBe(400);
     expect((await rename(id, 'run.exe')).status).toBe(422);
+  });
+
+  it('reads the extension the way the file lands on disk', async () => {
+    const { id } = await json(await upload({ entityType: 'company', entityId: companyId }));
+    // Windows drops trailing dots and spaces on save; invisible characters hide the real ending.
+    expect((await rename(id, 'run.exe.')).status).toBe(422);
+    expect((await rename(id, 'run.EXE. . .')).status).toBe(422);
+    expect((await rename(id, 'run.e\u200bxe')).status).toBe(422);
+    // A right-to-left override shows `photo\u202Egnp.exe` as `photoexe.png`.
+    expect((await rename(id, 'photo\u202Egnp.exe')).status).toBe(422);
+    expect((await rename(id, 'photo\u202Egnp.png')).status).toBe(422);
+    // Emoji keep their joiners.
+    expect((await rename(id, 'team \u{1F468}\u200D\u{1F469}.png')).status).toBe(200);
   });
 
   it('needs write access to the record the file hangs off', async () => {

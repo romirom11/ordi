@@ -16,6 +16,11 @@ published to [GitHub Releases](https://github.com/romirom11/ordi/releases).
   under it, while the stored bytes and every embedded link stay the same.
   Blocked extensions are refused on rename as on upload. New API
   `PATCH /attachments/:id` and MCP tool `rename_attachment`.
+- **The blocked-extension check reads names the way they land on disk**:
+  `run.exe.` (Windows drops the trailing dot on save), an extension split
+  by an invisible character, and names with right-to-left override or
+  other bidi controls are refused on upload, rename, mail intake and in
+  the MCP tools.
 
 ## v1.42.0
 

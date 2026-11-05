@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { getDb, schema, eq, and, desc } from '@ordi/db';
 import { ulid } from 'ulid';
-import { MAX_UPLOAD_BYTES, BLOCKED_FILE_EXTENSIONS, attachmentPatchSchema, type Permission } from '@ordi/shared';
+import { MAX_UPLOAD_BYTES, attachmentPatchSchema, isBlockedFilename, type Permission } from '@ordi/shared';
 import type { Actor, AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { assertProject } from '../../core/access';
@@ -84,8 +84,7 @@ export function attachmentsRoutes() {
     if (!(file instanceof File)) throw err.validation('file field required (multipart/form-data)');
     if (!file.name) throw err.validation('filename required');
     if (file.size < 1 || file.size > MAX_UPLOAD_BYTES) throw err.validation('File exceeds the size cap');
-    const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
-    if (BLOCKED_FILE_EXTENSIONS.includes(ext)) throw err.domain('File type not allowed');
+    if (isBlockedFilename(file.name)) throw err.domain('File type not allowed');
     const entityType = typeof form['entityType'] === 'string' && form['entityType'] ? form['entityType'] : null;
     const entityId = typeof form['entityId'] === 'string' && form['entityId'] ? form['entityId'] : null;
     if (entityType) {
@@ -135,8 +134,7 @@ export function attachmentsRoutes() {
       throw err.forbidden('Only the uploader can rename this file');
     }
     const { filename } = attachmentPatchSchema.parse(await c.req.json());
-    const ext = filename.includes('.') ? filename.split('.').pop()!.toLowerCase() : '';
-    if (BLOCKED_FILE_EXTENSIONS.includes(ext)) throw err.domain('File type not allowed');
+    if (isBlockedFilename(filename)) throw err.domain('File type not allowed');
     if (filename !== att.filename) {
       await db.update(schema.attachments).set({ filename }).where(eq(schema.attachments.id, att.id));
       await writeActivity(db, {

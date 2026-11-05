@@ -173,6 +173,27 @@ export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 export const SOFT_LOCK_TTL_SECONDS = 120;
 export const BLOCKED_FILE_EXTENSIONS = ['exe', 'bat', 'cmd', 'sh', 'msi', 'com', 'scr', 'js', 'jar', 'app'];
 
+/** Bidi controls: they make a name read differently from what it is (`gpj.exe` shown as `exe.jpg`). */
+const BIDI_CONTROLS = /[\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
+/** Invisible characters dropped before reading the extension (U+200D also joins emoji, so it is not refused). */
+const ZERO_WIDTH = /[\u200b-\u200d\ufeff]/g;
+
+/**
+ * The extension a file really ends up with: NFKC-normalised, invisible
+ * characters dropped and trailing dots and spaces cut, because Windows strips
+ * those on save – `run.exe.` lands on disk as `run.exe`.
+ */
+export function fileExtension(filename: string): string {
+  const name = filename.normalize('NFKC').replace(ZERO_WIDTH, '').replace(/[.\s]+$/u, '');
+  const dot = name.lastIndexOf('.');
+  return dot >= 0 ? name.slice(dot + 1).toLowerCase() : '';
+}
+
+/** One check for every way a file gets a name: upload, rename, mail intake, MCP. */
+export function isBlockedFilename(filename: string): boolean {
+  return BIDI_CONTROLS.test(filename) || BLOCKED_FILE_EXTENSIONS.includes(fileExtension(filename));
+}
+
 /** Workspace feature modules (PRD §14.7). Missing key or true = enabled. */
 export const MODULE_KEYS = ['crm', 'kb', 'time', 'finance', 'people', 'resourcing', 'dashboards'] as const;
 export type ModuleKey = (typeof MODULE_KEYS)[number];
