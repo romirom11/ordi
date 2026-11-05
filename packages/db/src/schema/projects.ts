@@ -294,18 +294,25 @@ export const intakeItems = pgTable('intake_items', {
   title: text('title').notNull(),
   description: text('description').notNull().default(''),
   attachments: jsonb('attachments').notNull().default([]),
+  /** Answers to the form's custom fields: [{ key, label, type, value }] (calc/intake). */
+  answers: jsonb('answers').notNull().default([]),
+  /** HMAC of the submitter's IP – public form submissions are rate-limited on it. */
+  submitterKey: text('submitter_key'),
   status: text('status').notNull().default('pending'),
   declineReason: text('decline_reason'),
   createdTaskId: text('created_task_id').references(() => tasks.id),
   ...timestamps,
 }, (t) => ({
   projectIdx: index('intake_project_idx').on(t.projectId, t.status),
+  submitterIdx: index('intake_submitter_idx').on(t.submitterKey, t.createdAt),
 }));
 
 export const intakeSettings = pgTable('intake_settings', {
   projectId: text('project_id').primaryKey().references(() => projects.id, { onDelete: 'cascade' }),
   formToken: text('form_token').notNull().unique(),
   formEnabled: boolean('form_enabled').notNull().default(false),
+  /** Fields, texts and look of the public form (calc/intake); null = the default form. */
+  formConfig: jsonb('form_config'),
   mailbox: jsonb('mailbox'),
   ...timestamps,
 });

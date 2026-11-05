@@ -131,8 +131,9 @@ and expense posts balanced entries, so the books actually balance.
   with audited access, recruiting with public careers pages.
 - **Resourcing and dashboards** – capacity planning, team availability and custom
   dashboard widgets.
-- **Requests come to you** – public intake forms, email intake over IMAP with
-  attachments, and `/ordi` in Slack; a project Intake tab triages each request into
+- **Requests come to you** – public intake forms with your own fields, files and
+  accent colour, embeddable on any site with one snippet; email intake over IMAP with
+  attachments, and `/ordi` in Slack. A project Intake tab triages each request into
   a task or a decline, mailing the requester either way.
 - **Slack that sets itself up** – paste one token and ordi creates the Slack app;
   project events post to a bound channel.

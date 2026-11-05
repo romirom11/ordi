@@ -100,6 +100,11 @@ const EN: Dict = {
   'intakeDeclined.heading': 'Request declined',
   'intakeDeclined.body': 'We reviewed your request “{title}” and will not be taking it forward.',
   'intake.reason': 'Reason: {reason}',
+  'intakeReceived.subject': 'We received your request',
+  'intakeReceived.heading': 'Request received',
+  'intakeReceived.body': 'Hi {name}, we received your request “{title}”.',
+  'intakeReceived.bodyNoName': 'We received your request “{title}”.',
+  'intakeReceived.next': 'The team will review it and get back to you.',
 
   'notify.cta': 'Open in ordi',
   'notify.someone': 'Someone',
@@ -198,6 +203,11 @@ const UK: Dict = {
   'intakeDeclined.heading': 'Заявку відхилено',
   'intakeDeclined.body': 'Ми розглянули вашу заявку «{title}» і не братимемо її в роботу.',
   'intake.reason': 'Причина: {reason}',
+  'intakeReceived.subject': 'Ми отримали вашу заявку',
+  'intakeReceived.heading': 'Заявку отримано',
+  'intakeReceived.body': 'Вітаємо, {name}! Ми отримали вашу заявку «{title}».',
+  'intakeReceived.bodyNoName': 'Ми отримали вашу заявку «{title}».',
+  'intakeReceived.next': 'Команда розгляне її та зв’яжеться з вами.',
 
   'notify.cta': 'Відкрити в ordi',
   'notify.someone': 'Хтось',

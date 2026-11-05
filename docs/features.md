@@ -23,7 +23,15 @@ version.
 
 ## In flight
 
-Nothing at the moment.
+- Configurable intake form (branch `feature/intake-form-builder-and-embed`): an
+  editor with a live preview for the texts, accent colour and fields (built-in
+  ones relabelled, reordered or hidden; custom fields of nine types whose answers
+  reach the triage card and the task description), file uploads, a receipt email,
+  a "New link" button that rotates the token, a rate limit counted in the
+  database, and an embed loader (`/api/v1/embed/intake.js`) that puts the form on
+  any site in a self-resizing iframe. Also fixes the public form, which sent
+  field names the API did not accept and so could not submit a request.
+  Migration `0044_intake_form_config`.
 
 ## Shipped
 

@@ -2,8 +2,9 @@ import { Hono } from 'hono';
 import { getDb, schema, eq, and, isNull, asc, desc, inArray, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import {
-  publicQuoteDecisionSchema, intakeSubmitSchema, careersApplySchema,
+  publicQuoteDecisionSchema, careersApplySchema,
   parseTaskRefs, computePaidState, type EventType,
+  MAX_UPLOAD_BYTES, normalizeIntakeFormConfig, visibleIntakeFields,
 } from '@ordi/shared';
 import type { AppEnv } from '../../context';
 import { env } from '../../env';
@@ -12,7 +13,9 @@ import { logger } from '../../lib/logger';
 import { emit } from '../../core/events';
 import { hmacSha256, encrypt, generateToken } from '../../lib/crypto';
 import { verifyFileToken } from '../../lib/file-tokens';
-import { getObject } from '../../lib/s3';
+import { getObject, isStorageConfigured } from '../../lib/s3';
+import { submitPublicIntake, type IntakeFile } from '../projects/intake';
+import { INTAKE_EMBED_SCRIPT } from './intake-embed';
 import { writeActivity } from '../../core/activity';
 import { verifyOAuthState, exchangeGithubCode, exchangeSlackCode } from '../integrations/oauth';
 import {
@@ -63,7 +66,8 @@ async function documentParties(companyId: string) {
  * Unknown or expired tokens return 404 – existence is never leaked.
  */
 
-// ── Simple in-memory rate limiter (per IP) for public form endpoints (PRD §8.6/§12.3). ──
+// ── Simple in-memory rate limiter (per IP) for the careers form (PRD §12.3). The intake ──
+// form counts its stored requests instead (projects/intake.ts), which survives restarts.
 const rateBuckets = new Map<string, number[]>();
 function rateLimitOk(key: string, limit = 5, windowMs = 60_000): boolean {
   const now = Date.now();
@@ -333,6 +337,11 @@ export function publicRoutes() {
   });
 
   // ── Intake form (PRD §8.6) ──
+  /**
+   * What the public page renders: the visible fields in order, the texts and
+   * accent the project configured, and the workspace's name and logo. Hidden
+   * fields never leave the server.
+   */
   app.get('/intake/:token', async (c) => {
     const { db } = getDb();
     const [settings] = await db.select().from(schema.intakeSettings)
@@ -341,17 +350,32 @@ export function publicRoutes() {
     const [project] = await db.select({ name: schema.projects.name }).from(schema.projects)
       .where(and(eq(schema.projects.id, settings.projectId), isNull(schema.projects.deletedAt)));
     if (!project) throw err.notFound();
+    const [ws] = await db.select({ name: schema.workspaceSettings.name, logo: schema.workspaceSettings.logo })
+      .from(schema.workspaceSettings).where(eq(schema.workspaceSettings.id, 'workspace'));
+    const config = normalizeIntakeFormConfig(settings.formConfig);
     return c.json({
       projectName: project.name,
-      fields: [
-        { name: 'requesterName', label: 'Your name', type: 'text', required: true },
-        { name: 'requesterEmail', label: 'Email', type: 'email', required: false },
-        { name: 'title', label: 'Subject', type: 'text', required: true },
-        { name: 'description', label: 'Details', type: 'textarea', required: false },
-      ],
+      workspaceName: ws?.name ?? null,
+      // Served by /branding/logo: a data: URI in settings, streamed as bytes.
+      logoUrl: ws?.logo?.startsWith('data:') ? '/api/v1/branding/logo' : null,
+      form: {
+        heading: config.heading,
+        intro: config.intro,
+        submitLabel: config.submitLabel,
+        successMessage: config.successMessage,
+        accentColor: config.accentColor,
+        fields: visibleIntakeFields(config).map(({ hidden: _hidden, ...field }) => field),
+        attachments: config.allowAttachments && isStorageConfigured()
+          ? { maxFiles: config.maxAttachments, maxBytes: MAX_UPLOAD_BYTES }
+          : null,
+      },
     });
   });
 
+  /**
+   * A submission: JSON (`{ values, honeypot }`), or multipart with the same
+   * JSON in a `payload` part and the files in `files` parts.
+   */
   app.post('/intake/:token', async (c) => {
     const { db } = getDb();
     const [settings] = await db.select().from(schema.intakeSettings)
@@ -363,22 +387,38 @@ export function publicRoutes() {
       .where(and(eq(schema.projects.id, settings.projectId), isNull(schema.projects.deletedAt)));
     if (!live) throw err.notFound();
 
-    const body = intakeSubmitSchema.parse(await c.req.json());
-    // Honeypot: bots fill the hidden field – silently accept, create nothing.
-    if (body.honeypot && body.honeypot.trim() !== '') return c.json({ ok: true });
-    if (!rateLimitOk(`intake:${clientIp(c)}`)) throw err.rateLimited();
+    let body: unknown;
+    const files: IntakeFile[] = [];
+    if ((c.req.header('content-type') ?? '').includes('multipart/form-data')) {
+      const form = await c.req.parseBody({ all: true });
+      try {
+        body = typeof form['payload'] === 'string' ? JSON.parse(form['payload']) : {};
+      } catch {
+        throw err.validation('payload must be JSON');
+      }
+      const parts = form['files'];
+      for (const part of Array.isArray(parts) ? parts : parts ? [parts] : []) {
+        if (!(part instanceof File)) continue;
+        files.push({ filename: part.name, mime: part.type, content: new Uint8Array(await part.arrayBuffer()) });
+      }
+    } else {
+      body = await c.req.json().catch(() => {
+        throw err.validation('Body must be JSON');
+      });
+    }
 
-    await db.insert(schema.intakeItems).values({
-      id: ulid(),
-      projectId: settings.projectId,
-      source: 'form',
-      requesterName: body.requesterName,
-      requesterEmail: body.requesterEmail ?? null,
-      title: body.title,
-      description: body.description,
-      status: 'pending',
-    });
+    await submitPublicIntake({ projectId: settings.projectId, formConfig: settings.formConfig, body, files, ip: clientIp(c) });
     return c.json({ ok: true });
+  });
+
+  /**
+   * The embed loader: pasted on any site next to a `data-ordi-intake`
+   * element, it puts the form there in an iframe that grows with its content.
+   */
+  app.get('/embed/intake.js', (c) => {
+    c.header('Content-Type', 'application/javascript; charset=utf-8');
+    c.header('Cache-Control', 'public, max-age=3600');
+    return c.body(INTAKE_EMBED_SCRIPT);
   });
 
   // ── Careers public page + application (PRD §12.3) ──

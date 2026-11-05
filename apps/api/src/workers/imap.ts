@@ -8,11 +8,10 @@ import { ImapFlow } from 'imapflow';
 import { simpleParser, type Attachment } from 'mailparser';
 import { getDb, schema, and, isNotNull } from '@ordi/db';
 import { ulid } from 'ulid';
-import { MAX_UPLOAD_BYTES, BLOCKED_FILE_EXTENSIONS } from '@ordi/shared';
 import { logger } from '../lib/logger';
 import { decrypt } from '../lib/crypto';
-import { putObject } from '../lib/s3';
 import { notInDeletedProject } from '../core/access';
+import { storeIntakeFiles } from '../domains/projects/intake';
 
 interface MailboxConfig {
   host: string;
@@ -29,41 +28,15 @@ const CONNECT_TIMEOUT_MS = 10_000;
 const MAX_MAIL_ATTACHMENTS = 10;
 
 /**
- * Store a mail's attachments (PRD §8.6: "вкладення переносяться") and return
- * the intake item's attachment manifest. Anything unstorable – oversized,
- * blocked extension, storage not configured – is skipped with a warning; the
- * item itself must still be created.
+ * A mail's attachments as intake files (PRD §8.6: attachments are carried
+ * over). Capped, so a runaway mail cannot turn into a runaway upload loop.
  */
-async function storeMailAttachments(itemId: string, attachments: Attachment[]): Promise<
-  Array<{ attachmentId: string; filename: string; size: number; mime: string }>
-> {
-  const { db } = getDb();
-  const stored: Array<{ attachmentId: string; filename: string; size: number; mime: string }> = [];
-  for (const att of attachments.slice(0, MAX_MAIL_ATTACHMENTS)) {
-    const filename = att.filename || 'attachment';
-    const size = att.content?.length ?? 0;
-    const ext = filename.split('.').pop()?.toLowerCase() ?? '';
-    if (!att.content || size < 1 || size > MAX_UPLOAD_BYTES || BLOCKED_FILE_EXTENSIONS.includes(ext)) {
-      logger.warn({ itemId, filename, size }, 'intake mail attachment skipped');
-      continue;
-    }
-    const mime = att.contentType || 'application/octet-stream';
-    const key = `uploads/${ulid()}/${filename}`;
-    const ok = await putObject(key, new Uint8Array(att.content), mime);
-    if (!ok) {
-      logger.warn({ itemId, filename }, 'intake mail attachment skipped: storage not configured');
-      continue;
-    }
-    const id = ulid();
-    // Bound to the intake item from the first byte – access to the file goes
-    // through the item's project (attachments.routes).
-    await db.insert(schema.attachments).values({
-      id, entityType: 'intake_item', entityId: itemId,
-      fileKey: key, filename, size, mime, createdBy: null,
-    });
-    stored.push({ attachmentId: id, filename, size, mime });
-  }
-  return stored;
+function mailFiles(attachments: Attachment[]) {
+  return attachments.slice(0, MAX_MAIL_ATTACHMENTS).map((att) => ({
+    filename: att.filename || 'attachment',
+    mime: att.contentType || 'application/octet-stream',
+    content: att.content ? new Uint8Array(att.content) : new Uint8Array(),
+  }));
 }
 
 /** Mailbox passwords are stored encrypted; rows written before that are plain. */
@@ -101,7 +74,7 @@ async function pollMailbox(projectId: string, cfg: MailboxConfig): Promise<numbe
         const parsed = await simpleParser(msg.source);
         const from = parsed.from?.value?.[0];
         const itemId = ulid();
-        const stored = await storeMailAttachments(itemId, parsed.attachments ?? []);
+        const stored = await storeIntakeFiles(itemId, mailFiles(parsed.attachments ?? []));
         await db.insert(schema.intakeItems).values({
           id: itemId,
           projectId,

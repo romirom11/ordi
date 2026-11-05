@@ -65,4 +65,18 @@ describe('SPA served by the API', () => {
     const mcp = await app.request('/api/v1/mcp', { method: 'POST', body: '{}' });
     expect(mcp.status).toBe(401);
   });
+
+  it('serves the embedded intake form page and its loader, not the SPA fallback for the script', async () => {
+    // What an embedding site's iframe requests: a navigation, so the page.
+    const page = await app.request('/intake/some-token?embed=1', { headers: { accept: 'text/html,application/xhtml+xml' } });
+    expect(await page.text()).toContain('<div id="root">');
+
+    // The loader looks like a root-level file; the API route must win over static serving.
+    for (const p of ['/embed/intake.js', '/api/v1/embed/intake.js']) {
+      const script = await app.request(p);
+      expect(script.status).toBe(200);
+      expect(script.headers.get('content-type')).toContain('javascript');
+      expect(await script.text()).toContain('data-ordi-intake');
+    }
+  });
 });

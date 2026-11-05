@@ -208,7 +208,7 @@ function ProjectSettings({ projectId, project, onDeleted }: {
           <section>
             <CustomFieldsPanel projectId={project.id} />
           </section>
-          <IntakeSettingsSection projectId={project.id} />
+          <IntakeSettingsSection projectId={project.id} projectName={project.name} />
           <ProjectAutomationSection projectId={project.id} />
         </>
       )}

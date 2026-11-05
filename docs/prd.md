@@ -418,10 +418,12 @@ Rich-text notes on a company/contact/lead/deal, which can be pinned. Activity: a
 
 Reference: Plane Intake. A channel for the structured intake of requests from clients and team members who have no direct access to the project:
 
-- **Sources:** a public form `/intake/{form_token}` (a per-project token, enabled in the project settings: title/description/email/attachments fields, branding from the workspace business details) and an optional mailbox (IMAP polling by a worker: email → intake request, attachments carried over).
+- **Sources:** a public form `/intake/{form_token}` (a per-project token, enabled in the project settings, branding from the workspace business details), an optional mailbox (IMAP polling by a worker: email → intake request, attachments carried over) and the `/ordi` Slack command.
+- **Form config** (`intake_settings.form_config`, editor with a live preview in the project settings): heading, introduction, button label, message after sending, accent colour; the built-in fields (name, email, title → task title, details → task description) can be relabelled, reordered, made required or hidden (the title is always shown and required); up to 30 custom fields of the types short text, long text, email, phone, link, number, date, choice and checkbox. Custom answers are stored on the request (`intake_items.answers`, with the label they were asked under), shown on the triage card and written into the task description on accept. File uploads are optional per form (up to 10 files, the upload size cap each, only when object storage is configured).
+- **Embedding:** a loader script `/api/v1/embed/intake.js` turns `<div data-ordi-intake="{form_token}">` on any site into an iframe of `/intake/{form_token}?embed=1` that resizes to the form's height via postMessage (options: `data-theme` light/dark/auto, `data-lang` en/uk; a bubbling `ordi:intake-submitted` event on success); a plain iframe works too. Embedded, the page drops its backdrop and branding row and defaults to the light theme.
 - **Triage:** the Intake queue in the project (visible to project admins/members): pending requests with a preview; actions: Accept (opens a pre-filled task creation modal: type, status, assignee; the request gets created_task_id) or Decline (with a reason; if the requester's email is known: an optional reply email from a template).
-- A requester with an email receives an acknowledgement of receipt and, optionally, a notification of acceptance (without details of the internal task).
-- Anti-abuse: rate limit on the form, a honeypot field, token regeneration.
+- A requester with an email receives an acknowledgement of receipt (queued, switchable per form, at most 3 per address per hour) and a notification of acceptance (without details of the internal task).
+- Anti-abuse: a rate limit counted on stored requests per submitter (an HMAC of the IP, 5 a minute and 30 an hour, so it survives restarts and holds across instances), a honeypot field, token regeneration (the old link and every embed stop at once).
 
 ### 8.7. Task templates and recurring tasks
 
@@ -989,7 +991,7 @@ Sources studied: docs.plane.so (core concepts, work items, nested pages, dashboa
 | Cycles: burndown, carrying over unfinished items, active cycle | ✅ | 8.4 |
 | Cycle velocity comparison | ❌ | agency cycles are irregular; snapshots exist, the metric can be added as a dashboard widget |
 | Modules / Epics / Initiatives / Milestones / Releases / Teamspaces | ❌ | section 22: levels above project+cycle |
-| Intake: form, email capture, accept/decline triage | ✅ | 8.6 |
+| Intake: configurable form, embedding, email capture, accept/decline triage | ✅ | 8.6 |
 | Work item templates, recurring work items | ✅ | 8.7 |
 | Pages/Wiki: nested pages, versions with diff, locks, page-level visibility | ✅ | 9.3 |
 | Inline comments in the page text | 🔧 | comments as a thread below the page; we do not do inline anchors |
