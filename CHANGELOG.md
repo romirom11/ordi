@@ -5,6 +5,15 @@ writes this file from the titles of the merged PRs, and each section is also the
 body of its [GitHub release](https://github.com/romirom11/ordi/releases). The
 hand-written notes of earlier versions are in [`docs/releases`](docs/releases).
 
+## [1.44.0](https://github.com/romirom11/ordi/compare/v1.43.0...v1.44.0) (2026-11-06)
+
+
+### Features
+
+* After an update, a "What's new" row in the sidebar lists what changed ([#161](https://github.com/romirom11/ordi/issues/161)) ([04c3ae9](https://github.com/romirom11/ordi/commit/04c3ae900598b688657210adec86bd08c56f5c60))
+* Project secrets can come from Doppler ([#162](https://github.com/romirom11/ordi/issues/162)) ([4e1cb18](https://github.com/romirom11/ordi/commit/4e1cb18e210473c956db59007ec2cf82ab50eac1))
+* The add-secret dialog is easier to read and fill in ([#163](https://github.com/romirom11/ordi/issues/163)) ([78b5864](https://github.com/romirom11/ordi/commit/78b5864bede5467d85854b53c792e57c8b13b1a6))
+
 ## v1.43.0
 
 - **Breaking for installs on the all-zero encryption key**: in production the
