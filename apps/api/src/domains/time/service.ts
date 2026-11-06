@@ -107,28 +107,98 @@ async function taskProject(actor: Actor, taskId: string): Promise<{ projectId: s
 
 // ── Entries ──
 
+/**
+ * An entry with what it was logged against: a bare row only knows ids, so a
+ * list of them could show nothing but the note.
+ */
+const te = schema.timeEntries;
+const entryColumns = {
+  id: te.id, taskId: te.taskId, userId: te.userId, projectId: te.projectId,
+  startedAt: te.startedAt, durationSeconds: te.durationSeconds, note: te.note,
+  billable: te.billable, hourlyRate: te.hourlyRate, costRate: te.costRate,
+  invoiceItemId: te.invoiceItemId, createdAt: te.createdAt, updatedAt: te.updatedAt, version: te.version,
+  taskNumber: schema.tasks.number, taskTitle: schema.tasks.title,
+  projectKey: schema.projects.key, projectName: schema.projects.name,
+  userName: schema.users.name,
+};
+
+function selectEntries() {
+  const { db } = getDb();
+  return db.select(entryColumns).from(te)
+    .innerJoin(schema.tasks, eq(schema.tasks.id, te.taskId))
+    .innerJoin(schema.projects, eq(schema.projects.id, te.projectId))
+    .innerJoin(schema.users, eq(schema.users.id, te.userId));
+}
+
+type EntryRow = Awaited<ReturnType<ReturnType<typeof selectEntries>['where']>>[number];
+
+function withRef(row: EntryRow) {
+  return { ...row, taskRef: `${row.projectKey}-${row.taskNumber}` };
+}
+
 export interface EntryFilters {
   from?: string;
   to?: string;
   projectId?: string;
   userId?: string;
   taskId?: string;
+  /** A company id, or `internal` for projects with no client. */
+  companyId?: string;
   limit: number;
 }
 
 export async function listEntries(actor: Actor, filters: EntryFilters, canReadAll: boolean) {
-  const { db } = getDb();
   const scopedUserId = canReadAll ? filters.userId : actor.userId;
   const to = upperBound(filters.to);
-  const rows = await db.select().from(schema.timeEntries).where(and(
-    scopedUserId ? eq(schema.timeEntries.userId, scopedUserId) : undefined,
-    filters.projectId ? eq(schema.timeEntries.projectId, filters.projectId) : undefined,
-    filters.taskId ? eq(schema.timeEntries.taskId, filters.taskId) : undefined,
-    notInDeletedProject(schema.timeEntries.projectId),
-    filters.from ? gte(schema.timeEntries.startedAt, new Date(filters.from)) : undefined,
-    to ? lte(schema.timeEntries.startedAt, new Date(to)) : undefined,
-  )).orderBy(desc(schema.timeEntries.startedAt)).limit(filters.limit + 1);
-  return rows;
+  const rows = await selectEntries().where(and(
+    scopedUserId ? eq(te.userId, scopedUserId) : undefined,
+    filters.projectId ? eq(te.projectId, filters.projectId) : undefined,
+    filters.taskId ? eq(te.taskId, filters.taskId) : undefined,
+    filters.companyId === 'internal' ? isNull(schema.projects.companyId)
+      : filters.companyId ? eq(schema.projects.companyId, filters.companyId) : undefined,
+    isNull(schema.projects.deletedAt),
+    filters.from ? gte(te.startedAt, new Date(filters.from)) : undefined,
+    to ? lte(te.startedAt, new Date(to)) : undefined,
+  )).orderBy(desc(te.startedAt), desc(te.id)).limit(filters.limit + 1);
+  return rows.map(withRef);
+}
+
+/** One entry with its task and project, for the entry panel. */
+export async function getEntryDetail(actor: Actor, id: string, canReadAll: boolean) {
+  const [row] = await selectEntries().where(and(eq(te.id, id), isNull(schema.projects.deletedAt)));
+  // Someone else's entry is as invisible as a missing one without time.read_all.
+  if (!row || (row.userId !== actor.userId && !canReadAll)) throw err.notFound('Time entry not found');
+  return withRef(row);
+}
+
+/**
+ * Time logged on a task: the total and the viewer's own share for anyone who
+ * can see the task, the split by person and everyone's entries only with
+ * time.read_all (the same line /time/entries draws).
+ */
+export async function taskTime(actor: Actor, taskId: string, canReadAll: boolean) {
+  const { db } = getDb();
+  await taskProject(actor, taskId);
+  const people = await db.select({
+    userId: te.userId, name: schema.users.name,
+    seconds: sql<number>`coalesce(sum(${te.durationSeconds}), 0)::int`,
+  }).from(te)
+    .innerJoin(schema.users, eq(schema.users.id, te.userId))
+    .where(eq(te.taskId, taskId))
+    .groupBy(te.userId, schema.users.name)
+    .orderBy(desc(sql`sum(${te.durationSeconds})`));
+  const totalSeconds = people.reduce((acc, p) => acc + Number(p.seconds), 0);
+  const mySeconds = Number(people.find((p) => p.userId === actor.userId)?.seconds ?? 0);
+  const entries = await selectEntries().where(and(
+    eq(te.taskId, taskId),
+    canReadAll ? undefined : eq(te.userId, actor.userId),
+  )).orderBy(desc(te.startedAt), desc(te.id)).limit(50);
+  return {
+    totalSeconds,
+    mySeconds,
+    people: canReadAll ? people.map((p) => ({ ...p, seconds: Number(p.seconds) })) : null,
+    entries: entries.map(withRef),
+  };
 }
 
 export async function createEntry(actor: Actor, input: any): Promise<string> {
@@ -338,31 +408,54 @@ export async function deleteRate(actor: Actor, id: string): Promise<void> {
 
 // ── Reports (raw SQL aggregates, PRD §10.2, §11.10) ──
 
-function whereFragments(f: { from?: string; to?: string; projectId?: string; billable: string }): SQL[] {
+interface ReportFilters { from?: string; to?: string; projectId?: string; userId?: string; taskId?: string; companyId?: string; billable: string }
+
+function whereFragments(f: ReportFilters): SQL[] {
   // Time of a deleted project leaves the reports with it (and returns on restore).
   const conds: SQL[] = [notInDeletedProject(sql`te.project_id`)];
   if (f.from) conds.push(sql`te.started_at >= ${f.from}`);
   const to = upperBound(f.to);
   if (to) conds.push(sql`te.started_at <= ${to}`);
   if (f.projectId) conds.push(sql`te.project_id = ${f.projectId}`);
+  if (f.userId) conds.push(sql`te.user_id = ${f.userId}`);
+  if (f.taskId) conds.push(sql`te.task_id = ${f.taskId}`);
+  // `internal` is the bucket the company grouping gives projects with no client.
+  if (f.companyId === 'internal') conds.push(sql`te.project_id in (select id from projects where company_id is null)`);
+  else if (f.companyId) conds.push(sql`te.project_id in (select id from projects where company_id = ${f.companyId})`);
   if (f.billable === 'billable') conds.push(sql`te.billable = true`);
   if (f.billable === 'nonbillable') conds.push(sql`te.billable = false`);
   return conds;
 }
 
-export async function report(params: { from?: string; to?: string; groupBy: string; billable: string; projectId?: string }) {
+export async function report(params: ReportFilters & { groupBy: string }) {
   const { db } = getDb();
   const conds = whereFragments(params);
   const whereSql = conds.length ? sql`where ${sql.join(conds, sql` and `)}` : sql``;
   const wsCurrency = await workspaceDefaultCurrency(db);
 
   let rows: any[];
-  if (params.groupBy === 'user') {
+  if (params.groupBy === 'task') {
+    rows = await db.execute(sql`
+      select t.id as key, p.key || '-' || t.number as ref, t.title as label, p.id as project_id,
+        coalesce(c.default_currency, ${wsCurrency}) as currency,
+        coalesce(sum(te.duration_seconds),0) as secs,
+        coalesce(sum(te.duration_seconds) filter (where te.billable),0) as billable_secs,
+        coalesce(sum((te.duration_seconds/3600.0) * te.hourly_rate),0) as amount,
+        coalesce(sum((te.duration_seconds/3600.0) * te.hourly_rate) filter (where te.billable),0) as billable_amount
+      from time_entries te
+      join tasks t on t.id = te.task_id
+      join projects p on p.id = te.project_id
+      left join companies c on c.id = p.company_id
+      ${whereSql}
+      group by t.id, p.key, t.number, t.title, p.id, c.default_currency
+      order by secs desc`) as any[];
+  } else if (params.groupBy === 'user') {
     rows = await db.execute(sql`
       select u.id as key, u.name as label, null::text as currency,
         coalesce(sum(te.duration_seconds),0) as secs,
         coalesce(sum(te.duration_seconds) filter (where te.billable),0) as billable_secs,
-        coalesce(sum((te.duration_seconds/3600.0) * te.hourly_rate),0) as amount
+        coalesce(sum((te.duration_seconds/3600.0) * te.hourly_rate),0) as amount,
+        coalesce(sum((te.duration_seconds/3600.0) * te.hourly_rate) filter (where te.billable),0) as billable_amount
       from time_entries te
       join users u on u.id = te.user_id
       ${whereSql}
@@ -374,7 +467,8 @@ export async function report(params: { from?: string; to?: string; groupBy: stri
         coalesce(c.default_currency, ${wsCurrency}) as currency,
         coalesce(sum(te.duration_seconds),0) as secs,
         coalesce(sum(te.duration_seconds) filter (where te.billable),0) as billable_secs,
-        coalesce(sum((te.duration_seconds/3600.0) * te.hourly_rate),0) as amount
+        coalesce(sum((te.duration_seconds/3600.0) * te.hourly_rate),0) as amount,
+        coalesce(sum((te.duration_seconds/3600.0) * te.hourly_rate) filter (where te.billable),0) as billable_amount
       from time_entries te
       join projects p on p.id = te.project_id
       left join companies c on c.id = p.company_id
@@ -387,7 +481,8 @@ export async function report(params: { from?: string; to?: string; groupBy: stri
         coalesce(c.default_currency, ${wsCurrency}) as currency,
         coalesce(sum(te.duration_seconds),0) as secs,
         coalesce(sum(te.duration_seconds) filter (where te.billable),0) as billable_secs,
-        coalesce(sum((te.duration_seconds/3600.0) * te.hourly_rate),0) as amount
+        coalesce(sum((te.duration_seconds/3600.0) * te.hourly_rate),0) as amount,
+        coalesce(sum((te.duration_seconds/3600.0) * te.hourly_rate) filter (where te.billable),0) as billable_amount
       from time_entries te
       join projects p on p.id = te.project_id
       left join companies c on c.id = p.company_id
@@ -399,9 +494,11 @@ export async function report(params: { from?: string; to?: string; groupBy: stri
   return rows.map((r) => ({
     key: r.key,
     label: r.label,
+    ...(r.ref ? { ref: r.ref, projectId: r.project_id } : {}),
     hours: round2(Number(r.secs) / 3600),
     billableHours: round2(Number(r.billable_secs) / 3600),
     amount: round2(Number(r.amount)),
+    billableAmount: round2(Number(r.billable_amount)),
     currency: r.currency ?? wsCurrency,
   }));
 }
@@ -442,17 +539,26 @@ export async function unbilled(params: { companyId?: string; from?: string; to?:
   }));
 }
 
-export async function myWeek(actor: Actor, weekStart: string) {
-  const { db } = getDb();
-  const start = new Date(`${weekStart.slice(0, 10)}T00:00:00.000Z`);
-  const end = new Date(start.getTime());
+/**
+ * The user's week. `bounds` are the instants the week starts and ends in the
+ * viewer's own time zone: a UTC week put Monday 01:00 in Kyiv into the week
+ * before. Without them (older clients) the week runs midnight to midnight UTC.
+ */
+export async function myWeek(actor: Actor, weekStart: string, bounds?: { from?: string; to?: string }) {
+  let start = new Date(`${weekStart.slice(0, 10)}T00:00:00.000Z`);
+  let end = new Date(start.getTime());
   end.setUTCDate(end.getUTCDate() + 7);
-  const rows = await db.select().from(schema.timeEntries).where(and(
-    eq(schema.timeEntries.userId, actor.userId),
-    gte(schema.timeEntries.startedAt, start),
-    lt(schema.timeEntries.startedAt, end),
-    notInDeletedProject(schema.timeEntries.projectId),
-  )).orderBy(schema.timeEntries.startedAt);
+  const from = bounds?.from ? new Date(bounds.from) : null;
+  const to = bounds?.to ? new Date(bounds.to) : null;
+  const span = from && to ? to.getTime() - from.getTime() : NaN;
+  // A week across a DST change is 167–169 hours; anything else is not a week.
+  if (Number.isFinite(span) && span > 0 && span <= 8 * 86_400_000) { start = from!; end = to!; }
+  const rows = (await selectEntries().where(and(
+    eq(te.userId, actor.userId),
+    gte(te.startedAt, start),
+    lt(te.startedAt, end),
+    isNull(schema.projects.deletedAt),
+  )).orderBy(te.startedAt, te.id)).map(withRef);
 
   const byDay = new Map<string, { date: string; totalSeconds: number; billableSeconds: number; entries: any[] }>();
   for (const e of rows) {
@@ -463,7 +569,7 @@ export async function myWeek(actor: Actor, weekStart: string) {
     if (e.billable) bucket.billableSeconds += e.durationSeconds;
     bucket.entries.push(e);
   }
-  return { weekStart: start.toISOString().slice(0, 10), days: [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date)) };
+  return { weekStart: weekStart.slice(0, 10), days: [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date)) };
 }
 
 function round2(n: number): number {

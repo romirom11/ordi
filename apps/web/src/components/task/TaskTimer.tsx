@@ -51,6 +51,9 @@ export function TaskTimer({ taskId }: { taskId: string }) {
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['timer'] });
     qc.invalidateQueries({ queryKey: ['time'] });
+    // Starting here stops a timer running elsewhere, which logs its time.
+    qc.invalidateQueries({ queryKey: ['taskTime'] });
+    qc.invalidateQueries({ queryKey: ['myWeek'] });
     qc.invalidateQueries({ queryKey: ['task', taskId] });
   };
 

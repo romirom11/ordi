@@ -1,18 +1,22 @@
-import { useState } from 'react';
+import { useState, type MouseEvent, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, qs, ApiError } from '../lib/api';
 import { useCan } from '../lib/auth';
+import { useOpen } from '../lib/router';
 import {
-  Button, IconButton, Input, Textarea, Card, PageHeader, PageBody, Breadcrumbs, EmptyState, Skeleton,
+  Avatar, Button, IconButton, Textarea, Card, PageHeader, PageBody, Breadcrumbs, EmptyState, Skeleton,
   SegmentedControl, Select, Reveal, fmtMoney, appLocale, cn,
 } from '../components/ui';
-import { Dialog, toast } from '../components/overlays';
+import { Dialog, SidePanel, toast } from '../components/overlays';
 import { SortHeader, sortRows, useTableSort } from '../components/tableSort';
-import { ChevronLeft, ChevronRight, Plus, Play, Square, Clock, Timer } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Play, Square, Clock, Timer, BarChart3 } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
 import { usePersistedState, oneOfPref } from '../lib/prefs';
-import { DateField } from '../components/DatePicker';
 import { useActiveTimer, useStopTimer, useTimerElapsed } from '../lib/timer';
+import {
+  EntryListSkeleton, LogTimeDialog, TaskSelect, TimeEntryPanel, TimeEntryRow, entryDay, fmtDur, invalidateTime, isoDay,
+  type TimeEntry,
+} from '../components/time/TimeEntries';
 
 extendDict({
   en: {
@@ -34,6 +38,22 @@ extendDict({
     'time.pickTask': 'Pick a task…',
     'time.noMyTasks': 'No tasks assigned to you yet – create or pick up a task first.',
     'time.durationRequired': 'Enter a duration in minutes.',
+    'time.groupTask': 'Task',
+    'time.billableHours': 'Billable h',
+    'time.amount': 'Billable amount',
+    'time.period.week': 'This week',
+    'time.period.lastWeek': 'Last week',
+    'time.period.month': 'This month',
+    'time.period.lastMonth': 'Last month',
+    'time.period.year': 'This year',
+    'time.period.all': 'All time',
+    'time.byTask': 'By task',
+    'time.byPerson': 'By person',
+    'time.byProject': 'By project',
+    'time.entries': 'Entries',
+    'time.latestEntries': 'Latest {n} entries',
+    'time.reportTotal': 'Total',
+    'time.openDetails': 'Open details',
   },
   uk: {
     'time.timerIdle': 'Таймер не запущено',
@@ -54,61 +74,30 @@ extendDict({
     'time.pickTask': 'Оберіть задачу…',
     'time.noMyTasks': 'На вас ще немає задач – спершу створіть або візьміть задачу.',
     'time.durationRequired': 'Вкажіть тривалість у хвилинах.',
+    'time.groupTask': 'Задача',
+    'time.billableHours': 'Оплачувані год',
+    'time.amount': 'Сума до оплати',
+    'time.period.week': 'Цей тиждень',
+    'time.period.lastWeek': 'Минулий тиждень',
+    'time.period.month': 'Цей місяць',
+    'time.period.lastMonth': 'Минулий місяць',
+    'time.period.year': 'Цей рік',
+    'time.period.all': 'Весь час',
+    'time.byTask': 'За задачами',
+    'time.byPerson': 'За людьми',
+    'time.byProject': 'За проєктами',
+    'time.entries': 'Записи',
+    'time.latestEntries': 'Останні {n} записів',
+    'time.reportTotal': 'Разом',
+    'time.openDetails': 'Відкрити деталі',
   },
 });
 
-interface TimeEntry {
-  id: string;
-  taskId?: string | null;
-  taskRef?: string | null;
-  projectName?: string | null;
-  durationSeconds: number | string;
-  note?: string | null;
-  startedAt?: string | null;
-  date?: string | null;
-}
 interface DayGroup { date: string; entries: TimeEntry[] }
-interface MyWeek { weekStart?: string; days?: DayGroup[]; entries?: TimeEntry[]; totalSeconds?: number | string }
-interface ReportRow { key?: string; label?: string; name?: string; hours?: number | string; seconds?: number | string; billableAmount?: number | string; currency?: string }
-interface TaskLite { id: string; ref?: string | null; title?: string | null }
-
-interface MyTaskLite { id: string; title: string; ref?: string | null; key?: string | null; number?: number | null }
-interface MeTasksBuckets { overdue?: MyTaskLite[]; today?: MyTaskLite[]; week?: MyTaskLite[]; later?: MyTaskLite[] }
-
-/** The user's open tasks, flattened for the timer/entry task pickers. */
-function useMyTaskOptions(enabled: boolean): { id: string; label: string }[] {
-  const q = useQuery({
-    queryKey: ['me', 'tasks'],
-    queryFn: () => api.get<MeTasksBuckets>('/me/tasks'),
-    enabled,
-    staleTime: 30_000,
-  });
-  const seen = new Set<string>();
-  const out: { id: string; label: string }[] = [];
-  for (const bucket of [q.data?.overdue, q.data?.today, q.data?.week, q.data?.later]) {
-    for (const task of bucket ?? []) {
-      if (seen.has(task.id)) continue;
-      seen.add(task.id);
-      const ref = task.ref ?? (task.key && task.number != null ? `${task.key}-${task.number}` : '');
-      out.push({ id: task.id, label: ref ? `${ref} · ${task.title}` : task.title });
-    }
-  }
-  return out;
-}
-
-/** Task dropdown for time tracking – replaces the old raw "task id" input. */
-function TaskSelect({ value, onChange, open }: { value: string; onChange: (id: string) => void; open: boolean }) {
-  const t = useT();
-  const options = useMyTaskOptions(open);
-  if (open && options.length === 0) {
-    return <p className="rounded-md border border-dashed border-border px-2.5 py-2 text-xs text-muted-foreground">{t('time.noMyTasks')}</p>;
-  }
-  return (
-    <Select value={value} onChange={(e) => onChange(e.target.value)} className="w-full">
-      <option value="">{t('time.pickTask')}</option>
-      {options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-    </Select>
-  );
+interface MyWeek { weekStart?: string; days?: DayGroup[] }
+interface ReportRow {
+  key: string; label?: string | null; ref?: string; projectId?: string;
+  hours?: number; billableHours?: number; amount?: number; billableAmount?: number; currency?: string;
 }
 
 function mondayOf(d: Date): Date {
@@ -117,14 +106,6 @@ function mondayOf(d: Date): Date {
   date.setDate(date.getDate() - dow);
   date.setHours(0, 0, 0, 0);
   return date;
-}
-function isoDate(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-function fmtDur(sec: number): string {
-  const h = Math.floor(sec / 3600);
-  const m = Math.round((sec % 3600) / 60);
-  return h > 0 ? `${h}h ${m > 0 ? m + 'm' : ''}`.trim() : `${m}m`;
 }
 function fmtClock(sec: number): string {
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
@@ -135,15 +116,10 @@ function weekDates(weekStart: string): string[] {
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(base);
     d.setDate(d.getDate() + i);
-    return isoDate(d);
+    return isoDay(d);
   });
 }
-function entryDate(e: TimeEntry): string {
-  return (e.date ?? e.startedAt ?? '').slice(0, 10);
-}
 function dayLabel(iso: string): string {
-  const today = isoDate(new Date());
-  if (iso === today) return '';
   return new Date(iso + 'T00:00:00').toLocaleDateString(appLocale(), { weekday: 'long', month: 'short', day: 'numeric' });
 }
 /** Human, locale-aware week range, e.g. "20 Jul – 26 Jul" / "20 лип – 26 лип". */
@@ -184,9 +160,11 @@ export function TimePage() {
 
 /* ───────────────────────── Timer hero ───────────────────────── */
 
-function TimerHero({ onChange }: { onChange: () => void }) {
+function TimerHero() {
   const t = useT();
   const can = useCan();
+  const qc = useQueryClient();
+  const open = useOpen();
   const [showStart, setShowStart] = useState(false);
   const [taskId, setTaskId] = useState('');
   const [note, setNote] = useState('');
@@ -196,9 +174,10 @@ function TimerHero({ onChange }: { onChange: () => void }) {
   const timer = timerQ.data ?? null;
   const elapsed = useTimerElapsed(timer, timerQ.dataUpdatedAt);
 
+  // The timer names its task, not its project: one lookup finds where it lives.
   const taskQ = useQuery({
     queryKey: ['task', 'ref', timer?.taskId],
-    queryFn: () => api.get<TaskLite>(`/tasks/${timer!.taskId}`),
+    queryFn: () => api.get<{ id: string; projectId: string }>(`/tasks/${timer!.taskId}`),
     enabled: !!timer?.taskId,
     staleTime: 60_000,
   });
@@ -210,14 +189,14 @@ function TimerHero({ onChange }: { onChange: () => void }) {
       setTaskId('');
       setNote('');
       toast(t('time.timerStarted'));
-      onChange();
+      invalidateTime(qc);
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('time.timerStartFailed')),
   });
   const stop = useStopTimer();
 
   const canTrack = can('time.track');
-  const ref = taskQ.data?.ref ?? taskQ.data?.title ?? timer?.taskId;
+  const taskHref = taskQ.data ? `/projects/${taskQ.data.projectId}/tasks/${taskQ.data.id}` : null;
 
   return (
     <>
@@ -232,7 +211,16 @@ function TimerHero({ onChange }: { onChange: () => void }) {
           <div className="mt-1.5 truncate text-[13px] text-muted-foreground">
             {timer ? (
               <>
-                <span className="font-medium text-foreground">{ref}</span>
+                <button
+                  type="button"
+                  disabled={!taskHref}
+                  onClick={(e) => taskHref && open(taskHref, e)}
+                  onAuxClick={(e) => taskHref && open(taskHref, e)}
+                  className="font-medium text-foreground underline-offset-2 hover:underline disabled:no-underline"
+                >
+                  {timer.ref && <span className="font-mono text-muted-foreground">{timer.ref} </span>}
+                  {timer.title ?? timer.taskId}
+                </button>
                 {timer.note && <span> · {timer.note}</span>}
               </>
             ) : timerQ.isLoading ? t('common.loading') : timerQ.isError ? t('time.timerUnavailable', 'Could not check the timer. Retry') : t('time.timerIdle')}
@@ -240,7 +228,7 @@ function TimerHero({ onChange }: { onChange: () => void }) {
         </div>
         {canTrack && (
           timer ? (
-            <Button variant="destructive" size="sm" onClick={() => stop.mutate(timer, { onSuccess: onChange })} disabled={stop.isPending}>
+            <Button variant="destructive" size="sm" onClick={() => stop.mutate(timer)} disabled={stop.isPending}>
               <Square size={13} /> {t('time.stopTimer')}
             </Button>
           ) : (
@@ -285,76 +273,87 @@ function TimerHero({ onChange }: { onChange: () => void }) {
 
 function MyWeekView() {
   const t = useT();
-  const qc = useQueryClient();
-  const [weekStart, setWeekStart] = useState(() => isoDate(mondayOf(new Date())));
+  const [weekStart, setWeekStart] = useState(() => isoDay(mondayOf(new Date())));
   const week = useQuery({
     queryKey: ['myWeek', weekStart],
-    queryFn: () => api.get<MyWeek>('/time/my-week' + qs({ weekStart })),
+    queryFn: () => {
+      // The week runs Monday to Monday in the viewer's own time zone.
+      const from = new Date(weekStart + 'T00:00:00');
+      const to = new Date(from);
+      to.setDate(to.getDate() + 7);
+      return api.get<MyWeek>('/time/my-week' + qs({ weekStart, from: from.toISOString(), to: to.toISOString() }));
+    },
   });
-
-  const invalidateTime = () => {
-    qc.invalidateQueries({ queryKey: ['myWeek'] });
-    qc.invalidateQueries({ queryKey: ['timer'] });
-  };
 
   const [showAdd, setShowAdd] = useState(false);
-  const [addError, setAddError] = useState<string | null>(null);
-  const [form, setForm] = useState({ taskId: '', date: weekStart, minutes: '', note: '' });
-  const addEntry = useMutation({
-    mutationFn: () =>
-      api.post('/time/entries', {
-        taskId: form.taskId,
-        date: form.date,
-        startedAt: form.date,
-        durationSeconds: Math.round(Number(form.minutes) * 60),
-        note: form.note,
-      }),
-    onSuccess: () => {
-      setShowAdd(false);
-      setForm({ taskId: '', date: weekStart, minutes: '', note: '' });
-      toast(t('common.saved'));
-      invalidateTime();
-    },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('time.addEntryFailed')),
-  });
+  const [openEntry, setOpenEntry] = useState<TimeEntry | null>(null);
 
   const dates = weekDates(weekStart);
-  const rawEntries = week.data?.days ? week.data.days.flatMap((d) => d.entries.map((e) => ({ ...e, date: e.date ?? d.date }))) : week.data?.entries ?? [];
+  const today = isoDay(new Date());
+  const rawEntries = (week.data?.days ?? []).flatMap((d) => d.entries);
   const byDate = new Map<string, TimeEntry[]>();
   for (const d of dates) byDate.set(d, []);
-  for (const e of rawEntries) {
-    const key = entryDate(e);
-    const bucket = byDate.get(key);
-    if (bucket) bucket.push(e);
-  }
-  const weekTotal = rawEntries.reduce((acc, e) => acc + Number(e.durationSeconds), 0);
-  const activeDays = dates.filter((d) => (byDate.get(d) ?? []).length > 0);
+  for (const e of rawEntries) byDate.get(entryDay(e))?.push(e);
+  const dayTotal = (d: string) => (byDate.get(d) ?? []).reduce((a, e) => a + Number(e.durationSeconds), 0);
+  const weekTotal = dates.reduce((acc, d) => acc + dayTotal(d), 0);
+  // Newest day first: today's work is what people come here for.
+  const activeDays = dates.filter((d) => (byDate.get(d) ?? []).length > 0).reverse();
+  const maxDay = Math.max(...dates.map(dayTotal), 1);
+  const defaultDay = dates.includes(today) ? today : weekStart;
 
   const shift = (deltaDays: number) => {
     const d = new Date(weekStart + 'T00:00:00');
     d.setDate(d.getDate() + deltaDays);
-    setWeekStart(isoDate(mondayOf(d)));
+    setWeekStart(isoDay(mondayOf(d)));
   };
+  const scrollToDay = (d: string) => document.getElementById(`time-day-${d}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   return (
     <PageBody>
-      <TimerHero onChange={invalidateTime} />
+      <TimerHero />
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="mb-3 flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-1.5">
           <IconButton size="sm" onClick={() => shift(-7)} aria-label="Previous week"><ChevronLeft size={15} /></IconButton>
           <span className="min-w-[8.5rem] text-center text-[13px] font-medium tabular-nums">{weekRangeLabel(weekStart)}</span>
           <IconButton size="sm" onClick={() => shift(7)} aria-label="Next week"><ChevronRight size={15} /></IconButton>
         </div>
-        <button className="text-xs text-muted-foreground transition-colors hover:text-foreground" onClick={() => setWeekStart(isoDate(mondayOf(new Date())))}>{t('tasks.thisWeek')}</button>
+        <button className="text-xs text-muted-foreground transition-colors hover:text-foreground" onClick={() => setWeekStart(isoDay(mondayOf(new Date())))}>{t('tasks.thisWeek')}</button>
 
         <Card className="ml-auto flex items-center gap-2.5 px-3 py-1.5">
           <span className="text-xs text-muted-foreground">{t('time.weekTotal')}</span>
           <span className="font-mono text-sm font-semibold tabular-nums">{fmtDur(weekTotal)}</span>
         </Card>
-        <Button size="sm" variant="outline" onClick={() => { setForm((f) => ({ ...f, date: weekStart })); setShowAdd(true); }}>
+        <Button size="sm" variant="outline" onClick={() => setShowAdd(true)}>
           <Plus size={13} /> {t('time.addEntry')}
         </Button>
+      </div>
+
+      {/* The week at a glance: one bar per day, a click jumps to that day. */}
+      <div className="mb-5 grid grid-cols-7 gap-1.5">
+        {dates.map((d) => {
+          const secs = dayTotal(d);
+          const date = new Date(d + 'T00:00:00');
+          return (
+            <button
+              key={d}
+              type="button"
+              disabled={secs === 0}
+              onClick={() => scrollToDay(d)}
+              className={cn(
+                'flex flex-col items-center gap-1 rounded-lg border border-border px-1 py-2 transition-colors duration-150',
+                secs > 0 ? 'hover:bg-muted/60' : 'cursor-default opacity-60',
+                d === today && 'border-primary/40',
+              )}
+            >
+              <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{date.toLocaleDateString(appLocale(), { weekday: 'short' })}</span>
+              <span className="flex h-8 w-2 items-end overflow-hidden rounded-full bg-muted">
+                <span className="w-full rounded-full bg-primary/70" style={{ height: `${Math.round((secs / maxDay) * 100)}%` }} />
+              </span>
+              <span className={cn('font-mono text-[11px] tabular-nums', secs > 0 ? 'text-foreground' : 'text-faint')}>{secs > 0 ? fmtDur(secs) : '–'}</span>
+            </button>
+          );
+        })}
       </div>
 
       {week.isLoading ? (
@@ -362,10 +361,7 @@ function MyWeekView() {
           {[0, 1, 2].map((i) => (
             <div key={i} className="overflow-hidden rounded-xl border border-border">
               <Skeleton className="h-8 w-full rounded-none" />
-              <div className="space-y-2 p-3">
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-              </div>
+              <EntryListSkeleton rows={2} />
             </div>
           ))}
         </div>
@@ -379,26 +375,16 @@ function MyWeekView() {
       ) : (
         <div className="space-y-4">
           {activeDays.map((d, gi) => {
-            const entries = byDate.get(d) ?? [];
-            const dayTotal = entries.reduce((a, e) => a + Number(e.durationSeconds), 0);
-            const label = dayLabel(d) || t('time.today');
+            const entries = [...(byDate.get(d) ?? [])].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+            const label = d === today ? t('time.today') : dayLabel(d);
             return (
-              <div key={d} className="row-enter overflow-hidden rounded-xl border border-border bg-card" style={{ ['--i' as string]: Math.min(gi, 10) }}>
+              <div id={`time-day-${d}`} key={d} className="row-enter scroll-mt-4 overflow-hidden rounded-xl border border-border bg-card" style={{ ['--i' as string]: Math.min(gi, 10) }}>
                 <div className="flex items-center justify-between border-b border-border bg-muted/40 px-4 py-2">
                   <span className="text-[13px] font-medium">{label}</span>
-                  <span className="font-mono text-xs font-medium tabular-nums text-muted-foreground">{fmtDur(dayTotal)}</span>
+                  <span className="font-mono text-xs font-medium tabular-nums text-muted-foreground">{fmtDur(dayTotal(d))}</span>
                 </div>
                 <div className="divide-y divide-border">
-                  {entries.map((e) => (
-                    <div key={e.id} className="flex items-center gap-3 px-4 py-2.5 transition-colors duration-150 hover:bg-muted/40">
-                      <div className="min-w-0 flex-1">
-                        {/* Fall back to the note as the primary line instead of a literal "Entry". */}
-                        <div className="truncate text-[13px] font-medium">{e.taskRef ?? e.projectName ?? e.note ?? t('time.entry')}</div>
-                        {e.note && (e.taskRef || e.projectName) && <div className="truncate text-xs text-muted-foreground">{e.note}</div>}
-                      </div>
-                      <span className="shrink-0 font-mono text-[13px] tabular-nums text-muted-foreground">{fmtDur(Number(e.durationSeconds))}</span>
-                    </div>
-                  ))}
+                  {entries.map((e) => <TimeEntryRow key={e.id} entry={e} onOpen={setOpenEntry} />)}
                 </div>
               </div>
             );
@@ -406,120 +392,328 @@ function MyWeekView() {
         </div>
       )}
 
-      <Dialog open={showAdd} onClose={() => setShowAdd(false)} title={t('time.addManualEntry')} width={420}>
-        <form
-          className="space-y-3 px-4 pb-4 pt-1"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setAddError(null);
-            if (!form.taskId) { setAddError(t('time.taskRequired')); return; }
-            if (!(Number(form.minutes) > 0)) { setAddError(t('time.durationRequired')); return; }
-            addEntry.mutate();
-          }}
-        >
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">{t('time.task')}</label>
-            <TaskSelect value={form.taskId} onChange={(id) => setForm((f) => ({ ...f, taskId: id }))} open={showAdd} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">{t('common.date')}</label>
-              <DateField value={form.date} onChange={(v) => setForm((f) => ({ ...f, date: v ?? '' }))} clearable={false} />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">{t('time.durationMinutes')}</label>
-              <Input type="number" min={1} value={form.minutes} onChange={(e) => setForm((f) => ({ ...f, minutes: e.target.value }))} placeholder="60" />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">{t('time.note')}</label>
-              <Input value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} />
-            </div>
-          </div>
-          {(addError || addEntry.isError) && (
-            <p className="text-xs text-destructive">{addError ?? t('time.addEntryFailed')}</p>
-          )}
-          <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="ghost" size="sm" onClick={() => setShowAdd(false)}>{t('common.cancel')}</Button>
-            <Button type="submit" size="sm" disabled={addEntry.isPending}><Plus size={13} /> {t('time.addEntry')}</Button>
-          </div>
-        </form>
-      </Dialog>
+      <LogTimeDialog open={showAdd} onClose={() => setShowAdd(false)} defaultDay={defaultDay} />
+      <TimeEntryPanel entry={openEntry} onClose={() => setOpenEntry(null)} />
     </PageBody>
   );
 }
 
 /* ───────────────────────── Reports ───────────────────────── */
 
-type ReportSortKey = 'name' | 'hours' | 'billable';
+type GroupBy = 'project' | 'user' | 'company' | 'task';
+type Period = 'week' | 'lastWeek' | 'month' | 'lastMonth' | 'year' | 'all';
+const PERIODS: Period[] = ['week', 'lastWeek', 'month', 'lastMonth', 'year', 'all'];
+type ReportSortKey = 'name' | 'hours' | 'billable' | 'amount';
+
+function periodRange(p: Period): { from?: string; to?: string } {
+  const now = new Date();
+  switch (p) {
+    case 'week': {
+      const from = mondayOf(now);
+      const to = new Date(from); to.setDate(to.getDate() + 6);
+      return { from: isoDay(from), to: isoDay(to) };
+    }
+    case 'lastWeek': {
+      const from = mondayOf(now); from.setDate(from.getDate() - 7);
+      const to = new Date(from); to.setDate(to.getDate() + 6);
+      return { from: isoDay(from), to: isoDay(to) };
+    }
+    case 'month':
+      return { from: isoDay(new Date(now.getFullYear(), now.getMonth(), 1)), to: isoDay(new Date(now.getFullYear(), now.getMonth() + 1, 0)) };
+    case 'lastMonth':
+      return { from: isoDay(new Date(now.getFullYear(), now.getMonth() - 1, 1)), to: isoDay(new Date(now.getFullYear(), now.getMonth(), 0)) };
+    case 'year':
+      return { from: `${now.getFullYear()}-01-01`, to: `${now.getFullYear()}-12-31` };
+    default:
+      return {};
+  }
+}
+
+/** The query parameter that narrows reports and entries to one row of a grouping. */
+const FILTER_PARAM: Record<GroupBy, string> = { project: 'projectId', user: 'userId', company: 'companyId', task: 'taskId' };
+
+function rowName(r: ReportRow, groupBy: GroupBy): string {
+  if (groupBy === 'company' && r.key === 'internal') return r.label ?? '(internal)';
+  return r.label ?? r.key ?? '–';
+}
 
 function ReportsView() {
   const t = useT();
-  const [groupBy, setGroupBy] = usePersistedState<'project' | 'user' | 'company'>(
-    'ordi:view:time.reports.groupBy', 'project', oneOfPref(['project', 'user', 'company'], 'project'),
+  const [groupBy, setGroupBy] = usePersistedState<GroupBy>(
+    'ordi:view:time.reports.groupBy', 'project', oneOfPref(['project', 'user', 'company', 'task'], 'project'),
   );
+  const [period, setPeriod] = usePersistedState<Period>('ordi:view:time.reports.period', 'month', oneOfPref(PERIODS, 'month'));
+  const range = periodRange(period);
   const report = useQuery({
-    queryKey: ['timeReport', groupBy],
-    queryFn: () => api.get<{ data: ReportRow[] }>('/time/reports' + qs({ groupBy })),
+    queryKey: ['timeReport', groupBy, range.from, range.to],
+    queryFn: () => api.get<{ data: ReportRow[] }>('/time/reports' + qs({ groupBy, ...range })),
   });
+  const [selected, setSelected] = useState<ReportRow | null>(null);
   const rows = report.data?.data ?? [];
-  const hoursOf = (r: ReportRow): number => (r.hours != null ? Number(r.hours) : r.seconds != null ? Number(r.seconds) / 3600 : 0);
   const { sort, toggle: toggleSort } = useTableSort<ReportSortKey>({
     key: 'ordi:view:time.reports.sort',
-    keys: ['name', 'hours', 'billable'],
+    keys: ['name', 'hours', 'billable', 'amount'],
   });
   const sorted = sortRows(rows, sort, (r, key) => {
     switch (key) {
-      case 'name': return (r.label ?? r.name ?? r.key ?? '').toLowerCase() || null;
-      case 'hours': return hoursOf(r);
-      case 'billable': return r.billableAmount != null ? Number(r.billableAmount) : null;
+      case 'name': return rowName(r, groupBy).toLowerCase() || null;
+      case 'hours': return r.hours ?? 0;
+      case 'billable': return r.billableHours ?? 0;
+      case 'amount': return r.billableAmount ?? 0;
     }
   });
+  const totalHours = rows.reduce((a, r) => a + (r.hours ?? 0), 0);
+  const totalBillable = rows.reduce((a, r) => a + (r.billableHours ?? 0), 0);
+  // Amounts add up only within one currency.
+  const currencies = new Set(rows.map((r) => r.currency ?? 'USD'));
+  const totalAmount = currencies.size === 1 ? rows.reduce((a, r) => a + (r.billableAmount ?? 0), 0) : null;
+  const groupLabel = t(groupBy === 'project' ? 'time.groupProject' : groupBy === 'user' ? 'time.groupUser' : groupBy === 'company' ? 'time.groupCompany' : 'time.groupTask');
 
   return (
     <PageBody>
-      <div className="mb-4 flex items-center gap-2">
-        <span className="text-xs text-muted-foreground">{t('time.groupBy')}</span>
-        <SegmentedControl
-          options={[
-            { key: 'project' as const, label: t('time.groupProject') },
-            { key: 'user' as const, label: t('time.groupUser') },
-            { key: 'company' as const, label: t('time.groupCompany') },
-          ]}
-          value={groupBy}
-          onChange={setGroupBy}
-        />
+      <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">{t('time.groupBy')}</span>
+          <SegmentedControl
+            options={[
+              { key: 'project' as const, label: t('time.groupProject') },
+              { key: 'task' as const, label: t('time.groupTask') },
+              { key: 'user' as const, label: t('time.groupUser') },
+              { key: 'company' as const, label: t('time.groupCompany') },
+            ]}
+            value={groupBy}
+            onChange={setGroupBy}
+          />
+        </div>
+        <Select value={period} onChange={(e) => setPeriod(e.target.value as Period)} className="ml-auto w-44" aria-label="Period">
+          {PERIODS.map((p) => <option key={p} value={p}>{t(`time.period.${p}`)}</option>)}
+        </Select>
       </div>
       <Card className="overflow-hidden">
         <table className="w-full text-[13px]">
           <thead>
             <tr className="border-b border-border text-left text-[11px]">
-              <th className="px-4 py-2">
-                <SortHeader
-                  label={t(groupBy === 'project' ? 'time.groupProject' : groupBy === 'user' ? 'time.groupUser' : 'time.groupCompany')}
-                  sortKey="name" sort={sort} onToggle={toggleSort}
-                />
-              </th>
+              <th className="px-4 py-2"><SortHeader label={groupLabel} sortKey="name" sort={sort} onToggle={toggleSort} /></th>
               <th className="px-4 py-2"><SortHeader label={t('time.hours')} sortKey="hours" sort={sort} onToggle={toggleSort} className="w-full justify-end" /></th>
-              <th className="px-4 py-2"><SortHeader label={t('time.billable')} sortKey="billable" sort={sort} onToggle={toggleSort} className="w-full justify-end" /></th>
+              <th className="px-4 py-2"><SortHeader label={t('time.billableHours')} sortKey="billable" sort={sort} onToggle={toggleSort} className="w-full justify-end" /></th>
+              <th className="px-4 py-2"><SortHeader label={t('time.amount')} sortKey="amount" sort={sort} onToggle={toggleSort} className="w-full justify-end" /></th>
             </tr>
           </thead>
           <tbody>
             {report.isLoading && (
-              <tr><td colSpan={3} className="px-4 py-3"><Skeleton className="h-5 w-full" /></td></tr>
+              <tr><td colSpan={4} className="px-4 py-3"><Skeleton className="h-5 w-full" /></td></tr>
             )}
             {!report.isLoading && rows.length === 0 && (
-              <tr><td colSpan={3} className="px-4 py-10 text-center text-muted-foreground">{t('time.noReportData')}</td></tr>
+              <tr><td colSpan={4} className="px-4 py-10 text-center text-muted-foreground">{t('time.noReportData')}</td></tr>
             )}
             {sorted.map((r, i) => (
-              <tr key={r.key ?? r.name ?? r.label ?? String(i)} className="row-enter border-b border-border transition-colors duration-150 last:border-0 hover:bg-muted/40" style={{ ['--i' as string]: Math.min(i, 10) }}>
-                <td className="px-4 py-2 font-medium">{r.label ?? r.name ?? r.key ?? '–'}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{hoursOf(r).toFixed(1)}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{r.billableAmount != null ? fmtMoney(r.billableAmount, r.currency ?? 'USD') : '–'}</td>
+              <tr
+                key={r.key ?? String(i)}
+                tabIndex={0}
+                role="button"
+                aria-label={`${t('time.openDetails')}: ${rowName(r, groupBy)}`}
+                onClick={() => setSelected(r)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(r); } }}
+                className="row-enter group cursor-pointer border-b border-border transition-colors duration-150 last:border-0 hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none"
+                style={{ ['--i' as string]: Math.min(i, 10) }}
+              >
+                <td className="px-4 py-2.5 font-medium">
+                  <span className="inline-flex min-w-0 items-center gap-2">
+                    {groupBy === 'user' && <Avatar name={rowName(r, groupBy)} size={18} />}
+                    {r.ref && <span className="font-mono text-[11px] text-muted-foreground">{r.ref}</span>}
+                    <span className="truncate">{rowName(r, groupBy)}</span>
+                    <ChevronRight size={13} className="shrink-0 text-faint opacity-0 transition-opacity group-hover:opacity-100" />
+                  </span>
+                </td>
+                <td className="px-4 py-2.5 text-right tabular-nums">{fmtHours(r.hours)}</td>
+                <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{fmtHours(r.billableHours)}</td>
+                <td className="px-4 py-2.5 text-right tabular-nums">{r.billableAmount ? fmtMoney(r.billableAmount, r.currency ?? 'USD') : '–'}</td>
               </tr>
             ))}
           </tbody>
+          {rows.length > 1 && (
+            <tfoot>
+              <tr className="border-t border-border bg-muted/30 font-medium">
+                <td className="px-4 py-2">{t('time.reportTotal')}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{fmtHours(totalHours)}</td>
+                <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">{fmtHours(totalBillable)}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{totalAmount ? fmtMoney(totalAmount, [...currencies][0]!) : '–'}</td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </Card>
+
+      <ReportDetailPanel
+        groupBy={groupBy}
+        row={selected}
+        range={range}
+        periodLabel={t(`time.period.${period}`)}
+        onClose={() => setSelected(null)}
+      />
     </PageBody>
+  );
+}
+
+function fmtHours(h?: number): string {
+  return h ? fmtDur(Math.round(h * 3600)) : '–';
+}
+
+/** Share of the largest row, as a thin bar behind a breakdown line. */
+function Breakdown({ title, rows, render, onOpen }: {
+  title: string; rows: ReportRow[]; render: (r: ReportRow) => ReactNode; onOpen?: (r: ReportRow, e: MouseEvent) => void;
+}) {
+  if (rows.length === 0) return null;
+  const max = Math.max(...rows.map((r) => r.hours ?? 0), 0.01);
+  return (
+    <section>
+      <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-faint">{title}</h3>
+      <div className="overflow-hidden rounded-lg border border-border">
+        {rows.map((r) => {
+          const Tag = onOpen ? 'button' : 'div';
+          return (
+            <Tag
+              key={r.key}
+              {...(onOpen ? { type: 'button' as const, onClick: (e: MouseEvent) => onOpen(r, e), onAuxClick: (e: MouseEvent) => onOpen(r, e) } : {})}
+              className={cn('relative flex w-full items-center gap-2 border-b border-border px-3 py-2 text-left text-[13px] last:border-0', onOpen && 'transition-colors duration-150 hover:bg-muted/40')}
+            >
+              <span aria-hidden className="absolute inset-y-0 left-0 bg-primary/[0.07]" style={{ width: `${((r.hours ?? 0) / max) * 100}%` }} />
+              <span className="relative flex min-w-0 flex-1 items-center gap-2">{render(r)}</span>
+              <span className="relative shrink-0 font-mono text-xs tabular-nums text-muted-foreground">{fmtHours(r.hours)}</span>
+            </Tag>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+const DETAIL_ENTRIES = 100;
+
+/**
+ * What one report row is made of: its tasks, its people and its entries, for
+ * the same period. Every line leads further: a task opens, an entry opens in
+ * its own panel.
+ */
+function ReportDetailPanel({ groupBy, row, range, periodLabel, onClose }: {
+  groupBy: GroupBy; row: ReportRow | null; range: { from?: string; to?: string }; periodLabel: string; onClose: () => void;
+}) {
+  const t = useT();
+  const open = useOpen();
+  const [shown, setShown] = useState<ReportRow | null>(row);
+  if (row && row !== shown) setShown(row);
+  const [openEntry, setOpenEntry] = useState<TimeEntry | null>(null);
+  const filter = shown ? { [FILTER_PARAM[groupBy]]: shown.key } : {};
+  const enabled = !!row;
+
+  const byTask = useQuery({
+    queryKey: ['timeReport', 'detail', 'task', groupBy, shown?.key, range.from, range.to],
+    queryFn: () => api.get<{ data: ReportRow[] }>('/time/reports' + qs({ groupBy: 'task', ...range, ...filter })),
+    enabled: enabled && groupBy !== 'task',
+  });
+  const byUser = useQuery({
+    queryKey: ['timeReport', 'detail', 'user', groupBy, shown?.key, range.from, range.to],
+    queryFn: () => api.get<{ data: ReportRow[] }>('/time/reports' + qs({ groupBy: 'user', ...range, ...filter })),
+    enabled: enabled && groupBy !== 'user',
+  });
+  const byProject = useQuery({
+    queryKey: ['timeReport', 'detail', 'project', groupBy, shown?.key, range.from, range.to],
+    queryFn: () => api.get<{ data: ReportRow[] }>('/time/reports' + qs({ groupBy: 'project', ...range, ...filter })),
+    enabled: enabled && (groupBy === 'user' || groupBy === 'company'),
+  });
+  const entries = useQuery({
+    queryKey: ['timeEntries', groupBy, shown?.key, range.from, range.to],
+    queryFn: () => api.get<{ data: TimeEntry[]; nextCursor: string | null }>('/time/entries' + qs({ ...range, ...filter, limit: DETAIL_ENTRIES })),
+    enabled,
+  });
+
+  if (!shown) return null;
+  const name = rowName(shown, groupBy);
+  const stats: [string, string][] = [
+    [t('time.hours'), fmtHours(shown.hours)],
+    [t('time.billableHours'), fmtHours(shown.billableHours)],
+    [t('time.amount'), shown.billableAmount ? fmtMoney(shown.billableAmount, shown.currency ?? 'USD') : '–'],
+  ];
+  const openTask = (r: ReportRow, e: MouseEvent) => {
+    if (!r.projectId) return;
+    if (e.button === 0 && !e.metaKey && !e.ctrlKey) onClose();
+    open(`/projects/${r.projectId}/tasks/${r.key}`, e);
+  };
+  const entryRows = entries.data?.data ?? [];
+
+  return (
+    <>
+      <SidePanel
+        open={!!row}
+        onClose={onClose}
+        width={560}
+        icon={groupBy === 'user' ? <Avatar name={name} size={22} /> : <BarChart3 size={16} />}
+        title={shown.ref ? `${shown.ref} · ${name}` : name}
+        subtitle={periodLabel}
+      >
+        <div className="space-y-5">
+          <div className="grid grid-cols-3 gap-2">
+            {stats.map(([label, value]) => (
+              <div key={label} className="rounded-lg border border-border px-3 py-2">
+                <div className="text-[11px] text-muted-foreground">{label}</div>
+                <div className="mt-0.5 font-mono text-[15px] font-semibold tabular-nums">{value}</div>
+              </div>
+            ))}
+          </div>
+
+          {groupBy === 'task' && shown.projectId && (
+            <Button size="sm" variant="outline" onClick={(e) => openTask(shown, e)} onAuxClick={(e) => openTask(shown, e)}>
+              {t('time.openTask')} <ChevronRight size={13} />
+            </Button>
+          )}
+
+          {(groupBy === 'user' || groupBy === 'company') && (
+            byProject.isLoading ? <EntryListSkeleton rows={2} /> : (
+              <Breakdown title={t('time.byProject')} rows={byProject.data?.data ?? []} render={(r) => <span className="truncate">{r.label}</span>} />
+            )
+          )}
+          {groupBy !== 'task' && (
+            byTask.isLoading ? <EntryListSkeleton rows={3} /> : (
+              <Breakdown
+                title={t('time.byTask')}
+                rows={byTask.data?.data ?? []}
+                onOpen={openTask}
+                render={(r) => (
+                  <>
+                    <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{r.ref}</span>
+                    <span className="truncate">{r.label}</span>
+                  </>
+                )}
+              />
+            )
+          )}
+          {groupBy !== 'user' && (
+            byUser.isLoading ? <EntryListSkeleton rows={2} /> : (
+              <Breakdown
+                title={t('time.byPerson')}
+                rows={byUser.data?.data ?? []}
+                render={(r) => <><Avatar name={r.label ?? '?'} size={18} /><span className="truncate">{r.label}</span></>}
+              />
+            )
+          )}
+
+          <section>
+            <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-faint">
+              {entries.data?.nextCursor ? t('time.latestEntries').replace('{n}', String(DETAIL_ENTRIES)) : t('time.entries')}
+            </h3>
+            <div className="overflow-hidden rounded-lg border border-border">
+              {entries.isLoading ? <EntryListSkeleton rows={4} /> : (
+                <div className="divide-y divide-border">
+                  {entryRows.map((e) => (
+                    <TimeEntryRow key={e.id} entry={e} onOpen={setOpenEntry} showUser={groupBy !== 'user'} showDay showProject={groupBy === 'user' || groupBy === 'company'} className="px-3" />
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      </SidePanel>
+      <TimeEntryPanel entry={openEntry} onClose={() => setOpenEntry(null)} />
+    </>
   );
 }

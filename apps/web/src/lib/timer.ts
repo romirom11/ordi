@@ -50,7 +50,7 @@ export function useStopTimer() {
   const t = useT();
   const qc = useQueryClient();
   const refresh = () => {
-    for (const key of ['timer', 'time', 'myWeek', 'timeReport']) {
+    for (const key of ['timer', 'time', 'myWeek', 'timeReport', 'timeEntries', 'taskTime']) {
       void qc.invalidateQueries({ queryKey: [key] });
     }
   };
