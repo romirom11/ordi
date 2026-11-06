@@ -32,7 +32,11 @@ export const projectRateInputSchema = z.object({
 export const timeReportQuerySchema = z.object({
   from: z.string().optional(),
   to: z.string().optional(),
-  groupBy: z.enum(['project', 'user', 'company']).default('project'),
+  groupBy: z.enum(['project', 'user', 'company', 'task']).default('project'),
   billable: z.enum(['all', 'billable', 'nonbillable']).default('all'),
   projectId: idSchema.optional(),
+  userId: idSchema.optional(),
+  taskId: idSchema.optional(),
+  /** A company id, or `internal` for the projects with no client. */
+  companyId: z.union([idSchema, z.literal('internal')]).optional(),
 });

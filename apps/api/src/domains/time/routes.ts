@@ -52,13 +52,24 @@ export function timeRoutes() {
   // ── Entries ──
   app.get('/time/entries', guardAny('time.track', 'time.read_all'), async (c) => {
     const actor = currentActor(c);
-    const limit = Number(c.req.query('limit') ?? 50);
+    const limit = Math.min(Math.max(Number(c.req.query('limit')) || 50, 1), 500);
     const rows = await svc.listEntries(actor, {
       from: c.req.query('from'), to: c.req.query('to'), projectId: c.req.query('projectId'),
-      userId: c.req.query('userId'), taskId: c.req.query('taskId'), limit,
+      userId: c.req.query('userId'), taskId: c.req.query('taskId'), companyId: c.req.query('companyId'), limit,
     }, hasPerm(actor, 'time.read_all'));
     const res = page(rows, limit, (r) => ({ startedAt: r.startedAt }));
     return c.json({ ...res, data: res.data.map((r) => withoutCost(actor, r)) });
+  });
+
+  app.get('/time/entries/:id', guardAny('time.track', 'time.read_all'), async (c) => {
+    const actor = currentActor(c);
+    return c.json(withoutCost(actor, await svc.getEntryDetail(actor, c.req.param('id'), hasPerm(actor, 'time.read_all'))));
+  });
+
+  app.get('/time/tasks/:taskId', guardAny('time.track', 'time.read_all'), async (c) => {
+    const actor = currentActor(c);
+    const res = await svc.taskTime(actor, c.req.param('taskId'), hasPerm(actor, 'time.read_all'));
+    return c.json({ ...res, entries: res.entries.map((e) => withoutCost(actor, e)) });
   });
 
   app.post('/time/entries', guard('time.track'), async (c) => {
@@ -115,6 +126,9 @@ export function timeRoutes() {
       from: c.req.query('from'), to: c.req.query('to'),
       groupBy: c.req.query('groupBy') ?? undefined, billable: c.req.query('billable') ?? undefined,
       projectId: c.req.query('projectId') ?? undefined,
+      userId: c.req.query('userId') ?? undefined,
+      taskId: c.req.query('taskId') ?? undefined,
+      companyId: c.req.query('companyId') ?? undefined,
     });
     return c.json({ data: await svc.report(q) });
   });
@@ -124,9 +138,9 @@ export function timeRoutes() {
 
   app.get('/time/my-week', guard('time.track'), async (c) => {
     const weekStart = c.req.query('weekStart');
-    if (!weekStart) throw err.validation('weekStart required');
+    if (!weekStart || !/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) throw err.validation('weekStart (YYYY-MM-DD) required');
     const actor = currentActor(c);
-    const week = await svc.myWeek(actor, weekStart);
+    const week = await svc.myWeek(actor, weekStart, { from: c.req.query('from'), to: c.req.query('to') });
     return c.json({ ...week, days: week.days.map((d) => ({ ...d, entries: d.entries.map((e) => withoutCost(actor, e)) })) });
   });
 

@@ -17,6 +17,7 @@ import { LabelsMenu } from '../LabelsMenu';
 import { GitBlock } from './GitBlock';
 import { useT, extendDict } from '../../lib/i18n';
 import { TaskTimer } from './TaskTimer';
+import { TaskTimeRow } from './TaskTime';
 import type { MilestoneLite, TaskDetail, TaskPatch, TaskStatus, UserLite } from './types';
 import { activeUsers } from '../../lib/queries';
 import { Calendar } from '../DatePicker';
@@ -42,6 +43,7 @@ extendDict({
     'task.setEstimate': 'Set estimate',
     'task.clear': 'Clear',
     'task.points': 'points',
+    'task.hoursUnit': 'h',
     'task.created': 'Created',
     'task.updated': 'Updated',
     'task.pickDate': 'Pick a date',
@@ -74,6 +76,7 @@ extendDict({
     'task.setEstimate': 'Вказати оцінку',
     'task.clear': 'Очистити',
     'task.points': 'балів',
+    'task.hoursUnit': 'год',
     'task.created': 'Створено',
     'task.updated': 'Оновлено',
     'task.pickDate': 'Оберіть дату',
@@ -222,11 +225,15 @@ export function PropertySidebar({ task, statuses, users, onPatch, hasRepos }: {
   const milestone = milestones.find((m) => m.id === task.milestoneId);
 
   // Cycles, only where the project uses them (the project query is shared with the project page).
-  const { data: projectRow } = useQuery<{ cyclesEnabled?: boolean }>({
+  const { data: projectRow } = useQuery<{ cyclesEnabled?: boolean; settings?: { estimateUnit?: string } }>({
     queryKey: ['project', task.projectId],
-    queryFn: () => api.get<{ cyclesEnabled?: boolean }>(`/projects/${task.projectId}`),
+    queryFn: () => api.get<{ cyclesEnabled?: boolean; settings?: { estimateUnit?: string } }>(`/projects/${task.projectId}`),
     staleTime: 60_000,
   });
+  // Time spent compares with the estimate only when both are hours.
+  const estimateInHours = projectRow?.settings?.estimateUnit === 'hours';
+  const estimateSeconds = estimateInHours && task.estimate != null && Number(task.estimate) > 0
+    ? Math.round(Number(task.estimate) * 3600) : null;
   const cyclesQ = useCycles(task.projectId, !!projectRow?.cyclesEnabled);
   const allCycles = cyclesQ.data ?? [];
   const cycle = allCycles.find((c) => c.id === task.cycleId);
@@ -485,7 +492,7 @@ export function PropertySidebar({ task, statuses, users, onPatch, hasRepos }: {
             <Chip empty={task.estimate == null}>
               <Gauge size={14} />
               <span className="truncate tabular-nums">
-                {task.estimate != null ? `${task.estimate} ${t('task.points')}` : t('task.setEstimate')}
+                {task.estimate != null ? `${Number(task.estimate)} ${estimateInHours ? t('task.hoursUnit') : t('task.points')}` : t('task.setEstimate')}
               </span>
             </Chip>
           }
@@ -510,6 +517,9 @@ export function PropertySidebar({ task, statuses, users, onPatch, hasRepos }: {
           )}
         </DropdownMenu>
       </Row>
+
+      {/* Time spent */}
+      <TaskTimeRow task={task} estimateSeconds={estimateSeconds} Row={Row} Chip={Chip} />
 
       <div className="mx-3 my-2 h-px bg-border" />
 

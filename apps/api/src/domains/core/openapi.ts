@@ -223,8 +223,10 @@ const ROWS: Row[] = [
   // time
   ['/time', 'get', 'List time entries', 'time.track', undefined, 'time'],
   ['/time', 'post', 'Create time entry', 'time.track', 'TimeEntryInput', 'time'],
-  ['/time/{id}', 'patch', 'Update time entry', 'time.track', 'free', 'time'],
-  ['/time/{id}', 'delete', 'Delete time entry', 'time.track', undefined, 'time'],
+  ['/time/entries/{id}', 'get', 'Get a time entry with its task and project', 'time.track', undefined, 'time'],
+  ['/time/entries/{id}', 'patch', 'Update time entry', 'time.track', 'free', 'time'],
+  ['/time/entries/{id}', 'delete', 'Delete time entry', 'time.track', undefined, 'time'],
+  ['/time/tasks/{taskId}', 'get', 'Time logged on a task', 'time.track', undefined, 'time'],
   ['/time/timer/start', 'post', 'Start the running timer', 'time.track', 'free', 'time'],
   ['/time/timer/stop', 'post', 'Stop the running timer into an entry', 'time.track', undefined, 'time'],
   ['/time/reports', 'get', 'Time reports', 'time.read_all', undefined, 'time'],
