@@ -7,8 +7,8 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Copy, EyeOff, Plus, Trash2 } from 'lucide-react';
 import {
-  INTAKE_FIELD_TYPES, INTAKE_MAX_ATTACHMENTS, INTAKE_MAX_FIELDS, MAX_UPLOAD_BYTES, intakeFormConfigSchema, isBuiltinIntakeKey,
-  type IntakeField, type IntakeFieldType, type IntakeFormConfig,
+  INTAKE_FIELD_TYPES, INTAKE_MAX_ATTACHMENTS, INTAKE_MAX_FIELDS, MAX_UPLOAD_BYTES, intakeFormConfigSchema, intakePrefillAttribute,
+  isBuiltinIntakeKey, type IntakeField, type IntakeFieldType, type IntakeFormConfig, type IntakeHiddenSource,
 } from '@ordi/shared';
 import { api, ApiError } from '../../lib/api';
 import { accentVars } from '../../lib/accent';
@@ -67,6 +67,15 @@ extendDict({
     'intakeEditor.type.date': 'Date',
     'intakeEditor.type.select': 'Choice',
     'intakeEditor.type.checkbox': 'Checkbox',
+    'intakeEditor.type.hidden': 'Hidden value',
+    'intakeEditor.key': 'Key',
+    'intakeEditor.keyHint': 'Your site passes a value as {attr}.',
+    'intakeEditor.keyInvalid': 'Letters, digits and _ only, starting with a letter',
+    'intakeEditor.keyTaken': 'Another field already uses this key',
+    'intakeEditor.source': 'Value',
+    'intakeEditor.source.prefill': 'Passed by your site',
+    'intakeEditor.source.page': 'Address of the page the form is on',
+    'intakeEditor.hiddenNote': 'Not shown to the visitor. The value arrives with the request, for example which page or account it came from.',
     'intakeEmbed.title': 'Embed on a website',
     'intakeEmbed.hint': 'Paste this where the form should appear. The frame grows with the form, so there is no inner scrollbar.',
     'intakeEmbed.theme': 'Theme',
@@ -79,6 +88,11 @@ extendDict({
     'intakeEmbed.iframe': 'Plain iframe',
     'intakeEmbed.iframeHint': 'For site builders that strip scripts. The height is fixed, so set it to fit your form.',
     'intakeEmbed.event': 'After a request goes through, the container fires an ordi:intake-submitted event – handy for analytics.',
+    'intakeEmbed.prefill': 'Prefill from your site',
+    'intakeEmbed.prefillHint': 'Add these attributes to the container to fill fields in for the visitor – for example their name and email from your own login. Leave out the ones you do not need.',
+    'intakeEmbed.lock': 'Make prefilled fields read-only',
+    'intakeEmbed.prefillTrust': 'Prefilled values are whatever the page sets, so treat them as convenience, not proof of who sent the request.',
+    'intakeEmbed.prefillIframe': 'For the plain iframe, put the same values after # in its address: #requesterEmail=…&orderId=…',
     'intakeEmbed.copy': 'Copy',
     'intakeEmbed.copied': 'Snippet copied',
   },
@@ -130,6 +144,15 @@ extendDict({
     'intakeEditor.type.date': 'Дата',
     'intakeEditor.type.select': 'Вибір зі списку',
     'intakeEditor.type.checkbox': 'Прапорець',
+    'intakeEditor.type.hidden': 'Приховане значення',
+    'intakeEditor.key': 'Ключ',
+    'intakeEditor.keyHint': 'Сайт передає значення як {attr}.',
+    'intakeEditor.keyInvalid': 'Лише латинські літери, цифри й _, на початку літера',
+    'intakeEditor.keyTaken': 'Цей ключ уже має інше поле',
+    'intakeEditor.source': 'Значення',
+    'intakeEditor.source.prefill': 'Передає ваш сайт',
+    'intakeEditor.source.page': 'Адреса сторінки, на якій форма',
+    'intakeEditor.hiddenNote': 'Відвідувач його не бачить. Значення приходить разом із запитом: наприклад, з якої сторінки чи акаунта його надіслали.',
     'intakeEmbed.title': 'Вбудувати на сайт',
     'intakeEmbed.hint': 'Вставте цей код туди, де має бути форма. Рамка підлаштовується під висоту форми, тож внутрішньої прокрутки не буде.',
     'intakeEmbed.theme': 'Тема',
@@ -142,6 +165,11 @@ extendDict({
     'intakeEmbed.iframe': 'Звичайний iframe',
     'intakeEmbed.iframeHint': 'Для конструкторів сайтів, що вирізають скрипти. Висота фіксована – підберіть її під форму.',
     'intakeEmbed.event': 'Після надсилання контейнер генерує подію ordi:intake-submitted – зручно для аналітики.',
+    'intakeEmbed.prefill': 'Передзаповнення з вашого сайту',
+    'intakeEmbed.prefillHint': 'Додайте ці атрибути до контейнера, щоб заповнити поля за відвідувача: наприклад, ім’я та email з вашого входу. Непотрібні можна прибрати.',
+    'intakeEmbed.lock': 'Заборонити змінювати передзаповнені поля',
+    'intakeEmbed.prefillTrust': 'Передзаповнені значення – це те, що вказала сторінка, тож вони для зручності, а не доказ того, хто надіслав запит.',
+    'intakeEmbed.prefillIframe': 'Для звичайного iframe додайте ті самі значення після # в адресі: #requesterEmail=…&orderId=…',
     'intakeEmbed.copy': 'Копіювати',
     'intakeEmbed.copied': 'Код скопійовано',
   },
@@ -202,11 +230,20 @@ export function IntakeFormEditor({ projectId, projectName, config, storageConfig
     fields.splice(index + by, 0, field!);
     return { ...d, fields };
   });
+  /** A custom field's key changed: null when it took, else why not. */
+  const renameField = (from: string, to: string): string | null => {
+    if (to === from) return null;
+    if (!/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(to)) return t('intakeEditor.keyInvalid');
+    if (isBuiltinIntakeKey(to) || draft.fields.some((f) => f.key === to)) return t('intakeEditor.keyTaken');
+    setDraft((d) => ({ ...d, fields: d.fields.map((f) => (f.key === from ? { ...f, key: to } : f)) }));
+    setOpen(to);
+    return null;
+  };
   const addField = () => {
     const key = newFieldKey();
     setDraft((d) => ({
       ...d,
-      fields: [...d.fields, { key, type: 'text', label: t('intakeEditor.newField'), placeholder: '', help: '', required: false, hidden: false, options: [] }],
+      fields: [...d.fields, { key, type: 'text', label: t('intakeEditor.newField'), placeholder: '', help: '', required: false, hidden: false, options: [], source: 'prefill' }],
     }));
     setOpen(key);
   };
@@ -300,6 +337,7 @@ export function IntakeFormEditor({ projectId, projectName, config, storageConfig
                   last={index === draft.fields.length - 1}
                   onToggle={() => setOpen(open === field.key ? null : field.key)}
                   onChange={(patch) => setField(field.key, patch)}
+                  onRename={(to) => renameField(field.key, to)}
                   onMove={(by) => move(index, by)}
                   onRemove={() => setDraft((d) => ({ ...d, fields: d.fields.filter((f) => f.key !== field.key) }))}
                 />
@@ -364,7 +402,7 @@ export function IntakeFormEditor({ projectId, projectName, config, storageConfig
 }
 
 
-function FieldRow({ field, label, expanded, first, last, onToggle, onChange, onMove, onRemove }: {
+function FieldRow({ field, label, expanded, first, last, onToggle, onChange, onRename, onMove, onRemove }: {
   field: IntakeField;
   label: string;
   expanded: boolean;
@@ -372,17 +410,26 @@ function FieldRow({ field, label, expanded, first, last, onToggle, onChange, onM
   last: boolean;
   onToggle: () => void;
   onChange: (patch: Partial<IntakeField>) => void;
+  onRename: (key: string) => string | null;
   onMove: (by: -1 | 1) => void;
   onRemove: () => void;
 }) {
   const t = useT();
   const [optionsText, setOptionsText] = useState(field.options.join('\n'));
+  const [keyText, setKeyText] = useState(field.key);
+  const [keyError, setKeyError] = useState<string | null>(null);
   const builtin = isBuiltinIntakeKey(field.key);
   const isTitle = field.key === 'title';
+  const isHidden = field.type === 'hidden';
   const note = isTitle ? t('intakeEditor.titleNote')
     : field.key === 'description' ? t('intakeEditor.descriptionNote')
       : field.key === 'requesterEmail' ? t('intakeEditor.emailNote')
-        : builtin ? null : t('intakeEditor.customNote');
+        : builtin ? null : isHidden ? t('intakeEditor.hiddenNote') : t('intakeEditor.customNote');
+  // A typed key is applied on blur, so a half-typed one never clashes with another field's.
+  const commitKey = () => {
+    const problem = onRename(keyText.trim());
+    setKeyError(problem);
+  };
 
   return (
     <li>
@@ -422,10 +469,39 @@ function FieldRow({ field, label, expanded, first, last, onToggle, onChange, onM
               </div>
             )}
           </div>
-          {field.type !== 'checkbox' && (
+          {!builtin && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor={`key-${field.key}`}>{t('intakeEditor.key')}</label>
+                <Input
+                  id={`key-${field.key}`}
+                  className={cn('font-mono text-xs', keyError && '!border-destructive')}
+                  value={keyText}
+                  onChange={(e) => { setKeyText(e.target.value); setKeyError(null); }}
+                  onBlur={commitKey}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitKey(); } }}
+                />
+                {(keyError || !(isHidden && field.source === 'page')) && (
+                  <p className={cn('text-xs', keyError ? 'text-destructive' : 'text-faint')}>
+                    {keyError ?? fill(t('intakeEditor.keyHint'), { attr: intakePrefillAttribute(field.key) })}
+                  </p>
+                )}
+              </div>
+              {isHidden && (
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">{t('intakeEditor.source')}</label>
+                  <Select className="w-full" value={field.source} onChange={(e) => onChange({ source: e.target.value as IntakeHiddenSource })}>
+                    <option value="prefill">{t('intakeEditor.source.prefill')}</option>
+                    <option value="page">{t('intakeEditor.source.page')}</option>
+                  </Select>
+                </div>
+              )}
+            </div>
+          )}
+          {field.type !== 'checkbox' && !isHidden && (
             <LabeledInput label={t('intakeEditor.placeholder')} value={field.placeholder} onChange={(v) => onChange({ placeholder: v })} />
           )}
-          <LabeledInput label={t('intakeEditor.help')} value={field.help} onChange={(v) => onChange({ help: v })} />
+          {!isHidden && <LabeledInput label={t('intakeEditor.help')} value={field.help} onChange={(v) => onChange({ help: v })} />}
           {field.type === 'select' && (
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">{t('intakeEditor.options')}</label>
@@ -452,8 +528,8 @@ function FieldRow({ field, label, expanded, first, last, onToggle, onChange, onM
             </label>
             <label className="flex items-center gap-2 text-[13px]">
               <Switch
-                checked={field.required}
-                disabled={isTitle || field.hidden}
+                checked={field.required && !isHidden}
+                disabled={isTitle || field.hidden || isHidden}
                 label={t('intakeEditor.required')}
                 onChange={(required) => onChange({ required })}
               />
@@ -497,14 +573,29 @@ function ToggleRow({ label, hint, checked, disabled, onChange }: {
 
 /* ─────────────────────────── Embed ─────────────────────────── */
 
-export function IntakeEmbedDialog({ origin, token, onClose }: { origin: string; token: string; onClose: () => void }) {
+/** Example prefill values, so the snippet reads as what to put there. */
+function prefillExample(field: IntakeField): string {
+  if (field.key === 'requesterName') return 'Jane Doe';
+  if (field.key === 'requesterEmail') return 'jane@example.com';
+  return '…';
+}
+
+export function IntakeEmbedDialog({ origin, token, config, onClose }: {
+  origin: string; token: string; config: IntakeFormConfig; onClose: () => void;
+}) {
   const t = useT();
   const [theme, setTheme] = useState<'light' | 'dark' | 'auto'>('light');
   const [lang, setLang] = useState<'' | 'en' | 'uk'>('');
+  const [lock, setLock] = useState(false);
 
+  // What a site would want to fill in: who is asking, and the hidden values it supplies.
+  const prefillable = config.fields.filter((f) => !f.hidden
+    && (f.key === 'requesterName' || f.key === 'requesterEmail' || (f.type === 'hidden' && f.source === 'prefill')));
+  const prefillAttrs = prefillable.map((f) => `${intakePrefillAttribute(f.key)}="${prefillExample(f)}"`);
   const attrs = [`data-ordi-intake="${token}"`, theme !== 'light' ? `data-theme="${theme}"` : '', lang ? `data-lang="${lang}"` : '']
     .filter(Boolean).join(' ');
   const script = `<div ${attrs}></div>\n<script src="${origin}/api/v1/embed/intake.js" async></script>`;
+  const prefilled = `<div ${attrs}\n  ${[...prefillAttrs, ...(lock ? ['data-lock-prefilled'] : [])].join('\n  ')}></div>\n<script src="${origin}/api/v1/embed/intake.js" async></script>`;
   const query = ['embed=1', theme !== 'light' ? `theme=${theme}` : '', lang ? `lang=${lang}` : ''].filter(Boolean).join('&');
   const iframe = `<iframe src="${origin}/intake/${token}?${query}" title="Request form" style="width:100%;height:760px;border:0" loading="lazy"></iframe>`;
 
@@ -532,6 +623,16 @@ export function IntakeEmbedDialog({ origin, token, onClose }: { origin: string; 
         </div>
         <Snippet title={t('intakeEmbed.script')} code={script} note={t('intakeEmbed.event')} />
         <Snippet title={t('intakeEmbed.iframe')} code={iframe} note={t('intakeEmbed.iframeHint')} />
+        {prefillAttrs.length > 0 && (
+          <div className="space-y-2 border-t border-border pt-4">
+            <p className="text-xs text-muted-foreground">{t('intakeEmbed.prefillHint')}</p>
+            <label className="flex items-center gap-2 text-[13px]">
+              <Switch checked={lock} label={t('intakeEmbed.lock')} onChange={setLock} />
+              {t('intakeEmbed.lock')}
+            </label>
+            <Snippet title={t('intakeEmbed.prefill')} code={prefilled} note={`${t('intakeEmbed.prefillTrust')} ${t('intakeEmbed.prefillIframe')}`} />
+          </div>
+        )}
       </div>
     </Dialog>
   );

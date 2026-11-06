@@ -267,3 +267,79 @@ describe('the embed loader', () => {
     }
   });
 });
+
+describe('hidden fields and prefill', () => {
+  it('keeps hidden values the site passed, and hands their source to the page', async () => {
+    const owner = reqAs(users.owner!.cookie);
+    const type = await json(owner.post('/project-types', { name: 'Support', revenueSource: 'none' }));
+    const id = (await json(owner.post('/projects', { name: 'Support', key: 'SUP', projectTypeId: type.id, visibility: 'private' }))).id;
+    const settings = await json(owner.patch(`/projects/${id}/intake-settings`, {
+      formEnabled: true,
+      formConfig: {
+        fields: [
+          { key: 'title' },
+          { key: 'requesterEmail', required: true },
+          { key: 'page', label: 'Page', type: 'hidden', source: 'page' },
+          { key: 'accountId', label: 'Account', type: 'hidden' },
+        ],
+      },
+    }));
+
+    const form = await json(app.request(`/api/v1/intake/${settings.formToken}`));
+    expect(form.form.fields.find((f: any) => f.key === 'page')).toMatchObject({ type: 'hidden', source: 'page', required: false });
+
+    const res = await submit({
+      values: { title: 'Checkout broken', requesterEmail: 'Anna@Example.com', page: 'https://shop.example.com/cart?step=2', accountId: 'acc_42' },
+    }, undefined, settings.formToken);
+    expect(res.status).toBe(200);
+    const { db } = getDb();
+    const [item] = await db.select().from(schema.intakeItems).where(eq(schema.intakeItems.projectId, id));
+    expect(item!.requesterEmail).toBe('anna@example.com');
+    expect(item!.answers).toEqual([
+      { key: 'page', label: 'Page', type: 'hidden', value: 'https://shop.example.com/cart?step=2' },
+      { key: 'accountId', label: 'Account', type: 'hidden', value: 'acc_42' },
+    ]);
+  });
+});
+
+describe('the embed loader on a page', () => {
+  /** Run the loader against a minimal stand-in for a host page; returns the iframe it made. */
+  async function runLoader(attributes: Record<string, string>, pageUrl = 'https://site.example.com/help?x=1#top') {
+    const source = await (await app.request('/api/v1/embed/intake.js')).text();
+    const frames: any[] = [];
+    const container = {
+      attributes: Object.entries(attributes).map(([name, value]) => ({ name, value })),
+      getAttribute(name: string) { return this.attributes.find((a) => a.name === name)?.value ?? null; },
+      setAttribute(name: string, value: string) { this.attributes.push({ name, value }); },
+      appendChild(el: any) { frames.push(el); },
+    };
+    const document = {
+      currentScript: { src: 'https://ordi.example.com/api/v1/embed/intake.js' },
+      readyState: 'complete',
+      querySelectorAll: () => [container],
+      createElement: () => ({ style: {}, setAttribute() {} }),
+    };
+    const window = { location: { href: pageUrl }, addEventListener() {} } as any;
+    new Function('window', 'document', source)(window, document);
+    return { frame: frames[0], api: window.ordiIntake };
+  }
+
+  it('puts prefill, the lock and the page address in the fragment, not the query', async () => {
+    const { frame, api } = await runLoader({
+      'data-ordi-intake': 'tok123',
+      'data-lang': 'uk',
+      'data-prefill-requester-email': 'anna@example.com',
+      'data-prefill-account_id': 'acc 42',
+      'data-lock-prefilled': '',
+    });
+    const url = new URL(frame.src);
+    expect(url.origin + url.pathname).toBe('https://ordi.example.com/intake/tok123');
+    expect(url.search).toBe('?embed=1&lang=uk');
+    const hash = new URLSearchParams(url.hash.slice(1));
+    expect(hash.get('requesterEmail')).toBe('anna@example.com');
+    expect(hash.get('account_id')).toBe('acc 42');
+    expect(hash.get('_lock')).toBe('1');
+    expect(hash.get('_page')).toBe('https://site.example.com/help?x=1');
+    expect(typeof api.mount).toBe('function');
+  });
+});

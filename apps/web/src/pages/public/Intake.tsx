@@ -6,12 +6,17 @@
  * Embedded, the page drops its own backdrop and branding row, takes its
  * theme from `?theme=` (light by default – most host sites are), and tells
  * the parent page its height and when a request went through.
+ *
+ * Prefill arrives in the URL fragment (`#requesterEmail=…&_page=…&_lock=1`),
+ * put there by the loader or by hand on a link: field values matched to keys
+ * loosely, the embedding page's address, and whether prefilled fields are
+ * read-only. Hidden fields are filled from it and never drawn.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Paperclip, X } from 'lucide-react';
 import {
-  BLOCKED_FILE_EXTENSIONS, defaultIntakeFormConfig, validateIntakeSubmission,
+  BLOCKED_FILE_EXTENSIONS, defaultIntakeFormConfig, intakePrefillMatchKey, validateIntakeSubmission,
   type IntakeField, type IntakeFieldError,
 } from '@ordi/shared';
 import { api, ApiError } from '../../lib/api';
@@ -115,6 +120,65 @@ function readEmbedOptions(): EmbedOptions {
   return { embed, theme };
 }
 
+/** What the site passed in the fragment. */
+export interface IntakePrefill {
+  /** Values by loose key (see intakePrefillMatchKey). */
+  values: Record<string, string>;
+  /** The page the form sits on, or was linked from. */
+  page: string | null;
+  /** Prefilled visible fields are read-only. */
+  lock: boolean;
+}
+
+function readPrefill(): IntakePrefill {
+  const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const values: Record<string, string> = {};
+  for (const [key, value] of params) {
+    if (!key.startsWith('_') && value.trim()) values[intakePrefillMatchKey(key)] = value;
+  }
+  return {
+    values,
+    page: params.get('_page') || document.referrer || null,
+    lock: params.get('_lock') === '1',
+  };
+}
+
+/** The value a field starts with, if the site passed one it can take. */
+function prefilledValue(field: PublicField, prefill: IntakePrefill | null | undefined): string | boolean | undefined {
+  if (!prefill) return undefined;
+  if (field.type === 'hidden' && field.source === 'page') return prefill.page ?? undefined;
+  const raw = prefill.values[intakePrefillMatchKey(field.key)];
+  if (raw === undefined) return undefined;
+  if (field.type === 'checkbox') return ['true', '1', 'on', 'yes'].includes(raw.toLowerCase()) || undefined;
+  if (field.type === 'select') return field.options.includes(raw) ? raw : undefined;
+  return raw;
+}
+
+/**
+ * The embedding page's address right now – a single-page site may have
+ * navigated since the form loaded. Null when not framed by the loader or it
+ * does not answer in time.
+ */
+function askParentPage(): Promise<string | null> {
+  if (window.parent === window) return Promise.resolve(null);
+  const id = Math.random().toString(36).slice(2);
+  return new Promise((resolve) => {
+    const done = (page: string | null) => {
+      window.removeEventListener('message', onMessage);
+      clearTimeout(timer);
+      resolve(page);
+    };
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { source?: string; type?: string; id?: string; page?: unknown } | null;
+      if (event.source !== window.parent || data?.source !== 'ordi-intake-host' || data.type !== 'context' || data.id !== id) return;
+      done(typeof data.page === 'string' ? data.page : null);
+    };
+    const timer = setTimeout(() => done(null), 400);
+    window.addEventListener('message', onMessage);
+    notifyParent({ type: 'context-request', id });
+  });
+}
+
 /** Tell the embedding page something; a no-op when the page is not framed. */
 function notifyParent(message: Record<string, unknown>) {
   if (window.parent === window) return;
@@ -124,6 +188,7 @@ function notifyParent(message: Record<string, unknown>) {
 export function IntakeFormPage({ token }: { token: string }) {
   const t = useT();
   const options = useMemo(readEmbedOptions, []);
+  const prefill = useMemo(readPrefill, []);
   const info = useQuery({ queryKey: ['intake', token], queryFn: () => api.get<IntakeInfo>(`/intake/${token}`), retry: false });
 
   useLayoutEffect(() => {
@@ -156,7 +221,7 @@ export function IntakeFormPage({ token }: { token: string }) {
           {info.data.workspaceName && <span>{info.data.workspaceName}</span>}
         </div>
       )}
-      <IntakeForm token={token} projectName={info.data.projectName} form={info.data.form} embed={options.embed} />
+      <IntakeForm token={token} projectName={info.data.projectName} form={info.data.form} embed={options.embed} prefill={prefill} />
     </Frame>
   );
 }
@@ -165,14 +230,24 @@ export function IntakeFormPage({ token }: { token: string }) {
  * The form itself. Also rendered by the settings editor as a live preview –
  * `token` null there, and submitting is a no-op.
  */
-export function IntakeForm({ token, projectName, form, embed = false }: {
+export function IntakeForm({ token, projectName, form, embed = false, prefill }: {
   token: string | null;
   projectName: string;
   form: PublicIntakeForm;
   embed?: boolean;
+  prefill?: IntakePrefill | null;
 }) {
   const t = useT();
-  const [values, setValues] = useState<Record<string, string | boolean>>({});
+  const initial = useMemo(() => {
+    const out: Record<string, string | boolean> = {};
+    for (const field of form.fields) {
+      const value = prefilledValue(field, prefill);
+      if (value !== undefined) out[field.key] = value;
+    }
+    return out;
+  }, [form.fields, prefill]);
+  const locked = (field: PublicField) => Boolean(prefill?.lock && field.type !== 'hidden' && initial[field.key] !== undefined);
+  const [values, setValues] = useState<Record<string, string | boolean>>(initial);
   const [files, setFiles] = useState<File[]>([]);
   const [honeypot, setHoneypot] = useState('');
   const [errors, setErrors] = useState<Record<string, IntakeFieldError>>({});
@@ -183,8 +258,13 @@ export function IntakeForm({ token, projectName, form, embed = false }: {
 
   const submit = useMutation({
     mutationFn: async () => {
-      const payload = { values, honeypot };
       if (!token) return;
+      const sent = { ...values };
+      if (form.fields.some((f) => f.type === 'hidden' && f.source === 'page')) {
+        const page = await askParentPage();
+        if (page) for (const f of form.fields) if (f.type === 'hidden' && f.source === 'page') sent[f.key] = page;
+      }
+      const payload = { values: sent, honeypot };
       if (files.length) {
         const body = new FormData();
         body.append('payload', JSON.stringify(payload));
@@ -239,7 +319,7 @@ export function IntakeForm({ token, projectName, form, embed = false }: {
   };
 
   const reset = () => {
-    setValues({}); setFiles([]); setErrors({}); setFileError(null); setFormError(null);
+    setValues(initial); setFiles([]); setErrors({}); setFileError(null); setFormError(null);
     submit.reset();
   };
 
@@ -265,12 +345,13 @@ export function IntakeForm({ token, projectName, form, embed = false }: {
         noValidate
         onSubmit={(event) => { event.preventDefault(); onSubmit(); }}
       >
-        {form.fields.map((field) => (
+        {form.fields.filter((field) => field.type !== 'hidden').map((field) => (
           <FieldControl
             key={field.key}
             field={field}
             label={labelOf(field)}
             value={values[field.key]}
+            readOnly={locked(field)}
             error={errors[field.key] ? t(`intakeForm.err.${errors[field.key]}`) : null}
             chooseLabel={t('intakeForm.choose')}
             onChange={(value) => setValue(field.key, value)}
@@ -331,10 +412,12 @@ export function IntakeForm({ token, projectName, form, embed = false }: {
   );
 }
 
-function FieldControl({ field, label, value, error, chooseLabel, onChange }: {
+function FieldControl({ field, label, value, readOnly = false, error, chooseLabel, onChange }: {
   field: PublicField;
   label: string;
   value: string | boolean | undefined;
+  /** Prefilled by the site and locked: shown, not editable. */
+  readOnly?: boolean;
   error: string | null;
   chooseLabel: string;
   onChange: (value: string | boolean) => void;
@@ -345,7 +428,7 @@ function FieldControl({ field, label, value, error, chooseLabel, onChange }: {
     id,
     'aria-invalid': error ? true : undefined,
     'aria-describedby': describedBy,
-    className: cn('mt-1', error && '!border-destructive'),
+    className: cn('mt-1', error && '!border-destructive', readOnly && 'bg-muted/50 text-muted-foreground'),
   };
   const text = typeof value === 'string' ? value : '';
 
@@ -358,6 +441,7 @@ function FieldControl({ field, label, value, error, chooseLabel, onChange }: {
             type="checkbox"
             className="mt-0.5 h-4 w-4 shrink-0 accent-[hsl(var(--action))]"
             checked={value === true}
+            disabled={readOnly}
             aria-invalid={error ? true : undefined}
             aria-describedby={describedBy}
             onChange={(event) => onChange(event.target.checked)}
@@ -371,10 +455,10 @@ function FieldControl({ field, label, value, error, chooseLabel, onChange }: {
 
   let control: ReactNode;
   if (field.type === 'textarea') {
-    control = <Textarea {...common} rows={5} placeholder={field.placeholder} value={text} onChange={(event) => onChange(event.target.value)} />;
+    control = <Textarea {...common} readOnly={readOnly} rows={5} placeholder={field.placeholder} value={text} onChange={(event) => onChange(event.target.value)} />;
   } else if (field.type === 'select') {
     control = (
-      <Select {...common} className={cn(common.className, 'w-full')} value={text} onChange={(event) => onChange(event.target.value)}>
+      <Select {...common} disabled={readOnly} className={cn(common.className, 'w-full')} value={text} onChange={(event) => onChange(event.target.value)}>
         <option value="">{field.placeholder || chooseLabel}</option>
         {field.options.map((option) => <option key={option} value={option}>{option}</option>)}
       </Select>
@@ -386,6 +470,7 @@ function FieldControl({ field, label, value, error, chooseLabel, onChange }: {
       <Input
         {...common}
         type={type}
+        readOnly={readOnly}
         inputMode={field.type === 'number' ? 'decimal' : undefined}
         autoComplete={autoComplete}
         placeholder={field.placeholder}

@@ -197,7 +197,7 @@ export function ProjectIntakeTab({ projectId, statuses, users }: {
                     <div key={answer.key} className="contents">
                       <dt className="text-faint">{answer.label}</dt>
                       <dd className="break-words text-muted-foreground">
-                        {answer.type === 'url' && typeof answer.value === 'string'
+                        {(answer.type === 'url' || answer.type === 'hidden') && typeof answer.value === 'string' && /^https?:\/\//i.test(answer.value)
                           ? <a href={answer.value} target="_blank" rel="noreferrer noopener" className="underline underline-offset-2 hover:text-foreground">{answer.value}</a>
                           : intakeAnswerText(answer)}
                       </dd>
@@ -478,7 +478,7 @@ export function IntakeSettingsSection({ projectId, projectName }: { projectId: s
         />
       )}
       {embedding && settings && (
-        <IntakeEmbedDialog origin={appOrigin()} token={settings.formToken} onClose={() => setEmbedding(false)} />
+        <IntakeEmbedDialog origin={appOrigin()} token={settings.formToken} config={settings.formConfig} onClose={() => setEmbedding(false)} />
       )}
       <ConfirmDialog
         open={rotating}

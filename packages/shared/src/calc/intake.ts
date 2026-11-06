@@ -10,13 +10,22 @@
  * made required or hidden – except the title, which a request cannot do
  * without. Everything else is a custom field whose answer is stored on the
  * request and copied into the task description on accept.
+ *
+ * A `hidden` field is never rendered: its value comes from the site the form
+ * is embedded in – prefilled by the embed loader (`data-prefill-<key>`), or
+ * the address of the page the form was sent from. Prefilled values are what
+ * the embedding page says they are, not verified facts about the visitor.
  */
 import { z } from 'zod';
 
 export const INTAKE_FIELD_TYPES = [
-  'text', 'textarea', 'email', 'phone', 'url', 'number', 'date', 'select', 'checkbox',
+  'text', 'textarea', 'email', 'phone', 'url', 'number', 'date', 'select', 'checkbox', 'hidden',
 ] as const;
 export type IntakeFieldType = (typeof INTAKE_FIELD_TYPES)[number];
+
+/** Where a hidden field's value comes from: what the site passes, or the page's address. */
+export const INTAKE_HIDDEN_SOURCES = ['prefill', 'page'] as const;
+export type IntakeHiddenSource = (typeof INTAKE_HIDDEN_SOURCES)[number];
 
 export const INTAKE_BUILTIN_KEYS = ['requesterName', 'requesterEmail', 'title', 'description'] as const;
 export type IntakeBuiltinKey = (typeof INTAKE_BUILTIN_KEYS)[number];
@@ -34,7 +43,7 @@ export const INTAKE_MAX_ATTACHMENTS = 10;
 /** Longest accepted answer per field type; anything longer is refused, not cut. */
 const MAX_LENGTH: Record<IntakeFieldType, number> = {
   text: 500, textarea: 20_000, email: 254, phone: 40, url: 2_000,
-  number: 40, date: 10, select: 120, checkbox: 5,
+  number: 40, date: 10, select: 120, checkbox: 5, hidden: 2_000,
 };
 
 export function isBuiltinIntakeKey(key: string): key is IntakeBuiltinKey {
@@ -52,6 +61,8 @@ export const intakeFieldSchema = z.object({
   hidden: z.boolean().default(false),
   /** Choices of a `select` field. */
   options: z.array(z.string().trim().min(1).max(120)).max(50).default([]),
+  /** Where a `hidden` field's value comes from. */
+  source: z.enum(INTAKE_HIDDEN_SOURCES).default('prefill'),
 });
 export type IntakeField = z.infer<typeof intakeFieldSchema>;
 
@@ -86,10 +97,10 @@ export const intakeFormConfigSchema = z.object({
 export type IntakeFormConfig = z.infer<typeof intakeFormConfigSchema>;
 
 const DEFAULT_FIELDS: IntakeField[] = [
-  { key: 'requesterName', type: 'text', label: '', placeholder: '', help: '', required: true, hidden: false, options: [] },
-  { key: 'requesterEmail', type: 'email', label: '', placeholder: '', help: '', required: false, hidden: false, options: [] },
-  { key: 'title', type: 'text', label: '', placeholder: '', help: '', required: true, hidden: false, options: [] },
-  { key: 'description', type: 'textarea', label: '', placeholder: '', help: '', required: false, hidden: false, options: [] },
+  { key: 'requesterName', type: 'text', label: '', placeholder: '', help: '', required: true, hidden: false, options: [], source: 'prefill' },
+  { key: 'requesterEmail', type: 'email', label: '', placeholder: '', help: '', required: false, hidden: false, options: [], source: 'prefill' },
+  { key: 'title', type: 'text', label: '', placeholder: '', help: '', required: true, hidden: false, options: [], source: 'prefill' },
+  { key: 'description', type: 'textarea', label: '', placeholder: '', help: '', required: false, hidden: false, options: [], source: 'prefill' },
 ];
 
 /** The form every project starts with: what the page asked for before it was configurable. */
@@ -106,7 +117,8 @@ export function defaultIntakeFormConfig(): IntakeFormConfig {
  * keep their fixed types and are always present (a dropped one comes back
  * hidden, a dropped title comes back first), the title is always shown and
  * required, a hidden field is never required, and only choice fields carry
- * options.
+ * options. A `hidden`-type field is never required either (the visitor could
+ * not fix it) and has no placeholder or hint.
  */
 export function normalizeIntakeFormConfig(raw: unknown): IntakeFormConfig {
   if (raw == null) return defaultIntakeFormConfig();
@@ -119,6 +131,8 @@ export function normalizeIntakeFormConfig(raw: unknown): IntakeFormConfig {
     if (next.key === 'title') { next.hidden = false; next.required = true; }
     if (next.hidden) next.required = false;
     if (next.type !== 'select') next.options = [];
+    if (next.type === 'hidden') { next.required = false; next.placeholder = ''; next.help = ''; }
+    else next.source = 'prefill';
     return next;
   });
   for (const builtin of DEFAULT_FIELDS) {
@@ -129,7 +143,10 @@ export function normalizeIntakeFormConfig(raw: unknown): IntakeFormConfig {
   return { ...config, fields };
 }
 
-/** The fields a visitor sees, in order. */
+/**
+ * The fields the form takes, in order: all but those switched off. The
+ * `hidden`-type ones among them are taken but not drawn.
+ */
 export function visibleIntakeFields(config: IntakeFormConfig): IntakeField[] {
   return config.fields.filter((f) => !f.hidden);
 }
@@ -189,6 +206,8 @@ function checkField(field: IntakeField, raw: unknown):
     return { value: on ? true : null };
   }
   const value = typeof raw === 'string' ? raw.trim() : typeof raw === 'number' ? String(raw) : '';
+  // Nobody can correct a hidden value, so an overlong one is cut, not refused.
+  if (field.type === 'hidden') return { value: value ? value.slice(0, MAX_LENGTH.hidden) : null };
   if (!value) return field.required ? { error: 'required' } : { value: null };
   if (value.length > MAX_LENGTH[field.type]) return { error: 'too_long' };
   switch (field.type) {
@@ -237,4 +256,18 @@ export function validateIntakeSubmission(
 /** An answer's value as text; a ticked box reads ✓. */
 export function intakeAnswerText(answer: IntakeAnswer): string {
   return answer.value === true ? '✓' : String(answer.value);
+}
+
+/**
+ * A field key as prefill names are matched against it: case, `_` and `-`
+ * ignored, since HTML lowercases attribute names (`data-prefill-requester-email`
+ * and `data-prefill-requesteremail` both reach `requesterEmail`).
+ */
+export function intakePrefillMatchKey(key: string): string {
+  return key.toLowerCase().replace(/[_-]/g, '');
+}
+
+/** The container attribute the embed loader reads a field's prefill from. */
+export function intakePrefillAttribute(key: string): string {
+  return `data-prefill-${key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
 }
