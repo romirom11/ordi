@@ -1492,8 +1492,10 @@ export async function peopleDashboard(actor?: Actor) {
     group by s.id, s.name, s.position order by s.position asc`) as any[];
 
   // Open roles and the candidates still in play for each (hired and rejected
-  // are done). Counts only: applicant names stay behind people.recruit.
-  const openRoles = await db.execute(sql`
+  // are done). Openings and stages are people.recruit data (their own routes
+  // demand it), so only a recruiter gets them; applicant names never.
+  const canRecruit = actor ? actor.access.permissions.has('people.recruit') : false;
+  const openRoles = !canRecruit ? [] : await db.execute(sql`
     select o.id, o.title, o.positions_count,
       count(a.id) filter (where not s.is_hired and not s.is_rejected)::int as active_candidates
     from job_openings o
@@ -1502,7 +1504,7 @@ export async function peopleDashboard(actor?: Actor) {
     where o.deleted_at is null and o.status = 'open'
     group by o.id, o.title, o.positions_count, o.created_at
     order by o.created_at asc limit 20`) as any[];
-  const activeStages = await db.execute(sql`
+  const activeStages = !canRecruit ? [] : await db.execute(sql`
     select s.id as stage_id, s.name as stage_name, count(a.id)::int as count
     from applicant_stages s
     join applicants a on a.stage_id = s.id and a.deleted_at is null
@@ -1535,13 +1537,13 @@ export async function peopleDashboard(actor?: Actor) {
     dates,
     joiners: joiners.map(move),
     leavers: leavers.map(move),
-    recruiting: {
+    recruiting: !canRecruit ? null : {
       openRoles: openRoles.map((r) => ({
         id: r.id, title: r.title, positionsCount: Number(r.positions_count), activeCandidates: Number(r.active_candidates),
       })),
       stages: activeStages.map((r) => ({ stageId: r.stage_id, name: r.stage_name, count: Number(r.count) })),
     },
-    canRecruit: actor ? actor.access.permissions.has('people.recruit') : false,
+    canRecruit,
     canApproveLeave: actor ? actor.access.permissions.has('people.approve_leave') : false,
     upcomingAbsences,
     openJobOpenings: Number(openings?.open_count ?? 0),

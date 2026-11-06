@@ -81,7 +81,9 @@ interface Dashboard {
   dates: DateEvent[];
   joiners: Move[];
   leavers: Move[];
-  recruiting: { openRoles: { id: string; title: string; positionsCount: number; activeCandidates: number }[]; stages: { stageId: string; name: string; count: number }[] };
+  /** Only for people.recruit; openJobOpenings is the count everyone with people.read sees. */
+  recruiting: { openRoles: { id: string; title: string; positionsCount: number; activeCandidates: number }[]; stages: { stageId: string; name: string; count: number }[] } | null;
+  openJobOpenings: number;
   canRecruit: boolean;
   canApproveLeave: boolean;
 }
@@ -176,7 +178,7 @@ export function PeopleDashboard() {
   const d = q.data;
   const goTab = (tab: string) => navigate(`/people?tab=${tab}`);
   const awayNow = d.awayThisWeek.filter((l) => l.fromDate <= d.today && l.toDate >= d.today).length;
-  const roles = d.recruiting.openRoles;
+  const roles = d.recruiting?.openRoles ?? [];
   const moves = [
     ...d.joiners.map((m) => ({ ...m, kind: 'join' as const })),
     ...d.leavers.map((m) => ({ ...m, kind: 'leave' as const })),
@@ -187,7 +189,7 @@ export function PeopleDashboard() {
     { label: n(t('hrdash.people'), d.headcount.active + d.headcount.onLeave), onClick: () => goTab('employees') },
     ...(d.pendingLeave.length ? [{ label: n(t('hrdash.pendingCount'), d.pendingLeave.length), onClick: () => goTab('leave'), accent: true }] : []),
     ...(d.awayThisWeek.length ? [{ label: n(t('hrdash.awayCount'), d.awayThisWeek.length), onClick: () => goTab('calendar') }] : []),
-    ...(roles.length ? [{ label: n(t('hrdash.rolesCount'), roles.length), onClick: d.canRecruit ? () => goTab('recruiting') : undefined }] : []),
+    ...(d.openJobOpenings ? [{ label: n(t('hrdash.rolesCount'), d.openJobOpenings), onClick: d.canRecruit ? () => goTab('recruiting') : undefined }] : []),
   ];
 
   const dateMeta = (e: DateEvent): { icon: ReactNode; label: string } => {
@@ -333,9 +335,9 @@ export function PeopleDashboard() {
                   </span>
                 </button>
               ))}
-              {d.recruiting.stages.length > 0 && (
+              {(d.recruiting?.stages.length ?? 0) > 0 && (
                 <div className="flex flex-wrap gap-1.5 px-4 py-2.5">
-                  {d.recruiting.stages.map((s) => (
+                  {d.recruiting!.stages.map((s) => (
                     <span key={s.stageId} className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
                       {s.name} <span className="tabular-nums text-foreground">{s.count}</span>
                     </span>

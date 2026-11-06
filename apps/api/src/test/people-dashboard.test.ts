@@ -83,6 +83,22 @@ describe('HR dashboard', () => {
     expect(d.recruiting.stages).toEqual([{ stageId: expect.any(String), name: 'Screening', count: 1 }]);
     expect(JSON.stringify(d.recruiting)).not.toContain('a@x.test');
   });
+
+  it('keeps openings and stages from someone without people.recruit', async () => {
+    // A role that reads people but does not recruit.
+    const { db } = getDb();
+    const roleId = ulid();
+    const userId = ulid();
+    const token = `t-${ulid()}`;
+    await db.insert(schema.roles).values({ id: roleId, key: 'people_viewer', name: 'People viewer', description: '', isSystem: false });
+    await db.insert(schema.rolePermissions).values({ roleId, permission: 'people.read' });
+    await db.insert(schema.users).values({ id: userId, email: 'viewer@test.local', name: 'Viewer', passwordHash: 'x', roleId });
+    await db.insert(schema.sessions).values({ id: ulid(), userId, token, expiresAt: new Date(Date.now() + 3600_000) });
+    const d = await json(reqAs(`ordi_session=${token}`).get('/people/dashboard'));
+    expect(d.recruiting).toBeNull();
+    expect(d.canRecruit).toBe(false);
+    expect(d.openJobOpenings).toBe(1);
+  });
 });
 
 describe('nextOccurrence', () => {
