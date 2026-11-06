@@ -4,7 +4,7 @@
  * here: persona/emergency fields, compensation and salary ranges are stripped or
  * audited on read. Leave math comes from @ordi/shared pure calc (never re-implemented).
  */
-import { getDb, schema, eq, and, isNull, inArray, desc, asc, gte, lte, sql } from '@ordi/db';
+import { getDb, schema, eq, and, isNull, inArray, desc, asc, gte, lte, sql, type SQL } from '@ordi/db';
 import { ulid } from 'ulid';
 import {
   leaveDays, availableBalance, carryForward, rangesOverlap, remainingBalance, exceedsEntitlement,
@@ -1373,18 +1373,70 @@ export async function putOverheadSettings(actor: Actor, input: any) {
 }
 
 // ─── HR dashboard (PRD §12.6) ───
-export async function peopleDashboard() {
+
+/**
+ * Someone still at the company: their card is not terminated and, when it is
+ * linked to an account, the account is active. The same rule the directory
+ * and the org structure use.
+ */
+const STILL_HERE = sql`e.deleted_at is null and e.status <> 'terminated' and coalesce(u.is_active, true)`;
+const FULL_NAME = sql`btrim(coalesce(e.first_name,'') || ' ' || coalesce(e.last_name,''))`;
+
+function isoDayOffset(days: number): string {
+  return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** The next time a yearly date (birthday, work anniversary) comes round, on or after `today`. */
+export function nextOccurrence(date: string, today: string): { date: string; years: number } {
+  const monthDay = date.slice(5, 10);
+  const year = Number(today.slice(0, 4));
+  // 29 February outside a leap year falls on 28 February.
+  const leap = (y: number) => y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0);
+  const fit = (y: number) => (monthDay === '02-29' && !leap(y) ? `${y}-02-28` : `${y}-${monthDay}`);
+  const thisYear = fit(year);
+  const next = thisYear >= today ? thisYear : fit(year + 1);
+  return { date: next, years: Number(next.slice(0, 4)) - Number(date.slice(0, 4)) };
+}
+
+const isDay = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v);
+
+/**
+ * What HR should look at, as lists of people rather than bare counts: leave
+ * waiting for a decision, who is away this week, dates coming up, who joined
+ * or is leaving, and hiring. The original counters stay for API callers.
+ */
+export async function peopleDashboard(actor?: Actor) {
   const { db } = getDb();
-  const today = new Date().toISOString().slice(0, 10);
-  const cutoff = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  const today = isoDayOffset(0);
+  const weekAhead = isoDayOffset(6);
+  const monthAhead = isoDayOffset(30);
+  const cutoff = isoDayOffset(-30);
 
   const [headcount] = await db.execute(sql`
     select
-      count(*) filter (where status = 'active')::int as active,
-      count(*) filter (where status = 'on_leave')::int as on_leave,
-      count(*) filter (where join_date is not null and join_date >= ${cutoff})::int as new_hires,
-      count(*) filter (where status = 'terminated' and exit_date is not null and exit_date >= ${cutoff})::int as exits
-    from employees where deleted_at is null`) as any[];
+      count(*) filter (where ${STILL_HERE} and e.status = 'active')::int as active,
+      count(*) filter (where ${STILL_HERE} and e.status = 'on_leave')::int as on_leave,
+      count(*) filter (where e.deleted_at is null and e.join_date >= ${cutoff} and e.join_date <= ${today})::int as new_hires,
+      count(*) filter (where e.deleted_at is null and e.exit_date >= ${cutoff} and e.exit_date <= ${today})::int as exits
+    from employees e left join users u on u.id = e.user_id`) as any[];
+
+  const leaveRow = sql`lr.id, lr.employee_id, ${FULL_NAME} as name, u.avatar, lt.name as leave_type,
+    lr.from_date, lr.to_date, lr.half_day`;
+  const leaveFrom = sql`from leave_requests lr
+    join employees e on e.id = lr.employee_id
+    left join users u on u.id = e.user_id
+    left join leave_types lt on lt.id = lr.leave_type_id`;
+
+  const pendingLeave = await db.execute(sql`
+    select ${leaveRow}, lr.created_at ${leaveFrom}
+    where lr.status = 'pending' and e.deleted_at is null and lr.to_date >= ${today}
+    order by lr.from_date asc limit 20`) as any[];
+
+  // Away at any point from today through the next six days.
+  const awayThisWeek = await db.execute(sql`
+    select ${leaveRow} ${leaveFrom}
+    where lr.status = 'approved' and ${STILL_HERE} and lr.from_date <= ${weekAhead} and lr.to_date >= ${today}
+    order by lr.from_date asc limit 30`) as any[];
 
   const upcomingAbsences = await db.execute(sql`
     select lr.id, lr.employee_id, lr.leave_type_id, lr.from_date, lr.to_date, lr.half_day,
@@ -1392,6 +1444,43 @@ export async function peopleDashboard() {
     from leave_requests lr join employees e on e.id = lr.employee_id
     where lr.status = 'approved' and lr.from_date >= ${today} and e.deleted_at is null
     order by lr.from_date asc limit 20`) as any[];
+
+  // Birthdays, work anniversaries and probation ends in the next 30 days.
+  const people = await db.execute(sql`
+    select e.id, ${FULL_NAME} as name, u.avatar, e.birthday, e.join_date, e.probation_end
+    from employees e left join users u on u.id = e.user_id
+    where ${STILL_HERE}`) as any[];
+  type DateEvent = {
+    kind: 'birthday' | 'anniversary' | 'probation'; employeeId: string; name: string;
+    avatar: string | null; date: string; years?: number;
+  };
+  const dates: DateEvent[] = [];
+  for (const p of people) {
+    const base = { employeeId: p.id as string, name: p.name as string, avatar: (p.avatar ?? null) as string | null };
+    if (isDay(p.birthday)) {
+      const next = nextOccurrence(p.birthday, today);
+      if (next.date <= monthAhead) dates.push({ kind: 'birthday', ...base, date: next.date });
+    }
+    if (isDay(p.join_date) && p.join_date < today) {
+      const next = nextOccurrence(p.join_date, today);
+      if (next.years > 0 && next.date <= monthAhead) dates.push({ kind: 'anniversary', ...base, date: next.date, years: next.years });
+    }
+    if (isDay(p.probation_end) && p.probation_end >= today && p.probation_end <= monthAhead) {
+      dates.push({ kind: 'probation', ...base, date: p.probation_end });
+    }
+  }
+  dates.sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name));
+
+  // Joined in the last 30 days or starting in the next 30; leaving the same.
+  const moves = (column: 'join_date' | 'exit_date', extra: SQL) => db.execute(sql`
+    select e.id as employee_id, ${FULL_NAME} as name, u.avatar, e.${sql.raw(column)} as date, pos.title as position
+    from employees e left join users u on u.id = e.user_id
+    left join positions pos on pos.id = e.position_id
+    where e.deleted_at is null and ${extra}
+      and e.${sql.raw(column)} >= ${cutoff} and e.${sql.raw(column)} <= ${monthAhead}
+    order by e.${sql.raw(column)} desc limit 20`) as Promise<any[]>;
+  const joiners = await moves('join_date', sql`e.status <> 'terminated'`);
+  const leavers = await moves('exit_date', sql`true`);
 
   const [openings] = await db.execute(sql`
     select count(*)::int as open_count from job_openings where deleted_at is null and status = 'open'`) as any[];
@@ -1402,18 +1491,58 @@ export async function peopleDashboard() {
     left join applicants a on a.stage_id = s.id and a.deleted_at is null
     group by s.id, s.name, s.position order by s.position asc`) as any[];
 
+  // Open roles and the candidates still in play for each (hired and rejected
+  // are done). Counts only: applicant names stay behind people.recruit.
+  const openRoles = await db.execute(sql`
+    select o.id, o.title, o.positions_count,
+      count(a.id) filter (where not s.is_hired and not s.is_rejected)::int as active_candidates
+    from job_openings o
+    left join applicants a on a.job_opening_id = o.id and a.deleted_at is null
+    left join applicant_stages s on s.id = a.stage_id
+    where o.deleted_at is null and o.status = 'open'
+    group by o.id, o.title, o.positions_count, o.created_at
+    order by o.created_at asc limit 20`) as any[];
+  const activeStages = await db.execute(sql`
+    select s.id as stage_id, s.name as stage_name, count(a.id)::int as count
+    from applicant_stages s
+    join applicants a on a.stage_id = s.id and a.deleted_at is null
+    join job_openings o on o.id = a.job_opening_id and o.deleted_at is null and o.status = 'open'
+    where not s.is_hired and not s.is_rejected
+    group by s.id, s.name, s.position order by s.position asc`) as any[];
+
   const upcomingProbation = await db.execute(sql`
-    select id, first_name, last_name, probation_end from employees
-    where deleted_at is null and status = 'active' and probation_end is not null and probation_end >= ${today}
-    order by probation_end asc limit 20`) as any[];
+    select e.id, e.first_name, e.last_name, e.probation_end
+    from employees e left join users u on u.id = e.user_id
+    where ${STILL_HERE} and e.status = 'active' and e.probation_end is not null and e.probation_end >= ${today}
+    order by e.probation_end asc limit 20`) as any[];
+
+  const leave = (r: any) => ({
+    id: r.id, employeeId: r.employee_id, name: r.name, avatar: r.avatar ?? null, leaveType: r.leave_type ?? null,
+    fromDate: r.from_date, toDate: r.to_date, halfDay: !!r.half_day,
+  });
+  const move = (r: any) => ({ employeeId: r.employee_id, name: r.name, avatar: r.avatar ?? null, date: r.date, position: r.position ?? null });
 
   return {
+    today,
     headcount: {
       active: Number(headcount?.active ?? 0),
       onLeave: Number(headcount?.on_leave ?? 0),
       newHires: Number(headcount?.new_hires ?? 0),
       exits: Number(headcount?.exits ?? 0),
     },
+    pendingLeave: pendingLeave.map((r) => ({ ...leave(r), requestedAt: r.created_at })),
+    awayThisWeek: awayThisWeek.map(leave),
+    dates,
+    joiners: joiners.map(move),
+    leavers: leavers.map(move),
+    recruiting: {
+      openRoles: openRoles.map((r) => ({
+        id: r.id, title: r.title, positionsCount: Number(r.positions_count), activeCandidates: Number(r.active_candidates),
+      })),
+      stages: activeStages.map((r) => ({ stageId: r.stage_id, name: r.stage_name, count: Number(r.count) })),
+    },
+    canRecruit: actor ? actor.access.permissions.has('people.recruit') : false,
+    canApproveLeave: actor ? actor.access.permissions.has('people.approve_leave') : false,
     upcomingAbsences,
     openJobOpenings: Number(openings?.open_count ?? 0),
     pipeline,

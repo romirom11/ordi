@@ -425,7 +425,7 @@ export function peopleRoutes() {
   });
 
   // ── HR dashboard (PRD §12.6) ──
-  app.get('/people/dashboard', guard('people.read'), async (c) => c.json(await svc.peopleDashboard()));
+  app.get('/people/dashboard', guard('people.read'), async (c) => c.json(await svc.peopleDashboard(currentActor(c))));
 
   return app;
 }
