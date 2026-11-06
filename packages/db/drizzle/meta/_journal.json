@@ -337,6 +337,13 @@
       "when": 1793918872159,
       "tag": "0047_secret_providers",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1794000264093,
+      "tag": "0048_invoice_payment_accounts",
+      "breakpoints": true
     }
   ]
 }

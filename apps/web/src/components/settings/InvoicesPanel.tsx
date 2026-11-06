@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check } from 'lucide-react';
+import { Check, Plus, Trash2 } from 'lucide-react';
+import type { PaymentAccount } from '@ordi/shared';
 import { api } from '../../lib/api';
-import { Button, Input, Textarea, Switch, Skeleton, Spinner, cn } from '../ui';
+import { currencyOptions } from '../../lib/currency';
+import { Button, Input, Select, Textarea, Switch, Skeleton, Spinner, cn } from '../ui';
 import { toast } from '../overlays';
 import { SectionHead, SettingRow } from './primitives';
 import { useT, extendDict } from '../../lib/i18n';
@@ -19,6 +21,18 @@ extendDict({
     'settings.invoiceFooterPlaceholder': 'Дякуємо за співпрацю!',
     'settings.invoicePayment': 'Payment details',
     'settings.invoicePaymentPlaceholder': 'IBAN UA00 0000 0000 …\nПризначення платежу: …',
+    'settings.invoiceAccounts': 'Payment accounts',
+    'settings.invoiceAccountsHint': 'One account per currency you take payments in. An invoice prints the account in the currency the client pays in; the first one in each currency is picked by default.',
+    'settings.invoiceAccountName': 'Account name',
+    'settings.invoiceAccountNamePlaceholder': 'e.g. PrivatBank, UAH',
+    'settings.invoiceAccountCurrency': 'Account currency',
+    'settings.invoiceAccountDetails': 'Payment details',
+    'settings.invoiceAccountDetailsRequired': 'Enter the details the client pays to.',
+    'settings.invoiceAccountAdd': 'Add account',
+    'settings.invoiceAccountRemove': 'Remove account',
+    'settings.invoiceAccountDefault': 'Default for {currency}',
+    'settings.invoiceAccountMakeDefault': 'Make default for {currency}',
+    'settings.invoiceAccountsEmpty': 'No accounts yet: invoices print no payment details.',
     'settings.invoicePreview': 'Preview',
     'settings.invoicePreviewNumber': 'INV-0001',
     'settings.invoicePreviewFrom': 'From',
@@ -49,6 +63,18 @@ extendDict({
     'settings.invoiceFooterPlaceholder': 'Дякуємо за співпрацю!',
     'settings.invoicePayment': 'Платіжні реквізити',
     'settings.invoicePaymentPlaceholder': 'IBAN UA00 0000 0000 …\nПризначення платежу: …',
+    'settings.invoiceAccounts': 'Рахунки для оплати',
+    'settings.invoiceAccountsHint': 'По рахунку на кожну валюту, в якій ви приймаєте оплату. Інвойс показує рахунок у валюті, якою платить клієнт; за замовчуванням береться перший рахунок цієї валюти.',
+    'settings.invoiceAccountName': 'Назва рахунку',
+    'settings.invoiceAccountNamePlaceholder': 'Напр. ПриватБанк, гривня',
+    'settings.invoiceAccountCurrency': 'Валюта рахунку',
+    'settings.invoiceAccountDetails': 'Реквізити',
+    'settings.invoiceAccountDetailsRequired': 'Вкажіть реквізити, на які платить клієнт.',
+    'settings.invoiceAccountAdd': 'Додати рахунок',
+    'settings.invoiceAccountRemove': 'Видалити рахунок',
+    'settings.invoiceAccountDefault': 'Типовий для {currency}',
+    'settings.invoiceAccountMakeDefault': 'Зробити типовим для {currency}',
+    'settings.invoiceAccountsEmpty': 'Рахунків ще немає: інвойси не показують реквізитів.',
     'settings.invoicePreview': 'Попередній перегляд',
     'settings.invoicePreviewNumber': 'INV-0001',
     'settings.invoicePreviewFrom': 'Від',
@@ -75,6 +101,7 @@ interface InvoiceSettings {
   accentColor?: string | null;
   footerNote?: string | null;
   paymentDetails?: string | null;
+  paymentAccounts?: PaymentAccount[];
   defaultNotes?: string | null;
   defaultTerms?: string | null;
 }
@@ -88,6 +115,7 @@ interface LegalDetails {
 interface WorkspaceData {
   name?: string;
   logo?: string | null;
+  defaultCurrency?: string | null;
   legalDetails?: LegalDetails | null;
   invoiceSettings?: InvoiceSettings;
 }
@@ -96,6 +124,22 @@ const ISSUER_KEYS: (keyof LegalDetails)[] = ['legalName', 'taxId', 'address', 'e
 function issuerOf(ws?: WorkspaceData): Record<keyof LegalDetails, string> {
   const raw = ws?.legalDetails ?? {};
   return Object.fromEntries(ISSUER_KEYS.map((k) => [k, typeof raw[k] === 'string' ? (raw[k] as string) : ''])) as Record<keyof LegalDetails, string>;
+}
+
+/**
+ * The accounts the editor starts from. A workspace that still has only the
+ * older single text sees it as one account in its default currency, and the
+ * next save stores it as such.
+ */
+function accountsOf(ws?: WorkspaceData): PaymentAccount[] {
+  const inv = ws?.invoiceSettings ?? {};
+  if (inv.paymentAccounts?.length) return inv.paymentAccounts.map((a) => ({ id: a.id, name: a.name ?? '', currency: a.currency, details: a.details }));
+  const legacy = inv.paymentDetails?.trim();
+  return legacy ? [{ id: 'default', name: '', currency: ws?.defaultCurrency || 'USD', details: legacy }] : [];
+}
+
+function newAccountId(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID().slice(0, 12) : Math.random().toString(36).slice(2, 14);
 }
 
 const DEFAULT_ACCENT = '#6366f1';
@@ -110,7 +154,9 @@ export function InvoicesPanel() {
   const [showLogo, setShowLogo] = useState(true);
   const [accent, setAccent] = useState(DEFAULT_ACCENT);
   const [footer, setFooter] = useState('');
-  const [payment, setPayment] = useState('');
+  const [accounts, setAccounts] = useState<PaymentAccount[]>([]);
+  /** The account the preview shows: the one last focused, else the first. */
+  const [previewIdx, setPreviewIdx] = useState(0);
   const [defaultNotes, setDefaultNotes] = useState('');
   const [defaultTerms, setDefaultTerms] = useState('');
   const [issuer, setIssuer] = useState<Record<keyof LegalDetails, string>>(issuerOf());
@@ -123,7 +169,7 @@ export function InvoicesPanel() {
       setShowLogo(inv.showLogo ?? true);
       setAccent(inv.accentColor ?? DEFAULT_ACCENT);
       setFooter(inv.footerNote ?? '');
-      setPayment(inv.paymentDetails ?? '');
+      setAccounts(accountsOf(ws.data));
       setDefaultNotes(inv.defaultNotes ?? '');
       setDefaultTerms(inv.defaultTerms ?? '');
       setIssuer(issuerOf(ws.data));
@@ -151,21 +197,40 @@ export function InvoicesPanel() {
     showLogo !== (stored.showLogo ?? true) ||
     accent !== (stored.accentColor ?? DEFAULT_ACCENT) ||
     footer !== (stored.footerNote ?? '') ||
-    payment !== (stored.paymentDetails ?? '') ||
+    JSON.stringify(accounts) !== JSON.stringify(accountsOf(ws.data)) ||
     defaultNotes !== (stored.defaultNotes ?? '') ||
     defaultTerms !== (stored.defaultTerms ?? '') ||
     ISSUER_KEYS.some((k) => issuer[k] !== storedIssuer[k])
   );
   const logoIsWebp = !!logo && logo.startsWith('data:image/webp');
+  const accountsValid = accounts.every((a) => a.details.trim());
+  const payment = accounts[Math.min(previewIdx, accounts.length - 1)]?.details ?? '';
+
+  const setAccount = (idx: number, patch: Partial<PaymentAccount>) => setAccounts((cur) => cur.map((a, i) => (i === idx ? { ...a, ...patch } : a)));
+  /** The first account in a currency is its default: moving one in front of the others makes it so. */
+  const makeDefault = (idx: number) => setAccounts((cur) => {
+    const acc = cur[idx]!;
+    const first = cur.findIndex((a) => a.currency === acc.currency);
+    const rest = cur.filter((_, i) => i !== idx);
+    return [...rest.slice(0, first), acc, ...rest.slice(first)];
+  });
+  const addAccount = () => {
+    const used = new Set(accounts.map((a) => a.currency));
+    const currency = currencyOptions(ws.data?.defaultCurrency).find((c) => !used.has(c)) ?? ws.data?.defaultCurrency ?? 'USD';
+    setAccounts((cur) => [...cur, { id: newAccountId(), name: '', currency, details: '' }]);
+    setPreviewIdx(accounts.length);
+  };
 
   const save = () => {
-    if (!validHex) return;
+    if (!validHex || !accountsValid) return;
     patch.mutate({
       invoiceSettings: {
         showLogo,
         accentColor: accent,
         footerNote: footer.trim() || null,
-        paymentDetails: payment.trim() || null,
+        // The accounts replace the older single text for good.
+        paymentAccounts: accounts.map((a) => ({ id: a.id, name: a.name.trim(), currency: a.currency, details: a.details.trim() })),
+        paymentDetails: null,
         defaultNotes: defaultNotes.trim() || null,
         defaultTerms: defaultTerms.trim() || null,
       },
@@ -265,17 +330,69 @@ export function InvoicesPanel() {
             />
           </div>
 
+          {/* Payment accounts: one per currency the client may pay in. */}
           <div>
-            <div className="text-[13px] font-medium">{t('settings.invoicePayment')}</div>
-            <Textarea
-              value={payment}
-              onChange={(e) => setPayment(e.target.value)}
-              onFocus={() => setFocus('payment')}
-              onBlur={() => setFocus(null)}
-              placeholder={t('settings.invoicePaymentPlaceholder')}
-              rows={4}
-              className="mt-1.5 w-full font-mono text-xs"
-            />
+            <div className="text-[13px] font-medium">{t('settings.invoiceAccounts')}</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">{t('settings.invoiceAccountsHint')}</div>
+            <div className="mt-2.5 space-y-3">
+              {accounts.length === 0 && <p className="text-xs text-faint">{t('settings.invoiceAccountsEmpty')}</p>}
+              {accounts.map((a, i) => {
+                const isDefault = accounts.findIndex((x) => x.currency === a.currency) === i;
+                const multiple = accounts.filter((x) => x.currency === a.currency).length > 1;
+                const missing = !a.details.trim();
+                return (
+                  <div
+                    key={a.id}
+                    className="space-y-2 rounded-md border border-border p-2.5"
+                    onFocus={() => { setFocus('payment'); setPreviewIdx(i); }}
+                    onBlur={() => setFocus(null)}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={a.name}
+                        onChange={(e) => setAccount(i, { name: e.target.value })}
+                        placeholder={t('settings.invoiceAccountNamePlaceholder')}
+                        aria-label={t('settings.invoiceAccountName')}
+                        className="min-w-0 flex-1"
+                      />
+                      <Select
+                        value={a.currency}
+                        onChange={(e) => setAccount(i, { currency: e.target.value })}
+                        aria-label={t('settings.invoiceAccountCurrency')}
+                        className="w-[5.5rem] shrink-0"
+                      >
+                        {currencyOptions(a.currency).map((c) => <option key={c} value={c}>{c}</option>)}
+                      </Select>
+                      <button
+                        type="button"
+                        onClick={() => { setAccounts((cur) => cur.filter((_, j) => j !== i)); setPreviewIdx(0); }}
+                        aria-label={t('settings.invoiceAccountRemove')}
+                        title={t('settings.invoiceAccountRemove')}
+                        className="grid h-8 w-8 shrink-0 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                    <Textarea
+                      value={a.details}
+                      onChange={(e) => setAccount(i, { details: e.target.value })}
+                      placeholder={t('settings.invoicePaymentPlaceholder')}
+                      aria-label={t('settings.invoiceAccountDetails')}
+                      aria-invalid={missing || undefined}
+                      rows={4}
+                      className={cn('w-full font-mono text-xs', missing && 'border-destructive')}
+                    />
+                    {missing && <p className="text-xs text-destructive">{t('settings.invoiceAccountDetailsRequired')}</p>}
+                    {multiple && (
+                      isDefault
+                        ? <p className="text-xs text-muted-foreground">{t('settings.invoiceAccountDefault').replace('{currency}', a.currency)}</p>
+                        : <button type="button" onClick={() => makeDefault(i)} className="text-xs text-primary hover:underline">{t('settings.invoiceAccountMakeDefault').replace('{currency}', a.currency)}</button>
+                    )}
+                  </div>
+                );
+              })}
+              <Button type="button" variant="outline" size="sm" onClick={addAccount}><Plus size={13} /> {t('settings.invoiceAccountAdd')}</Button>
+            </div>
           </div>
 
           {/* Defaults: what every new invoice/quote starts with. */}
@@ -291,7 +408,7 @@ export function InvoicesPanel() {
 
           <div className="flex h-8 items-center gap-3">
             {dirty && (
-              <Button size="sm" onClick={save} disabled={patch.isPending || !validHex}>
+              <Button size="sm" onClick={save} disabled={patch.isPending || !validHex || !accountsValid}>
                 {patch.isPending ? <Spinner /> : null} {t('common.save')}
               </Button>
             )}

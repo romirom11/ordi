@@ -86,6 +86,13 @@ export const invoices = pgTable('invoices', {
   amountPaid: money('amount_paid').notNull().default('0'),
   notes: text('notes').notNull().default(''),
   terms: text('terms').notNull().default(''),
+  /** The payment account (an id in Settings → Invoices); null → the first account in the currency paid in. */
+  paymentAccountId: text('payment_account_id'),
+  /** The account's details as they were when the invoice was sent; null while a draft reads them live. */
+  paymentDetails: text('payment_details'),
+  /** Set when the client pays the equivalent in another currency, at exchange_rate units of it per unit of `currency`. */
+  paymentCurrency: text('payment_currency'),
+  exchangeRate: numeric('exchange_rate'),
   publicToken: text('public_token').notNull().unique(),
   sentAt: timestamp('sent_at', { withTimezone: true }),
   viewedAt: timestamp('viewed_at', { withTimezone: true }),

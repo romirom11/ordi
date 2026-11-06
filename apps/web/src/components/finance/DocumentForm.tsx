@@ -2,15 +2,21 @@
  * One form for an invoice or quote, used to create a draft and to edit an
  * existing document: dates (a due date is optional – without one the invoice
  * is never overdue and prints no deadline), currency, language, the tax rate
- * applied to every line, a discount, and the line items. Items lock once an
+ * applied to every line, a discount, and the line items. An invoice also
+ * names the account it is paid to and, when the client pays the equivalent in
+ * another currency (a USD invoice paid in UAH), that currency and the rate
+ * typed in for it. Items lock once an
  * invoice has been sent (the API refuses them); everything else stays
  * editable, because dates, wording and tax are what a client asks to change.
  */
 import { useEffect, useId, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, Trash2 } from 'lucide-react';
+import { paymentAccountsOf, equivalentAmount } from '@ordi/shared';
 import { api } from '../../lib/api';
-import { Button, Input, Select, fmtMoney } from '../ui';
+import { Link } from '../../lib/router';
+import { Button, Input, Select, Checkbox, fmtMoney } from '../ui';
+import { useWorkspaceSettings } from './workspace';
 import { DateField } from '../DatePicker';
 import { currencyOptions } from '../../lib/currency';
 import { byName } from '../../lib/queries';
@@ -35,6 +41,12 @@ extendDict({
     'finance.saveChanges': 'Save changes',
     'finance.lang.uk': 'Ukrainian',
     'finance.lang.en': 'English',
+    'finance.paymentAccount': 'Paid to',
+    'finance.paymentAccountNone': 'No {currency} account yet – add one in Settings → Invoices.',
+    'finance.paysEquivalent': 'Client pays the equivalent in another currency',
+    'finance.paymentCurrency': 'Currency paid in',
+    'finance.exchangeRate': 'Rate: {currency} for 1 {base}',
+    'finance.clientPays': 'Client pays',
   },
   uk: {
     'finance.issueDate': 'Дата виставлення',
@@ -54,6 +66,12 @@ extendDict({
     'finance.saveChanges': 'Зберегти зміни',
     'finance.lang.uk': 'Українська',
     'finance.lang.en': 'Англійська',
+    'finance.paymentAccount': 'Рахунок для оплати',
+    'finance.paymentAccountNone': 'Рахунку в {currency} ще немає – додайте його в Налаштування → Інвойси.',
+    'finance.paysEquivalent': 'Клієнт платить еквівалент в іншій валюті',
+    'finance.paymentCurrency': 'Валюта оплати',
+    'finance.exchangeRate': 'Курс: {currency} за 1 {base}',
+    'finance.clientPays': 'Клієнт сплачує',
   },
 });
 
@@ -71,6 +89,10 @@ export interface DocumentFormValues {
   taxRateId: string | null;
   discountType: 'none' | 'percent' | 'fixed';
   discountValue: number;
+  /** Invoice only: the account it is paid to, and the equivalent currency and rate when the client pays in another one. */
+  paymentAccountId: string | null;
+  paymentCurrency: string | null;
+  exchangeRate: number | null;
   items: { description: string; quantity: number; unitPrice: number; taxRateId: string | null; position: number }[];
 }
 
@@ -83,6 +105,9 @@ export interface DocumentFormInitial {
   taxRateId?: string | null;
   discountType?: string | null;
   discountValue?: number | string | null;
+  paymentAccountId?: string | null;
+  paymentCurrency?: string | null;
+  exchangeRate?: number | string | null;
   items?: { description?: string | null; quantity?: number | string | null; unitPrice?: number | string | null; taxRateId?: string | null }[];
 }
 
@@ -132,6 +157,35 @@ export function DocumentForm({ kind, mode, companies, initial, defaultCurrency, 
       : [{ ...emptyLine }],
   );
 
+  // Where an invoice is paid: an account in the currency the client pays in,
+  // which is the invoice's own unless they pay the equivalent in another.
+  const ws = useWorkspaceSettings();
+  const accounts = paymentAccountsOf(ws.data?.invoiceSettings);
+  const [paymentAccountId, setPaymentAccountId] = useState(initial?.paymentAccountId ?? '');
+  const [paysEquivalent, setPaysEquivalent] = useState(!!initial?.paymentCurrency);
+  const [paymentCurrency, setPaymentCurrency] = useState(initial?.paymentCurrency ?? '');
+  const [exchangeRate, setExchangeRate] = useState(initial?.exchangeRate != null ? String(Number(initial.exchangeRate)) : '');
+  const payCurrency = paysEquivalent && paymentCurrency ? paymentCurrency : currency;
+  const payAccounts = accounts.filter((a) => a.currency === payCurrency);
+
+  // The account follows the currency paid in: the first one in it, unless the
+  // one already chosen takes that currency too.
+  useEffect(() => {
+    if (kind !== 'invoice' || !ws.data) return;
+    if (!payAccounts.some((a) => a.id === paymentAccountId)) setPaymentAccountId(payAccounts[0]?.id ?? '');
+  }, [kind, ws.data, payCurrency, paymentAccountId, payAccounts]);
+
+  const togglePaysEquivalent = (on: boolean) => {
+    setPaysEquivalent(on);
+    if (on && (!paymentCurrency || paymentCurrency === currency)) {
+      const home = ws.data?.defaultCurrency;
+      setPaymentCurrency(
+        home && home !== currency ? home
+          : accounts.find((a) => a.currency !== currency)?.currency ?? (currency === 'UAH' ? 'USD' : 'UAH'),
+      );
+    }
+  };
+
   // A new invoice follows the company's own currency once one is picked.
   useEffect(() => {
     if (mode !== 'create' || !companyId) return;
@@ -148,7 +202,12 @@ export function DocumentForm({ kind, mode, companies, initial, defaultCurrency, 
   const tax = taxRateId ? taxable * ratePct / 100 : 0;
   const total = taxable + tax;
 
-  const valid = (mode === 'edit' || !!companyId) && !!issueDate && items.every((it) => it.description.trim());
+  const equivalentOn = kind === 'invoice' && paysEquivalent;
+  const rateValue = Number(exchangeRate);
+  const equivalentValid = !equivalentOn || (!!paymentCurrency && paymentCurrency !== currency && rateValue > 0);
+  const equivalentTotal = equivalentOn && equivalentValid ? equivalentAmount(total, rateValue) : null;
+
+  const valid = (mode === 'edit' || !!companyId) && !!issueDate && items.every((it) => it.description.trim()) && equivalentValid;
 
   return (
     <form
@@ -164,6 +223,9 @@ export function DocumentForm({ kind, mode, companies, initial, defaultCurrency, 
           taxRateId: taxRateId || null,
           discountType,
           discountValue: discountType === 'none' ? 0 : Number(discountValue || 0),
+          paymentAccountId: kind === 'invoice' ? paymentAccountId || null : null,
+          paymentCurrency: equivalentOn ? paymentCurrency : null,
+          exchangeRate: equivalentOn ? rateValue : null,
           items: items.map((it, i) => ({
             description: it.description.trim(), quantity: Number(it.quantity || 0), unitPrice: Number(it.unitPrice || 0),
             taxRateId: taxRateId || null, position: (i + 1) * 1000,
@@ -239,6 +301,49 @@ export function DocumentForm({ kind, mode, companies, initial, defaultCurrency, 
         </div>
       </div>
 
+      {kind === 'invoice' && (
+        <div className="space-y-3 rounded-md border border-border p-3">
+          <label className="flex items-center gap-2 text-[13px]">
+            <Checkbox checked={paysEquivalent} onChange={togglePaysEquivalent} />
+            {t('finance.paysEquivalent')}
+          </label>
+          {paysEquivalent && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="min-w-0 space-y-1">
+                <label htmlFor={fid('paymentCurrency')} className="text-xs font-medium text-muted-foreground">{t('finance.paymentCurrency')}</label>
+                <Select id={fid('paymentCurrency')} name="paymentCurrency" value={paymentCurrency} onChange={(e) => setPaymentCurrency(e.target.value)} className="block w-full">
+                  {currencyOptions(paymentCurrency).filter((c) => c !== currency).map((cur) => <option key={cur} value={cur}>{cur}</option>)}
+                </Select>
+              </div>
+              <div className="min-w-0 space-y-1">
+                <label htmlFor={fid('exchangeRate')} className="text-xs font-medium text-muted-foreground">
+                  {t('finance.exchangeRate').replace('{currency}', paymentCurrency || '…').replace('{base}', currency)}
+                </label>
+                <Input
+                  id={fid('exchangeRate')} name="exchangeRate" type="number" min={0} step="any" required
+                  value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)}
+                  placeholder="41.25" className="block w-full"
+                />
+              </div>
+            </div>
+          )}
+          {accounts.length > 0 && (
+            <div className="min-w-0 space-y-1">
+              <label htmlFor={fid('paymentAccount')} className="text-xs font-medium text-muted-foreground">{t('finance.paymentAccount')}</label>
+              {payAccounts.length ? (
+                <Select id={fid('paymentAccount')} name="paymentAccountId" value={paymentAccountId} onChange={(e) => setPaymentAccountId(e.target.value)} className="block w-full">
+                  {payAccounts.map((a) => <option key={a.id} value={a.id}>{a.name.trim() || a.details.split('\n')[0]} · {a.currency}</option>)}
+                </Select>
+              ) : (
+                <p className="text-xs text-warning">
+                  <Link to="/settings/invoices" className="hover:underline">{t('finance.paymentAccountNone').replace('{currency}', payCurrency)}</Link>
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <fieldset className="min-w-0 space-y-2">
         <legend className="sr-only">{t('finance.lineItems', 'Line items')}</legend>
         {!itemsEditable && <p className="text-xs text-muted-foreground">{t('finance.itemsLocked')}</p>}
@@ -288,6 +393,7 @@ export function DocumentForm({ kind, mode, companies, initial, defaultCurrency, 
           {discount > 0 && <div className="flex gap-3"><dt>{t('finance.discount')}</dt><dd className="tabular-nums">-{fmtMoney(discount, currency)}</dd></div>}
           {tax > 0 && <div className="flex gap-3"><dt>{t('finance.taxAmount')} ({ratePct}%)</dt><dd className="tabular-nums">{fmtMoney(tax, currency)}</dd></div>}
           <div className="flex gap-3"><dt>{t('common.total')}</dt><dd className="font-semibold tabular-nums text-foreground">{fmtMoney(total, currency)}</dd></div>
+          {equivalentTotal != null && <div className="flex gap-3"><dt>{t('finance.clientPays')}</dt><dd className="font-semibold tabular-nums text-foreground">{fmtMoney(equivalentTotal, paymentCurrency)}</dd></div>}
         </dl>
         <div className="ml-auto flex gap-2">
           {onCancel && <Button type="button" variant="ghost" size="sm" onClick={onCancel}>{t('common.cancel')}</Button>}

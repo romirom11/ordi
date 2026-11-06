@@ -11,7 +11,8 @@ import { ulid } from 'ulid';
 import {
   computeDocumentTotals, computePaidState, wouldOverpay, computeAging, computeProfitability, utilization,
   lineAmount, addMonthsIso, INVOICE_TRANSITIONS, QUOTE_TRANSITIONS,
-  type InvoiceStatus, type QuoteStatus,
+  paymentAccountsOf, invoicePayCurrency, invoicePaymentDetails,
+  type InvoiceStatus, type QuoteStatus, type PaymentAccountSettings,
 } from '@ordi/shared';
 import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
@@ -151,6 +152,54 @@ async function documentText(input: { notes?: string; terms?: string }): Promise<
   };
 }
 
+interface PaymentTerms {
+  currency: string;
+  paymentAccountId: string | null;
+  paymentCurrency: string | null;
+  exchangeRate: string | null;
+}
+
+/**
+ * Where an invoice is paid and in what currency, checked as one: a client
+ * paying the equivalent in another currency needs a positive rate and a
+ * currency that is not the invoice's own, and a named account has to exist in
+ * the currency the client pays in. `explicit` lists the fields the caller sent;
+ * a stored account or payment currency the caller did not touch is dropped,
+ * not refused, when a currency change leaves it pointing the wrong way.
+ */
+async function resolvePaymentTerms(terms: PaymentTerms, explicit: { account: boolean; payment: boolean }): Promise<PaymentTerms> {
+  const out = { ...terms };
+  if (out.paymentCurrency === out.currency) {
+    if (explicit.payment) throw err.validation('The client already pays in the invoice currency – choose another currency or turn off the equivalent', { field: 'paymentCurrency' });
+    out.paymentCurrency = null;
+  }
+  if (!out.paymentCurrency) out.exchangeRate = null;
+  else if (!(Number(out.exchangeRate) > 0)) {
+    throw err.validation('Enter the exchange rate the client pays the equivalent at', { field: 'exchangeRate' });
+  }
+  if (out.paymentAccountId) {
+    const ws = await getWorkspace();
+    const account = paymentAccountsOf(ws?.invoiceSettings as PaymentAccountSettings).find((a) => a.id === out.paymentAccountId);
+    const payCurrency = invoicePayCurrency(out);
+    if (!account || account.currency !== payCurrency) {
+      if (explicit.account) {
+        throw err.validation(
+          account ? `That account takes ${account.currency}, but the client pays in ${payCurrency}` : 'Unknown payment account',
+          { field: 'paymentAccountId' },
+        );
+      }
+      out.paymentAccountId = null;
+    }
+  }
+  return out;
+}
+
+/** The payment details an invoice prints right now, read from the live settings. */
+async function livePaymentDetails(terms: PaymentTerms): Promise<string | null> {
+  const ws = await getWorkspace();
+  return invoicePaymentDetails({ ...terms, paymentDetails: null }, ws?.invoiceSettings as PaymentAccountSettings);
+}
+
 async function getCompanyRow(id: string) {
   const { db } = getDb();
   const [company] = await db.select().from(schema.companies).where(eq(schema.companies.id, id));
@@ -249,12 +298,19 @@ export async function createInvoice(actor: Actor, input: any) {
   const items: ItemInput[] = input.items ?? [];
   const rateMap = await resolveTaxRates(items);
   const totals = docTotals(items, rateMap, input.discountType, input.discountValue, input.discountBeforeTax);
+  const pay = await resolvePaymentTerms({
+    currency: input.currency,
+    paymentAccountId: input.paymentAccountId ?? null,
+    paymentCurrency: input.paymentCurrency ?? null,
+    exchangeRate: input.exchangeRate != null ? String(input.exchangeRate) : null,
+  }, { account: input.paymentAccountId != null, payment: input.paymentCurrency != null });
   const id = ulid();
   const number = await nextNumber('invoice');
   const text = await documentText(input);
   await db.insert(schema.invoices).values({
     id, companyId: input.companyId, projectId: input.projectId ?? null, quoteId: input.quoteId ?? null,
     number, status: 'draft', currency: input.currency, issueDate: input.issueDate, dueDate: input.dueDate ?? null,
+    paymentAccountId: pay.paymentAccountId, paymentCurrency: pay.paymentCurrency, exchangeRate: pay.exchangeRate,
     language: input.language, discountType: input.discountType, discountValue: String(input.discountValue ?? 0),
     discountBeforeTax: input.discountBeforeTax ?? true, subtotal: String(totals.subtotal),
     taxTotal: String(totals.taxTotal), total: String(totals.total), notes: text.notes, terms: text.terms,
@@ -279,6 +335,21 @@ export async function updateInvoice(actor: Actor, id: string, input: any) {
   const patch: Record<string, unknown> = {};
   for (const k of ['projectId', 'currency', 'issueDate', 'dueDate', 'language', 'notes', 'terms', 'customFields']) {
     if (input[k] !== undefined) patch[k] = input[k];
+  }
+
+  // Where it is paid and in what currency. A sent invoice re-freezes the
+  // details it prints, so the client sees the account it was moved to.
+  if (['currency', 'paymentAccountId', 'paymentCurrency', 'exchangeRate'].some((k) => input[k] !== undefined)) {
+    const pay = await resolvePaymentTerms({
+      currency: input.currency ?? before.currency,
+      paymentAccountId: input.paymentAccountId !== undefined ? input.paymentAccountId : before.paymentAccountId,
+      paymentCurrency: input.paymentCurrency !== undefined ? input.paymentCurrency : before.paymentCurrency,
+      exchangeRate: input.exchangeRate !== undefined ? (input.exchangeRate != null ? String(input.exchangeRate) : null) : before.exchangeRate,
+    }, { account: input.paymentAccountId != null, payment: input.paymentCurrency != null });
+    patch.paymentAccountId = pay.paymentAccountId;
+    patch.paymentCurrency = pay.paymentCurrency;
+    patch.exchangeRate = pay.exchangeRate;
+    if (before.status !== 'draft') patch.paymentDetails = await livePaymentDetails(pay);
   }
 
   // Recompute totals when items or any discount field changed (draft only for items).
@@ -427,7 +498,10 @@ export async function sendInvoice(actor: Actor, id: string, opts: { to?: string;
   const sentAt = new Date();
 
   if (isFirstSend) {
-    await db.update(schema.invoices).set({ status: 'sent', sentAt })
+    // The details the client was sent are frozen with it: a later edit of the
+    // account in Settings does not rewrite an invoice already out.
+    const paymentDetails = inv.paymentDetails ?? await livePaymentDetails(inv);
+    await db.update(schema.invoices).set({ status: 'sent', sentAt, paymentDetails })
       .where(and(eq(schema.invoices.id, id), eq(schema.invoices.version, inv.version)));
     // Ledger mirror (accrual-light): first send books AR against Client billing.
     await ledger.postInvoiceSent(actor, inv);
@@ -466,6 +540,7 @@ export async function duplicateInvoice(actor: Actor, id: string) {
   await db.insert(schema.invoices).values({
     id: newId, companyId: src.companyId, projectId: src.projectId, quoteId: null, number, status: 'draft',
     currency: src.currency, issueDate: today(), dueDate: src.dueDate, language: src.language,
+    paymentAccountId: src.paymentAccountId, paymentCurrency: src.paymentCurrency, exchangeRate: src.exchangeRate,
     discountType: src.discountType, discountValue: src.discountValue, discountBeforeTax: src.discountBeforeTax,
     subtotal: src.subtotal, taxTotal: src.taxTotal, total: src.total, notes: src.notes, terms: src.terms,
     publicToken: ulid(), source: 'manual', customFields: src.customFields, createdBy: actor.userId,

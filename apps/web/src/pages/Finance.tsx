@@ -419,6 +419,9 @@ function InvoicesView() {
         language: v.language,
         discountType: v.discountType,
         discountValue: v.discountValue,
+        paymentAccountId: v.paymentAccountId,
+        paymentCurrency: v.paymentCurrency,
+        exchangeRate: v.exchangeRate,
         items: v.items,
       }),
     onSuccess: (r) => {

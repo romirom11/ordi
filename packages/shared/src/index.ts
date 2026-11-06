@@ -22,6 +22,7 @@ export * from './mcp-library';
 
 // Pure business calc (single source of truth, unit-tested)
 export * from './calc/money';
+export * from './calc/payment-accounts';
 export * from './calc/git-mentions';
 export * from './calc/fractional';
 export * from './calc/cost';

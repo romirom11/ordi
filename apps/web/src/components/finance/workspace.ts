@@ -6,12 +6,16 @@
  * the rest of the app (Shell, Settings).
  */
 import { useQuery } from '@tanstack/react-query';
+import type { PaymentAccount } from '@ordi/shared';
 import { api } from '../../lib/api';
 
 export interface InvoiceSettings {
   accentColor?: string | null;
   footerNote?: string | null;
+  /** The single payment text used before accounts existed; printed only while there are none. */
   paymentDetails?: string | null;
+  /** Bank accounts invoices are paid to; the first in a currency is its default. */
+  paymentAccounts?: PaymentAccount[];
   showLogo?: boolean;
   /** Text every new invoice/quote starts with (Settings → Invoices). */
   defaultNotes?: string | null;
