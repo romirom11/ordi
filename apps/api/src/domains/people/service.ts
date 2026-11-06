@@ -486,9 +486,32 @@ export async function deleteEmployeeDocument(actor: Actor, id: string) {
 }
 
 // ─── departments & positions (PRD §12.1) ───
+
+/**
+ * Who sits in a department or position, split the way the people directory
+ * splits them: someone whose card is terminated or whose account is
+ * deactivated has left. The org view counts the people still here; the former
+ * ones are reported apart because their cards still name the unit, and so
+ * still keep it from being deleted.
+ */
+function headcount(column: 'department_id' | 'position_id', unitId: unknown) {
+  const here = sql`e.status <> 'terminated' and coalesce(u.is_active, true)`;
+  const base = sql`from employees e left join users u on u.id = e.user_id
+    where e.${sql.raw(column)} = ${unitId} and e.deleted_at is null`;
+  return {
+    activeCount: sql<number>`(select count(*)::int ${base} and ${here})`,
+    formerCount: sql<number>`(select count(*)::int ${base} and not (${here}))`,
+  };
+}
+
 export async function listDepartments() {
   const { db } = getDb();
-  return db.select().from(schema.departments).orderBy(asc(schema.departments.name));
+  return db.select({
+    id: schema.departments.id, name: schema.departments.name, parentId: schema.departments.parentId,
+    createdAt: schema.departments.createdAt, updatedAt: schema.departments.updatedAt,
+    ...headcount('department_id', schema.departments.id),
+  })
+    .from(schema.departments).orderBy(asc(schema.departments.name));
 }
 
 export async function createDepartment(input: any): Promise<string> {
@@ -516,7 +539,12 @@ export async function deleteDepartment(id: string) {
 
 export async function listPositions() {
   const { db } = getDb();
-  return db.select().from(schema.positions).orderBy(asc(schema.positions.title));
+  return db.select({
+    id: schema.positions.id, title: schema.positions.title,
+    createdAt: schema.positions.createdAt, updatedAt: schema.positions.updatedAt,
+    ...headcount('position_id', schema.positions.id),
+  })
+    .from(schema.positions).orderBy(asc(schema.positions.title));
 }
 
 export async function createPosition(input: any): Promise<string> {

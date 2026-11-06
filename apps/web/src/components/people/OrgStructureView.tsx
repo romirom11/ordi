@@ -31,6 +31,9 @@ extendDict({
     'people.noDepartments': 'No departments yet. Create the first one.',
     'people.noPositions': 'No positions yet. Create the first one.',
     'people.peopleCount': 'people',
+    'people.formerCount': '{n} former (deactivated) not counted',
+    'people.deptHeldByFormer': 'Former employees still have this department on their cards. Change it there first.',
+    'people.posHeldByFormer': 'Former employees still have this position on their cards. Change it there first.',
   },
   uk: {
     'people.departments': 'Відділи',
@@ -56,12 +59,16 @@ extendDict({
     'people.noDepartments': 'Відділів ще немає. Створіть перший.',
     'people.noPositions': 'Посад ще немає. Створіть першу.',
     'people.peopleCount': 'осіб',
+    'people.formerCount': 'ще {n} колишніх (деактивованих) не враховано',
+    'people.deptHeldByFormer': 'Цей відділ досі вказано в картках колишніх співробітників. Спершу змініть його там.',
+    'people.posHeldByFormer': 'Цю посаду досі вказано в картках колишніх співробітників. Спершу змініть її там.',
   },
 });
 
-interface Department { id: string; name: string; parentId?: string | null }
-interface Position { id: string; title: string }
-interface EmployeeLite { id: string; departmentId?: string | null; positionId?: string | null }
+/** activeCount: people here now; formerCount: deactivated cards that still name the unit. */
+interface Headcount { activeCount?: number; formerCount?: number }
+interface Department extends Headcount { id: string; name: string; parentId?: string | null }
+interface Position extends Headcount { id: string; title: string }
 
 interface DeptNode extends Department { children: DeptNode[]; depth: number }
 
@@ -147,20 +154,23 @@ export function OrgStructureView() {
 
   const departments = useQuery({ queryKey: ['departments'], queryFn: () => api.get<{ data: Department[] }>('/departments') });
   const positions = useQuery({ queryKey: ['positions'], queryFn: () => api.get<{ data: Position[] }>('/positions') });
-  const employees = useQuery({ queryKey: ['employees'], queryFn: () => api.get<{ data: EmployeeLite[] }>('/employees') });
 
   const tree = useMemo(() => buildTree(departments.data?.data ?? []), [departments.data]);
   const posRows = positions.data?.data ?? [];
 
-  const counts = useMemo(() => {
-    const dept = new Map<string, number>();
-    const pos = new Map<string, number>();
-    for (const e of employees.data?.data ?? []) {
-      if (e.departmentId) dept.set(e.departmentId, (dept.get(e.departmentId) ?? 0) + 1);
-      if (e.positionId) pos.set(e.positionId, (pos.get(e.positionId) ?? 0) + 1);
-    }
-    return { dept, pos };
-  }, [employees.data]);
+  // Counted on the server the way the people directory counts: someone whose
+  // card is terminated or whose account is deactivated has left.
+  const unitById = useMemo(() => {
+    const map = new Map<string, Headcount>();
+    for (const d of departments.data?.data ?? []) map.set(d.id, d);
+    for (const p of positions.data?.data ?? []) map.set(p.id, p);
+    return map;
+  }, [departments.data, positions.data]);
+  // Deleting is refused while any card names the unit, former ones included.
+  const heldOnlyByFormer = (id: string) => {
+    const unit = unitById.get(id);
+    return (unit?.activeCount ?? 0) === 0 && (unit?.formerCount ?? 0) > 0;
+  };
 
   // UI state: at most one inline editor open at a time.
   const [addingDeptUnder, setAddingDeptUnder] = useState<string | 'root' | null>(null);
@@ -190,9 +200,9 @@ export function OrgStructureView() {
   const deleteDept = useMutation({
     mutationFn: (id: string) => api.del(`/departments/${id}`),
     onSuccess: () => { invalidate(); setPendingDelete(null); toast(t('people.deptDeleted')); },
-    onError: (e) => {
+    onError: (e, id) => {
       setPendingDelete(null);
-      toast.error(e instanceof ApiError && e.code === 'domain_rule' ? t('people.deptInUse') : t('people.orgFailed'));
+      toast.error(e instanceof ApiError && e.code === 'domain_rule' ? t(heldOnlyByFormer(id) ? 'people.deptHeldByFormer' : 'people.deptInUse') : t('people.orgFailed'));
     },
   });
 
@@ -209,17 +219,25 @@ export function OrgStructureView() {
   const deletePos = useMutation({
     mutationFn: (id: string) => api.del(`/positions/${id}`),
     onSuccess: () => { invalidate(); setPendingDelete(null); toast(t('people.posDeleted')); },
-    onError: (e) => {
+    onError: (e, id) => {
       setPendingDelete(null);
-      toast.error(e instanceof ApiError && e.code === 'domain_rule' ? t('people.posInUse') : t('people.orgFailed'));
+      toast.error(e instanceof ApiError && e.code === 'domain_rule' ? t(heldOnlyByFormer(id) ? 'people.posHeldByFormer' : 'people.posInUse') : t('people.orgFailed'));
     },
   });
 
-  const countBadge = (n: number) => (
-    <Tooltip label={`${n} ${t('people.peopleCount')}`}>
-      <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">{n}</span>
-    </Tooltip>
-  );
+  const countBadge = (unitId: string) => {
+    const unit = unitById.get(unitId);
+    const n = unit?.activeCount ?? 0;
+    const former = unit?.formerCount ?? 0;
+    const label = former > 0
+      ? `${n} ${t('people.peopleCount')} · ${t('people.formerCount').replace('{n}', String(former))}`
+      : `${n} ${t('people.peopleCount')}`;
+    return (
+      <Tooltip label={label}>
+        <span className={cn('shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground', n === 0 && 'opacity-60')}>{n}</span>
+      </Tooltip>
+    );
+  };
 
   const addRow = (depth: number, parentId: string | null, kind: 'dept' | 'pos') => (
     <div className="flex items-center gap-2 border-t border-border px-3 py-1.5" style={{ paddingLeft: 12 + depth * 18 }}>
@@ -295,7 +313,7 @@ export function OrgStructureView() {
                   ) : (
                     <>
                       <span className="min-w-0 flex-1 truncate font-medium text-foreground">{d.name}</span>
-                      {countBadge(counts.dept.get(d.id) ?? 0)}
+                      {countBadge(d.id)}
                       <span className="flex shrink-0 items-center">
                         <RowAction label={t('people.addSubdepartment')} onClick={() => { setEditing(null); setAddingDeptUnder(d.id); }}>
                           <Plus size={13} />
@@ -355,7 +373,7 @@ export function OrgStructureView() {
                 ) : (
                   <>
                     <span className="min-w-0 flex-1 truncate font-medium text-foreground">{p.title}</span>
-                    {countBadge(counts.pos.get(p.id) ?? 0)}
+                    {countBadge(p.id)}
                     <span className="flex shrink-0 items-center">
                       <RowAction label={t('people.rename')} onClick={() => { setAddingPos(false); setEditing({ kind: 'pos', id: p.id }); }}>
                         <Pencil size={13} />
