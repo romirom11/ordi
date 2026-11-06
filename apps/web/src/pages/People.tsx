@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, qs, ApiError } from '../lib/api';
 import { useNavigate, useOpen, useSearchParams, type OpenIntent } from '../lib/router';
@@ -11,11 +11,12 @@ import {
 import { Dialog, DropdownMenu, MenuItem, ContextMenu, toast, type ContextMenuEntry } from '../components/overlays';
 import {
   Plus, Check, X, UserPlus, Users, CalendarClock, CalendarDays, Briefcase,
-  ChevronRight, LayoutGrid, Sparkles, ExternalLink, Copy, FilePlus, IdCard, Link2, Network,
+  ChevronRight, LayoutGrid, ExternalLink, Copy, FilePlus, IdCard, Link2, Network,
 } from 'lucide-react';
 import { TeamCalendar } from '../components/people/TeamCalendar';
 import { CreateProfileDialog, type CreateProfileTarget } from '../components/people/CreateProfileDialog';
 import { OrgStructureView } from '../components/people/OrgStructureView';
+import { PeopleDashboard } from '../components/people/PeopleDashboard';
 import { useLeaveTypes } from '../lib/queries';
 import { useT, extendDict } from '../lib/i18n';
 import { usePersistedState, oneOfPref, stringPref } from '../lib/prefs';
@@ -224,7 +225,7 @@ export function PeoplePage() {
       {activeTab === 'calendar' && <TeamCalendar />}
       {activeTab === 'recruiting' && can('people.recruit') && <RecruitingView />}
       {activeTab === 'org' && can('people.write') && <OrgStructureView />}
-      {activeTab === 'dashboard' && can('people.read') && <PeopleDashboardView />}
+      {activeTab === 'dashboard' && can('people.read') && <PeopleDashboard />}
     </div>
   );
 }
@@ -906,40 +907,3 @@ function AddApplicantDialog({ open, jobOpeningId, onClose }: {
   );
 }
 
-function PeopleDashboardView() {
-  const t = useT();
-  const dash = useQuery({ queryKey: ['peopleDashboard'], queryFn: () => api.get<any>('/people/dashboard') });
-  const d = dash.data;
-  if (dash.isLoading) {
-    return (
-      <div className="grid grid-cols-2 gap-3 p-6 md:grid-cols-3">
-        {[0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-20 w-full" />)}
-      </div>
-    );
-  }
-  // API shape: { headcount: {active,onLeave,newHires,exits}, openJobOpenings, pipeline: [{count}], upcomingAbsences: [] }
-  // (with fallbacks for older/flat shapes so this keeps working either way).
-  const pipelineCount = Array.isArray(d?.pipeline)
-    ? d.pipeline.reduce((a: number, p: any) => a + Number(p?.count ?? 0), 0)
-    : d?.pipelineCount ?? d?.applicants ?? 0;
-  const tiles: { label: string; value: string; icon: ReactNode }[] = [
-    { label: t('people.headcount'), value: String(d?.headcount?.active ?? d?.headcount ?? d?.activeCount ?? 0), icon: <Users size={15} /> },
-    { label: t('people.onLeave'), value: String(d?.headcount?.onLeave ?? d?.onLeave ?? 0), icon: <CalendarClock size={15} /> },
-    { label: t('people.newHires'), value: String(d?.headcount?.newHires ?? d?.newHires ?? 0), icon: <Sparkles size={15} /> },
-    { label: t('people.openPositions'), value: String(d?.openJobOpenings ?? d?.openPositions ?? d?.openOpenings ?? 0), icon: <Briefcase size={15} /> },
-    { label: t('people.inPipeline'), value: String(pipelineCount), icon: <UserPlus size={15} /> },
-    { label: t('people.upcomingLeave'), value: String(d?.upcomingAbsences?.length ?? d?.upcomingLeave ?? 0), icon: <CalendarClock size={15} /> },
-  ];
-  return (
-    <div className="grid grid-cols-2 gap-3 p-6 md:grid-cols-3">
-      {tiles.map((tile, i) => (
-        <div key={tile.label} className="row-enter" style={{ ['--i' as string]: i } as CSSProperties}>
-          <Card className="p-4">
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">{tile.icon} {tile.label}</div>
-            <div className="mt-1.5 text-2xl font-semibold tabular-nums">{tile.value}</div>
-          </Card>
-        </div>
-      ))}
-    </div>
-  );
-}
