@@ -10,6 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { Skeleton, fmtMoney, fmtDate, cn } from '../../components/ui';
 import { Download, Landmark, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { equivalentAmount } from '@ordi/shared';
 import { useT, extendDict, I18nProvider, guessLocale } from '../../lib/i18n';
 
 extendDict({
@@ -22,6 +23,8 @@ extendDict({
     'public.notes': 'Notes',
     'public.terms': 'Terms',
     'public.discount': 'Discount',
+    'public.payableIn': 'Payable in {currency}',
+    'public.rateNote': 'at {rate} {currency} per 1 {base}',
   },
   uk: {
     'public.paidInFull': 'Оплачено повністю',
@@ -32,6 +35,8 @@ extendDict({
     'public.notes': 'Примітки',
     'public.terms': 'Умови',
     'public.discount': 'Знижка',
+    'public.payableIn': 'До сплати в {currency}',
+    'public.rateNote': 'за курсом {rate} {currency} за 1 {base}',
   },
 });
 
@@ -47,6 +52,8 @@ interface PublicPayload {
     issueDate?: string | null; dueDate?: string | null;
     subtotal?: number | string | null; taxTotal?: number | string | null; total?: number | string | null;
     discountType?: string | null; discountValue?: number | string | null; taxRateLabel?: string | null;
+    /** Set when the client pays the equivalent in another currency, at this rate. */
+    paymentCurrency?: string | null; exchangeRate?: number | string | null;
     notes?: string | null; terms?: string | null;
   };
   items?: PubItem[];
@@ -97,6 +104,7 @@ function InvoiceDocument({ token, data }: { token: string; data: PublicPayload }
   const isPaid = iv.status === 'paid' || (paid > 0 && outstanding <= 0);
   const hasDiscount = !!iv.discountType && iv.discountType !== 'none' && Number(iv.discountValue ?? 0) > 0;
   const hasTax = Number(iv.taxTotal ?? 0) > 0;
+  const equivalent = iv.paymentCurrency && outstanding > 0 ? equivalentAmount(outstanding, iv.exchangeRate) : null;
   const isOverdue = !isPaid && iv.status !== 'canceled' && !!iv.dueDate && new Date(iv.dueDate) < new Date() && outstanding > 0;
 
   return (
@@ -199,6 +207,14 @@ function InvoiceDocument({ token, data }: { token: string; data: PublicPayload }
                   <span>{isPaid ? t('public.paidInFull') : t('public.amountDue')}</span>
                   <span className="tabular-nums" style={{ color: accent }}>{fmtMoney(Math.max(0, outstanding), cur)}</span>
                 </div>
+                {equivalent != null && (
+                  <div className="px-3 pt-1">
+                    <SumRow label={t('public.payableIn').replace('{currency}', iv.paymentCurrency!)} value={fmtMoney(equivalent, iv.paymentCurrency!)} bold />
+                    <p className="text-right text-xs text-slate-400">
+                      {t('public.rateNote').replace('{rate}', String(Number(iv.exchangeRate))).replace('{currency}', iv.paymentCurrency!).replace('{base}', cur)}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 

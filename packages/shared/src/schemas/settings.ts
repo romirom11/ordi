@@ -23,10 +23,23 @@ export const integrationsSchema = z.object({
  * every new invoice/quote starts with (defaultNotes/defaultTerms) so the
  * same payment terms are not retyped per document.
  */
+/**
+ * A bank account invoices are paid to (Settings → Invoices). The first account
+ * in a currency is the default for invoices paid in that currency.
+ */
+export const paymentAccountSchema = z.object({
+  id: z.string().min(1).max(40),
+  name: z.string().max(120).default(''),
+  currency: z.string().length(3),
+  details: z.string().min(1).max(4000),
+});
+
 export const invoiceSettingsSchema = z.object({
   accentColor: z.string().max(32).nullable().optional(),
   footerNote: z.string().max(2000).nullable().optional(),
+  /** The single payment text used before accounts existed; printed only while there are none. */
   paymentDetails: z.string().max(4000).nullable().optional(),
+  paymentAccounts: z.array(paymentAccountSchema).max(20).optional(),
   showLogo: z.boolean().optional(),
   defaultNotes: z.string().max(4000).nullable().optional(),
   defaultTerms: z.string().max(4000).nullable().optional(),

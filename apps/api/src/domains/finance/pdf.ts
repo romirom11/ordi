@@ -13,6 +13,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import PDFDocument from 'pdfkit';
+import { invoicePaymentDetails, equivalentAmount, type PaymentAccountSettings } from '@ordi/shared';
 import { env } from '../../env';
 
 export interface PdfDoc {
@@ -37,6 +38,12 @@ export interface PdfDoc {
   language?: string;
   /** "VAT 20%" when every taxed line shares one rate; null → a plain "Tax" row. */
   taxRateName?: string | null;
+  /** Invoice only: the account it is paid to and the details frozen when it was sent. */
+  paymentAccountId?: string | null;
+  paymentDetails?: string | null;
+  /** Invoice only: the client pays the equivalent in this currency, at this rate. */
+  paymentCurrency?: string | null;
+  exchangeRate?: string | number | null;
 }
 
 export interface PdfLine {
@@ -62,8 +69,8 @@ export interface PdfWorkspace {
 }
 
 interface Requisites { legalName?: string | null; taxId?: string | null; address?: string | null; email?: string | null; phone?: string | null }
-interface InvoiceSettings {
-  accentColor?: string | null; footerNote?: string | null; paymentDetails?: string | null; showLogo?: boolean;
+interface InvoiceSettings extends PaymentAccountSettings {
+  accentColor?: string | null; footerNote?: string | null; showLogo?: boolean;
 }
 
 /** Localized labels (PRD §11.3, §19.5): PDF language is per-document. */
@@ -74,7 +81,7 @@ const LABELS = {
     description: 'Description', qty: 'Qty', unit: 'Unit price', amount: 'Amount',
     subtotal: 'Subtotal', discount: 'Discount', tax: 'Tax', total: 'Total',
     paid: 'Amount paid', credited: 'Credited', balance: 'Balance due', paidInFull: 'Paid in full', notes: 'Notes', terms: 'Terms',
-    paymentDetails: 'Payment details', taxId: 'Tax ID', viewOnline: 'View online', page: 'Page',
+    paymentDetails: 'Payment details', payableIn: 'Payable in {currency}', rate: 'at {rate} {currency} per 1 {base}', taxId: 'Tax ID', viewOnline: 'View online', page: 'Page',
     status_draft: 'Draft', status_sent: 'Sent', status_viewed: 'Viewed', status_partially_paid: 'Partially paid',
     status_paid: 'Paid', status_overdue: 'Overdue', status_canceled: 'Canceled', status_accepted: 'Accepted',
     status_declined: 'Declined', status_expired: 'Expired',
@@ -85,7 +92,7 @@ const LABELS = {
     description: 'Опис', qty: 'К-сть', unit: 'Ціна', amount: 'Сума',
     subtotal: 'Проміжна сума', discount: 'Знижка', tax: 'Податок', total: 'Разом',
     paid: 'Сплачено', credited: 'Зараховано кредит-нотами', balance: 'До сплати', paidInFull: 'Оплачено повністю', notes: 'Примітки', terms: 'Умови',
-    paymentDetails: 'Реквізити для оплати', taxId: 'Код', viewOnline: 'Переглянути онлайн', page: 'Сторінка',
+    paymentDetails: 'Реквізити для оплати', payableIn: 'До сплати в {currency}', rate: 'за курсом {rate} {currency} за 1 {base}', taxId: 'Код', viewOnline: 'Переглянути онлайн', page: 'Сторінка',
     status_draft: 'Чернетка', status_sent: 'Надіслано', status_viewed: 'Переглянуто', status_partially_paid: 'Частково оплачено',
     status_paid: 'Оплачено', status_overdue: 'Прострочено', status_canceled: 'Скасовано', status_accepted: 'Прийнято',
     status_declined: 'Відхилено', status_expired: 'Прострочено',
@@ -138,6 +145,11 @@ function fmtMoney(n: string | number | null | undefined, currency: string): stri
   const [int, frac] = Math.abs(v).toFixed(2).split('.');
   const grouped = int!.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
   return `${v < 0 ? '-' : ''}${grouped}.${frac} ${currency}`;
+}
+
+/** An exchange rate as typed: up to six decimals, no trailing zeros. */
+function fmtRate(n: string | number | null | undefined): string {
+  return String(Math.round(Number(n ?? 0) * 1e6) / 1e6);
 }
 
 function fmtQty(n: string | number): string {
@@ -401,7 +413,7 @@ function render(
   // total only when a payment separates it from the balance, so an untaxed,
   // unpaid invoice ends in one "Balance due" row and nothing else. The final
   // row is plain bold text over a rule, in the accent colour: no filled band.
-  const totals: { label: string; value: string; bold?: boolean; final?: boolean }[] = [];
+  const totals: { label: string; value: string; bold?: boolean; final?: boolean; note?: boolean }[] = [];
   const hasDiscount = !!doc.discountType && doc.discountType !== 'none' && Number(doc.discountValue ?? 0) > 0;
   const hasTax = Number(doc.taxTotal ?? 0) > 0;
   if (hasDiscount || hasTax) totals.push({ label: L.subtotal, value: fmtMoney(doc.subtotal, cur) });
@@ -425,11 +437,22 @@ function render(
       if (credited > 0) totals.push({ label: L.credited, value: fmtMoney(credited, cur) });
     }
     totals.push({ label: balance <= 0 && settled > 0 ? L.paidInFull : L.balance, value: fmtMoney(Math.max(0, balance), cur), bold: true, final: true });
+    // Paid as the equivalent in another currency: what the client transfers.
+    const equivalent = doc.paymentCurrency ? equivalentAmount(Math.max(0, balance), doc.exchangeRate) : null;
+    if (equivalent != null && balance > 0) {
+      totals.push({ label: L.payableIn.replace('{currency}', doc.paymentCurrency!), value: fmtMoney(equivalent, doc.paymentCurrency!), bold: true });
+      totals.push({ note: true, label: '', value: L.rate.replace('{rate}', fmtRate(doc.exchangeRate)).replace('{currency}', doc.paymentCurrency!).replace('{base}', cur) });
+    }
   }
   const totalsW = 230;
   const totalsX = PAGE.width - MARGIN.x - totalsW;
   w.ensure(totals.length * 18 + 10);
   for (const row of totals) {
+    if (row.note) {
+      w.text(row.value, totalsX + 10, w.y, totalsW - 20, { size: 8, color: MUTED, align: 'right' });
+      w.y += 14;
+      continue;
+    }
     const rowH = row.final ? 20 : 17;
     if (row.bold) w.doc.moveTo(totalsX + 10, w.y).lineTo(totalsX + totalsW - 10, w.y).lineWidth(row.final ? 1 : 0.6).strokeColor(row.final ? accent : RULE).stroke();
     const ty = w.y + (row.final ? 5 : 3);
@@ -440,8 +463,8 @@ function render(
   }
   w.y += 14;
 
-  /* ── Payment details (workspace) ── */
-  const payment = str(settings.paymentDetails);
+  /* ── Payment details: the invoice's account ── */
+  const payment = kind === 'invoice' ? str(invoicePaymentDetails({ ...doc, currency: cur }, settings)) : '';
   if (payment && kind === 'invoice') {
     const innerW = CONTENT_W - 24;
     const h = w.textHeight(payment, innerW, 9) + 34;

@@ -5,6 +5,7 @@ import {
   publicQuoteDecisionSchema, careersApplySchema,
   parseTaskRefs, computePaidState, type EventType,
   MAX_UPLOAD_BYTES, normalizeIntakeFormConfig, visibleIntakeFields,
+  invoicePaymentDetails, type InvoicePaymentFields, type PaymentAccountSettings,
 } from '@ordi/shared';
 import type { AppEnv } from '../../context';
 import { env } from '../../env';
@@ -61,6 +62,23 @@ async function documentParties(companyId: string) {
     },
     workspace: { name: ws?.name ?? 'ordi', logo: ws?.logo ?? null, legalDetails: ws?.legalDetails ?? {} },
     invoiceSettings: ws?.invoiceSettings ?? {},
+  };
+}
+
+/**
+ * The branding a public page gets: never the whole settings object, which
+ * holds every payment account. An invoice page also gets the one set of
+ * payment details printed on that invoice.
+ */
+function publicBranding(settings: unknown, invoice?: InvoicePaymentFields) {
+  const s = (settings && typeof settings === 'object' ? settings : {}) as {
+    accentColor?: string | null; footerNote?: string | null; showLogo?: boolean;
+  } & PaymentAccountSettings;
+  return {
+    accentColor: s.accentColor ?? null,
+    footerNote: s.footerNote ?? null,
+    showLogo: s.showLogo,
+    ...(invoice ? { paymentDetails: invoicePaymentDetails(invoice, s) } : {}),
   };
 }
 
@@ -186,12 +204,13 @@ export function publicRoutes() {
         discountType: inv.discountType, discountValue: inv.discountValue,
         subtotal: inv.subtotal, taxTotal: inv.taxTotal, total: inv.total,
         taxRateLabel: await taxRateLabel(items),
+        paymentCurrency: inv.paymentCurrency, exchangeRate: inv.exchangeRate,
         notes: inv.notes, terms: inv.terms, viewedAt,
       },
       items: items.map(({ taxRateId: _taxRateId, ...it }) => it),
       company: parties.company,
       workspace: parties.workspace,
-      invoiceSettings: parties.invoiceSettings,
+      invoiceSettings: publicBranding(parties.invoiceSettings, inv),
       amountPaid: Number(inv.amountPaid),
       amountCredited,
       outstanding,
@@ -253,7 +272,7 @@ export function publicRoutes() {
       items: items.map(({ taxRateId: _taxRateId, ...it }) => it),
       company: parties.company,
       workspace: parties.workspace,
-      invoiceSettings: parties.invoiceSettings,
+      invoiceSettings: publicBranding(parties.invoiceSettings),
     });
   });
 

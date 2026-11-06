@@ -7,6 +7,7 @@ import { api, appOrigin, ApiError } from '../lib/api';
 import { Button, Input, Select, Textarea, Card, Breadcrumbs, Skeleton, Tooltip, Spinner, fmtMoney, fmtDate, cn } from '../components/ui';
 import { Dialog, ConfirmDialog, toast } from '../components/overlays';
 import { Send, Download, Ban, Plus, ExternalLink, FilePlus2, Eye, Banknote, Landmark, Mail, Paperclip, AlertTriangle, Pencil } from 'lucide-react';
+import { invoicePaymentDetails, equivalentAmount } from '@ordi/shared';
 import { useT, extendDict } from '../lib/i18n';
 import { openExternal } from '../lib/desktop';
 import { InlineEdit } from '../components/crm/detail';
@@ -52,6 +53,10 @@ extendDict({
     'finance.status.paid': 'Paid',
     'finance.status.canceled': 'Canceled',
     'finance.paymentDetails': 'Payment details',
+    'finance.payableIn': 'Payable in {currency}',
+    'finance.rateNote': 'at {rate} {currency} per 1 {base}',
+    'finance.receivedIn': 'Received, {currency}',
+    'finance.receivedNote': 'Received {amount} at {rate} {currency} per 1 {base}',
     'finance.notes': 'Notes',
     'finance.terms': 'Terms',
     'finance.from': 'From',
@@ -103,6 +108,10 @@ extendDict({
     'finance.status.paid': 'Оплачено',
     'finance.status.canceled': 'Скасовано',
     'finance.paymentDetails': 'Реквізити для оплати',
+    'finance.payableIn': 'До сплати в {currency}',
+    'finance.rateNote': 'за курсом {rate} {currency} за 1 {base}',
+    'finance.receivedIn': 'Отримано, {currency}',
+    'finance.receivedNote': 'Отримано {amount} за курсом {rate} {currency} за 1 {base}',
     'finance.notes': 'Примітки',
     'finance.terms': 'Умови',
     'finance.from': 'Постачальник',
@@ -165,6 +174,12 @@ interface Invoice {
   sends?: { at: string; to: string | null; actorId?: string | null }[];
   version?: number;
   customFields?: Record<string, unknown>;
+  /** The account it is paid to, and the details frozen when it was sent. */
+  paymentAccountId?: string | null;
+  paymentDetails?: string | null;
+  /** Set when the client pays the equivalent in another currency, at this rate. */
+  paymentCurrency?: string | null;
+  exchangeRate?: string | number | null;
 }
 
 /** GET /invoices/:id/send-preview – what the Send dialog confirms before anything goes out. */
@@ -271,17 +286,26 @@ export function InvoiceDetailPage({ id }: { id: string }) {
     onSuccess: () => { setShowCancel(false); toast(t('finance.invoiceCanceled')); invalidate(); },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('finance.cancelFailed')),
   });
-  const [pay, setPay] = useState({ amount: '', date: '', method: 'bank' });
+  // `received` is what arrived in the currency the client pays the
+  // equivalent in; `amount` is what it settles, in the invoice's currency.
+  const [pay, setPay] = useState({ amount: '', received: '', date: '', method: 'bank' });
+  const payRate = Number(invoice.data?.exchangeRate ?? 0);
+  const payIn = invoice.data?.paymentCurrency && payRate > 0 ? invoice.data.paymentCurrency : null;
   const recordPayment = useMutation({
     mutationFn: () => api.post(`/invoices/${id}/payments`, {
       amount: Number(pay.amount),
       currency: invoice.data?.currency ?? 'USD',
       date: pay.date || todayIso(),
       method: pay.method,
+      ...(payIn && Number(pay.received) > 0 ? {
+        notes: t('finance.receivedNote')
+          .replace('{amount}', fmtMoney(Number(pay.received), payIn))
+          .replace('{rate}', String(payRate)).replace('{currency}', payIn).replace('{base}', invoice.data?.currency ?? 'USD'),
+      } : {}),
     }),
     onSuccess: () => {
       setShowPayment(false);
-      setPay({ amount: '', date: '', method: 'bank' });
+      setPay({ amount: '', received: '', date: '', method: 'bank' });
       toast(t('finance.paymentRecorded'));
       invalidate();
     },
@@ -327,6 +351,8 @@ export function InvoiceDetailPage({ id }: { id: string }) {
   const canEditText = can('finance.write') && iv.status !== 'canceled';
   const hasDiscount = !!iv.discountType && iv.discountType !== 'none' && Number(iv.discountValue ?? 0) > 0;
   const hasTax = Number(iv.taxTotal ?? 0) > 0;
+  const paymentText = invoicePaymentDetails({ ...iv, currency: cur }, settings);
+  const equivalent = iv.paymentCurrency && outstanding > 0 ? equivalentAmount(outstanding, iv.exchangeRate) : null;
 
   const timeline = buildTimeline(iv, payments, t);
 
@@ -383,7 +409,7 @@ export function InvoiceDetailPage({ id }: { id: string }) {
               size="sm"
               onClick={() => {
                 // Prefill with the outstanding amount and today's date.
-                setPay((p) => ({ ...p, amount: String(outstanding), date: todayIso() }));
+                setPay((p) => ({ ...p, amount: String(outstanding), received: payIn ? String(equivalentAmount(outstanding, payRate) ?? '') : '', date: todayIso() }));
                 setShowPayment(true);
               }}
             >
@@ -513,6 +539,14 @@ export function InvoiceDetailPage({ id }: { id: string }) {
                 <Row label={t('finance.outstanding')} value={fmtMoney(outstanding, cur)} bold accent={outstanding > 0} />
               </div>
             )}
+            {equivalent != null && (
+              <div className="border-t border-border pt-2">
+                <Row label={t('finance.payableIn').replace('{currency}', iv.paymentCurrency!)} value={fmtMoney(equivalent, iv.paymentCurrency!)} bold />
+                <p className="mt-0.5 text-right text-xs text-muted-foreground">
+                  {t('finance.rateNote').replace('{rate}', String(Number(iv.exchangeRate))).replace('{currency}', iv.paymentCurrency!).replace('{base}', cur)}
+                </p>
+              </div>
+            )}
           </dl>
         </Card>
       </div>
@@ -544,12 +578,12 @@ export function InvoiceDetailPage({ id }: { id: string }) {
       </div>
       {settings.footerNote && <p className="mt-4 whitespace-pre-line text-center text-[13px] italic text-muted-foreground">{settings.footerNote}</p>}
 
-      {settings.paymentDetails && (
+      {paymentText && (
         <Card className="mt-6 p-4">
           <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-faint">
             <Landmark size={13} /> {t('finance.paymentDetails')}
           </div>
-          <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-foreground/90">{settings.paymentDetails}</pre>
+          <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-foreground/90">{paymentText}</pre>
         </Card>
       )}
 
@@ -573,6 +607,7 @@ export function InvoiceDetailPage({ id }: { id: string }) {
               companyId: iv.companyId, issueDate: iv.issueDate, endDate: iv.dueDate, currency: iv.currency, language: iv.language,
               taxRateId: items.find((it) => it.taxRateId)?.taxRateId ?? null,
               discountType: iv.discountType, discountValue: iv.discountValue, items,
+              paymentAccountId: iv.paymentAccountId, paymentCurrency: iv.paymentCurrency, exchangeRate: iv.exchangeRate,
             }}
             pending={edit.isPending}
             submitLabel={t('finance.saveChanges')}
@@ -580,6 +615,7 @@ export function InvoiceDetailPage({ id }: { id: string }) {
             onSubmit={(v) => edit.mutate({
               issueDate: v.issueDate, dueDate: v.endDate, currency: v.currency, language: v.language,
               discountType: v.discountType, discountValue: v.discountValue,
+              paymentAccountId: v.paymentAccountId, paymentCurrency: v.paymentCurrency, exchangeRate: v.exchangeRate,
               // Items travel only while they may change; the API rejects them afterwards.
               ...(iv.status === 'draft' ? { items: v.items } : {}),
             })}
@@ -650,9 +686,28 @@ export function InvoiceDetailPage({ id }: { id: string }) {
           onSubmit={(e) => { e.preventDefault(); if (Number(pay.amount) > 0) recordPayment.mutate(); }}
         >
           <div className="grid grid-cols-2 gap-3">
+            {/* Paid as the equivalent: type what arrived, the invoice amount follows at the invoice's rate (and back). */}
+            {payIn && (
+              <div className="col-span-2 space-y-1">
+                <label htmlFor="pay-received" className="text-xs font-medium text-muted-foreground">{t('finance.receivedIn').replace('{currency}', payIn)}</label>
+                <Input
+                  id="pay-received" autoFocus type="number" min={0} step="0.01" value={pay.received}
+                  onChange={(e) => {
+                    const received = e.target.value;
+                    setPay((p) => ({ ...p, received, amount: Number(received) > 0 ? String(Math.round(Number(received) / payRate * 100) / 100) : '' }));
+                  }}
+                />
+              </div>
+            )}
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">{t('public.amount')}</label>
-              <Input autoFocus type="number" min={0} step="0.01" value={pay.amount} onChange={(e) => setPay((p) => ({ ...p, amount: e.target.value }))} />
+              <label htmlFor="pay-amount" className="text-xs font-medium text-muted-foreground">{payIn ? `${t('public.amount')}, ${cur}` : t('public.amount')}</label>
+              <Input
+                id="pay-amount" autoFocus={!payIn} type="number" min={0} step="0.01" value={pay.amount}
+                onChange={(e) => {
+                  const amount = e.target.value;
+                  setPay((p) => ({ ...p, amount, received: payIn && Number(amount) > 0 ? String(equivalentAmount(Number(amount), payRate) ?? '') : p.received }));
+                }}
+              />
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">{t('common.date')}</label>

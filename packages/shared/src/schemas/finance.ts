@@ -42,6 +42,15 @@ export const invoiceInputSchema = z.object({
   /** Omitted → the workspace's default notes/terms (Settings → Invoices). */
   notes: z.string().optional(),
   terms: z.string().optional(),
+  /** The account it is paid to (Settings → Invoices); null → the first account in the currency paid in. */
+  paymentAccountId: z.string().min(1).max(40).nullable().optional(),
+  /**
+   * Set when the client pays the equivalent in another currency (a USD
+   * invoice paid in UAH): that currency, and how many of its units one unit
+   * of the invoice currency is worth. Both or neither.
+   */
+  paymentCurrency: z.string().length(3).nullable().optional(),
+  exchangeRate: z.number().positive().max(1_000_000).nullable().optional(),
   items: z.array(lineItemInputSchema).default([]),
   customFields: customFieldsSchema.optional(),
 });
