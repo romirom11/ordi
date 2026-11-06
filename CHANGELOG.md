@@ -5,6 +5,21 @@ writes this file from the titles of the merged PRs, and each section is also the
 body of its [GitHub release](https://github.com/romirom11/ordi/releases). The
 hand-written notes of earlier versions are in [`docs/releases`](docs/releases).
 
+## [1.45.0](https://github.com/romirom11/ordi/compare/v1.44.0...v1.45.0) (2026-11-06)
+
+
+### Features
+
+* A site that embeds the intake form can fill in the visitor's details and send hidden values ([#165](https://github.com/romirom11/ordi/issues/165)) ([0dd37cc](https://github.com/romirom11/ordi/commit/0dd37cc71291b27ac008da8c5cd4ed93b8e093f7))
+* Invoices are paid to an account in their currency, and can be paid as the equivalent at a rate you enter ([#170](https://github.com/romirom11/ordi/issues/170)) ([e532c57](https://github.com/romirom11/ordi/commit/e532c5753e77213b578c5e1ac71c3a8f7a6cd1e5))
+* The HR dashboard lists what needs attention instead of bare counts ([#169](https://github.com/romirom11/ordi/issues/169)) ([df0c1b7](https://github.com/romirom11/ordi/commit/df0c1b745bf8af9bf3ae6d890934f70487b40703))
+* Time entries open for viewing and editing, and a task shows the time spent on it ([#167](https://github.com/romirom11/ordi/issues/167)) ([7bc7182](https://github.com/romirom11/ordi/commit/7bc7182797349690e312b5db10b4ab6309691c6a))
+
+
+### Fixes
+
+* The org structure counts only current employees, not deactivated ones ([#168](https://github.com/romirom11/ordi/issues/168)) ([3ce8743](https://github.com/romirom11/ordi/commit/3ce87430a606e004af55b3a22106a2be9c4d826e))
+
 ## [1.44.0](https://github.com/romirom11/ordi/compare/v1.43.0...v1.44.0) (2026-11-06)
 
 
