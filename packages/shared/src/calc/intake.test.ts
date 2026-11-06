@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   defaultIntakeFormConfig, normalizeIntakeFormConfig, intakeFormConfigSchema,
-  validateIntakeSubmission, visibleIntakeFields,
+  validateIntakeSubmission, visibleIntakeFields, intakePrefillAttribute, intakePrefillMatchKey,
 } from './intake';
 
 describe('normalizeIntakeFormConfig', () => {
@@ -106,5 +106,38 @@ describe('validateIntakeSubmission', () => {
         consent: 'required',
       },
     });
+  });
+});
+
+describe('hidden fields', () => {
+  const config = normalizeIntakeFormConfig({
+    fields: [
+      { key: 'title' },
+      { key: 'page', label: 'Page', type: 'hidden', source: 'page', required: true, help: 'x' },
+      { key: 'plan', label: 'Plan', type: 'text', source: 'page' },
+    ],
+  });
+
+  it('are never required, carry no hint, and only they keep a source', () => {
+    expect(config.fields.find((f) => f.key === 'page')).toMatchObject({ required: false, help: '', source: 'page' });
+    expect(config.fields.find((f) => f.key === 'plan')!.source).toBe('prefill');
+  });
+
+  it('take what the site passed, cut to length rather than refused', () => {
+    const long = `https://example.com/${'a'.repeat(3000)}`;
+    const result = validateIntakeSubmission(config, { title: 'Hi', page: long });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.answers).toEqual([{ key: 'page', label: 'Page', type: 'hidden', value: long.slice(0, 2000) }]);
+    expect(validateIntakeSubmission(config, { title: 'Hi' })).toMatchObject({ ok: true, answers: [] });
+  });
+});
+
+describe('prefill names', () => {
+  it('match a key whatever the case, dashes or underscores', () => {
+    expect(intakePrefillMatchKey('requesterEmail')).toBe(intakePrefillMatchKey('requester-email'));
+    expect(intakePrefillMatchKey('order_id')).toBe(intakePrefillMatchKey('orderId'));
+    expect(intakePrefillAttribute('requesterEmail')).toBe('data-prefill-requester-email');
+    expect(intakePrefillAttribute('order_id')).toBe('data-prefill-order_id');
   });
 });
