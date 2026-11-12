@@ -5,6 +5,13 @@ writes this file from the titles of the merged PRs, and each section is also the
 body of its [GitHub release](https://github.com/romirom11/ordi/releases). The
 hand-written notes of earlier versions are in [`docs/releases`](docs/releases).
 
+## [1.46.0](https://github.com/romirom11/ordi/compare/v1.45.0...v1.46.0) (2026-11-12)
+
+
+### Features
+
+* The time report shows each task's status, people, estimate and last entry, and sorts by them ([#171](https://github.com/romirom11/ordi/issues/171)) ([a275716](https://github.com/romirom11/ordi/commit/a2757165e10e43d325267b3d930b8d392bca1d73))
+
 ## [1.45.0](https://github.com/romirom11/ordi/compare/v1.44.0...v1.45.0) (2026-11-06)
 
 
