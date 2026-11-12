@@ -5,10 +5,10 @@ import { useCan } from '../lib/auth';
 import { useOpen } from '../lib/router';
 import {
   Avatar, Button, IconButton, Textarea, Card, PageHeader, PageBody, Breadcrumbs, EmptyState, Skeleton,
-  SegmentedControl, Select, Reveal, fmtMoney, appLocale, cn,
+  SegmentedControl, Select, Reveal, AvatarGroup, StatusIcon, fmtMoney, fmtRelative, formatDateTime, appLocale, cn,
 } from '../components/ui';
 import { Dialog, SidePanel, toast } from '../components/overlays';
-import { SortHeader, sortRows, useTableSort } from '../components/tableSort';
+import { SortHeader, sortRows, useTableSort, type SortState } from '../components/tableSort';
 import { ChevronLeft, ChevronRight, Plus, Play, Square, Clock, Timer, BarChart3 } from 'lucide-react';
 import { useT, extendDict } from '../lib/i18n';
 import { usePersistedState, oneOfPref } from '../lib/prefs';
@@ -54,6 +54,10 @@ extendDict({
     'time.latestEntries': 'Latest {n} entries',
     'time.reportTotal': 'Total',
     'time.openDetails': 'Open details',
+    'time.status': 'Status',
+    'time.lastLogged': 'Last logged',
+    'time.ofEstimate': 'of {h}',
+    'time.overEstimate': 'Over the {h} estimate',
   },
   uk: {
     'time.timerIdle': 'Таймер не запущено',
@@ -90,6 +94,10 @@ extendDict({
     'time.latestEntries': 'Останні {n} записів',
     'time.reportTotal': 'Разом',
     'time.openDetails': 'Відкрити деталі',
+    'time.status': 'Статус',
+    'time.lastLogged': 'Останній запис',
+    'time.ofEstimate': 'з {h}',
+    'time.overEstimate': 'Більше за оцінку {h}',
   },
 });
 
@@ -98,6 +106,14 @@ interface MyWeek { weekStart?: string; days?: DayGroup[] }
 interface ReportRow {
   key: string; label?: string | null; ref?: string; projectId?: string;
   hours?: number; billableHours?: number; amount?: number; billableAmount?: number; currency?: string;
+  /** When time was last logged in the row, in every grouping. */
+  lastAt?: string | null;
+  /** Task grouping only: enough to read the list without opening each task. */
+  projectName?: string;
+  status?: { name: string; category: string; color?: string | null };
+  /** Set only when the project estimates in hours. */
+  estimateHours?: number | null;
+  people?: { id: string; name: string; avatar?: string | null; actorType?: string | null }[];
 }
 
 function mondayOf(d: Date): Date {
@@ -403,7 +419,10 @@ function MyWeekView() {
 type GroupBy = 'project' | 'user' | 'company' | 'task';
 type Period = 'week' | 'lastWeek' | 'month' | 'lastMonth' | 'year' | 'all';
 const PERIODS: Period[] = ['week', 'lastWeek', 'month', 'lastMonth', 'year', 'all'];
-type ReportSortKey = 'name' | 'hours' | 'billable' | 'amount';
+type ReportSortKey = 'name' | 'status' | 'last' | 'hours' | 'billable' | 'amount';
+const REPORT_SORT_KEYS: ReportSortKey[] = ['name', 'status', 'last', 'hours', 'billable', 'amount'];
+/** Statuses sort in lifecycle order, not alphabetically. */
+const STATUS_RANK: Record<string, number> = { backlog: 0, todo: 1, in_progress: 2, done: 3, canceled: 4 };
 
 function periodRange(p: Period): { from?: string; to?: string } {
   const now = new Date();
@@ -450,13 +469,20 @@ function ReportsView() {
   });
   const [selected, setSelected] = useState<ReportRow | null>(null);
   const rows = report.data?.data ?? [];
-  const { sort, toggle: toggleSort } = useTableSort<ReportSortKey>({
+  const { sort: storedSort, toggle: toggleSort } = useTableSort<ReportSortKey>({
     key: 'ordi:view:time.reports.sort',
-    keys: ['name', 'hours', 'billable', 'amount'],
+    keys: REPORT_SORT_KEYS,
   });
+  const isTask = groupBy === 'task';
+  // Unsorted means most time first, and the Hours header says so. Status
+  // exists only for tasks, so another grouping falls back to the same.
+  const sort: SortState<ReportSortKey> = storedSort && (isTask || storedSort.key !== 'status')
+    ? storedSort : { key: 'hours', dir: 'desc' };
   const sorted = sortRows(rows, sort, (r, key) => {
     switch (key) {
       case 'name': return rowName(r, groupBy).toLowerCase() || null;
+      case 'status': return r.status ? `${STATUS_RANK[r.status.category] ?? 9}:${r.status.name.toLowerCase()}` : null;
+      case 'last': return r.lastAt ?? null;
       case 'hours': return r.hours ?? 0;
       case 'billable': return r.billableHours ?? 0;
       case 'amount': return r.billableAmount ?? 0;
@@ -467,10 +493,12 @@ function ReportsView() {
   // Amounts add up only within one currency.
   const currencies = new Set(rows.map((r) => r.currency ?? 'USD'));
   const totalAmount = currencies.size === 1 ? rows.reduce((a, r) => a + (r.billableAmount ?? 0), 0) : null;
+  // Spans every column the widest layout shows; extra span is harmless when some hide.
+  const columns = isTask ? 6 : 5;
   const groupLabel = t(groupBy === 'project' ? 'time.groupProject' : groupBy === 'user' ? 'time.groupUser' : groupBy === 'company' ? 'time.groupCompany' : 'time.groupTask');
 
   return (
-    <PageBody>
+    <PageBody width="wide">
       <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">{t('time.groupBy')}</span>
@@ -493,18 +521,22 @@ function ReportsView() {
         <table className="w-full text-[13px]">
           <thead>
             <tr className="border-b border-border text-left text-[11px]">
-              <th className="px-4 py-2"><SortHeader label={groupLabel} sortKey="name" sort={sort} onToggle={toggleSort} /></th>
-              <th className="px-4 py-2"><SortHeader label={t('time.hours')} sortKey="hours" sort={sort} onToggle={toggleSort} className="w-full justify-end" /></th>
-              <th className="px-4 py-2"><SortHeader label={t('time.billableHours')} sortKey="billable" sort={sort} onToggle={toggleSort} className="w-full justify-end" /></th>
-              <th className="px-4 py-2"><SortHeader label={t('time.amount')} sortKey="amount" sort={sort} onToggle={toggleSort} className="w-full justify-end" /></th>
+              <th className="w-full px-4 py-2"><SortHeader label={groupLabel} sortKey="name" sort={sort} onToggle={toggleSort} /></th>
+              {isTask && (
+                <th className="hidden px-3 py-2 md:table-cell"><SortHeader label={t('time.status')} sortKey="status" sort={sort} onToggle={toggleSort} /></th>
+              )}
+              <th className="hidden px-3 py-2 sm:table-cell"><SortHeader label={t('time.lastLogged')} sortKey="last" sort={sort} onToggle={toggleSort} className="whitespace-nowrap" /></th>
+              <th className="px-3 py-2"><SortHeader label={t('time.hours')} sortKey="hours" sort={sort} onToggle={toggleSort} className="w-full justify-end" /></th>
+              <th className="hidden px-3 py-2 lg:table-cell"><SortHeader label={t('time.billableHours')} sortKey="billable" sort={sort} onToggle={toggleSort} className="w-full justify-end whitespace-nowrap" /></th>
+              <th className="hidden py-2 pl-3 pr-4 md:table-cell"><SortHeader label={t('time.amount')} sortKey="amount" sort={sort} onToggle={toggleSort} className="w-full justify-end whitespace-nowrap" /></th>
             </tr>
           </thead>
           <tbody>
             {report.isLoading && (
-              <tr><td colSpan={4} className="px-4 py-3"><Skeleton className="h-5 w-full" /></td></tr>
+              <tr><td colSpan={columns} className="px-4 py-3"><Skeleton className="h-5 w-full" /></td></tr>
             )}
             {!report.isLoading && rows.length === 0 && (
-              <tr><td colSpan={4} className="px-4 py-10 text-center text-muted-foreground">{t('time.noReportData')}</td></tr>
+              <tr><td colSpan={columns} className="px-4 py-10 text-center text-muted-foreground">{t('time.noReportData')}</td></tr>
             )}
             {sorted.map((r, i) => (
               <tr
@@ -517,17 +549,35 @@ function ReportsView() {
                 className="row-enter group cursor-pointer border-b border-border transition-colors duration-150 last:border-0 hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none"
                 style={{ ['--i' as string]: Math.min(i, 10) }}
               >
-                <td className="px-4 py-2.5 font-medium">
-                  <span className="inline-flex min-w-0 items-center gap-2">
+                {/* max-w-0 lets a long name truncate instead of pushing the numbers out of the card. */}
+                <td className="max-w-0 px-4 py-2.5">
+                  <div className="flex min-w-0 items-center gap-2 font-medium">
                     {groupBy === 'user' && <Avatar name={rowName(r, groupBy)} size={18} />}
-                    {r.ref && <span className="font-mono text-[11px] text-muted-foreground">{r.ref}</span>}
-                    <span className="truncate">{rowName(r, groupBy)}</span>
+                    {r.ref && <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{r.ref}</span>}
+                    <span className="truncate" title={rowName(r, groupBy)}>{rowName(r, groupBy)}</span>
                     <ChevronRight size={13} className="shrink-0 text-faint opacity-0 transition-opacity group-hover:opacity-100" />
-                  </span>
+                  </div>
+                  {isTask && <TaskFacts row={r} />}
                 </td>
-                <td className="px-4 py-2.5 text-right tabular-nums">{fmtHours(r.hours)}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{fmtHours(r.billableHours)}</td>
-                <td className="px-4 py-2.5 text-right tabular-nums">{r.billableAmount ? fmtMoney(r.billableAmount, r.currency ?? 'USD') : '–'}</td>
+                {isTask && (
+                  <td className="hidden whitespace-nowrap px-3 py-2.5 md:table-cell">
+                    {r.status && (
+                      <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                        <StatusIcon category={r.status.category} color={r.status.color ?? undefined} size={13} />
+                        {r.status.name}
+                      </span>
+                    )}
+                  </td>
+                )}
+                <td className="hidden whitespace-nowrap px-3 py-2.5 text-muted-foreground sm:table-cell" title={r.lastAt ? formatDateTime(r.lastAt) : undefined}>
+                  {r.lastAt ? fmtRelative(r.lastAt) : '–'}
+                </td>
+                <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">
+                  <div className="font-medium">{fmtHours(r.hours)}</div>
+                  {r.estimateHours ? <EstimateLine hours={r.hours ?? 0} estimate={r.estimateHours} /> : null}
+                </td>
+                <td className="hidden whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-muted-foreground lg:table-cell">{fmtHours(r.billableHours)}</td>
+                <td className="hidden whitespace-nowrap py-2.5 pl-3 pr-4 text-right tabular-nums md:table-cell">{r.billableAmount ? fmtMoney(r.billableAmount, r.currency ?? 'USD') : '–'}</td>
               </tr>
             ))}
           </tbody>
@@ -535,9 +585,11 @@ function ReportsView() {
             <tfoot>
               <tr className="border-t border-border bg-muted/30 font-medium">
                 <td className="px-4 py-2">{t('time.reportTotal')}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{fmtHours(totalHours)}</td>
-                <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">{fmtHours(totalBillable)}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{totalAmount ? fmtMoney(totalAmount, [...currencies][0]!) : '–'}</td>
+                {isTask && <td className="hidden md:table-cell" />}
+                <td className="hidden sm:table-cell" />
+                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{fmtHours(totalHours)}</td>
+                <td className="hidden whitespace-nowrap px-3 py-2 text-right tabular-nums text-muted-foreground lg:table-cell">{fmtHours(totalBillable)}</td>
+                <td className="hidden whitespace-nowrap py-2 pl-3 pr-4 text-right tabular-nums md:table-cell">{totalAmount ? fmtMoney(totalAmount, [...currencies][0]!) : '–'}</td>
               </tr>
             </tfoot>
           )}
@@ -557,6 +609,41 @@ function ReportsView() {
 
 function fmtHours(h?: number): string {
   return h ? fmtDur(Math.round(h * 3600)) : '–';
+}
+
+/** Under a task's name: its project, its status on narrow screens, and who logged the time. */
+function TaskFacts({ row }: { row: ReportRow }) {
+  return (
+    <div className="mt-0.5 flex min-w-0 items-center gap-2 text-[12px] text-muted-foreground">
+      {row.status && (
+        <span className="inline-flex shrink-0 items-center gap-1 md:hidden" title={row.status.name}>
+          <StatusIcon category={row.status.category} color={row.status.color ?? undefined} size={12} />
+          <span className="max-w-[8rem] truncate">{row.status.name}</span>
+        </span>
+      )}
+      {row.projectName && <span className="truncate">{row.projectName}</span>}
+      {row.people && row.people.length > 0 && (
+        <span className="ml-auto shrink-0" title={row.people.map((p) => p.name).join(', ')}>
+          <AvatarGroup users={row.people} size={16} max={4} />
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Time against a task's estimate: "of 8h", amber once it runs over. */
+function EstimateLine({ hours, estimate }: { hours: number; estimate: number }) {
+  const t = useT();
+  const est = fmtHours(estimate);
+  const over = hours > estimate;
+  return (
+    <div
+      className={cn('text-[11px]', over ? 'text-warning' : 'text-faint')}
+      title={over ? t('time.overEstimate').replace('{h}', est) : undefined}
+    >
+      {t('time.ofEstimate').replace('{h}', est)}
+    </div>
+  );
 }
 
 /** Share of the largest row, as a thin bar behind a breakdown line. */

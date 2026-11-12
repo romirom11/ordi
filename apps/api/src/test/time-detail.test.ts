@@ -89,6 +89,26 @@ describe('time reports drill down', () => {
     expect(res.data[0]).toMatchObject({ key: task.id, ref: `RDM-${task.number}`, label: 'Sign-in codes', projectId: project.id, hours: 1.5 });
   });
 
+  it('say enough about each task to read the list without opening it', async () => {
+    await reqAs(users.owner!.cookie).patch(`/tasks/${task.id}`, { estimate: 2 });
+    const res = await json(reqAs(users.owner!.cookie).get(`/time/reports?groupBy=task&projectId=${project.id}`));
+    const row = res.data.find((r: { key: string }) => r.key === task.id);
+    expect(row).toMatchObject({
+      projectName: 'Roadmap',
+      status: { name: expect.any(String), category: expect.any(String) },
+      estimateHours: 2,
+      lastAt: `${monday}T10:00:00.000Z`,
+    });
+    expect(row.people).toHaveLength(2);
+    const other = res.data.find((r: { key: string }) => r.key === otherTask.id);
+    expect(other).toMatchObject({ estimateHours: null, people: [{ id: users.owner!.userId, name: expect.any(String) }] });
+  });
+
+  it('carry when time was last logged in every grouping', async () => {
+    const res = await json(reqAs(users.owner!.cookie).get('/time/reports?groupBy=user'));
+    expect(res.data.every((r: { lastAt: string | null }) => typeof r.lastAt === 'string')).toBe(true);
+  });
+
   it('narrow to one person', async () => {
     const res = await json(reqAs(users.owner!.cookie).get(`/time/reports?groupBy=task&userId=${users.member!.userId}`));
     expect(res.data).toEqual([expect.objectContaining({ key: task.id, hours: 0.5 })]);
