@@ -437,6 +437,11 @@ export async function report(params: ReportFilters & { groupBy: string }) {
   if (params.groupBy === 'task') {
     rows = await db.execute(sql`
       select t.id as key, p.key || '-' || t.number as ref, t.title as label, p.id as project_id,
+        p.name as project_name, ts.name as status_name, ts.category as status_category, ts.color as status_color,
+        -- An estimate compares with time only when the project counts it in hours.
+        case when p.settings->>'estimateUnit' = 'hours' then t.estimate end as estimate_hours,
+        jsonb_agg(distinct jsonb_build_object('id', u.id, 'name', u.name, 'avatar', u.avatar, 'actorType', u.actor_type)) as people,
+        max(te.started_at) as last_at,
         coalesce(c.default_currency, ${wsCurrency}) as currency,
         coalesce(sum(te.duration_seconds),0) as secs,
         coalesce(sum(te.duration_seconds) filter (where te.billable),0) as billable_secs,
@@ -444,14 +449,17 @@ export async function report(params: ReportFilters & { groupBy: string }) {
         coalesce(sum((te.duration_seconds/3600.0) * te.hourly_rate) filter (where te.billable),0) as billable_amount
       from time_entries te
       join tasks t on t.id = te.task_id
+      join task_statuses ts on ts.id = t.status_id
+      join users u on u.id = te.user_id
       join projects p on p.id = te.project_id
       left join companies c on c.id = p.company_id
       ${whereSql}
-      group by t.id, p.key, t.number, t.title, p.id, c.default_currency
+      group by t.id, p.id, ts.id, c.default_currency
       order by secs desc`) as any[];
   } else if (params.groupBy === 'user') {
     rows = await db.execute(sql`
       select u.id as key, u.name as label, null::text as currency,
+        max(te.started_at) as last_at,
         coalesce(sum(te.duration_seconds),0) as secs,
         coalesce(sum(te.duration_seconds) filter (where te.billable),0) as billable_secs,
         coalesce(sum((te.duration_seconds/3600.0) * te.hourly_rate),0) as amount,
@@ -464,6 +472,7 @@ export async function report(params: ReportFilters & { groupBy: string }) {
   } else if (params.groupBy === 'company') {
     rows = await db.execute(sql`
       select coalesce(c.id, 'internal') as key, coalesce(c.name, '(internal)') as label,
+        max(te.started_at) as last_at,
         coalesce(c.default_currency, ${wsCurrency}) as currency,
         coalesce(sum(te.duration_seconds),0) as secs,
         coalesce(sum(te.duration_seconds) filter (where te.billable),0) as billable_secs,
@@ -478,6 +487,7 @@ export async function report(params: ReportFilters & { groupBy: string }) {
   } else {
     rows = await db.execute(sql`
       select p.id as key, p.name as label,
+        max(te.started_at) as last_at,
         coalesce(c.default_currency, ${wsCurrency}) as currency,
         coalesce(sum(te.duration_seconds),0) as secs,
         coalesce(sum(te.duration_seconds) filter (where te.billable),0) as billable_secs,
@@ -494,7 +504,13 @@ export async function report(params: ReportFilters & { groupBy: string }) {
   return rows.map((r) => ({
     key: r.key,
     label: r.label,
-    ...(r.ref ? { ref: r.ref, projectId: r.project_id } : {}),
+    ...(r.ref ? {
+      ref: r.ref, projectId: r.project_id, projectName: r.project_name,
+      status: { name: r.status_name, category: r.status_category, color: r.status_color },
+      estimateHours: r.estimate_hours != null && Number(r.estimate_hours) > 0 ? Number(r.estimate_hours) : null,
+      people: (typeof r.people === 'string' ? JSON.parse(r.people) : r.people ?? []) as { id: string; name: string; avatar: string | null; actorType: string }[],
+    } : {}),
+    lastAt: r.last_at ? new Date(r.last_at).toISOString() : null,
     hours: round2(Number(r.secs) / 3600),
     billableHours: round2(Number(r.billable_secs) / 3600),
     amount: round2(Number(r.amount)),
