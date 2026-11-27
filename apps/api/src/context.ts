@@ -25,6 +25,12 @@ export interface Actor {
 export type Variables = {
   actor: Actor;
   requestId: string;
+  /**
+   * Set by a route whose answer is not a document read (the audit feed):
+   * file paths in it are signed only for a reader with a right of their own
+   * to the file (core/file-links).
+   */
+  fileLinksStrict?: boolean;
 };
 
 export type AppEnv = { Variables: Variables };

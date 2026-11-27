@@ -39,7 +39,19 @@ async function freshPath(path: string): Promise<string | null> {
   return answer;
 }
 
+/** The path an image was last retried with: once per path, not once per element. */
 const RETRIED = 'ordiFileRetried';
+
+/**
+ * A fresh, absolute link for a stored file src, for a button that opens it
+ * (Download, Open in new tab) on a page that may have been open for hours.
+ * Falls back to the src as it is.
+ */
+export async function freshFileHref(src: string): Promise<string> {
+  const path = filePathOf(src);
+  const next = path ? await freshPath(path) : null;
+  return next ? appOrigin() + next : (/^[a-z][a-z0-9+.-]*:/i.test(src) ? src : appOrigin() + src);
+}
 
 let onStale: (() => void) | null = null;
 let lastStale = 0;
@@ -55,10 +67,9 @@ function refetchDocuments(): void {
 async function onImageError(event: Event): Promise<void> {
   const img = event.target;
   if (!(img instanceof HTMLImageElement)) return;
-  if (img.dataset[RETRIED]) return;
   const path = filePathOf(img.currentSrc || img.src);
-  if (!path) return;
-  img.dataset[RETRIED] = '1';
+  if (!path || img.dataset[RETRIED] === path) return;
+  img.dataset[RETRIED] = path;
   const next = await freshPath(path);
   if (next) img.src = appOrigin() + next;
   else refetchDocuments();

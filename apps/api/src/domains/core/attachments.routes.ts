@@ -12,6 +12,7 @@ import {
 import { writeActivity } from '../../core/activity';
 import { putObject } from '../../lib/s3';
 import { fileSrc } from '../../lib/file-tokens';
+import { vetFilePaths } from '../../core/file-links';
 import { err } from '../../lib/errors';
 import { appendFileResource } from '../projects/resources.routes';
 
@@ -86,6 +87,9 @@ export function attachmentsRoutes() {
     if (file.name.length > MAX_FILENAME_LENGTH) throw err.validation(`Filename is longer than ${MAX_FILENAME_LENGTH} characters`);
     if (file.size < 1 || file.size > MAX_UPLOAD_BYTES) throw err.validation('File exceeds the size cap');
     if (isBlockedFilename(file.name)) throw err.domain('File type not allowed');
+    // The name is shown back in every list: a file path in it is vetted like
+    // one in a document (multipart bodies are not, core/file-links).
+    const filename = await vetFilePaths(file.name, actor);
     const entityType = typeof form['entityType'] === 'string' && form['entityType'] ? form['entityType'] : null;
     const entityId = typeof form['entityId'] === 'string' && form['entityId'] ? form['entityId'] : null;
     // A type with no id would hang the file off nothing: only the permission
@@ -105,17 +109,17 @@ export function attachmentsRoutes() {
     const id = ulid();
     await db.insert(schema.attachments).values({
       id, entityType, entityId,
-      fileKey: key, filename: file.name, size: file.size, mime,
+      fileKey: key, filename, size: file.size, mime,
       createdBy: actor.userId,
     });
     if (entityType) {
       await writeActivity(db, {
         entityType: 'attachment', entityId: id, action: 'created',
-        diff: { file: { to: file.name }, on: { to: `${entityType}:${entityId}` } },
+        diff: { file: { to: filename }, on: { to: `${entityType}:${entityId}` } },
         actorId: actor.userId, actorType: actor.actorType,
       });
       // A project's files are listed among its resources.
-      if (entityType === 'project' && entityId) await appendFileResource(db, entityId, id, file.name, actor);
+      if (entityType === 'project' && entityId) await appendFileResource(db, entityId, id, filename, actor);
     }
     // `src` is what an editor stores in the document: a signed path that an
     // <img> can fetch with no session at all. It expires within the hour;

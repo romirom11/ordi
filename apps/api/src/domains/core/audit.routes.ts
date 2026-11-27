@@ -9,6 +9,10 @@ import { err } from '../../lib/errors';
 export function auditRoutes() {
   const app = new Hono<AppEnv>();
   app.use('*', requireAuth);
+  // The feed shows diffs of records the reader may not otherwise open (a
+  // private project's task, seen through audit.read): an image in such a diff
+  // opens only for someone with a right of their own to it.
+  app.use('*', async (c, next) => { c.set('fileLinksStrict', true); await next(); });
 
   // Global audit feed (PRD §14.4). Sensitive records hidden unless read_sensitive/compensation.
   app.get('/', guard('audit.read'), async (c) => {

@@ -6,6 +6,7 @@
  */
 import { getDb, schema, eq, and, asc, isNull } from '@ordi/db';
 import { docToText } from '@ordi/shared';
+import { signFilePaths } from '../../core/file-links';
 
 const { tasks, projects, comments, users, taskLinks, gitLinks, taskLabels, labels, taskStatuses } = schema;
 
@@ -140,7 +141,9 @@ export async function buildTaskBrief(ctx: PromptContext): Promise<string> {
       }
     }
   }
-  return lines.join('\n').trim() + '\n';
+  // Screenshots in the description and comments are signed afresh, as a read
+  // of the task through the API would (links expire within the hour).
+  return signFilePaths(lines.join('\n').trim() + '\n', undefined);
 }
 
 function quote(text: string): string {

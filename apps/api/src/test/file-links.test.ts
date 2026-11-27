@@ -13,7 +13,10 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { getDb, schema, eq } from '@ordi/db';
 import { ulid } from 'ulid';
+import { Hono } from 'hono';
 import { app, resetDb, seedRolesAndUsers, reqAs, anon, json } from './helpers';
+import { fileLinks, signFilePaths } from '../core/file-links';
+import type { AppEnv } from '../context';
 import { FILE_LINK_GRACE_SECONDS, FILE_LINK_TTL_SECONDS, deadFileToken, fileSrc, signFileToken } from '../lib/file-tokens';
 import { hmacSha256 } from '../lib/crypto';
 import { env } from '../env';
@@ -199,6 +202,73 @@ describe('an embedded file opens for the readers of its document', () => {
     expect((await anon().post(`/careers/${token}`, { name: 'E', email: 'e@x.test', coverText })).status).toBe(200);
     const [row] = await db.select({ coverText: schema.applicants.coverText }).from(schema.applicants).where(eq(schema.applicants.email, 'e@x.test'));
     expect(row!.coverText).toContain(deadFileToken(id));
+  });
+});
+
+describe('paths that reach storage or an answer some other way', () => {
+  const stale = (id: string) => lapsedPath(id, FILE_LINK_GRACE_SECONDS + 60);
+
+  it('vets the intake form’s JSON payload inside a multipart body, escapes and all', async () => {
+    const { db } = getDb();
+    const { id } = await upload(owner);
+    const settings = await json(owner.patch(`/projects/${projectId}/intake-settings`, { formEnabled: true }));
+    const hidden = stale(id).replace(/\//g, '\\/');
+    const fd = new FormData();
+    fd.append('payload', `{"values":{"requesterName":"Ola","requesterEmail":"ola@x.test","title":"Broken ${hidden}"}}`);
+    const res = await app.request(`/api/v1/intake/${settings.formToken}`, { method: 'POST', body: fd, headers: { 'x-forwarded-for': '10.9.9.9' } });
+    expect(res.status).toBe(200);
+    const [item] = await db.select({ title: schema.intakeItems.title }).from(schema.intakeItems).where(eq(schema.intakeItems.projectId, projectId));
+    expect(item!.title).toContain(deadFileToken(id));
+  });
+
+  it('vets a csv cell after parsing, where a stray carriage return no longer splits the path', async () => {
+    const { id } = await upload(owner);
+    const split = stale(id).replace('/files/', '/fi\rles/');
+    const csv = `projectKey,title\nFLD,Imported ${split}\n`;
+    const dry = await json(member.post('/import/tasks', { csv, dryRun: true }));
+    expect(JSON.stringify(dry)).not.toContain(signFileToken(id));
+    expect((await member.post('/import/tasks', { csv })).status).toBe(200);
+    const rows = await getDb().db.select({ title: schema.tasks.title }).from(schema.tasks).where(eq(schema.tasks.projectId, projectId));
+    const imported = rows.find((r) => r.title.startsWith('Imported'));
+    expect(imported!.title).toContain(deadFileToken(id));
+  });
+
+  it('renews nothing in a write’s answer for a reader without a right of their own', async () => {
+    const { id } = await upload(owner);
+    const recent = lapsedPath(id, 3600);
+    const created = await json(member.post('/tasks', { projectId, title: 'Echo', description: doc(recent) }));
+    expect(srcOf(created.description)).toBe(recent);
+    // Read back, it is a document being read: signed afresh.
+    expect((await open(srcOf((await json(member.get(`/tasks/${created.id}`))).description))).status).toBe(200);
+  });
+
+  it('signs a loose file in an audit-style answer only for a reader with a right of their own', async () => {
+    const { id } = await upload(owner);
+    const text = `diff ${legacyPath(id)}`;
+    const memberActor = { userId: users.member!.userId, access: { permissions: new Set<string>() } } as any;
+    expect(await signFilePaths(text, memberActor, { documentRead: false })).toBe(text);
+    const ownerActor = { userId: users.owner!.userId, access: { permissions: new Set<string>() } } as any;
+    expect(await signFilePaths(text, ownerActor, { documentRead: false })).not.toBe(text);
+  });
+
+  it('keeps a csv answer’s byte-order mark when it rewrites the paths in it', async () => {
+    const { id } = await upload(owner);
+    const mini = new Hono<AppEnv>();
+    mini.use('*', fileLinks);
+    mini.get('/x.csv', (c) => c.body(`\uFEFFname,img\nA,${legacyPath(id)}\n`, 200, { 'content-type': 'text/csv; charset=utf-8' }));
+    const bytes = new Uint8Array(await (await mini.request('/x.csv')).arrayBuffer());
+    expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    expect(new TextDecoder().decode(bytes)).not.toContain(legacyPath(id));
+  });
+
+  it('vets a file path hidden in an uploaded file’s name', async () => {
+    const { id } = await upload(owner);
+    const fd = new FormData();
+    fd.append('file', new File([PNG], `x${stale(id)}.png`, { type: 'image/png' }));
+    const res = await member.postForm('/attachments', fd);
+    expect(res.status).toBe(201);
+    const [row] = await getDb().db.select({ filename: schema.attachments.filename }).from(schema.attachments).where(eq(schema.attachments.id, (await json(res)).id));
+    expect(row!.filename).toContain(deadFileToken(id));
   });
 });
 

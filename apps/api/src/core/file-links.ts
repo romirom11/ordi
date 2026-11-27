@@ -109,16 +109,23 @@ export async function vetFilePaths(text: string, actor: Actor | undefined): Prom
  * with a right of their own – or a recent link could be renewed forever
  * without ever living anywhere.
  */
-export async function signFilePaths(text: string, actor: Actor | undefined, echoed: ReadonlySet<string> = new Set()): Promise<string> {
+export async function signFilePaths(
+  text: string, actor: Actor | undefined,
+  opts: { echoed?: ReadonlySet<string>; documentRead?: boolean } = {},
+): Promise<string> {
   const canRead = readChecker(actor);
+  const echoed = opts.echoed ?? new Set<string>();
+  const documentRead = opts.documentRead ?? true;
   return replacePaths(text, async (id, token, att) => {
     if (!att) return null;
     if (await canRead(att)) return signFileToken(id);
     // A loose file lives in the document that carries it – unless it came in
     // unvetted (dead), and then only those with a right of their own see it.
     if (att.entityType || token === deadFileToken(id)) return deadFileToken(id);
-    // Handed back as it came in: it keeps the expiry it had.
-    if (echoed.has(`${id}/${token}`)) return null;
+    // Not a document being read – a write's answer, which can only hand back
+    // or reshape what was sent; the audit feed – or a path handed back as it
+    // came in: it keeps the expiry it had.
+    if (!documentRead || echoed.has(`${id}/${token}`)) return null;
     return signFileToken(id);
   });
 }
@@ -164,13 +171,17 @@ async function anyUnvetted(readings: string[], actor: Actor | undefined, echoed:
 /** Response types that carry what a route read back; a stream is left alone. */
 const SIGNABLE = /^(application\/([\w.+-]*\+)?json|text\/(?!event-stream))/i;
 
-async function signResponse(c: Context<AppEnv>, actor: Actor | undefined, echoed: ReadonlySet<string>): Promise<void> {
+async function signResponse(
+  c: Context<AppEnv>, actor: Actor | undefined, opts: { echoed: ReadonlySet<string>; documentRead: boolean },
+): Promise<void> {
   const res = c.res;
   const type = res.headers.get('content-type') ?? '';
   if (!res.body || !SIGNABLE.test(type)) return;
-  const text = await res.clone().text();
+  // ignoreBOM keeps a leading byte-order mark as a character, so a CSV export
+  // that carries one (Excel reads accents by it) keeps it when rewritten.
+  const text = new TextDecoder('utf-8', { ignoreBOM: true }).decode(await res.clone().arrayBuffer());
   if (!text.includes(MARKER)) return;
-  const signed = await signFilePaths(text, actor, echoed);
+  const signed = await signFilePaths(text, actor, opts);
   if (signed === text) return;
   const headers = new Headers(res.headers);
   headers.delete('content-length');
@@ -191,6 +202,11 @@ async function vetRequest(c: Context<AppEnv>, actor: Actor | undefined): Promise
   if (await anyUnvetted(decodings(c.req.url), actor, echoed)) return { refused: refuse(c) };
 
   if (c.req.method === 'GET' || c.req.method === 'HEAD' || !c.req.raw.body) return { echoed };
+  // Multipart is left to the routes that read it, which vet the fields they
+  // keep as they parsed them (an upload's filename, the intake form's JSON
+  // payload): its parts are never rewritten in place, and buffering a large
+  // upload here would come before the route's own size cap.
+  if (/multipart\/form-data/i.test(c.req.header('content-type') ?? '')) return { echoed };
   const raw = await c.req.raw.clone().arrayBuffer();
   const text = new TextDecoder().decode(raw);
   let parsed: { ok: true; value: unknown } | { ok: false } = { ok: false };
@@ -212,17 +228,10 @@ async function vetRequest(c: Context<AppEnv>, actor: Actor | undefined): Promise
   }
   // A form, an upload, plain text: checked as bytes and as a decoded form,
   // never rewritten in place – an unvetted path refuses the write.
-  const bytes = Buffer.from(raw);
-  // Nothing that is or decodes to a path: the common upload, left unread.
-  if (!bytes.includes(MARKER) && !/%2f/i.test(bytes.toString('latin1'))) return { echoed };
-  const latin = bytes.toString('latin1');
-  // A form is read every way it can be decoded; anything else (an upload's
-  // parts) as is and with percent-runs decoded.
+  // A form is read every way a route might decode it; any other text as is.
+  const latin = Buffer.from(raw).toString('latin1');
   const form = /x-www-form-urlencoded/i.test(c.req.header('content-type') ?? '');
-  const readings = form ? decodings(latin) : [latin, latin.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
-    try { return decodeURIComponent(run); } catch { return run; }
-  })];
-  if (await anyUnvetted(readings, actor, echoed)) return { refused: refuse(c) };
+  if (await anyUnvetted(form ? decodings(latin) : [latin], actor, echoed)) return { refused: refuse(c) };
   return { echoed };
 }
 
@@ -235,13 +244,18 @@ export const fileLinks: MiddlewareHandler<AppEnv> = async (c, next) => {
   const vetted = await vetRequest(c, c.get('actor'));
   if ('refused' in vetted) return vetted.refused;
   await next();
-  // ── Out: re-sign what the route answered with. ──
-  await signResponse(c, c.get('actor'), vetted.echoed);
+  // ── Out: re-sign what the route answered with. Only a read is a document
+  // being read; a write's answer can only hand back or reshape what it was
+  // sent, which might have slipped past the check above in a shape no
+  // pattern sees (a csv cell split by a stray carriage return). ──
+  const documentRead = (c.req.method === 'GET' || c.req.method === 'HEAD') && !c.get('fileLinksStrict');
+  await signResponse(c, c.get('actor'), { echoed: vetted.echoed, documentRead });
 };
 
 /**
- * For a public route that stores what a visitor sends (an intake form, a
- * careers application, a quote decline): the visitor has no rights of their
+ * For a public route that stores a JSON body a visitor sends (a careers
+ * application, a quote decline; the intake form vets its parsed payload
+ * itself, after its size cap): the visitor has no rights of their
  * own, so only a recent link is kept, and the triage queue's readers never get
  * an old path signed afresh because a visitor pasted it.
  */
@@ -254,5 +268,5 @@ export const vetFileLinksIn: MiddlewareHandler<AppEnv> = async (c, next) => {
 /** For a public route whose JSON may carry a document (a careers page's job description). */
 export const signFileLinksOut: MiddlewareHandler<AppEnv> = async (c, next) => {
   await next();
-  await signResponse(c, undefined, new Set());
+  await signResponse(c, undefined, { echoed: new Set(), documentRead: true });
 };

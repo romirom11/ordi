@@ -15,13 +15,14 @@ import { z } from 'zod';
 import { ulid } from 'ulid';
 import { getDb, schema, eq, and, isNull, inArray, asc, desc, gte, lt, sql } from '@ordi/db';
 import { COMPANY_STATUSES, TASK_PRIORITIES, appendPosition } from '@ordi/shared';
-import type { AppEnv } from '../../context';
+import type { Actor, AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { guard } from '../../core/rbac';
 import { accessibleProjectIds, effectiveProjectRole } from '../../core/access';
 import { writeActivity } from '../../core/activity';
 import { emit } from '../../core/events';
 import { err } from '../../lib/errors';
+import { vetFilePaths } from '../../core/file-links';
 import { exportLeads } from '../crm/service';
 
 // ── CSV primitives ──
@@ -273,9 +274,17 @@ export function importExportRoutes() {
 
   // ── Imports ──
 
-  /** Parse csv text into header-mapped data rows; throws-free, returns errors for the caller. */
-  function readRows(csvText: string): { cols: Map<string, number>; data: string[][] } {
-    const parsed = parseCsv(csvText);
+  /**
+   * Parse csv text into header-mapped data rows; throws-free, returns errors
+   * for the caller. File paths are vetted in the parsed cells, not only in the
+   * request: parsing drops stray carriage returns and quotes, so a path split
+   * by them reaches a cell whole without the request ever showing it
+   * (core/file-links).
+   */
+  async function readRows(csvText: string, actor: Actor): Promise<{ cols: Map<string, number>; data: string[][] }> {
+    const parsed = await Promise.all(parseCsv(csvText).map((row) => Promise.all(
+      row.map((v) => (v.includes('/api/v1/files/') ? vetFilePaths(v, actor) : v)),
+    )));
     const header = parsed[0] ?? [];
     return { cols: headerMap(header), data: parsed.slice(1) };
   }
@@ -302,7 +311,7 @@ export function importExportRoutes() {
   app.post('/import/companies', guard('crm.write'), async (c) => {
     const actor = currentActor(c);
     const body = importBodySchema.parse(await c.req.json());
-    const { cols, data } = readRows(body.csv);
+    const { cols, data } = await readRows(body.csv, actor);
     const errors: ImportError[] = [];
     const creates: Array<Record<string, unknown> & { name: string }> = [];
     const updates: Array<{ id: string; patch: Record<string, unknown> }> = [];
@@ -364,7 +373,7 @@ export function importExportRoutes() {
   app.post('/import/contacts', guard('crm.write'), async (c) => {
     const actor = currentActor(c);
     const body = importBodySchema.parse(await c.req.json());
-    const { cols, data } = readRows(body.csv);
+    const { cols, data } = await readRows(body.csv, actor);
     const errors: ImportError[] = [];
     const creates: Array<Record<string, unknown>> = [];
     const updates: Array<{ id: string; patch: Record<string, unknown> }> = [];
@@ -427,7 +436,7 @@ export function importExportRoutes() {
   app.post('/import/leads', guard('crm.write'), async (c) => {
     const actor = currentActor(c);
     const body = importBodySchema.parse(await c.req.json());
-    const { cols, data } = readRows(body.csv);
+    const { cols, data } = await readRows(body.csv, actor);
     const errors: ImportError[] = [];
     const creates: Array<Record<string, unknown> & { companyName: string }> = [];
     const updates: Array<{ id: string; patch: Record<string, unknown> }> = [];
@@ -561,7 +570,7 @@ export function importExportRoutes() {
   app.post('/import/tasks', guard('projects.create'), async (c) => {
     const actor = currentActor(c);
     const body = importBodySchema.parse(await c.req.json());
-    const { cols, data } = readRows(body.csv);
+    const { cols, data } = await readRows(body.csv, actor);
     const errors: ImportError[] = [];
     const creates: Array<Record<string, unknown> & { projectId: string; statusId: string; key: string }> = [];
     const updates: Array<{ id: string; patch: Record<string, unknown> }> = [];

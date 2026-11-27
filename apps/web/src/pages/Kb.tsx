@@ -24,6 +24,7 @@ import {
 import { RichEditor, EMPTY_DOC } from '../components/richtext/RichEditor';
 import { SpaceAccessDialog, type AccessSpace } from '../components/kb/SpaceAccessDialog';
 import { uploadPdf, resolveFileSrc, uploadErrorKey, UploadError } from '../lib/uploads';
+import { freshFileHref } from '../lib/fileLinks';
 import { openExternal } from '../lib/desktop';
 import { useT, extendDict } from '../lib/i18n';
 
@@ -1042,6 +1043,7 @@ function PdfPageView({ page, pageId, canWrite }: { page: PageDetail; pageId: str
   }
 
   const href = resolveFileSrc(page.file.src);
+  const storedSrc = page.file.src;
   return (
     <div className="space-y-2">
       {replaceInput}
@@ -1055,7 +1057,8 @@ function PdfPageView({ page, pageId, canWrite }: { page: PageDetail; pageId: str
             {replace.isPending ? <Spinner /> : (<><Upload size={13} className="mr-1" />{t('kb.replacePdf')}</>)}
           </Button>
         )}
-        <Button size="sm" variant="ghost" onClick={() => openExternal(href)}>
+        {/* The page may have been open past its link's hour: open a fresh one. */}
+        <Button size="sm" variant="ghost" onClick={() => { void freshFileHref(storedSrc).then(openExternal); }}>
           <ExternalLink size={13} className="mr-1" />{t('kb.openNewTab')}
         </Button>
       </div>

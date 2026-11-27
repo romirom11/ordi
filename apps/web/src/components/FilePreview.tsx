@@ -125,7 +125,12 @@ export function FilePreviewDialog({ file, onClose }: { file: FileRow; onClose: (
           />
         )}
         <div className="flex justify-end">
-          <Button size="sm" variant="outline" disabled={!href} onClick={() => href && openExternal(href)}>
+          {/* The link in hand may have outlived its hour: ask for a fresh one. */}
+          <Button size="sm" variant="outline" disabled={!href} onClick={() => {
+            void api.get<{ url: string }>(`/attachments/${file.id}/url`)
+              .then((r) => openExternal(resolveFileSrc(r.url)))
+              .catch(() => href && openExternal(href));
+          }}>
             <Download size={13} /> {t('crm.downloadFile')}
           </Button>
         </div>

@@ -108,8 +108,9 @@ async function readableThroughRecord(actor: Actor, attachmentId: string): Promis
     if (doc) return true;
   }
 
+  // Only a pdf page shows its file (kb/service getPage).
   const pages = await db.select({ id: schema.kbPages.id }).from(schema.kbPages)
-    .where(eq(schema.kbPages.fileId, attachmentId));
+    .where(and(eq(schema.kbPages.fileId, attachmentId), eq(schema.kbPages.type, 'pdf')));
   for (const page of pages) {
     if (await allowed(() => getPage(actor, page.id, false))) return true;
   }
