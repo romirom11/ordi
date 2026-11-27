@@ -203,6 +203,21 @@ describe('working with its token', () => {
   });
 });
 
+describe('what the routes refuse to touch', () => {
+  it('a person, an ordi agent, or another agent\'s token', async () => {
+    expect((await owner().post(`/external-agents/${users.manager!.userId}/tokens`, {})).status).toBe(404);
+    expect((await owner().post(`/external-agents/${users.manager!.userId}/disable`)).status).toBe(404);
+    const managed = await json(owner().post('/agents', { name: 'Ordi runner', runtime: 'claude_code' }));
+    expect((await owner().post(`/external-agents/${managed.id}/tokens`, {})).status).toBe(404);
+
+    const a = await createAgent('Agent A');
+    const b = await createAgent('Agent B');
+    const { token, tokenInfo } = await issueToken(b.id);
+    expect((await owner().del(`/external-agents/${a.id}/tokens/${tokenInfo.id}`)).status).toBe(404);
+    expect((await bearer(token).get('/projects')).status).toBe(200);
+  });
+});
+
 describe('assigning work to it', () => {
   it('is not handed a leaving person\'s tasks in projects it is not on', async () => {
     const agent = await createAgent('Successor bot');

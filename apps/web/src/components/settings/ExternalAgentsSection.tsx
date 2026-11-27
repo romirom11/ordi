@@ -157,10 +157,15 @@ export function ExternalAgentsSection() {
 }
 
 function OwnerSelect({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+  const t = useT();
   const usersQ = useUsersLookup();
   const people = activeUsers(usersQ.data ?? []).filter((u) => u.actorType !== 'agent');
+  // An owner who has since been deactivated still shows as the value, so the
+  // select does not silently claim the first person in the list is the owner.
+  const current = value && !people.some((u) => u.id === value) ? (usersQ.data ?? []).find((u) => u.id === value) : undefined;
   return (
     <Select value={value} onChange={(e) => onChange(e.target.value)}>
+      {current && <option value={current.id} disabled>{current.name} · {t('task.deactivatedUser', 'deactivated')}</option>}
       {people.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
     </Select>
   );
@@ -223,7 +228,8 @@ function ManageDialog({ agent, onClose }: { agent: ExternalAgent; onClose: () =>
   });
   const toggle = useMutation({
     mutationFn: (on: boolean) => api.post(`/external-agents/${agent.id}/${on ? 'enable' : 'disable'}`),
-    onSuccess: () => { refresh(); qc.invalidateQueries({ queryKey: ['users-lookup'] }); },
+    // Switching off revokes every token, the one just shown included.
+    onSuccess: (_r, on) => { if (!on) setIssued(null); refresh(); qc.invalidateQueries({ queryKey: ['users-lookup'] }); },
     onError: apiError,
   });
   const issue = useMutation({
