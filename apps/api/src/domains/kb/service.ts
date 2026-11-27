@@ -169,7 +169,7 @@ export function tiptapToMarkdown(doc: unknown): string {
  * mime, so the pdf-ness is enforced here – where the page commits to rendering
  * the file inline.
  */
-async function assertPdfAttachment(fileId: string) {
+async function assertPdfAttachment(actor: Actor, fileId: string, currentFileId?: string | null) {
   const { db } = getDb();
   const [att] = await db
     .select()
@@ -177,6 +177,13 @@ async function assertPdfAttachment(fileId: string) {
     .where(eq(schema.attachments.id, fileId))
     .limit(1);
   if (!att) throw err.validation('Uploaded file not found');
+  // The page serves its file to everyone who can read the page, so it may
+  // show only a file of the caller's own upload that hangs off no record. Any
+  // attachment id used to do: an employee's contract or a private project's
+  // brief, republished through a page. The page's current file stays valid.
+  if (fileId !== currentFileId && (att.entityType || att.createdBy !== actor.userId)) {
+    throw err.validation('Uploaded file not found');
+  }
   if (att.mime !== 'application/pdf') throw err.validation('The file must be a PDF');
   return att;
 }
@@ -514,10 +521,11 @@ export async function createPage(actor: Actor, input: any): Promise<string> {
   const position = appendPosition(last?.position != null ? Number(last.position) : null);
 
   const type = input.type ?? 'article';
-  const fileId = input.fileId ?? null;
+  // Only a pdf page shows a file; any other page type keeps none.
+  const fileId = type === 'pdf' ? input.fileId ?? null : null;
   if (type === 'pdf') {
     if (!fileId) throw err.validation('A PDF page needs an uploaded file');
-    await assertPdfAttachment(fileId);
+    await assertPdfAttachment(actor, fileId);
   }
 
   const id = ulid();
@@ -634,7 +642,7 @@ export async function updatePage(actor: Actor, id: string, input: any) {
   if (input.fileId !== undefined) {
     if (before.type !== 'pdf') delete patch.fileId;
     else if (!input.fileId) throw err.validation('A PDF page needs an uploaded file');
-    else await assertPdfAttachment(input.fileId);
+    else await assertPdfAttachment(actor, input.fileId, before.fileId);
   }
   await db
     .update(schema.kbPages)

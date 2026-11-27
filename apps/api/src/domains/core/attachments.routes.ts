@@ -28,7 +28,7 @@ function requireEntityPerm(perms: ReadonlySet<string>, map: Record<string, Permi
  * the project's own reads are (core/access).
  */
 async function assertEntityAccess(
-  actor: Actor, entityType: string, entityId: string | null | undefined, minRole: 'viewer' | 'member',
+  actor: Actor, entityType: string, entityId: string | null | undefined, minRole: 'viewer' | 'member' | 'admin',
 ): Promise<void> {
   if (!entityId) return;
   if (entityType === 'project') {
@@ -46,8 +46,42 @@ async function assertEntityAccess(
     const [item] = await db.select({ projectId: schema.intakeItems.projectId }).from(schema.intakeItems).where(eq(schema.intakeItems.id, entityId));
     if (!item) throw err.notFound('Intake item not found');
     // The triage queue itself demands project membership; its files do too.
-    await assertProject(actor, item.projectId, 'member');
+    await assertProject(actor, item.projectId, minRole === 'admin' ? 'admin' : 'member');
   }
+}
+
+/** Entity types whose files answer to a project's membership (assertEntityAccess). */
+const PROJECT_SCOPED = new Set(['project', 'task', 'intake_item']);
+
+/**
+ * Who may rename or delete a file that already exists.
+ *
+ * - A file embedded in a document answers to no record: only its uploader.
+ * - A file on a project, a task or an intake item: its uploader as a project
+ *   member, anyone else only as a project admin – the rule a comment follows
+ *   (projects/service deleteComment). Membership alone let any member rename or
+ *   delete the files a colleague, or the public intake form, had put there.
+ * - A file on a CRM record or an employee: whoever may change that record
+ *   (WRITE_PERM). Those records have no per-record owner or admin to defer to;
+ *   the write permission is the whole of their edit rule.
+ */
+async function assertCanChange(
+  actor: Actor,
+  att: { entityType: string | null; entityId: string | null; createdBy: string | null },
+): Promise<void> {
+  const own = att.createdBy === actor.userId;
+  if (!att.entityType) {
+    if (!own) throw err.forbidden('Only the uploader can change this file');
+    return;
+  }
+  requireEntityPerm(actor.access.permissions, WRITE_PERM, att.entityType);
+  if (!PROJECT_SCOPED.has(att.entityType)) return;
+  // A project-scoped file that names no record has no project to defer to.
+  if (!att.entityId) {
+    if (!own) throw err.forbidden('Only the uploader can change this file');
+    return;
+  }
+  await assertEntityAccess(actor, att.entityType, att.entityId, own ? 'member' : 'admin');
 }
 
 export function attachmentsRoutes() {
@@ -89,6 +123,9 @@ export function attachmentsRoutes() {
     if (isBlockedFilename(file.name)) throw err.domain('File type not allowed');
     const entityType = typeof form['entityType'] === 'string' && form['entityType'] ? form['entityType'] : null;
     const entityId = typeof form['entityId'] === 'string' && form['entityId'] ? form['entityId'] : null;
+    // A type with no id would hang the file off nothing: only the permission
+    // would ever guard it, never the record.
+    if (entityType && !entityId) throw err.validation('entityId required with entityType');
     if (entityType) {
       requireEntityPerm(actor.access.permissions, WRITE_PERM, entityType);
       await assertEntityAccess(actor, entityType, entityId, 'member');
@@ -130,13 +167,7 @@ export function attachmentsRoutes() {
     const { db } = getDb();
     const [att] = await db.select().from(schema.attachments).where(eq(schema.attachments.id, c.req.param('id')));
     if (!att) throw err.notFound();
-    if (att.entityType) {
-      requireEntityPerm(actor.access.permissions, WRITE_PERM, att.entityType);
-      await assertEntityAccess(actor, att.entityType, att.entityId, 'member');
-    } else if (att.createdBy !== actor.userId) {
-      // A file embedded in a document answers to no record: only its uploader renames it.
-      throw err.forbidden('Only the uploader can rename this file');
-    }
+    await assertCanChange(actor, att);
     const { filename } = attachmentPatchSchema.parse(await c.req.json());
     if (isBlockedFilename(filename)) throw err.domain('File type not allowed');
     if (filename !== att.filename) {
@@ -156,10 +187,7 @@ export function attachmentsRoutes() {
     const { db } = getDb();
     const [att] = await db.select().from(schema.attachments).where(eq(schema.attachments.id, c.req.param('id')));
     if (!att) throw err.notFound();
-    if (att.entityType) {
-      requireEntityPerm(actor.access.permissions, WRITE_PERM, att.entityType);
-      await assertEntityAccess(actor, att.entityType, att.entityId, 'member');
-    }
+    await assertCanChange(actor, att);
     // The S3 object stays behind (cheap, recoverable); only the reference goes.
     await db.delete(schema.attachments).where(eq(schema.attachments.id, att.id));
     await writeActivity(db, {

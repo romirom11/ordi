@@ -464,6 +464,10 @@ export async function addEmployeeDocument(actor: Actor, employeeId: string, inpu
   if (att.entityType && !(att.entityType === 'employee' && att.entityId === employeeId)) {
     throw err.domain('Attachment already belongs to another record');
   }
+  // Filing a loose file claims it: from here on it answers to this employee's
+  // record, not to whoever uploaded it. Only the uploader hands it over, or a
+  // file someone embedded in a document could be taken over by id.
+  if (!att.entityType && att.createdBy !== actor.userId) throw err.validation('Unknown attachment');
   const id = ulid();
   await db.insert(schema.employeeDocuments).values({
     id, employeeId, attachmentId: input.attachmentId, type: input.type ?? 'other',

@@ -2,7 +2,6 @@ import { useState, type FormEvent } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { X, Bookmark, Plus } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
-import { useMe } from '../../lib/auth';
 import { Button, Input, Skeleton, cn } from '../ui';
 import { Dialog, ConfirmDialog, toast } from '../overlays';
 
@@ -14,14 +13,14 @@ export interface SavedView {
   layout?: string;
   isShared?: boolean;
   userId?: string | null;
+  /** The server's answer to whether this user may delete it (savedviews.routes). */
+  canDelete?: boolean;
 }
 
 export function SavedViewsBar({ projectId, currentView, onApply }: {
   projectId: string; currentView: string; onApply: (view: SavedView) => void;
 }) {
   const qc = useQueryClient();
-  const me = useMe();
-  const myId = me.user.id;
   const [saving, setSaving] = useState(false);
   const [saveName, setSaveName] = useState('');
   const [toDelete, setToDelete] = useState<SavedView | null>(null);
@@ -56,7 +55,7 @@ export function SavedViewsBar({ projectId, currentView, onApply }: {
     <div className="flex flex-wrap items-center gap-1.5">
       {viewsQ.isLoading && <Skeleton className="h-6 w-32" />}
       {views.map((v) => {
-        const canDelete = v.userId == null || v.userId === myId;
+        const canDelete = !!v.canDelete;
         return (
           <span key={v.id}
             className={cn(

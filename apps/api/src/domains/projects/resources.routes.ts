@@ -11,7 +11,8 @@
  *   space, draft, someone else's private page) is left out of their list
  *   altogether, title included – the same rule search applies.
  *
- * Reads need project viewer, writes project member.
+ * Reads need project viewer, writes project member; removing a file someone
+ * else uploaded needs project admin, as deleting it through /attachments does.
  */
 import { Hono } from 'hono';
 import { getDb, schema, eq, and, asc, inArray, isNull, sql } from '@ordi/db';
@@ -278,13 +279,15 @@ export function projectResourcesRoutes() {
 
     if (row.kind === 'file' && row.attachmentId) {
       const [att] = await db.select().from(attachments).where(eq(attachments.id, row.attachmentId));
-      // Only a file that hangs off this very project is deleted from here:
-      // project membership (checked above) is what DELETE /attachments asks
-      // of a project file too. The row goes with its attachment (ON DELETE
-      // CASCADE); the S3 object stays behind, as with every other delete.
+      // Only a file that hangs off this very project is deleted from here,
+      // by the rule DELETE /attachments holds it to: its uploader as a member
+      // (checked above), anyone else as a project admin. The row goes with
+      // its attachment (ON DELETE CASCADE); the S3 object stays behind, as
+      // with every other delete.
       if (att && (att.entityType !== 'project' || att.entityId !== row.projectId)) {
         throw err.domain('This file belongs to another record');
       }
+      if (att && att.createdBy !== actor.userId) await assertProject(actor, row.projectId, 'admin');
       if (att) {
         logged = { kind: 'file', name: att.filename };
         await db.delete(attachments).where(eq(attachments.id, att.id));
