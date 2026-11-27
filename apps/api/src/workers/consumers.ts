@@ -506,10 +506,18 @@ const automations: Consumer = {
     if (!p.taskId || !p.projectId) return;
     const trigger = ev.type.replace('git.', ''); // pr_opened | pr_merged | pr_closed | branch_created
     const { db } = getDb();
-    const [rule] = await db.select().from(schema.gitAutomationRules)
+    // Only a status of the task's own project: a rule pointing elsewhere is
+    // skipped, and so is an event about a task that has since moved (the old
+    // row is deleted, the new one lives in another project).
+    const [rule] = await db.select({ targetStatusId: schema.gitAutomationRules.targetStatusId }).from(schema.gitAutomationRules)
+      .innerJoin(schema.taskStatuses, and(
+        eq(schema.taskStatuses.id, schema.gitAutomationRules.targetStatusId),
+        eq(schema.taskStatuses.projectId, schema.gitAutomationRules.projectId),
+      ))
       .where(and(eq(schema.gitAutomationRules.projectId, p.projectId), eq(schema.gitAutomationRules.trigger, trigger)));
     if (!rule) return;
-    const [task] = await db.select().from(schema.tasks).where(eq(schema.tasks.id, p.taskId));
+    const [task] = await db.select().from(schema.tasks)
+      .where(and(eq(schema.tasks.id, p.taskId), eq(schema.tasks.projectId, p.projectId), isNull(schema.tasks.deletedAt)));
     if (!task || task.statusId === rule.targetStatusId) return;
     await db.update(schema.tasks).set({ statusId: rule.targetStatusId }).where(eq(schema.tasks.id, p.taskId));
     await writeActivity(db, {

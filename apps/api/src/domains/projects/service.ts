@@ -527,6 +527,18 @@ export async function saveProjectAsTemplate(actor: Actor, projectId: string, nam
 // ─────────────────────────── Tasks ───────────────────────────
 
 /**
+ * A task's status is one of its own project's statuses: the board, progress
+ * and that project's status deletion all read it that way. Exported for the
+ * git automation rules, which set a status on their own later.
+ */
+export async function assertStatusInProject(statusId: string, projectId: string, field = 'statusId'): Promise<void> {
+  const { db } = getDb();
+  const [status] = await db.select({ id: taskStatuses.id }).from(taskStatuses)
+    .where(and(eq(taskStatuses.id, statusId), eq(taskStatuses.projectId, projectId)));
+  if (!status) throw err.validation(`${field} must be a status of the same project`);
+}
+
+/**
  * A milestone belongs to one project, so a task can only carry one of its own
  * project's milestones — otherwise the overview would count work it does not
  * own, and moving a task between projects would drag a stale grouping with it.
@@ -703,6 +715,7 @@ export async function createTask(actor: Actor, input: any) {
   await assertLabelScope(labelIds, 'task');
   const { db } = getDb();
   const id = ulid();
+  if (input.statusId) await assertStatusInProject(input.statusId, input.projectId);
   const statusId = input.statusId ?? (await defaultStatusId(input.projectId));
   if (input.milestoneId) await assertMilestoneInProject(input.milestoneId, input.projectId);
   const position = await nextTaskPosition(input.projectId);
@@ -787,6 +800,7 @@ export async function updateTask(actor: Actor, id: string, input: any) {
   for (const k of ['title', 'description', 'statusId', 'typeId', 'priority', 'parentId', 'milestoneId', 'dueDate', 'startDate', 'cycleId', 'reporterId']) {
     if (input[k] !== undefined) patch[k] = input[k];
   }
+  if (input.statusId) await assertStatusInProject(input.statusId, before.projectId);
   if (input.reporterId) await assertReporter(project, input.reporterId);
   if (input.milestoneId) await assertMilestoneInProject(input.milestoneId, before.projectId);
   if (input.customFields !== undefined) patch.customFields = mergeCustomFields(before.customFields, input.customFields);
@@ -1269,6 +1283,11 @@ export async function bulkUpdateTasks(actor: Actor, input: any) {
   if (input.milestoneId) {
     for (const projectId of new Set(rows.map((t) => t.projectId).filter(canEdit))) {
       await assertMilestoneInProject(input.milestoneId, projectId);
+    }
+  }
+  if (input.statusId) {
+    for (const projectId of new Set(rows.map((t) => t.projectId).filter(canEdit))) {
+      await assertStatusInProject(input.statusId, projectId);
     }
   }
   let updated = 0;
