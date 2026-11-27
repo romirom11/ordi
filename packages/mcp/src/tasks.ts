@@ -22,7 +22,7 @@
 import { createHash } from 'node:crypto';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { MAX_SUBTASK_DEPTH, TASK_PRIORITIES, docToText, secretEnvVars, textToDoc } from '@ordi/shared';
+import { MAX_SUBTASK_DEPTH, TASK_PRIORITIES, TASK_STATUS_CATEGORIES, docToText, secretEnvVars, textToDoc } from '@ordi/shared';
 import { OrdiApiError, type OrdiClient } from './client';
 import { absolutizeImageSrcs, relativizeImageSrcs, wrap } from './format';
 
@@ -412,6 +412,79 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
       customFields: fields.data
         .filter((f) => !f.deprecated)
         .map((f) => ({ key: f.key, label: f.label, type: f.type, options: f.options, required: f.required })),
+    };
+  }));
+
+  // ── Workflow: the project's own task statuses (board columns) ──
+
+  const statusOut = (s: Row) => ({ id: s.id, name: s.name, category: s.category, color: s.color, isDefault: !!s.isDefault, position: s.position });
+  const STATUS_CATEGORY_HINT = 'category says what the status means to ordi: backlog | todo | in_progress | done (counts as finished) | canceled (closed, not finished). Overdue, progress and cycle carry-over read it, not the name.';
+
+  /** A status by id or exact name only – management never guesses from a category. */
+  const pickStatus = (list: Row[], ref: string): Row => {
+    const wanted = ref.trim().toLowerCase();
+    const hit = list.find((s) => s.id === ref.trim()) ?? list.find((s) => String(s.name).trim().toLowerCase() === wanted);
+    if (!hit) throw new Error(`Unknown status "${ref}". This project has: ${list.map((s) => s.name).join(', ') || '(none)'}.`);
+    return hit;
+  };
+  const listStatuses = async (projectId: string): Promise<Row[]> =>
+    (await client.get<{ data: Row[] }>(`/projects/${projectId}/task-statuses`)).data;
+  /** Move one status to a 0-based board index, keeping the rest in order. */
+  const moveStatus = async (projectId: string, list: Row[], id: string, index: number): Promise<Row[]> => {
+    const ids = list.map((s) => s.id).filter((x) => x !== id);
+    ids.splice(Math.max(0, Math.min(index, ids.length)), 0, id);
+    return (await client.patch<{ data: Row[] }>(`/projects/${projectId}/task-statuses/order`, { ids })).data;
+  };
+
+  server.tool('create_workflow_status', `Add a task status (a board column) to one project, e.g. "Awaiting client". Statuses belong to a project, not the workspace. ${STATUS_CATEGORY_HINT} Needs project admin. Lands at the end of the board unless index is given. Returns the project's statuses in board order.`, {
+    project: z.string().describe('Project key (e.g. CONTENT) or id'),
+    name: z.string().min(1).max(60).describe('Unique within the project, case-insensitive'),
+    category: z.enum(TASK_STATUS_CATEGORIES),
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().describe('#rrggbb; defaults to grey'),
+    isDefault: z.boolean().optional().describe('New tasks start in this status; the previous default stops being one'),
+    index: z.number().int().min(0).optional().describe('0-based place on the board; omitted, the status goes last'),
+  }, ({ project, index, ...input }) => wrap(async () => {
+    const projectId = await resolveProjectId(client, project);
+    const created = await client.post<Row>(`/projects/${projectId}/task-statuses`, input);
+    let list = await listStatuses(projectId);
+    if (index !== undefined) list = await moveStatus(projectId, list, created.id, index);
+    return { action: 'created', status: statusOut(created), statuses: list.map(statusOut) };
+  }));
+
+  server.tool('update_workflow_status', `Rename, recolour, recategorise or reorder one of a project's task statuses, or make it the default for new tasks. This edits the status itself, for every task in it; to move one task to another status use update_task_status. ${STATUS_CATEGORY_HINT} Needs project admin.`, {
+    project: z.string().describe('Project key (e.g. CONTENT) or id'),
+    status: z.string().describe('Status id or its current name'),
+    name: z.string().min(1).max(60).optional(),
+    category: z.enum(TASK_STATUS_CATEGORIES).optional(),
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().describe('#rrggbb'),
+    isDefault: z.literal(true).optional().describe('Make this the default; to change the default, set it on another status'),
+    index: z.number().int().min(0).optional().describe('0-based place on the board'),
+  }, ({ project, status, index, ...patch }) => wrap(async () => {
+    const projectId = await resolveProjectId(client, project);
+    const target = pickStatus(await listStatuses(projectId), status);
+    const body = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+    if (!Object.keys(body).length && index === undefined) throw new Error('Nothing to update – pass name, category, color, isDefault or index.');
+    if (Object.keys(body).length) await client.patch(`/task-statuses/${target.id}`, body);
+    let list = await listStatuses(projectId);
+    if (index !== undefined) list = await moveStatus(projectId, list, target.id, index);
+    return { action: 'updated', status: statusOut(list.find((s) => s.id === target.id) ?? target), statuses: list.map(statusOut) };
+  }));
+
+  server.tool('delete_workflow_status', 'Remove a task status from a project. Its tasks are not lost: they all move to moveTasksTo first, and if the removed status was the default, moveTasksTo becomes the default. Needs project admin.', {
+    project: z.string().describe('Project key (e.g. CONTENT) or id'),
+    status: z.string().describe('Status id or name to remove'),
+    moveTasksTo: z.string().describe('Status id or name its tasks move to; must be another status of the same project'),
+  }, ({ project, status, moveTasksTo }) => wrap(async () => {
+    const projectId = await resolveProjectId(client, project);
+    const list = await listStatuses(projectId);
+    const target = pickStatus(list, status);
+    const to = pickStatus(list, moveTasksTo);
+    if (to.id === target.id) throw new Error('moveTasksTo must be a different status than the one being removed.');
+    const res = await client.del<{ movedTasks?: number }>(`/task-statuses/${target.id}?migrateTo=${encodeURIComponent(to.id)}`);
+    return {
+      action: 'deleted', status: { id: target.id, name: target.name },
+      movedTasks: res.movedTasks ?? null, movedTo: { id: to.id, name: to.name },
+      statuses: (await listStatuses(projectId)).map(statusOut),
     };
   }));
 

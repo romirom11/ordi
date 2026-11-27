@@ -117,11 +117,17 @@ export const projectMemberInputSchema = z.object({
 });
 
 export const taskStatusInputSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().trim().min(1).max(60),
   category: z.enum(TASK_STATUS_CATEGORIES),
-  color: z.string().default('#6b7280'),
-  position: z.number().default(0),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'a #rrggbb colour').default('#6b7280'),
+  /** Omitted on create, the status goes to the end of the board. */
+  position: z.number().int().min(0).optional(),
   isDefault: z.boolean().default(false),
+});
+
+/** PATCH /projects/:id/task-statuses/order – every status id of the project, in board order. */
+export const taskStatusOrderSchema = z.object({
+  ids: z.array(idSchema).min(1),
 });
 
 export const taskTypeInputSchema = z.object({

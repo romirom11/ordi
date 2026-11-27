@@ -3,7 +3,7 @@ import { getDb, schema, eq, ne, and, isNull, isNotNull, asc, sql } from '@ordi/d
 import { ulid } from 'ulid';
 import {
   projectInputSchema, projectUpdateSchema, projectMemberInputSchema,
-  taskStatusInputSchema, taskTypeInputSchema, projectTypeInputSchema, projectTypeOrderSchema,
+  taskStatusInputSchema, taskStatusOrderSchema, taskTypeInputSchema, projectTypeInputSchema, projectTypeOrderSchema,
   projectTemplateInputSchema, projectRepositoryInputSchema, gitAutomationRuleInputSchema,
 } from '@ordi/shared';
 import type { AppEnv } from '../../context';
@@ -223,6 +223,11 @@ export function projectsRoutes() {
   app.post('/projects/:id/task-statuses', async (c) => {
     const body = taskStatusInputSchema.parse(await c.req.json());
     return c.json(await svc.createTaskStatus(currentActor(c), c.req.param('id'), body), 201);
+  });
+
+  app.patch('/projects/:id/task-statuses/order', async (c) => {
+    const body = taskStatusOrderSchema.parse(await c.req.json());
+    return c.json({ data: await svc.reorderTaskStatuses(currentActor(c), c.req.param('id'), body.ids) });
   });
 
   app.patch('/task-statuses/:statusId', async (c) => {

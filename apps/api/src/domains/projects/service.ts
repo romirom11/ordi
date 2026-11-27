@@ -391,45 +391,106 @@ export async function listTaskStatuses(actor: Actor, projectId: string) {
   return db.select().from(taskStatuses).where(eq(taskStatuses.projectId, projectId)).orderBy(asc(taskStatuses.position));
 }
 
+/** Board positions are spaced so a single status can later slot in between. */
+const STATUS_POSITION_STEP = 1000;
+
+/** A status name is how people and agents tell statuses apart, so it is unique per project. */
+async function assertStatusNameFree(projectId: string, name: string, exceptId?: string): Promise<void> {
+  const { db } = getDb();
+  const rows = await db.select({ id: taskStatuses.id, name: taskStatuses.name })
+    .from(taskStatuses).where(eq(taskStatuses.projectId, projectId));
+  const wanted = name.trim().toLowerCase();
+  if (rows.some((r) => r.id !== exceptId && r.name.trim().toLowerCase() === wanted)) {
+    throw err.validation(`This project already has a status called "${name.trim()}"`);
+  }
+}
+
+async function loadStatus(statusId: string) {
+  const { db } = getDb();
+  const [status] = await db.select().from(taskStatuses).where(eq(taskStatuses.id, statusId));
+  if (!status) throw err.notFound('Status not found');
+  return status;
+}
+
 export async function createTaskStatus(actor: Actor, projectId: string, input: any) {
   await assertProject(actor, projectId, 'admin');
+  await assertStatusNameFree(projectId, input.name);
   const { db } = getDb();
   const id = ulid();
-  if (input.isDefault) {
-    await db.update(taskStatuses).set({ isDefault: false }).where(eq(taskStatuses.projectId, projectId));
+  let position: number = input.position;
+  if (position === undefined) {
+    const [row] = await db.select({ max: sql<number | null>`max(${taskStatuses.position})` })
+      .from(taskStatuses).where(eq(taskStatuses.projectId, projectId));
+    position = (Number(row?.max ?? 0) || 0) + STATUS_POSITION_STEP;
   }
-  await db.insert(taskStatuses).values({
-    id, projectId, name: input.name, category: input.category, color: input.color,
-    position: input.position ?? 0, isDefault: input.isDefault ?? false,
+  await db.transaction(async (tx) => {
+    if (input.isDefault) {
+      await tx.update(taskStatuses).set({ isDefault: false }).where(eq(taskStatuses.projectId, projectId));
+    }
+    await tx.insert(taskStatuses).values({
+      id, projectId, name: input.name.trim(), category: input.category, color: input.color,
+      position, isDefault: input.isDefault ?? false,
+    });
   });
-  return { id };
+  return loadStatus(id);
 }
 
 export async function updateTaskStatus(actor: Actor, statusId: string, input: any) {
-  const { db } = getDb();
-  const [status] = await db.select().from(taskStatuses).where(eq(taskStatuses.id, statusId));
-  if (!status) throw err.notFound('Status not found');
+  const status = await loadStatus(statusId);
   await assertProject(actor, status.projectId, 'admin');
-  if (input.isDefault === true) {
-    await db.update(taskStatuses).set({ isDefault: false }).where(eq(taskStatuses.projectId, status.projectId));
+  // The default is moved, never removed: new tasks always need somewhere to land.
+  if (input.isDefault === false && status.isDefault) {
+    throw err.validation('This is the default status for new tasks – make another status the default instead');
   }
+  if (input.name !== undefined) await assertStatusNameFree(status.projectId, input.name, statusId);
   const patch: Record<string, unknown> = {};
   for (const k of ['name', 'category', 'color', 'position', 'isDefault']) if (input[k] !== undefined) patch[k] = input[k];
-  if (Object.keys(patch).length) await db.update(taskStatuses).set(patch).where(eq(taskStatuses.id, statusId));
-  return { ok: true };
+  if (typeof patch.name === 'string') patch.name = patch.name.trim();
+  const { db } = getDb();
+  if (Object.keys(patch).length) {
+    await db.transaction(async (tx) => {
+      if (input.isDefault === true) {
+        await tx.update(taskStatuses).set({ isDefault: false }).where(eq(taskStatuses.projectId, status.projectId));
+      }
+      await tx.update(taskStatuses).set(patch).where(eq(taskStatuses.id, statusId));
+    });
+  }
+  return loadStatus(statusId);
+}
+
+/** Put the project's statuses in the given board order. The list must name every status once. */
+export async function reorderTaskStatuses(actor: Actor, projectId: string, ids: string[]) {
+  await assertProject(actor, projectId, 'admin');
+  const { db } = getDb();
+  const existing = await db.select({ id: taskStatuses.id }).from(taskStatuses).where(eq(taskStatuses.projectId, projectId));
+  const known = new Set(existing.map((r) => r.id));
+  if (new Set(ids).size !== ids.length || ids.length !== known.size || ids.some((id) => !known.has(id))) {
+    throw err.validation('ids must list every status of this project exactly once');
+  }
+  await db.transaction(async (tx) => {
+    for (const [i, id] of ids.entries()) {
+      await tx.update(taskStatuses).set({ position: (i + 1) * STATUS_POSITION_STEP }).where(eq(taskStatuses.id, id));
+    }
+  });
+  return listTaskStatuses(actor, projectId);
 }
 
 export async function deleteTaskStatus(actor: Actor, statusId: string, migrateTo: string | undefined) {
-  const { db } = getDb();
-  const [status] = await db.select().from(taskStatuses).where(eq(taskStatuses.id, statusId));
-  if (!status) throw err.notFound('Status not found');
+  const status = await loadStatus(statusId);
   await assertProject(actor, status.projectId, 'admin');
   if (!migrateTo) throw err.validation('migrateTo status id required to delete a status');
+  if (migrateTo === statusId) throw err.validation('migrateTo must be another status – tasks cannot move to the status being deleted');
+  const { db } = getDb();
   const [target] = await db.select().from(taskStatuses).where(and(eq(taskStatuses.id, migrateTo), eq(taskStatuses.projectId, status.projectId)));
   if (!target) throw err.validation('migrateTo must be a status in the same project');
-  await db.update(tasks).set({ statusId: migrateTo }).where(eq(tasks.statusId, statusId));
-  await db.delete(taskStatuses).where(eq(taskStatuses.id, statusId));
-  return { ok: true };
+  const moved = await db.transaction(async (tx) => {
+    const rows = await tx.update(tasks).set({ statusId: migrateTo }).where(eq(tasks.statusId, statusId)).returning({ id: tasks.id });
+    // Deleting the default hands the role to the status its tasks moved to.
+    if (status.isDefault) await tx.update(taskStatuses).set({ isDefault: true }).where(eq(taskStatuses.id, migrateTo));
+    await tx.delete(taskStatuses).where(eq(taskStatuses.id, statusId));
+    return rows.length;
+  });
+  return { ok: true, movedTasks: moved };
 }
 
 // ── Save project as template (PRD §8.1) ──
