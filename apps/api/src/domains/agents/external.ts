@@ -331,7 +331,12 @@ export async function issueExternalAgentToken(
     // The role was checked against the issuer before the lock; a change in
     // between would mint a token wider than what was checked.
     if (locked.roleId !== row.user.roleId) throw err.conflict('The agent\'s role changed while the token was being issued – try again');
-    const scopes = [...(await loadRolePermissions(locked.roleId))];
+    // Same for the role's contents: the scopes are read again here, so a
+    // permission added to the role since the check must not slip in.
+    const scopes = [...(await loadRolePermissions(locked.roleId, tx))];
+    if (scopes.some((p) => !actor.access.permissions.has(p))) {
+      throw err.conflict('The agent\'s role changed while the token was being issued – try again');
+    }
     await tx.insert(apiTokens).values({
       id: tokenId, userId: id, name: input.name, hash: sha256(raw), prefix: raw.slice(0, 12), scopes, readOnly: false, expiresAt,
     });

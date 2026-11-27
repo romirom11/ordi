@@ -17,7 +17,7 @@ import { env } from '../env';
 import { salesWork, summarizeSalesWork } from '../domains/crm/work';
 import { queueRun, activeRunForTask } from '../domains/agents/runs';
 import { agentProfilesAmong } from '../domains/agents/profiles';
-import { userCanOpenProject } from '../core/access';
+import { userCanOpenPage, userCanOpenProject } from '../core/access';
 
 export interface Consumer {
   name: string;
@@ -37,6 +37,13 @@ interface NotifyOptions {
    * must not reach someone the project is closed to.
    */
   projectId?: string | null;
+  /**
+   * The knowledge-base page the news is about. Recipients who cannot open it
+   * now – outside its space, or kept out of a draft or a private page – are
+   * skipped: being @-mentioned on a page does not open it, and the email and
+   * the bell row carry its title.
+   */
+  pageId?: string | null;
   /**
    * The owner of the person's own agent that caused the event. Its routine
    * work (comments, status moves) is theirs already and would bury them;
@@ -71,6 +78,7 @@ async function notify(
     // both only added rows nobody would ever open.
     if (!user || !user.isActive || user.actorType !== 'user') continue;
     if (options.projectId && !(await userCanOpenProject(userId, options.projectId))) continue;
+    if (options.pageId && !(await userCanOpenPage(userId, options.pageId))) continue;
     const prefs = (user?.emailNotificationPrefs as Record<string, boolean>) ?? {};
     const dedupeKey = `${eventId}:notifications:${userId}:${type}`;
     let email: QueuedEmailInput | null = null;
@@ -384,7 +392,11 @@ const notifications: Consumer = {
         await notify(ev.id, [...(p.assigneeIds ?? []), reporterOf(p)], 'task.status_changed', p.ref ?? null, p, self);
         break;
       case 'page.mentioned':
-        await notify(ev.id, p.mentions ?? [], 'page.mentioned', p.ref ?? null, p, self);
+        // Read at delivery, not when the mention was written: the page may
+        // have been made private, or the person moved out of its space, since.
+        // No page id, nobody to check against – and so nobody told.
+        if (!p.pageId) break;
+        await notify(ev.id, p.mentions ?? [], 'page.mentioned', p.ref ?? null, p, { ...self, pageId: p.pageId });
         break;
       case 'payment.recorded':
         await notify(ev.id, [p.createdBy, p.ownerId], 'payment.recorded', p.ref ?? null, p, self);
@@ -506,10 +518,18 @@ const automations: Consumer = {
     if (!p.taskId || !p.projectId) return;
     const trigger = ev.type.replace('git.', ''); // pr_opened | pr_merged | pr_closed | branch_created
     const { db } = getDb();
-    const [rule] = await db.select().from(schema.gitAutomationRules)
+    // Only a status of the task's own project: a rule pointing elsewhere is
+    // skipped, and so is an event about a task that has since moved (the old
+    // row is deleted, the new one lives in another project).
+    const [rule] = await db.select({ targetStatusId: schema.gitAutomationRules.targetStatusId }).from(schema.gitAutomationRules)
+      .innerJoin(schema.taskStatuses, and(
+        eq(schema.taskStatuses.id, schema.gitAutomationRules.targetStatusId),
+        eq(schema.taskStatuses.projectId, schema.gitAutomationRules.projectId),
+      ))
       .where(and(eq(schema.gitAutomationRules.projectId, p.projectId), eq(schema.gitAutomationRules.trigger, trigger)));
     if (!rule) return;
-    const [task] = await db.select().from(schema.tasks).where(eq(schema.tasks.id, p.taskId));
+    const [task] = await db.select().from(schema.tasks)
+      .where(and(eq(schema.tasks.id, p.taskId), eq(schema.tasks.projectId, p.projectId), isNull(schema.tasks.deletedAt)));
     if (!task || task.statusId === rule.targetStatusId) return;
     await db.update(schema.tasks).set({ statusId: rule.targetStatusId }).where(eq(schema.tasks.id, p.taskId));
     await writeActivity(db, {
