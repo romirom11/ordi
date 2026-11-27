@@ -203,6 +203,23 @@ describe('editing a project', () => {
     expect(row).toMatchObject({ name: project.name, version: project.version });
   });
 
+  it('from the same version twice at once saves one and answers the other with a conflict', async () => {
+    const third = await setupWorkspace(users, 'WRTD');
+    const label = await json(owner.post('/labels', { name: 'Raced', color: '#333333', scope: 'project' }));
+    const project = await json(owner.get(`/projects/${third.projectId}`));
+    const results = await Promise.all([
+      owner.patch(`/projects/${third.projectId}`, { version: project.version, name: 'First name' }),
+      owner.patch(`/projects/${third.projectId}`, { version: project.version, name: 'Second name', labelIds: [label.id] }),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+    const { db } = getDb();
+    const [row] = await db.select().from(schema.projects).where(eq(schema.projects.id, third.projectId));
+    const labels = await db.select().from(schema.projectLabels).where(eq(schema.projectLabels.projectId, third.projectId));
+    // Whichever won, the loser left nothing behind – not its labels either.
+    if (row!.name === 'First name') expect(labels).toHaveLength(0);
+    else expect({ name: row!.name, labels: labels.length }).toEqual({ name: 'Second name', labels: 1 });
+  });
+
   it('that fails at its activity record announces nothing', async () => {
     const project = await json(owner.get(`/projects/${target.projectId}`));
     const completedBefore = await eventCount('project.completed');

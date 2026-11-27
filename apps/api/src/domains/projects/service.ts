@@ -295,13 +295,14 @@ export async function updateProject(actor: Actor, id: string, input: any) {
   // and the activity record share one transaction: a refused or failed edit
   // changes nothing – the labels included – and announces nothing.
   await db.transaction(async (tx) => {
-    // The patch was built from `before`, so a change in between is a conflict.
+    // The patch was built from `before`, and the caller named the version it
+    // saw, so a change in between is a conflict.
     // NO KEY UPDATE, the lock the UPDATE takes anyway: it does not wait for the
     // key-share lock a task (or anything else) inserted under the project holds.
     const [locked] = await tx.select({ version: projects.version }).from(projects)
       .where(and(eq(projects.id, id), isNull(projects.deletedAt))).for('no key update');
     if (!locked) throw err.notFound('Project not found');
-    if (Object.keys(patch).length && locked.version !== before.version) {
+    if (input.version !== undefined && locked.version !== before.version) {
       const [current] = await tx.select().from(projects).where(eq(projects.id, id));
       throw err.conflict('The record was modified by someone else', current ?? before);
     }
@@ -1066,12 +1067,15 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
     // Lock the subtree in id order – the order a task edit and a bulk edit
     // lock in – so a second move of the same task waits and then finds it
     // gone, instead of copying it into a second project too.
-    const live = new Set((await tx.select({ id: tasks.id }).from(tasks)
+    // The copies are made from the rows as locked, so an edit that committed
+    // just before is carried over rather than lost.
+    const live = new Map((await tx.select().from(tasks)
       .where(and(inArray(tasks.id, subtree.map((t) => t.id)), isNull(tasks.deletedAt)))
-      .orderBy(asc(tasks.id)).for('update')).map((r) => r.id));
+      .orderBy(asc(tasks.id)).for('update')).map((r) => [r.id, r]));
     if (!live.has(source.id)) throw err.notFound('Task not found');
     // A subtask moved elsewhere in between went with its own subtasks.
-    for (let i = subtree.length - 1; i >= 0; i--) if (!live.has(subtree[i]!.id)) subtree.splice(i, 1);
+    const fresh = subtree.filter((t) => live.has(t.id)).map((t) => live.get(t.id)!);
+    subtree.splice(0, subtree.length, ...fresh);
     const oldIds = subtree.map((t) => t.id);
     const newIdOf = new Map(oldIds.map((oldId) => [oldId, ulid()]));
 
@@ -1084,6 +1088,10 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
       tx.select().from(taskLabels).where(inArray(taskLabels.taskId, oldIds)),
     ]);
 
+    // Statuses and reporters are looked up before the first insert takes the
+    // target project's task-number counter, so the move does not hold it
+    // while it waits for those reads.
+    for (const t of subtree) { await targetStatusOf(t.statusId); await reporterFor(t.reporterId); }
     for (const t of subtree) {
       lastPos = appendPosition(lastPos);
       const cf = Object.fromEntries(
