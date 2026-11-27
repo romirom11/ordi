@@ -102,7 +102,7 @@ const PROJECT_ROLE_OF_RANK = [null, 'viewer', 'member', 'admin'] as const;
  * everywhere the viewer set goes.
  */
 const spaceCacheKey = Symbol('spaceAccessSets');
-async function spaceAccessSets(
+export async function spaceAccessSets(
   actor: Actor,
   opts?: { fresh?: boolean },
 ): Promise<{ viewer: string[]; editor: string[] }> {
