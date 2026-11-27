@@ -499,3 +499,16 @@ and do the same.
     work – the token remains the option there.
   - `APP_URL` is now only needed as a fallback (and for email links), but
     keep it up to date.
+
+  **Connections.** Each sign-in is a connection of its own: someone running
+  Claude Code on a laptop and on a server keeps both, and signing in again
+  never cuts off an earlier one. The consent page asks whether the client
+  works as the person or as their own agent (Profile → MCP & API → My agent).
+  Profile → MCP & API lists connections grouped by client, each with its last
+  use and its own Revoke. Clients often repeat the sign-in, so the worker
+  revokes, every hour, a token issued by the OAuth sign-in that was **never
+  used within 24 hours** of being issued, or **not used for 90 days**. A
+  client listing its tools counts as use. Every revocation is logged in the
+  activity log as `token_revoked` by `system`, with `reason: never_used` or
+  `idle`. The clean-up never touches tokens made by hand, tokens issued from
+  the My agent card or for a team bot, or agent-run tokens.

@@ -2,7 +2,7 @@
  * Scheduled jobs (PRD §8.4, §8.7, §11.5, §11.6). All idempotent: safe to run more
  * often than required (reminder_log dedup, next_run guards, per-day snapshot unique).
  */
-import { getDb, schema, eq, and, lte, isNull, sql, inArray, desc } from '@ordi/db';
+import { getDb, schema, eq, and, or, lt, lte, isNull, isNotNull, sql, inArray, desc } from '@ordi/db';
 import { ulid } from 'ulid';
 import { notInDeletedProject } from '../core/access';
 import { computeDocumentTotals, addMonthsIso } from '@ordi/shared';
@@ -14,6 +14,7 @@ import { runtimeConfig } from '../lib/runtime-config';
 import { enqueueEmail, type QueuedEmailInput } from './email-delivery';
 import { sweepCredentialExpiry } from '../domains/agents/credentials';
 import { runSecretExpiry } from '../domains/secrets/service';
+import { writeActivity } from '../core/activity';
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -299,6 +300,55 @@ export async function runAgentCredentialExpiry(): Promise<void> {
     }
   }
   logger.info({ expired: expired.length, expiringSoon: expiringSoon.length }, 'agent credential expiry sweep');
+}
+
+/** A sign-in no client presented within this long was abandoned. */
+export const OAUTH_UNUSED_MS = 24 * 3600_000;
+/** A connection not used for this long is idle. */
+export const OAUTH_IDLE_MS = 90 * 86_400_000;
+
+/**
+ * Clients repeat the OAuth sign-in (a new registration, a new consent) and
+ * every consent keeps its own connection, so Profile → MCP & API would fill up
+ * with tokens nobody holds. Revokes tokens issued through the OAuth exchange,
+ * for a person or their agent, that were never used within a day of being
+ * issued or have not been used for 90 days. Every other token – made by
+ * hand, issued from the My agent card or for a team bot, minted for an agent
+ * run – records no OAuth client and is never touched.
+ *
+ * One UPDATE over the partial index of live OAuth tokens, so it is cheap and
+ * idempotent. A request touching a token at the same moment either commits
+ * first (Postgres re-checks the row, sees it used, and skips it) or comes
+ * after and finds it revoked.
+ */
+export async function runOAuthTokenCleanup(now = new Date()): Promise<{ revoked: number }> {
+  const { db } = getDb();
+  const t = schema.apiTokens;
+  const unusedBefore = new Date(now.getTime() - OAUTH_UNUSED_MS);
+  const idleBefore = new Date(now.getTime() - OAUTH_IDLE_MS);
+  const revoked = await db.transaction(async (tx) => {
+    const rows = await tx.update(t).set({ revokedAt: now })
+      .where(and(
+        isNotNull(t.oauthClientId), isNull(t.revokedAt),
+        or(and(isNull(t.lastUsedAt), lt(t.createdAt, unusedBefore)), lt(t.lastUsedAt, idleBefore)),
+      ))
+      .returning({ id: t.id, userId: t.userId, name: t.name, lastUsedAt: t.lastUsedAt });
+    if (!rows.length) return rows;
+    const agents = new Set((await tx.select({ id: schema.users.id }).from(schema.users)
+      .where(and(inArray(schema.users.id, [...new Set(rows.map((r) => r.userId))]), eq(schema.users.actorType, 'agent'))))
+      .map((u) => u.id));
+    for (const r of rows) {
+      await writeActivity(tx, {
+        // On the agent, like a token disconnected from its card; on the person otherwise.
+        entityType: agents.has(r.userId) ? 'agent' : 'user', entityId: r.userId, action: 'token_revoked',
+        actorId: null, actorType: 'system',
+        diff: { tokenId: r.id, client: r.name.replace(/\s*\(OAuth\)$/, ''), oauth: true, reason: r.lastUsedAt ? 'idle' : 'never_used' },
+      });
+    }
+    return rows;
+  });
+  if (revoked.length) logger.info({ count: revoked.length }, 'unused oauth connections revoked');
+  return { revoked: revoked.length };
 }
 
 // helpers

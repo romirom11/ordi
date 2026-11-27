@@ -93,7 +93,13 @@ async function tokenIsValid(raw: string): Promise<boolean> {
   const { db } = getDb();
   const [token] = await db.select().from(schema.apiTokens)
     .where(eq(schema.apiTokens.hash, sha256(raw)));
-  if (token) return !token.revokedAt && !(token.expiresAt && token.expiresAt <= new Date());
+  if (token) {
+    const valid = !token.revokedAt && !(token.expiresAt && token.expiresAt <= new Date());
+    // A client that connects and lists its tools without calling one has
+    // still used its sign-in: the clean-up must not take it for an unused one.
+    if (valid) db.update(schema.apiTokens).set({ lastUsedAt: new Date() }).where(eq(schema.apiTokens.id, token.id)).catch(() => {});
+    return valid;
+  }
   // Bearer session tokens (desktop) are valid API credentials too.
   const [session] = await db.select().from(schema.sessions)
     .where(eq(schema.sessions.token, raw));
@@ -111,7 +117,7 @@ export function mcpRoutes() {
 
     // Node's req/res, provided by @hono/node-server. Absent under app.request()
     // (tests) – the OAuth flow is tested there, the transport is not.
-    const bindings = c.env as unknown as { incoming?: IncomingMessage; outgoing?: ServerResponse };
+    const bindings = (c.env ?? {}) as unknown as { incoming?: IncomingMessage; outgoing?: ServerResponse };
     if (!bindings.incoming || !bindings.outgoing) {
       return c.json({ error: 'unsupported', error_description: 'MCP requires the node server' }, 501);
     }
