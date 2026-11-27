@@ -5,6 +5,22 @@ writes this file from the titles of the merged PRs, and each section is also the
 body of its [GitHub release](https://github.com/romirom11/ordi/releases). The
 hand-written notes of earlier versions are in [`docs/releases`](docs/releases).
 
+## [1.46.0](https://github.com/romirom11/ordi/compare/v1.45.0...v1.46.0) (2026-11-27)
+
+
+### Features
+
+* Agents can edit a project's description and details over MCP ([#173](https://github.com/romirom11/ordi/issues/173)) ([eda6840](https://github.com/romirom11/ordi/commit/eda6840c83ab61e314c27cb58e85731baf9d903d))
+* Every MCP tool has a title and says whether it only reads or can't be undone ([#177](https://github.com/romirom11/ordi/issues/177)) ([4687113](https://github.com/romirom11/ordi/commit/46871132d20d423b122c203f96e9d018c21239a5))
+* Projects manage their own task statuses in settings and over MCP ([#174](https://github.com/romirom11/ordi/issues/174)) ([d61eaf8](https://github.com/romirom11/ordi/commit/d61eaf88c4d7a3803a33b7271d5feb7fc28954fd))
+* Tasks show who set them, and it can be changed ([#176](https://github.com/romirom11/ordi/issues/176)) ([97aa50f](https://github.com/romirom11/ordi/commit/97aa50f334b6a82dc3a74a39486a56f30d57d6a8))
+* The time report shows each task's status, people, estimate and last entry, and sorts by them ([#171](https://github.com/romirom11/ordi/issues/171)) ([a275716](https://github.com/romirom11/ordi/commit/a2757165e10e43d325267b3d930b8d392bca1d73))
+
+
+### Fixes
+
+* Agents reach only the projects they are members of ([#175](https://github.com/romirom11/ordi/issues/175)) ([bd404e5](https://github.com/romirom11/ordi/commit/bd404e5f40dfe0377b56af254562a972d53f5f1c))
+
 ## [1.45.0](https://github.com/romirom11/ordi/compare/v1.44.0...v1.45.0) (2026-11-06)
 
 
