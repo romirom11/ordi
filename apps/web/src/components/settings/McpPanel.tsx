@@ -8,6 +8,7 @@ import { Dialog, ConfirmDialog, toast } from '../overlays';
 import { SectionHead, Field, RowList, AnimatedRow, Disclosure } from './primitives';
 import { useT, extendDict } from '../../lib/i18n';
 import { mcpToolsOfKind } from '@ordi/shared';
+import { MyAgentCard } from './MyAgentCard';
 
 extendDict({
   en: {
@@ -179,6 +180,9 @@ export function McpPanel() {
   return (
     <div>
       <SectionHead title={t('settings.mcp')} desc={t('settings.mcpDesc')} />
+
+      {/* ── My agent: work my tasks under its own name ── */}
+      <MyAgentCard />
 
       {/* ── Connect: the URL + one snippet for the client you actually use ── */}
       <div className="mb-8 rounded-lg border border-primary/30 bg-primary/5 p-4">

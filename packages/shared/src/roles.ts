@@ -82,6 +82,14 @@ const AGENT: Permission[] = [
   'kb.read',
 ];
 
+/**
+ * What a person's own agent may ever do, whatever the person can: work tasks
+ * and read the knowledge base. Intersected on every request with the owner's
+ * current permissions – an agent never holds what its owner does not, and
+ * never finance, people, CRM, settings or secrets even when its owner does.
+ */
+export const PERSONAL_AGENT_PERMISSIONS: Permission[] = ['projects.read', 'projects.write', 'kb.read'];
+
 /** Guest: no global permissions; access is purely via project/space membership. */
 const GUEST: Permission[] = [];
 

@@ -13,7 +13,7 @@ import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { assertVersion } from '../../core/locking';
 import { loadCredentialSlots, resolveCredentialChain } from './credentials';
-import { assertCanGrantRole } from './external';
+import { assertCanGrantRole, personalAgentIds } from './external';
 
 const { users, roles, agentProfiles, agentConnectors, mcpConnectors, projectMembers } = schema;
 
@@ -253,6 +253,11 @@ export async function assertCanAssignAgents(
     .where(and(inArray(users.id, assigneeIds), eq(users.actorType, 'agent')));
   if (!agentRows.length) return;
   const agentIds = agentRows.map((a) => a.id);
+  // Someone's own agent works their tasks; the task is assigned to them.
+  const personal = await personalAgentIds(agentIds);
+  if (personal.size) {
+    throw err.domain('This is someone\'s own agent – assign the task to its owner, and the agent works it from there', { code: 'personal_agent_not_assignable' });
+  }
   const members = await db.select({ userId: projectMembers.userId }).from(projectMembers)
     .where(and(eq(projectMembers.projectId, projectId), inArray(projectMembers.userId, agentIds)));
   const memberSet = new Set(members.map((m) => m.userId));

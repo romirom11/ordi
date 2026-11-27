@@ -21,6 +21,8 @@ export interface TaskComment {
   createdAt: string;
   /** Set once the comment has been rewritten – null while it is untouched. */
   editedAt?: string | null;
+  /** The client a person's own agent wrote through ("Codex"). */
+  via?: string | null;
   /** Emoji → ids of the users who reacted with it. */
   reactions?: Record<string, string[]>;
 }
@@ -80,7 +82,9 @@ export interface UserLite {
   /** `agent` marks an AI agent employee – avatars carry a badge. */
   actorType?: string;
   /** For agents: `managed` – ordi runs it; `external` – it connects from outside and has no runs. */
-  agentKind?: 'managed' | 'external' | null;
+  agentKind?: 'managed' | 'external' | 'personal' | null;
+  /** A person's own agent: whose it is. */
+  ownerUserId?: string | null;
 }
 
 export interface SubtaskRow {

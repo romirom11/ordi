@@ -27,6 +27,8 @@ extendDict({
     'task.editComment': 'Edit comment',
     'task.commentEdited': 'edited',
     'task.editCommentFailed': 'Could not save the comment',
+    'task.via': 'via {client}',
+    'task.agentOf': '{owner}\'s agent',
   },
   uk: {
     'task.activity': 'Активність',
@@ -40,6 +42,8 @@ extendDict({
     'task.editComment': 'Редагувати коментар',
     'task.commentEdited': 'відредаговано',
     'task.editCommentFailed': 'Не вдалося зберегти коментар',
+    'task.via': 'через {client}',
+    'task.agentOf': 'агент: {owner}',
   },
 });
 
@@ -190,6 +194,8 @@ function CommentCard({ taskId, comment, users, authorName, canEdit }: {
   taskId: string; comment: TaskComment; users: UserLite[]; authorName: string; canEdit: boolean;
 }) {
   const t = useT();
+  const author = users.find((u) => u.id === comment.authorId);
+  const ownerName = author?.ownerUserId ? users.find((u) => u.id === author.ownerUserId)?.name ?? null : null;
   const qc = useQueryClient();
   // Non-null only while editing – the draft doubles as the mode flag.
   const [draft, setDraft] = useState<unknown>(null);
@@ -210,7 +216,9 @@ function CommentCard({ taskId, comment, users, authorName, canEdit }: {
   return (
     <div className="group/comment min-w-0 flex-1 rounded-lg border border-border bg-card px-3 py-2 transition-colors duration-150 hover:border-border-strong">
       <p className="mb-1 flex items-baseline gap-2">
-        <span className="text-[13px] font-medium">{authorName}</span>
+        {/* A person's own agent: whose it is on hover, and which client wrote it. */}
+        <span className="text-[13px] font-medium" title={ownerName ? t('task.agentOf').replace('{owner}', ownerName) : undefined}>{authorName}</span>
+        {comment.via && <span className="text-[11px] text-faint">{t('task.via').replace('{client}', comment.via)}</span>}
         <span className="text-[11px] text-faint">{fmtRelative(comment.createdAt)}</span>
         {comment.editedAt && (
           <span className="text-[11px] text-faint" title={fmtRelative(comment.editedAt)}>

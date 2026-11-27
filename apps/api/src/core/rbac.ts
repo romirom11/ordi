@@ -20,6 +20,18 @@ export async function loadRolePermissions(roleId: string): Promise<Set<string>> 
   return set;
 }
 
+/**
+ * The role's permissions straight from the database. The cache above is
+ * cleared only in the process that edited the role; a personal agent's reach
+ * must follow its owner's role at once in every process, so it reads this.
+ */
+export async function readRolePermissions(roleId: string): Promise<Set<string>> {
+  const { db } = getDb();
+  const rows = await db.select({ permission: schema.rolePermissions.permission }).from(schema.rolePermissions)
+    .where(eq(schema.rolePermissions.roleId, roleId));
+  return new Set(rows.map((r) => r.permission));
+}
+
 export function invalidateRoleCache(roleId?: string): void {
   if (roleId) rolePermCache.delete(roleId);
   else rolePermCache.clear();

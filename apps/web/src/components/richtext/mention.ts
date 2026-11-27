@@ -27,6 +27,7 @@ interface ApiUser {
   email?: string | null;
   avatar?: string | null;
   isActive?: boolean;
+  agentKind?: string | null;
 }
 
 /** Two-letter initials, matching the app Avatar component. */
@@ -56,7 +57,8 @@ function fetchUsers(): Promise<MentionUser[]> {
       .get<{ data: ApiUser[] }>('/users/lookup')
       .then((res) =>
         (res.data ?? [])
-          .filter((u) => u.isActive !== false)
+          // A person's own agent is mentioned through its owner, never itself.
+          .filter((u) => u.isActive !== false && u.agentKind !== 'personal')
           .map((u) => ({ id: u.id, label: u.name || u.email || u.id, avatar: u.avatar, isActive: u.isActive })),
       )
       .catch(() => {

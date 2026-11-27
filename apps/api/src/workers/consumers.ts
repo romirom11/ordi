@@ -37,7 +37,19 @@ interface NotifyOptions {
    * must not reach someone the project is closed to.
    */
   projectId?: string | null;
+  /**
+   * The owner of the person's own agent that caused the event. Its routine
+   * work (comments, status moves) is theirs already and would bury them;
+   * only a question put to them – an @-mention – reaches them.
+   */
+  quietFor?: string | null;
 }
+
+/**
+ * Types that reach a personal agent's owner even though the agent caused
+ * them: a question put to them, on a task or on a knowledge-base page.
+ */
+const REACHES_OWNER = new Set(['comment.mentioned', 'page.mentioned']);
 
 async function notify(
   eventId: string,
@@ -47,7 +59,8 @@ async function notify(
   payload: Record<string, unknown>,
   options: NotifyOptions = {},
 ): Promise<void> {
-  const unique = [...new Set(userIds)].filter((id): id is string => Boolean(id) && id !== options.actorId);
+  const unique = [...new Set(userIds)].filter((id): id is string => Boolean(id) && id !== options.actorId
+    && !(options.quietFor && id === options.quietFor && !REACHES_OWNER.has(type)));
   if (!unique.length) return;
   const { db } = getDb();
   let branding: Branding | null = null;
@@ -336,7 +349,13 @@ const notifications: Consumer = {
     // Only news about a project's work is gated by the project: an invoice or a
     // leave request may name a project its finance or HR audience cannot open.
     const aboutProjectWork = /^(task|comment|agent|git)\./.test(ev.type);
-    const self = { actorId: ev.actorId, projectId: aboutProjectWork ? (p.projectId as string | undefined) ?? null : null };
+    let quietFor: string | null = null;
+    if (ev.actorType === 'agent' && ev.actorId) {
+      const [ext] = await getDb().db.select({ kind: schema.externalAgents.kind, ownerUserId: schema.externalAgents.ownerUserId })
+        .from(schema.externalAgents).where(eq(schema.externalAgents.userId, ev.actorId));
+      if (ext?.kind === 'personal') quietFor = ext.ownerUserId;
+    }
+    const self = { actorId: ev.actorId, projectId: aboutProjectWork ? (p.projectId as string | undefined) ?? null : null, quietFor };
     switch (ev.type) {
       case 'task.assigned':
         await notify(ev.id, p.assigneeIds ?? [], 'task.assigned', p.ref ?? null, p, self);

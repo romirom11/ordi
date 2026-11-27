@@ -332,6 +332,20 @@ request and the task in review.
   one by one, all revoked when it is switched off), and its comments notify
   like a person's because no run events speak for it. `/users/lookup` says
   `agentKind: managed | external` so the UI shows runs only for the first.
+- **A person's own agent works their tasks, with their reach.** Team bots are
+  separate workspace members, which suits a shared bot but not someone's own
+  Claude Code or Codex: tasks would split between a person and their agent,
+  and an agent acting as the person could only "mention itself". So each
+  person may have one `external_agents` row of kind `personal`, created in
+  their Profile. It writes under its own name (comments record the client in
+  `comments.via`), but it is never an assignee, member or role holder;
+  `/me/tasks` returns its owner's tasks and tasks it files are reported by
+  the owner. Its access is rebuilt on every request from the owner's current
+  state – permissions `PERSONAL_AGENT_PERMISSIONS ∩ owner's ∩ token's`,
+  the owner's memberships, `projectRankCap` member and `spaceRankCap` viewer –
+  so it never outlives or outgrows them, and it is switched off, never
+  handed on, when they leave. Its routine work does not notify its owner;
+  an @-mention does.
 - **The agent stops at `in_review`.** It moves the task to the project's status
   in the profile's completion category and never to a `done` one; the pull
   request is attached with `add_task_link`, and the existing `pr_merged` git

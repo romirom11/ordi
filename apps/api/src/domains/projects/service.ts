@@ -21,6 +21,7 @@ import { assertProject, accessibleProjectIds, effectiveProjectRole, userCanOpenP
 import { closeProjectTimers } from '../time/service';
 import { cancelProjectRuns } from '../agents/runs';
 import { assertCanAssignAgents } from '../agents/profiles';
+import { assertNotPersonalAgent, personalAgentIdsOf } from '../agents/external';
 import { buildCustomFieldFilter, mergeCustomFields } from '../../core/customfields';
 import { extractMentions } from '../kb/service';
 import { encrypt, generateToken } from '../../lib/crypto';
@@ -372,6 +373,7 @@ export async function listMembers(actor: Actor, projectId: string) {
 
 export async function upsertMember(actor: Actor, projectId: string, input: any) {
   await assertProject(actor, projectId, 'admin');
+  await assertNotPersonalAgent(input.userId, 'added to a project');
   const { db } = getDb();
   await db.insert(projectMembers)
     .values({ projectId, userId: input.userId, role: input.role, canWriteTasks: input.canWriteTasks })
@@ -669,6 +671,8 @@ export async function listTasks(actor: Actor, params: {
  * so someone the project is closed to must not be one.
  */
 async function assertReporter(project: { id: string }, userId: string): Promise<void> {
+  // Someone's own agent files work for its owner; it is never the one who set it.
+  await assertNotPersonalAgent(userId, "a task's reporter");
   const { db } = getDb();
   const [user] = await db.select({ isActive: schema.users.isActive }).from(schema.users).where(eq(schema.users.id, userId));
   if (!user || !user.isActive) throw err.validation('The reporter must be an active user');
@@ -683,8 +687,13 @@ export async function createTask(actor: Actor, input: any) {
   if (input.cycleId) await assertCycleInProject(input.cycleId, input.projectId);
   const assigneeIds: string[] = input.assigneeIds ?? [];
   if (assigneeIds.length) await assertCanAssignAgents(actor, project.id, assigneeIds, effectiveProjectRole(actor, project));
-  const reporterId: string | null = input.reporterId === undefined ? actor.userId : input.reporterId;
-  if (reporterId && reporterId !== actor.userId) await assertReporter(project, reporterId);
+  // A person's own agent files work for its owner: the owner set it.
+  const reporterId: string | null = input.reporterId === undefined ? (actor.ownerUserId ?? actor.userId) : input.reporterId;
+  // A personal agent naming itself is checked too: it may not be the reporter.
+  // Its owner needs no check: the agent reached this project through the
+  // owner's access, read fresh, while assertReporter's view may be cached.
+  const ownerOfAgent = actor.agentKind === 'personal' && reporterId === actor.ownerUserId;
+  if (reporterId && !ownerOfAgent && (reporterId !== actor.userId || actor.agentKind === 'personal')) await assertReporter(project, reporterId);
   const labelIds: string[] = input.labelIds ?? [];
   // Before the row exists: a rejected label must not leave a half-created task.
   await assertLabelScope(labelIds, 'task');
@@ -1133,7 +1142,7 @@ export async function addComment(actor: Actor, taskId: string, input: any) {
   const task = await loadTask(taskId);
   await assertProject(actor, task.projectId, 'member');
   const id = ulid();
-  await db.insert(schema.comments).values({ id, taskId, authorId: actor.userId, body: input.body ?? {} });
+  await db.insert(schema.comments).values({ id, taskId, authorId: actor.userId, via: actor.agentKind === 'personal' ? actor.clientLabel ?? null : null, body: input.body ?? {} });
   // Mentions come from the explicit list plus any parsed out of the comment body,
   // so a client that only sends the tiptap doc still notifies the mentioned users.
   const mentions = [...new Set<string>([...(input.mentions ?? []), ...extractMentions(input.body).users])]
@@ -1512,6 +1521,7 @@ export async function myTasks(actor: Actor) {
   const today = new Date().toISOString().slice(0, 10);
   const weekEnd = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
 
+  // A person's own agent works its owner's tasks: "my tasks" are theirs.
   // `status_id`, `version` and the project's `visibility` are what the list
   // needs to change a status in place: the current pick, the optimistic-lock
   // token for the PATCH, and the input to the caller's project-role check.
@@ -1519,12 +1529,17 @@ export async function myTasks(actor: Actor) {
     select t.id, t.title, t.due_date, t.priority, t.number, t.project_id, t.status_id, t.version,
       p.key, p.visibility, ts.category, ts.name as status_name, ts.color as status_color
     from tasks t
-    join task_assignees ta on ta.task_id = t.id and ta.user_id = ${actor.userId}
+    join task_assignees ta on ta.task_id = t.id and ta.user_id = ${actor.ownerUserId ?? actor.userId}
     join projects p on p.id = t.project_id
     join task_statuses ts on ts.id = t.status_id
     where t.deleted_at is null and ts.category not in ('done','canceled') and t.project_id in ${inList}
     order by t.due_date nulls last`) as any[];
 
+  // A person and their own agent share one list: what either filed (the agent
+  // files for its owner, who is the task's reporter).
+  const person = actor.ownerUserId ?? actor.userId;
+  const filers = [person, ...(await personalAgentIdsOf([person]))];
+  const createdBy = sql`(${sql.join(filers.map((id) => sql`${id}`), sql`, `)})`;
   const created = await db.execute(sql`
     select t.id, t.title, t.due_date, t.priority, t.number, t.project_id, t.status_id, t.version,
       p.key, p.visibility, ts.category, ts.name as status_name, ts.color as status_color,
@@ -1532,7 +1547,7 @@ export async function myTasks(actor: Actor) {
     from tasks t
     join projects p on p.id = t.project_id
     join task_statuses ts on ts.id = t.status_id
-    where t.deleted_at is null and t.created_by = ${actor.userId}
+    where t.deleted_at is null and t.created_by in ${createdBy}
       and ts.category not in ('done','canceled') and t.project_id in ${inList}
     order by t.due_date nulls last`) as any[];
 

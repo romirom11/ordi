@@ -8,7 +8,7 @@
  */
 import { getDb, schema, eq, and, inArray, isNull } from '@ordi/db';
 import { ulid } from 'ulid';
-import type { CreateExternalAgentInput, UpdateExternalAgentInput } from '@ordi/shared';
+import { PERSONAL_AGENT_PERMISSIONS, type CreateExternalAgentInput, type UpdateExternalAgentInput } from '@ordi/shared';
 import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
 import { generateToken, sha256 } from '../../lib/crypto';
@@ -36,6 +36,8 @@ export interface ExternalAgentView {
   roleName: string;
   ownerUserId: string;
   ownerName: string | null;
+  /** 'team' – a shared bot; 'personal' – someone's own agent (Profile → MCP & API). */
+  kind: 'team' | 'personal';
   projects: { id: string; key: string; name: string }[];
   /** Projects it is on that the viewer cannot open. */
   hiddenProjects: number;
@@ -163,6 +165,7 @@ async function views(actor: Actor, ids: string[]): Promise<ExternalAgentView[]> 
     roleName: roleName ?? '',
     ownerUserId: ext.ownerUserId,
     ownerName: owners.find((o) => o.id === ext.ownerUserId)?.name ?? null,
+    kind: ext.kind === 'personal' ? 'personal' as const : 'team' as const,
     // Projects the viewer cannot open are counted, not named.
     projects: memberships.filter((m) => m.userId === user.id && reachable.has(m.id)).map(({ id, key, name }) => ({ id, key, name })),
     hiddenProjects: memberships.filter((m) => m.userId === user.id && !reachable.has(m.id)).length,
@@ -219,6 +222,9 @@ export async function createExternalAgent(actor: Actor, input: CreateExternalAge
 export async function updateExternalAgent(actor: Actor, id: string, input: UpdateExternalAgentInput): Promise<ExternalAgentView> {
   const { db } = getDb();
   const row = await loadRow(id);
+  if (row.ext.kind === 'personal' && (input.ownerUserId !== undefined || input.roleId !== undefined)) {
+    throw err.domain('A personal agent belongs to its owner and works with their reach – its owner and role do not change');
+  }
   const userPatch: Partial<typeof users.$inferInsert> = {};
   if (input.name !== undefined) userPatch.name = input.name;
   if (input.roleId !== undefined) {
@@ -295,6 +301,7 @@ export async function issueExternalAgentToken(
 ): Promise<{ token: string; tokenInfo: ExternalAgentToken }> {
   const { db } = getDb();
   const row = await loadRow(id);
+  if (row.ext.kind === 'personal') throw err.forbidden('Only its owner issues tokens for a personal agent, in their Profile', 'agents.manage');
   await assertCanGrantRole(actor, row.user.roleId);
   await assertCanReachAgentResources(actor, id);
   const raw = `ordi_${generateToken(24)}`;
@@ -347,9 +354,11 @@ export async function revokeExternalAgentToken(actor: Actor, id: string, tokenId
 }
 
 /** The external agents a person owns – what deactivating them would leave behind. */
-export async function externalAgentsOwnedBy(userId: string): Promise<{ id: string; name: string; isActive: boolean }[]> {
+export async function externalAgentsOwnedBy(userId: string): Promise<{ id: string; name: string; isActive: boolean; kind: string }[]> {
   const { db } = getDb();
-  return db.select({ id: users.id, name: users.name, isActive: users.isActive }).from(externalAgents)
+  // `kind` tells the deactivation dialog which go to the successor (team
+  // bots) and which are switched off whatever happens (their own agent).
+  return db.select({ id: users.id, name: users.name, isActive: users.isActive, kind: externalAgents.kind }).from(externalAgents)
     .innerJoin(users, eq(users.id, externalAgents.userId))
     .where(eq(externalAgents.ownerUserId, userId))
     .orderBy(users.name);
@@ -371,7 +380,8 @@ export async function handOverOwnedAgents(
   fromUserId: string,
   toUserId: string | null,
 ): Promise<{ id: string; name: string; outcome: 'transferred' | 'disabled' }[]> {
-  const owned: { id: string; name: string }[] = await tx.select({ id: users.id, name: users.name }).from(externalAgents)
+  const owned: { id: string; name: string; kind: string }[] = await tx.select({ id: users.id, name: users.name, kind: externalAgents.kind })
+    .from(externalAgents)
     .innerJoin(users, eq(users.id, externalAgents.userId))
     .where(eq(externalAgents.ownerUserId, fromUserId))
     .orderBy(users.name)
@@ -382,19 +392,160 @@ export async function handOverOwnedAgents(
     const [next] = await tx.select({ isActive: users.isActive, actorType: users.actorType }).from(users).where(eq(users.id, toUserId)).for('share');
     if (next?.isActive && next.actorType === 'user') successor = toUserId;
   }
-  const ids = owned.map((a) => a.id);
-  await tx.update(apiTokens).set({ revokedAt: new Date() }).where(and(inArray(apiTokens.userId, ids), isNull(apiTokens.revokedAt)));
-  if (successor) {
-    await tx.update(externalAgents).set({ ownerUserId: successor }).where(inArray(externalAgents.userId, ids));
-  } else {
-    await tx.update(users).set({ isActive: false }).where(inArray(users.id, ids));
-  }
+  // A personal agent is its owner's and nobody else's: it is switched off,
+  // never handed on. A team bot moves to the successor when there is one.
+  const moved = successor ? owned.filter((a) => a.kind !== 'personal').map((a) => a.id) : [];
+  const stopped = owned.filter((a) => !moved.includes(a.id)).map((a) => a.id);
+  await tx.update(apiTokens).set({ revokedAt: new Date() }).where(and(inArray(apiTokens.userId, owned.map((a) => a.id)), isNull(apiTokens.revokedAt)));
+  if (moved.length) await tx.update(externalAgents).set({ ownerUserId: successor! }).where(inArray(externalAgents.userId, moved));
+  if (stopped.length) await tx.update(users).set({ isActive: false }).where(inArray(users.id, stopped));
   for (const agent of owned) {
+    const transferred = moved.includes(agent.id);
     await writeActivity(tx, {
-      entityType: 'agent', entityId: agent.id, action: successor ? 'owner_handed_over' : 'disabled',
+      entityType: 'agent', entityId: agent.id, action: transferred ? 'owner_handed_over' : 'disabled',
       actorId: actor.userId, actorType: actor.actorType,
-      diff: { fromOwner: fromUserId, toOwner: successor, reason: 'owner_deactivated' },
+      diff: { fromOwner: fromUserId, toOwner: transferred ? successor : null, reason: 'owner_deactivated' },
     });
   }
-  return owned.map((a) => ({ id: a.id, name: a.name, outcome: successor ? 'transferred' : 'disabled' }));
+  return owned.map((a) => ({ id: a.id, name: a.name, outcome: moved.includes(a.id) ? 'transferred' as const : 'disabled' as const }));
+}
+
+// ── A person's own agent (Profile → MCP & API) ──
+
+/** The caller's own agent, or null. */
+export async function getMyAgent(actor: Actor): Promise<ExternalAgentView | null> {
+  const { db } = getDb();
+  const [row] = await db.select({ id: externalAgents.userId }).from(externalAgents)
+    .where(and(eq(externalAgents.ownerUserId, actor.userId), eq(externalAgents.kind, 'personal')));
+  return row ? (await views(actor, [row.id]))[0]! : null;
+}
+
+async function myAgentId(actor: Actor): Promise<string> {
+  const mine = await getMyAgent(actor);
+  if (!mine) throw err.notFound('You have no agent yet – create one first');
+  return mine.id;
+}
+
+function assertPerson(actor: Actor): void {
+  assertSignedInPerson(actor);
+  if (actor.actorType !== 'user') throw err.forbidden('Only a person has an agent of their own', 'projects.read');
+}
+
+/**
+ * Anyone signed in may have one agent of their own. It needs no role or
+ * memberships: every request it makes is held to what its owner can do then,
+ * as a member at most (see buildPersonalAgentAccess).
+ */
+export async function createMyAgent(actor: Actor, name: string): Promise<ExternalAgentView> {
+  assertPerson(actor);
+  const { db } = getDb();
+  if (await getMyAgent(actor)) throw err.domain('You already have an agent – rename it, or connect more clients to it');
+  const roleId = await defaultAgentRoleId();
+  const id = ulid();
+  try {
+    await db.transaction(async (tx) => {
+      const [me] = await tx.select({ isActive: users.isActive }).from(users).where(eq(users.id, actor.userId)).for('share');
+      if (!me?.isActive) throw err.forbidden('Your account is no longer active', 'projects.read');
+      await tx.insert(users).values({
+        id, email: agentEmail(id, name), name, passwordHash: null, roleId,
+        actorType: 'agent', emailNotificationPrefs: { __all: false },
+      });
+      await tx.insert(externalAgents).values({ userId: id, ownerUserId: actor.userId, kind: 'personal', createdBy: actor.userId });
+      await writeActivity(tx, {
+        entityType: 'agent', entityId: id, action: 'created', actorId: actor.userId, actorType: actor.actorType,
+        diff: { name, kind: 'personal', ownerUserId: actor.userId },
+      });
+    });
+  } catch (e) {
+    // Two tabs at once: the one-per-person index decides. The driver's code
+    // sits on the error itself or, wrapped by the ORM, on its cause.
+    const pg = e as { code?: string; cause?: { code?: string } };
+    if ((pg.code ?? pg.cause?.code) === '23505') throw err.domain('You already have an agent');
+    throw e;
+  }
+  return (await views(actor, [id]))[0]!;
+}
+
+export async function renameMyAgent(actor: Actor, name: string): Promise<ExternalAgentView> {
+  assertPerson(actor);
+  const id = await myAgentId(actor);
+  const { db } = getDb();
+  await db.update(users).set({ name }).where(eq(users.id, id));
+  await writeActivity(db, { entityType: 'agent', entityId: id, action: 'updated', actorId: actor.userId, actorType: actor.actorType, diff: { name } });
+  return (await views(actor, [id]))[0]!;
+}
+
+export async function setMyAgentActive(actor: Actor, active: boolean): Promise<ExternalAgentView> {
+  assertPerson(actor);
+  return setExternalAgentActive(actor, await myAgentId(actor), active);
+}
+
+/**
+ * A token for one client – "Claude Code", "Codex" – so each can be cut off on
+ * its own and the agent's comments say which one wrote them.
+ */
+export async function issueMyAgentToken(
+  actor: Actor,
+  input: { client: string; expiresInDays: number | null },
+): Promise<{ token: string; tokenInfo: ExternalAgentToken }> {
+  assertPerson(actor);
+  const id = await myAgentId(actor);
+  const { db } = getDb();
+  const raw = `ordi_${generateToken(24)}`;
+  const tokenId = ulid();
+  const expiresAt = input.expiresInDays ? new Date(Date.now() + input.expiresInDays * 86_400_000) : null;
+  await db.transaction(async (tx) => {
+    // Owner before agent, the order deactivation takes them in.
+    const [me] = await tx.select({ isActive: users.isActive }).from(users).where(eq(users.id, actor.userId)).for('share');
+    if (!me?.isActive) throw err.forbidden('Your account is no longer active', 'projects.read');
+    const [locked] = await tx.select({ isActive: users.isActive }).from(users).where(eq(users.id, id)).for('update');
+    if (!locked?.isActive) throw err.domain('Your agent is switched off; switch it on before connecting a client');
+    await tx.insert(apiTokens).values({
+      // The scope is the most a personal agent may ever do; each request is
+      // narrowed further to what its owner can do at that moment.
+      id: tokenId, userId: id, name: input.client, hash: sha256(raw), prefix: raw.slice(0, 12),
+      scopes: [...PERSONAL_AGENT_PERMISSIONS], readOnly: false, expiresAt,
+    });
+  });
+  await writeActivity(db, {
+    entityType: 'agent', entityId: id, action: 'token_issued', actorId: actor.userId, actorType: actor.actorType,
+    diff: { tokenId, client: input.client, expiresAt: expiresAt?.toISOString() ?? null },
+  });
+  const [created] = await db.select().from(apiTokens).where(eq(apiTokens.id, tokenId));
+  return {
+    token: raw,
+    tokenInfo: {
+      id: tokenId, name: input.client, prefix: created!.prefix, lastUsedAt: null,
+      expiresAt: expiresAt?.toISOString() ?? null, createdAt: created!.createdAt.toISOString(),
+    },
+  };
+}
+
+export async function revokeMyAgentToken(actor: Actor, tokenId: string): Promise<{ ok: true }> {
+  assertPerson(actor);
+  return revokeExternalAgentToken(actor, await myAgentId(actor), tokenId);
+}
+
+/** Which of these users are someone's own agent – never assigned, never a member of anything. */
+export async function personalAgentIds(userIds: string[]): Promise<Set<string>> {
+  if (!userIds.length) return new Set();
+  const { db } = getDb();
+  const rows = await db.select({ id: externalAgents.userId }).from(externalAgents)
+    .where(and(inArray(externalAgents.userId, userIds), eq(externalAgents.kind, 'personal')));
+  return new Set(rows.map((r) => r.id));
+}
+
+/** The own agents of these people (at most one each). */
+export async function personalAgentIdsOf(ownerUserIds: string[]): Promise<string[]> {
+  if (!ownerUserIds.length) return [];
+  const { db } = getDb();
+  const rows = await db.select({ id: externalAgents.userId }).from(externalAgents)
+    .where(and(inArray(externalAgents.ownerUserId, ownerUserIds), eq(externalAgents.kind, 'personal')));
+  return rows.map((r) => r.id);
+}
+
+export async function assertNotPersonalAgent(userId: string, what: string): Promise<void> {
+  if ((await personalAgentIds([userId])).size) {
+    throw err.validation(`A personal agent works its owner's tasks with its owner's access, so it cannot be ${what}`);
+  }
 }

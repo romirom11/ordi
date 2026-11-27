@@ -58,6 +58,13 @@ describe('canAccessProject', () => {
   it('membership still wins where permissions stop', () => {
     expect(canAccessProject(ctx([], [['p1', 'admin']]), { visibility: 'private', projectId: 'p1', minRole: 'admin' })).toBe(true);
   });
+  it('a rank cap holds whatever permissions and memberships say (a person\'s own agent)', () => {
+    const capped = { ...ctx(['projects.read', 'projects.write'], [['p1', 'admin']]), projectRankCap: 2 };
+    expect(canAccessProject(capped, { visibility: 'private', projectId: 'p1', minRole: 'member' })).toBe(true);
+    expect(canAccessProject(capped, { visibility: 'private', projectId: 'p1', minRole: 'admin' })).toBe(false);
+    expect(canAccessProject(capped, { visibility: 'workspace', projectId: 'p2', minRole: 'admin' })).toBe(false);
+    expect(canAccessProject(capped, { visibility: 'workspace', projectId: 'p2', minRole: 'member' })).toBe(true);
+  });
   it('membership-only actors (agents) get nothing from workspace visibility', () => {
     const agent = { ...ctx(['projects.read', 'projects.write'], [['mine', 'member']]), membershipOnlyProjects: true };
     expect(canAccessProject(agent, { visibility: 'workspace', projectId: 'other' })).toBe(false);

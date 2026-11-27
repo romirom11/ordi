@@ -13,7 +13,7 @@ import { asLocale, loadBranding, renderEmail, tr } from '../../lib/email-templat
 import { createPasswordReset, sendPasswordResetEmail } from '../../core/password-reset';
 import { env } from '../../env';
 import { handOffOpenTasks, openTasksAssignedTo } from '../projects/service';
-import { assertCanGrantRole, assertSignedInPerson, externalAgentsOwnedBy, handOverOwnedAgents } from '../agents/external';
+import { assertCanGrantRole, assertNotPersonalAgent, assertSignedInPerson, externalAgentsOwnedBy, handOverOwnedAgents } from '../agents/external';
 
 export function usersRoutes() {
   const app = new Hono<AppEnv>();
@@ -26,7 +26,12 @@ export function usersRoutes() {
       roleId: schema.users.roleId, isActive: schema.users.isActive, avatar: schema.users.avatar,
       actorType: schema.users.actorType, createdAt: schema.users.createdAt,
     }).from(schema.users);
-    return c.json({ data: rows });
+    // People's own agents are not workspace members to manage here: each
+    // lives in its owner's Profile and goes when they go.
+    const personal = await db.select({ id: schema.externalAgents.userId }).from(schema.externalAgents)
+      .where(eq(schema.externalAgents.kind, 'personal'));
+    const hidden = new Set(personal.map((p) => p.id));
+    return c.json({ data: rows.filter((r) => !hidden.has(r.id)) });
   });
 
   // Lightweight directory for assignee pickers and @mentions: any authenticated
@@ -42,7 +47,7 @@ export function usersRoutes() {
   // pickers showed "Vasyl" next to fully-named colleagues.
   app.get('/lookup', async (c) => {
     const { db } = getDb();
-    const [rows, emps, managed] = await Promise.all([
+    const [rows, emps, managed, personal] = await Promise.all([
       db.select({
         id: schema.users.id, name: schema.users.name, avatar: schema.users.avatar, isActive: schema.users.isActive,
         actorType: schema.users.actorType,
@@ -52,12 +57,15 @@ export function usersRoutes() {
         lastName: schema.employees.lastName, status: schema.employees.status,
       }).from(schema.employees),
       db.select({ userId: schema.agentProfiles.userId }).from(schema.agentProfiles),
+      db.select({ userId: schema.externalAgents.userId, ownerUserId: schema.externalAgents.ownerUserId })
+        .from(schema.externalAgents).where(eq(schema.externalAgents.kind, 'personal')),
     ]);
+    const personalOwner = new Map(personal.map((p) => [p.userId, p.ownerUserId]));
     // An agent ordi runs ('managed') or one that connects from outside
     // ('external'): only the first has runs to show on a task.
     const managedIds = new Set(managed.map((m) => m.userId));
     const agentKind = (u: { id: string; actorType: string }) =>
-      (u.actorType !== 'agent' ? null : managedIds.has(u.id) ? 'managed' : 'external');
+      (u.actorType !== 'agent' ? null : managedIds.has(u.id) ? 'managed' : personalOwner.has(u.id) ? 'personal' : 'external');
     const cardName = new Map<string, { name: string; active: boolean }>();
     for (const e of emps) {
       if (!e.userId) continue;
@@ -69,7 +77,11 @@ export function usersRoutes() {
       // active one names them.
       if (!seen || (active && !seen.active)) cardName.set(e.userId, { name: full, active });
     }
-    return c.json({ data: rows.map((u) => ({ ...u, name: cardName.get(u.id)?.name ?? u.name, agentKind: agentKind(u) })) });
+    return c.json({ data: rows.map((u) => ({
+      ...u, name: cardName.get(u.id)?.name ?? u.name, agentKind: agentKind(u),
+      // Whose own agent it is: shown on hover, so two "Claude"s are told apart.
+      ...(personalOwner.has(u.id) ? { ownerUserId: personalOwner.get(u.id) } : {}),
+    })) });
   });
 
   /**
@@ -211,6 +223,7 @@ export function usersRoutes() {
     if (target.actorType === 'agent') {
       // Set by a person at the keyboard, like everything else about agents.
       assertSignedInPerson(actor);
+      await assertNotPersonalAgent(id, 'given a role');
       const [role] = await db.select({ key: schema.roles.key }).from(schema.roles).where(eq(schema.roles.id, body.roleId));
       if (!role) throw err.validation('Unknown role');
       if (role.key === 'owner') throw err.domain('An agent cannot hold the Owner role');

@@ -11,6 +11,7 @@ import {
   agentCredentialInputSchema, updateAgentCredentialSchema, createAgentSchema, updateAgentSchema,
   customMcpConnectorInputSchema, libraryMcpConnectorInputSchema, updateMcpConnectorSchema, listAgentRunsQuerySchema,
   createExternalAgentSchema, updateExternalAgentSchema, issueExternalAgentTokenSchema,
+  myAgentInputSchema, issueMyAgentTokenSchema,
 } from '@ordi/shared';
 import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
@@ -95,6 +96,25 @@ export function agentsRoutes() {
 
   app.delete('/external-agents/:id/tokens/:tokenId', guard('agents.manage'), async (c) =>
     c.json(await external.revokeExternalAgentToken(person(c), c.req.param('id'), c.req.param('tokenId'))));
+
+  // ── A person's own agent: no permission needed beyond being signed in ──
+  app.get('/my-agent', async (c) => c.json({ agent: await external.getMyAgent(currentActor(c)) }));
+  app.post('/my-agent', async (c) => {
+    const body = myAgentInputSchema.parse(await c.req.json());
+    return c.json(await external.createMyAgent(currentActor(c), body.name), 201);
+  });
+  app.patch('/my-agent', async (c) => {
+    const body = myAgentInputSchema.parse(await c.req.json());
+    return c.json(await external.renameMyAgent(currentActor(c), body.name));
+  });
+  app.post('/my-agent/disable', async (c) => c.json(await external.setMyAgentActive(currentActor(c), false)));
+  app.post('/my-agent/enable', async (c) => c.json(await external.setMyAgentActive(currentActor(c), true)));
+  app.post('/my-agent/tokens', async (c) => {
+    const body = issueMyAgentTokenSchema.parse(await c.req.json());
+    return c.json(await external.issueMyAgentToken(currentActor(c), body), 201);
+  });
+  app.delete('/my-agent/tokens/:tokenId', async (c) =>
+    c.json(await external.revokeMyAgentToken(currentActor(c), c.req.param('tokenId'))));
 
   // ── Credentials ──
   app.get('/agent-credentials', guard('agents.manage'), async (c) => c.json({ data: await credentials.listCredentials() }));

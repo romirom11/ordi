@@ -14,6 +14,7 @@ import { emit } from '../../core/events';
 import { assertVersion } from '../../core/locking';
 import { assertSpace, assertProject, effectiveProjectRole, accessibleSpaceIds, editableSpaceIds } from '../../core/access';
 import { fileSrc } from '../../lib/file-tokens';
+import { assertNotPersonalAgent } from '../agents/external';
 
 const SOFT_LOCK_TTL_MS = 120 * 1000; // SOFT_LOCK_TTL_SECONDS
 
@@ -445,6 +446,7 @@ export async function listMembers(actor: Actor, spaceId: string) {
 export async function addMember(actor: Actor, spaceId: string, input: any): Promise<void> {
   const { db } = getDb();
   await assertSpaceEditorOrManager(actor, spaceId);
+  await assertNotPersonalAgent(input.userId, 'added to a space');
   await db
     .insert(schema.spaceMembers)
     .values({ spaceId, userId: input.userId, role: input.role ?? 'editor' })
