@@ -202,6 +202,7 @@ export function projectsRoutes() {
     const projectId = c.req.param('id');
     await assertProject(actor, projectId, 'admin');
     const body = gitAutomationRuleInputSchema.parse(await c.req.json());
+    await svc.assertStatusInProject(body.targetStatusId, projectId, 'targetStatusId');
     const { db } = getDb();
     const id = ulid();
     await db.insert(schema.gitAutomationRules).values({ id, projectId, trigger: body.trigger, targetStatusId: body.targetStatusId });
