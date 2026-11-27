@@ -709,12 +709,24 @@ any object in the bucket, not just the one that was just uploaded.
 rely on the session: `<img>` does not send `Authorization`, and the desktop app works with a
 bearer token from the origin `tauri://localhost` and has no cookie at all. Storing a presigned
 S3 URL in the document is not an option either – it expires, and the document breaks
-within an hour. So the same model applies as for invoices and client portals:
-an unguessable token in the link. `GET /api/v1/files/{id}/{token}`, where the token is
-an HMAC of the attachment id under `AUTH_SECRET`, never expires, and redirects to a fresh
-presigned URL. The trade-off is explicit: whoever has the link sees the file without signing in
-(just like a public invoice link). Rotating `AUTH_SECRET` invalidates all
-links ever issued.
+within an hour. So the file streams through the API behind an unguessable path,
+`GET /api/v1/files/{id}/{expiry}.{signature}`, where the signature is an HMAC of the
+attachment id and the expiry under `AUTH_SECRET`. A link opens the file for about an
+hour (the expiry is rounded up to the quarter hour, so the browser cache keeps working),
+then answers 404; links from before links expired are refused too. Rotating `AUTH_SECRET`
+invalidates every link at once.
+
+The document keeps the path it was saved with, and every API response signs the paths it
+carries afresh for the reader it answers – after the route has decided that reader may see
+the document. An embedded file therefore opens for exactly the people who can read the
+document, and a link copied out of it dies within the hour. A file that hangs off a record
+(a company's Files, an employee's documents) is signed only for readers of that record.
+A path that comes in with a write is kept only if its sender was handed it within the last
+day or may open the file on their own; any other is stored dead, so pasting an old link
+into one's own note does not bring the file back. `GET /attachments/{id}/url` gives a link
+to a loose file (no record) only to its uploader and to readers of a record that names it
+(a leave request, an expense, an applicant, a PDF page), and those records may name only
+the caller's own upload.
 
 The document stores a **root-relative path**, not an absolute URL: the web app
 resolves it against its own origin, the desktop app against the configured instance, so

@@ -25,6 +25,7 @@ import { CareersPage } from './pages/public/Careers';
 import { Spinner, Button, Input, Card } from './components/ui';
 import { BrandMark } from './components/BrandMark';
 import { installErrorReporting } from './lib/sentry';
+import { installFileLinkRefresh } from './lib/fileLinks';
 import { isTauri, installExternalLinkHandler } from './lib/desktop';
 import { getInstanceUrl, setInstanceUrl } from './lib/api';
 import { useT } from './lib/i18n';
@@ -35,6 +36,8 @@ applyStoredTheme();
 // Desktop only: the webview drops target="_blank" instead of asking the OS,
 // so every external link needs routing to the browser (no-op on the web).
 installExternalLinkHandler();
+// File links expire within the hour: an image that outlived its link asks for a fresh one.
+installFileLinkRefresh();
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
