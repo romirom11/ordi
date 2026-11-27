@@ -284,6 +284,9 @@ export async function setExternalAgentActive(actor: Actor, id: string, active: b
     await tx.update(users).set({ isActive: active }).where(eq(users.id, id));
     if (!active) {
       await tx.update(apiTokens).set({ revokedAt: new Date() }).where(and(eq(apiTokens.userId, id), isNull(apiTokens.revokedAt)));
+      // A consent given before the switch-off must not turn into a token
+      // once it is back on: pending sign-ins as this agent are dropped too.
+      await tx.delete(schema.oauthAuthCodes).where(eq(schema.oauthAuthCodes.agentUserId, id));
     }
     await writeActivity(tx, {
       entityType: 'agent', entityId: id, action: active ? 'enabled' : 'disabled', actorId: actor.userId, actorType: actor.actorType,
@@ -402,6 +405,7 @@ export async function handOverOwnedAgents(
   await tx.update(apiTokens).set({ revokedAt: new Date() }).where(and(inArray(apiTokens.userId, owned.map((a) => a.id)), isNull(apiTokens.revokedAt)));
   if (moved.length) await tx.update(externalAgents).set({ ownerUserId: successor! }).where(inArray(externalAgents.userId, moved));
   if (stopped.length) await tx.update(users).set({ isActive: false }).where(inArray(users.id, stopped));
+  await tx.delete(schema.oauthAuthCodes).where(inArray(schema.oauthAuthCodes.agentUserId, owned.map((a) => a.id)));
   for (const agent of owned) {
     const transferred = moved.includes(agent.id);
     await writeActivity(tx, {

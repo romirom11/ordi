@@ -269,10 +269,10 @@ export function oauthRoutes() {
     }
 
     const { db } = getDb();
-    const [row] = await db.select().from(schema.oauthAuthCodes)
-      .where(eq(schema.oauthAuthCodes.code, body.code));
-    // Single use: burn the code before validating so a race cannot redeem twice.
-    if (row) await db.delete(schema.oauthAuthCodes).where(eq(schema.oauthAuthCodes.id, row.id));
+    // Single use: the code is burnt and read in one statement, before any
+    // check, so of two exchanges racing for it only one gets the row.
+    const [row] = await db.delete(schema.oauthAuthCodes)
+      .where(eq(schema.oauthAuthCodes.code, body.code)).returning();
 
     if (!row || row.expiresAt < new Date()) {
       return oauthError(c, 'invalid_grant', 'Code is invalid or expired', { codeKnown: !!row, clientId: body.client_id });
@@ -335,22 +335,25 @@ export function oauthRoutes() {
       });
     }
 
-    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, row.userId));
-    if (!user || !user.isActive) return oauthError(c, 'invalid_grant', 'User is not active');
-
-    // The access token is an ordinary API token: same auth path, same
-    // revocation UI, scope = the user's own permissions at grant time.
-    const perms = await effectivePermissions(user.roleId, null);
     const name = `${clientName} (OAuth)`;
     let replaced: string[] = [];
-    await db.transaction(async (tx) => {
-      replaced = await replacedOAuthTokens(tx, user.id, clientName, row.redirectUri);
+    const user = await db.transaction(async (tx) => {
+      // The person's row locked until the token is in: two exchanges for the
+      // same person queue here, so the second sees – and replaces – the first.
+      const [locked] = await tx.select().from(schema.users).where(eq(schema.users.id, row.userId)).for('update');
+      if (!locked || !locked.isActive) return null;
+      // The access token is an ordinary API token: same auth path, same
+      // revocation UI, scope = the user's own permissions at grant time.
+      const perms = await effectivePermissions(locked.roleId, null);
+      replaced = await replacedOAuthTokens(tx, locked.id, clientName, row.redirectUri);
       if (replaced.length) await tx.update(schema.apiTokens).set({ revokedAt: new Date() }).where(inArray(schema.apiTokens.id, replaced));
       await tx.insert(schema.apiTokens).values({
-        id: tokenId, userId: user.id, name,
+        id: tokenId, userId: locked.id, name,
         hash: sha256(token), prefix: token.slice(0, 12), scopes: [...perms], readOnly: false, oauthClientId: row.clientId,
       });
+      return locked;
     });
+    if (!user) return oauthError(c, 'invalid_grant', 'User is not active');
 
     logger.info({ clientId: row.clientId, client: clientName, userId: user.id, replaced: replaced.length }, 'oauth token issued');
     return c.json({ access_token: token, token_type: 'bearer' });

@@ -18,6 +18,7 @@ import { useMeQuery } from '../lib/auth';
 import { Avatar, Button, Card, Spinner, cn } from '../components/ui';
 import { BrandMark } from '../components/BrandMark';
 import { useT, extendDict } from '../lib/i18n';
+import { denyRedirect } from '../lib/oauthRedirect';
 
 extendDict({
   en: {
@@ -64,7 +65,7 @@ extendDict({
   },
 });
 
-interface ClientInfo { id: string; name: string; myAgent: { name: string; isActive: boolean } | null }
+interface ClientInfo { id: string; name: string; redirectUris: string[]; myAgent: { name: string; isActive: boolean } | null }
 type ActAs = 'me' | 'agent';
 
 export function OAuthConsentPage() {
@@ -111,15 +112,10 @@ export function OAuthConsentPage() {
     onSuccess: (r) => { setDone(true); window.location.href = r.redirectTo; },
   });
 
+  // Back to the client only at a redirect it registered: the request's own
+  // redirect_uri is whatever the link said, and could be javascript:.
   const deny = () => {
-    try {
-      const url = new URL(params.redirectUri);
-      url.searchParams.set('error', 'access_denied');
-      if (params.state) url.searchParams.set('state', params.state);
-      window.location.href = url.toString();
-    } catch {
-      window.location.href = '/';
-    }
+    window.location.href = denyRedirect(client.data?.redirectUris ?? [], params.redirectUri, params.state) ?? '/';
   };
 
   // Not signed in → login first, then straight back here with the same query.

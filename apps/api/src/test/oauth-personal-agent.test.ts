@@ -37,10 +37,12 @@ function pkce() {
   return { verifier, challenge: createHash('sha256').update(verifier).digest('base64url') };
 }
 
+let registrations = 0;
 async function registerClient(name: string, redirect = REDIRECT): Promise<string> {
   const res = await app.request('/api/v1/oauth/register', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    // Its own address each: registration is rate-limited per address, and this file registers many.
+    headers: { 'Content-Type': 'application/json', 'x-forwarded-for': `10.9.0.${++registrations}` },
     body: JSON.stringify({ redirect_uris: [redirect], client_name: name }),
   });
   expect(res.status).toBe(201);
@@ -265,8 +267,17 @@ describe('connecting the same client again', () => {
       });
       return raw;
     };
-    for (let i = 0; i < 3; i++) legacy.push(await insert('Claude (OAuth)'));
+    // What an approval always left behind: an oauth.authorize entry just before the token.
+    const approved = () => db.insert(schema.activityLog).values({
+      id: ulid(), entityType: 'user', entityId: users.manager!.userId, actorId: users.manager!.userId,
+      actorType: 'user', action: 'oauth.authorize', diff: { client: 'Claude' },
+    });
+    for (let i = 0; i < 3; i++) { await approved(); legacy.push(await insert('Claude (OAuth)')); }
     const handMade = await insert('Claude');
+    // Made by hand, under the very name OAuth gives, with no approval behind it.
+    const handMadeSuffix = await insert('Claude (OAuth)');
+    await db.update(schema.apiTokens).set({ createdAt: new Date(Date.now() - 86_400_000) })
+      .where(eq(schema.apiTokens.prefix, handMadeSuffix.slice(0, 12)));
     const unknownClient = await insert('Gone client (OAuth)');
     // What the migration does to the rows an upgrade finds.
     const migration = readFileSync(fileURLToPath(new URL('../../../../packages/db/drizzle/0052_oauth_connect_as_agent.sql', import.meta.url)), 'utf8');
@@ -274,12 +285,64 @@ describe('connecting the same client again', () => {
     await db.execute(sql.raw(backfill));
     const tied = await db.select().from(schema.apiTokens).where(eq(schema.apiTokens.userId, users.manager!.userId));
     expect(tied.filter((t) => t.oauthClientId === clientId)).toHaveLength(3);
-    for (const raw of [...legacy, handMade, unknownClient]) expect(await tokenWorks(raw)).toBe(true);
+    for (const raw of [...legacy, handMade, handMadeSuffix, unknownClient]) expect(await tokenWorks(raw)).toBe(true);
 
     const fresh = await connect(users.manager!.cookie, await registerClient('Claude'));
     expect(await tokenWorks(fresh)).toBe(true);
     for (const raw of legacy) expect(await tokenWorks(raw)).toBe(false);
     expect(await tokenWorks(handMade)).toBe(true);
+    expect(await tokenWorks(handMadeSuffix)).toBe(true);
     expect(await tokenWorks(unknownClient)).toBe(true);
+  });
+});
+
+describe('races and changes between approve and exchange', () => {
+  async function approved(cookie: string, clientId: string, actAs?: 'me' | 'agent') {
+    const { res, verifier } = await approve(cookie, clientId, actAs);
+    expect(res.status).toBe(200);
+    return { code: new URL(((await res.json()) as { redirectTo: string }).redirectTo).searchParams.get('code')!, verifier };
+  }
+
+  it('one code redeemed twice at once gives one token', async () => {
+    const clientId = await registerClient('Racer');
+    const { code, verifier } = await approved(users.owner!.cookie, clientId, 'agent');
+    const results = await Promise.all([exchange(clientId, code, verifier), exchange(clientId, code, verifier), exchange(clientId, code, verifier)]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 400, 400]);
+  });
+
+  it('two reconnects of the same client at once leave one live token', async () => {
+    const { db } = getDb();
+    for (const actAs of ['me', 'agent'] as const) {
+      const a = await registerClient(`Twin ${actAs}`);
+      const b = await registerClient(`Twin ${actAs}`);
+      const [ca, cb] = [await approved(users.owner!.cookie, a, actAs), await approved(users.owner!.cookie, b, actAs)];
+      const results = await Promise.all([exchange(a, ca.code, ca.verifier), exchange(b, cb.code, cb.verifier)]);
+      expect(results.map((r) => r.status)).toEqual([200, 200]);
+      const rows = await db.select().from(schema.apiTokens).innerJoin(schema.oauthClients, eq(schema.oauthClients.id, schema.apiTokens.oauthClientId))
+        .where(eq(schema.oauthClients.name, `Twin ${actAs}`));
+      expect(rows.filter((r) => !r.api_tokens.revokedAt)).toHaveLength(1);
+    }
+  });
+
+  it('a consent given before the agent was switched off is gone once it is back on', async () => {
+    const clientId = await registerClient('Claude Code');
+    const { code, verifier } = await approved(users.owner!.cookie, clientId, 'agent');
+    expect((await owner().post('/my-agent/disable')).status).toBe(200);
+    expect((await owner().post('/my-agent/enable')).status).toBe(200);
+    expect((await exchange(clientId, code, verifier)).status).toBe(400);
+  });
+
+  it('an owner deactivated between approve and exchange gets no token for their agent', async () => {
+    const sales = reqAs(users.sales!.cookie);
+    expect((await sales.post('/my-agent', { name: 'Sales helper' })).status).toBe(201);
+    const clientId = await registerClient('Claude Code');
+    const asAgent = await approved(users.sales!.cookie, clientId, 'agent');
+    const asMe = await approved(users.sales!.cookie, clientId, 'me');
+    expect((await owner().post(`/users/${users.sales!.userId}/deactivate`, { reassignTo: users.manager!.userId })).status).toBe(200);
+    for (const { code, verifier } of [asAgent, asMe]) {
+      const res = await exchange(clientId, code, verifier);
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe('invalid_grant');
+    }
   });
 });
