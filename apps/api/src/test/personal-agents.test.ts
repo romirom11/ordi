@@ -9,6 +9,10 @@ import { resetDb, seedRolesAndUsers, reqAs, json, app } from './helpers';
 import { setupWorkspace, drainOutbox, type Workspace } from './agents-helpers';
 import { broadcaster } from '../core/events';
 import { streamTiming } from '../domains/core/stream.routes';
+import { invalidateRoleCache } from '../core/rbac';
+
+/** Slow CI must not turn a late event into a failure. */
+const WAIT = { timeout: 5000, interval: 20 };
 
 let users: Awaited<ReturnType<typeof seedRolesAndUsers>>;
 let ws: Workspace;
@@ -59,7 +63,7 @@ async function openStream(raw: string) {
       }
     }
   })().catch(() => {}).finally(() => { state.ended = true; });
-  await vi.waitFor(() => expect(state.events).toContain('connected'));
+  await vi.waitFor(() => expect(state.events).toContain('connected'), WAIT);
   return state;
 }
 
@@ -157,6 +161,31 @@ describe('what it can do', () => {
     expect(await createdFor(owner())).toEqual(expect.arrayContaining([filed.id, byOwner.id]));
   });
 
+  it('files for its owner even where this process\'s role cache is behind', async () => {
+    // The owner's role, as this process cached it, cannot read projects; in
+    // the database (another process granted it back) it can.
+    const { db } = getDb();
+    const [ownerUser] = await db.select({ roleId: schema.users.roleId }).from(schema.users).where(eq(schema.users.id, users.owner!.userId));
+    const roleId = ownerUser!.roleId;
+    const perms = ['projects.read', 'projects.write'];
+    const open = await json(reqAs(users.admin!.cookie).post('/projects', {
+      name: 'Cache lag', key: 'LAG', projectTypeId: (await json(reqAs(users.admin!.cookie).post('/project-types', { name: 'Lag type', revenueSource: 'none' }))).id, visibility: 'workspace',
+    }));
+    for (const permission of perms) {
+      await db.delete(schema.rolePermissions).where(and(eq(schema.rolePermissions.roleId, roleId), eq(schema.rolePermissions.permission, permission)));
+    }
+    invalidateRoleCache(roleId);
+    try {
+      await owner().get('/me'); // the cache now holds the role without them
+      await db.insert(schema.rolePermissions).values(perms.map((permission) => ({ roleId, permission })));
+      const res = await bearer(token).post('/tasks', { projectId: open.id, title: 'Filed through the lag' });
+      expect(res.status).toBe(201);
+      expect((await json(res)).reporterId).toBe(users.owner!.userId);
+    } finally {
+      invalidateRoleCache(roleId);
+    }
+  });
+
   it('never names itself the reporter', async () => {
     const bot = bearer(token);
     expect((await bot.post('/tasks', { projectId: ws.projectId, title: 'Mine, says the agent', reporterId: agentId })).status).toBe(400);
@@ -232,15 +261,20 @@ describe('talking to its owner', () => {
 });
 
 describe('what it hears on the event stream', () => {
-  it('hears about its owner\'s projects, not about finance or people', async () => {
+  it('hears about the work on its owner\'s projects, nothing else', async () => {
     const stream = await openStream(token);
     try {
-      broadcaster.broadcast({ event: 'payment.recorded', data: { aggregateType: 'invoice', aggregateId: 'inv1', amount: '1200.00' } });
+      broadcaster.broadcast({ event: 'payment.recorded', data: { aggregateType: 'payment', aggregateId: 'pay1', invoiceId: 'inv1', amount: '1200.00' } });
       broadcaster.broadcast({ event: 'leave.requested', data: { aggregateType: 'leave_request', aggregateId: 'lr1' } });
+      // A project created names no project scope: a private one's key would leak.
+      broadcaster.broadcast({ event: 'project.created', data: { aggregateType: 'project', aggregateId: 'p1', key: 'SECRET' } });
+      // Time on a project it works on is still not task work.
+      broadcaster.broadcast({ event: 'time.entry_created', data: { aggregateType: 'time_entry', projectId: ws.projectId }, projectScope: [ws.projectId] });
       broadcaster.broadcast({ event: 'task.updated', data: { aggregateType: 'task', projectId: ws.projectId }, projectScope: [ws.projectId] });
-      await vi.waitFor(() => expect(stream.events).toContain('task.updated'));
-      expect(stream.events).not.toContain('payment.recorded');
-      expect(stream.events).not.toContain('leave.requested');
+      await vi.waitFor(() => expect(stream.events).toContain('task.updated'), WAIT);
+      const seen = pings(stream);
+      await vi.waitFor(() => expect(pings(stream)).toBeGreaterThanOrEqual(seen + 1), WAIT);
+      for (const e of ['payment.recorded', 'leave.requested', 'project.created', 'time.entry_created']) expect(stream.events).not.toContain(e);
     } finally { await stream.close(); }
   });
 
@@ -252,14 +286,15 @@ describe('what it hears on the event stream', () => {
     const stream = await openStream(token);
     try {
       broadcaster.broadcast({ event: 'task.before', data: { projectId: priv.id }, projectScope: [priv.id] });
-      await vi.waitFor(() => expect(stream.events).toContain('task.before'));
+      await vi.waitFor(() => expect(stream.events).toContain('task.before'), WAIT);
 
       await admin.del(`/projects/${priv.id}/members/${users.owner!.userId}`);
       const seen = pings(stream);
-      await vi.waitFor(() => expect(pings(stream)).toBeGreaterThanOrEqual(seen + 2));
+      await vi.waitFor(() => expect(pings(stream)).toBeGreaterThanOrEqual(seen + 2), WAIT);
       broadcaster.broadcast({ event: 'task.after', data: { projectId: priv.id }, projectScope: [priv.id] });
-      broadcaster.broadcast({ event: 'task.marker', data: { projectId: ws.projectId }, projectScope: [ws.projectId] });
-      await vi.waitFor(() => expect(stream.events).toContain('task.marker'));
+      // A denied event may need a database read to be judged: give it two pings.
+      const after = pings(stream);
+      await vi.waitFor(() => expect(pings(stream)).toBeGreaterThanOrEqual(after + 2), WAIT);
       expect(stream.events).not.toContain('task.after');
     } finally { await stream.close(); }
   });
@@ -267,8 +302,18 @@ describe('what it hears on the event stream', () => {
   it('ends when the client is disconnected', async () => {
     const issued = await json(owner().post('/my-agent/tokens', { client: 'Cursor', expiresInDays: 30 }));
     const stream = await openStream(issued.token);
-    expect((await owner().del(`/my-agent/tokens/${issued.tokenInfo.id}`)).status).toBe(200);
-    await vi.waitFor(() => expect(stream.ended).toBe(true));
+    try {
+      // Re-checking on each ping is not a use of the token.
+      const lastUsed = async () => (await getDb().db.select({ at: schema.apiTokens.lastUsedAt }).from(schema.apiTokens)
+        .where(eq(schema.apiTokens.id, issued.tokenInfo.id)))[0]!.at?.getTime() ?? null;
+      const atConnect = await lastUsed();
+      const seen = pings(stream);
+      await vi.waitFor(() => expect(pings(stream)).toBeGreaterThanOrEqual(seen + 2), WAIT);
+      expect(await lastUsed()).toBe(atConnect);
+
+      expect((await owner().del(`/my-agent/tokens/${issued.tokenInfo.id}`)).status).toBe(200);
+      await vi.waitFor(() => expect(stream.ended).toBe(true), WAIT);
+    } finally { await stream.close(); }
   });
 });
 

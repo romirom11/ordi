@@ -690,7 +690,10 @@ export async function createTask(actor: Actor, input: any) {
   // A person's own agent files work for its owner: the owner set it.
   const reporterId: string | null = input.reporterId === undefined ? (actor.ownerUserId ?? actor.userId) : input.reporterId;
   // A personal agent naming itself is checked too: it may not be the reporter.
-  if (reporterId && (reporterId !== actor.userId || actor.agentKind === 'personal')) await assertReporter(project, reporterId);
+  // Its owner needs no check: the agent reached this project through the
+  // owner's access, read fresh, while assertReporter's view may be cached.
+  const ownerOfAgent = actor.agentKind === 'personal' && reporterId === actor.ownerUserId;
+  if (reporterId && !ownerOfAgent && (reporterId !== actor.userId || actor.agentKind === 'personal')) await assertReporter(project, reporterId);
   const labelIds: string[] = input.labelIds ?? [];
   // Before the row exists: a rejected label must not leave a half-created task.
   await assertLabelScope(labelIds, 'task');

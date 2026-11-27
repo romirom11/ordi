@@ -19,7 +19,11 @@ export const SESSION_COOKIE = 'ordi_session';
  * connections (the SSE stream) call it again to notice a revoked token or a
  * personal agent's owner losing access.
  */
-export async function resolveActor(c: Parameters<MiddlewareHandler<AppEnv>>[0]): Promise<Actor | null> {
+export async function resolveActor(
+  c: Parameters<MiddlewareHandler<AppEnv>>[0],
+  /** touch: false – a re-check, not a use: leave the token's lastUsedAt alone. */
+  opts: { touch?: boolean } = {},
+): Promise<Actor | null> {
   const { db } = getDb();
   const authHeader = c.req.header('Authorization');
   const cookieToken = getCookie(c, SESSION_COOKIE);
@@ -41,7 +45,7 @@ export async function resolveActor(c: Parameters<MiddlewareHandler<AppEnv>>[0]):
       readOnly = token.readOnly;
       apiTokenId = token.id;
       tokenName = token.name.replace(/\s*\(OAuth\)$/, '');
-      db.update(schema.apiTokens).set({ lastUsedAt: new Date() }).where(eq(schema.apiTokens.id, token.id)).catch(() => {});
+      if (opts.touch !== false) db.update(schema.apiTokens).set({ lastUsedAt: new Date() }).where(eq(schema.apiTokens.id, token.id)).catch(() => {});
     } else {
       // Bearer session token (desktop/Tauri client, PRD §18): the tauri://
       // origin cannot share same-site cookies, so the login-issued session
