@@ -146,10 +146,38 @@ describe('filtering tasks by a private project\'s field', () => {
     const text = await filter(outsider, 'falcon_budget', 'contains', 'thousand');
     expect(text.status).toBe(200);
     expect(((await json(text)).data as ListedTask[]).map((t) => t.id)).toEqual([noted]);
+    // An operator both types take matches in each project by that project's type.
+    const both = await filter(insider, 'falcon_budget', 'eq', 500);
+    expect(both.status).toBe(200);
+    expect(((await json(both)).data as ListedTask[]).map((t) => t.id)).toEqual([marked]);
+    const asText = await filter(insider, 'falcon_budget', 'eq', 'about a thousand', `projectId=${openProject}&`);
+    expect(((await json(asText)).data as ListedTask[]).map((t) => t.id)).toEqual([noted]);
+    const textEverywhere = await filter(insider, 'falcon_budget', 'eq', 'about a thousand');
+    expect(textEverywhere.status).toBe(200);
+    expect(((await json(textEverywhere)).data as ListedTask[]).map((t) => t.id)).toEqual([noted]);
     // For the outsider the key is the open project's text field only.
     const asNumber = await filter(outsider, 'falcon_budget', 'gt', 100);
     expect(asNumber.status).toBe(400);
     expect(JSON.stringify(await json(asNumber))).toContain("type 'text'");
+  });
+});
+
+describe('a shared saved view naming a private project in its filters', () => {
+  it('is listed only for those who can open it, and cannot be saved onto it from outside', async () => {
+    const res = await insider.as.post('/saved-views', {
+      entityType: 'tasks', name: 'Falcon board', isShared: true, filters: { projectId: secretProject, taskFilters: {} },
+    });
+    expect(res.status).toBe(201);
+    const viewId = (await json(res)).id;
+    const ids = async (who: typeof outsider) => ((await json(who.as.get('/saved-views?entityType=tasks'))).data as { id: string }[]).map((v) => v.id);
+    expect(await ids(outsider)).not.toContain(viewId);
+    expect(await ids(insider)).toContain(viewId);
+    const probe = await outsider.as.post('/saved-views', { entityType: 'tasks', name: 'Probe', filters: { projectId: secretProject } });
+    expect(probe.status).toBe(404);
+    // A view of a project the outsider can open is still theirs to save and see.
+    const own = await outsider.as.post('/saved-views', { entityType: 'tasks', name: 'Mine', isShared: true, filters: { projectId: openProject } });
+    expect(own.status).toBe(201);
+    expect(await ids(insider)).toContain((await json(own)).id);
   });
 });
 

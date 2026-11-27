@@ -112,22 +112,44 @@ export async function buildCustomFieldFilter(
   const column = scope.column ?? 'custom_fields';
   const defs = await visibleDefs(entityType, filter.field_key, scope.projectIds);
   if (!defs.length) throw err.validation(`Unknown custom field '${filter.field_key}'`);
-  // Project fields of one key may differ in type; the filter uses the first
-  // whose type takes this operator, in the projects that give it that type.
-  const def = defs.find((d) => OPS_BY_TYPE[d.type].includes(filter.op));
-  if (!def) {
+  const matching = defs.filter((d) => OPS_BY_TYPE[d.type].includes(filter.op));
+  if (!matching.length) {
     throw err.validation(`Operator '${filter.op}' not valid for type '${defs[0]!.type}'`);
   }
-  const predicate = fieldPredicate(column, def, filter);
-  if (def.projectId === null) return predicate;
+  // A workspace key is the only definition of its key.
+  const workspaceDef = matching.find((d) => d.projectId === null);
+  if (workspaceDef) return fieldPredicate(column, workspaceDef, filter);
   if (!scope.projectColumn) throw err.validation(`Unknown custom field '${filter.field_key}'`);
-  const inProjects = sql.join(
-    defs.filter((d) => d.type === def.type && d.projectId).map((d) => sql`${d.projectId}`),
-    sql`, `,
-  );
-  // CASE, not AND: the value is cast to the field's type only on records of
-  // the projects where it has that type, never on another project's values.
-  return sql`(case when ${scope.projectColumn} in (${inProjects}) then ${predicate} else false end)`;
+  // Projects may give one key different types: each type's predicate holds in
+  // the projects that give the key that type, and a record matches any of them.
+  // CASE, not AND: a value is cast to a type only on records of the projects
+  // where it has that type, never on another project's values.
+  const byType = new Map<CustomFieldType, FieldDef[]>();
+  for (const d of matching) byType.set(d.type, [...(byType.get(d.type) ?? []), d]);
+  // A value that is no number (or no date) cannot be compared as one: Postgres
+  // casts the parameter itself, CASE or not. Such a type is left out, unless
+  // it is the only one, which then fails as it always did.
+  let types = [...byType.values()];
+  if (types.length > 1) {
+    const fitting = types.filter((sameType) => valueFits(sameType[0]!.type, filter.value));
+    if (fitting.length) types = fitting;
+  }
+  const parts = types.map((sameType) => {
+    const inProjects = sql.join(sameType.map((d) => sql`${d.projectId}`), sql`, `);
+    return sql`(case when ${scope.projectColumn} in (${inProjects}) then ${fieldPredicate(column, sameType[0]!, filter)} else false end)`;
+  });
+  return parts.length === 1 ? parts[0]! : sql`(${sql.join(parts, sql` or `)})`;
+}
+
+/** Whether a filter value (or each of a list's values) can be compared as this type. */
+function valueFits(type: CustomFieldType, value: unknown): boolean {
+  const values = Array.isArray(value) ? value : [value];
+  if (type === 'number') {
+    return values.every((x) => (typeof x === 'number' && Number.isFinite(x))
+      || (typeof x === 'string' && x.trim() !== '' && Number.isFinite(Number(x))));
+  }
+  if (type === 'date') return values.every((x) => typeof x === 'string' && /^\d{4}-\d{2}-\d{2}/.test(x));
+  return true;
 }
 
 function fieldPredicate(column: string, def: FieldDef, filter: CustomFieldFilter): SQL {
