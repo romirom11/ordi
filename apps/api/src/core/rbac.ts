@@ -3,7 +3,7 @@
  * on every request (see loadRolePermissions). Guards are declarative per route.
  */
 import type { MiddlewareHandler } from 'hono';
-import { getDb, schema, eq } from '@ordi/db';
+import { getDb, schema, eq, type Database } from '@ordi/db';
 import { type Permission } from '@ordi/shared';
 import type { AppEnv, Actor } from '../context';
 import { err } from '../lib/errors';
@@ -17,10 +17,14 @@ import { err } from '../lib/errors';
  * primary key, next to the session, user and membership reads every request
  * makes anyway; a cache would need cross-process invalidation to be correct,
  * and saving one indexed query is not worth that.
+ *
+ * Pass `reader` (a transaction) to read inside one, on its own connection.
  */
-export async function loadRolePermissions(roleId: string): Promise<Set<string>> {
-  const { db } = getDb();
-  const rows = await db.select({ permission: schema.rolePermissions.permission }).from(schema.rolePermissions)
+export async function loadRolePermissions(
+  roleId: string,
+  reader: Pick<Database, 'select'> = getDb().db,
+): Promise<Set<string>> {
+  const rows = await reader.select({ permission: schema.rolePermissions.permission }).from(schema.rolePermissions)
     .where(eq(schema.rolePermissions.roleId, roleId));
   return new Set(rows.map((r) => r.permission));
 }

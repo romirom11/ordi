@@ -36,10 +36,13 @@ export function rolesRoutes() {
     const body = roleInputSchema.parse(await c.req.json());
     const { db } = getDb();
     const id = ulid();
-    await db.insert(schema.roles).values({ id, key: `custom_${id}`, name: body.name, description: body.description });
-    if (body.permissions.length) {
-      await db.insert(schema.rolePermissions).values(body.permissions.map((p) => ({ roleId: id, permission: p })));
-    }
+    const permissions = [...new Set(body.permissions)];
+    await db.transaction(async (tx) => {
+      await tx.insert(schema.roles).values({ id, key: `custom_${id}`, name: body.name, description: body.description });
+      if (permissions.length) {
+        await tx.insert(schema.rolePermissions).values(permissions.map((p) => ({ roleId: id, permission: p })));
+      }
+    });
     return c.json({ id }, 201);
   });
 
@@ -51,11 +54,17 @@ export function rolesRoutes() {
     if (!role) throw err.notFound();
     if (role.isSystem) throw err.domain('System roles cannot be edited');
     for (const p of body.permissions) if (!isPermission(p)) throw err.validation(`Unknown permission ${p}`);
-    await db.update(schema.roles).set({ name: body.name, description: body.description }).where(eq(schema.roles.id, id));
-    await db.delete(schema.rolePermissions).where(eq(schema.rolePermissions.roleId, id));
-    if (body.permissions.length) {
-      await db.insert(schema.rolePermissions).values(body.permissions.map((p) => ({ roleId: id, permission: p })));
-    }
+    // One transaction: permissions are read fresh on every request in every
+    // process, so a request between the delete and the insert would see the
+    // role with nothing – and a failed insert would leave it that way.
+    const permissions = [...new Set(body.permissions)];
+    await db.transaction(async (tx) => {
+      await tx.update(schema.roles).set({ name: body.name, description: body.description }).where(eq(schema.roles.id, id));
+      await tx.delete(schema.rolePermissions).where(eq(schema.rolePermissions.roleId, id));
+      if (permissions.length) {
+        await tx.insert(schema.rolePermissions).values(permissions.map((p) => ({ roleId: id, permission: p })));
+      }
+    });
     await emit({ type: 'role.updated', aggregateType: 'role', aggregateId: id, payload: {} });
     return c.json({ ok: true });
   });

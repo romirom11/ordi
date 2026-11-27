@@ -92,3 +92,25 @@ describe('a permission taken off a role', () => {
     }
   });
 });
+
+describe('saving a role in the role editor', () => {
+  const editRole = (permissions: string[]) =>
+    reqAs(users.owner!.cookie).patch(`/roles/${roleId}`, { name: 'Account manager', description: 'custom', permissions });
+
+  it('takes effect on the next request', async () => {
+    const me = reqAs(cookie);
+    expect((await me.get('/companies')).status).toBe(200);
+    expect((await editRole(['projects.read'])).status).toBe(200);
+    expect((await me.get('/companies')).status).toBe(403);
+    expect((await editRole(['crm.read', 'projects.read'])).status).toBe(200);
+    expect((await me.get('/companies')).status).toBe(200);
+  });
+
+  it('never leaves the role empty: a repeated permission is saved once', async () => {
+    // The delete and the insert used to commit apart, and a repeated key
+    // failed the insert after the delete had gone through.
+    expect((await editRole(['crm.read', 'crm.read', 'projects.read'])).status).toBe(200);
+    expect([...(await loadRolePermissions(roleId))].sort()).toEqual(['crm.read', 'projects.read']);
+    expect((await reqAs(cookie).get('/companies')).status).toBe(200);
+  });
+});
