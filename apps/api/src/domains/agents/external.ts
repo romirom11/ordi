@@ -275,6 +275,9 @@ export async function issueExternalAgentToken(
     // (and revokes this token with the rest).
     const [locked] = await tx.select({ isActive: users.isActive, roleId: users.roleId }).from(users).where(eq(users.id, id)).for('update');
     if (!locked?.isActive) throw err.domain('This agent is switched off; switch it on before issuing a token');
+    // The role was checked against the issuer before the lock; a change in
+    // between would mint a token wider than what was checked.
+    if (locked.roleId !== row.user.roleId) throw err.conflict('The agent\'s role changed while the token was being issued – try again');
     const scopes = [...(await loadRolePermissions(locked.roleId))];
     await tx.insert(apiTokens).values({
       id: tokenId, userId: id, name: input.name, hash: sha256(raw), prefix: raw.slice(0, 12), scopes, readOnly: false, expiresAt,
