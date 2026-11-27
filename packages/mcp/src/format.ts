@@ -99,6 +99,7 @@ const HINTS: Record<string, string> = {
   forbidden: 'The API token lacks the permission this call needs; the token scope (or the project role of its owner) has to be widened in ordi.',
   not_found: 'The id does not exist, was deleted, or the token cannot see it – list_projects / list_tasks show what is reachable.',
   validation_error: 'The arguments did not pass validation; fix the field named above and call again.',
+  internal_error: 'ordi failed on its side, not because of these arguments. Try once more; if it fails again, tell the person, since a workspace admin will find the cause in the api logs.',
 };
 
 export function toolErrorText(e: unknown): string {

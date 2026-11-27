@@ -7,6 +7,7 @@ import { Button, Input, Badge, Checkbox, SegmentedControl, Switch, Skeleton, Spi
 import { Dialog, ConfirmDialog, toast } from '../overlays';
 import { SectionHead, Field, RowList, AnimatedRow, Disclosure } from './primitives';
 import { useT, extendDict } from '../../lib/i18n';
+import { mcpToolsOfKind } from '@ordi/shared';
 
 extendDict({
   en: {
@@ -146,28 +147,9 @@ interface ApiToken {
   createdAt?: string | null;
 }
 
-/** Tool names mirrored from packages/mcp/src/server.ts (read-only summary). */
-const READ_TOOLS = [
-  'search', 'list_projects', 'get_project_schema', 'list_companies', 'list_contacts', 'list_leads', 'get_lead',
-  'get_sales_work', 'list_sales_activities', 'list_deals', 'list_deal_stages',
-  'list_custom_fields', 'get_company_overview', 'list_my_tasks', 'list_tasks', 'get_task',
-  'get_project_status', 'get_cycle_progress',
-  'list_overdue_invoices', 'get_receivables_aging', 'list_unbilled_time', 'find_kb_page',
-  'get_project_profitability', 'get_labor_cost', 'get_team_availability', 'list_pending_leave',
-  'get_recruitment_pipeline',
-];
-const ACTION_TOOLS = [
-  'create_task', 'update_task', 'upsert_task', 'add_task_link',
-  'create_milestone', 'update_milestone', 'create_cycle', 'complete_cycle',
-  'create_workflow_status', 'update_workflow_status', 'delete_workflow_status',
-  'update_task_status', 'assign_task', 'comment_on_task', 'log_time',
-  'create_invoice_from_time', 'create_invoice_from_project', 'send_invoice', 'record_payment',
-  'send_payment_reminder', 'create_quote', 'create_note', 'create_company', 'create_contact',
-  'create_lead', 'update_lead', 'schedule_sales_activity',
-  'complete_sales_activity', 'convert_lead',
-  'create_deal', 'move_deal', 'create_custom_field', 'create_kb_page', 'update_project',
-  'request_leave', 'approve_leave', 'create_job_opening', 'move_applicant',
-];
+/** The catalog the MCP server serves, split by whether a tool changes anything. */
+const READ_TOOLS = mcpToolsOfKind('read');
+const ACTION_TOOLS = mcpToolsOfKind('write', 'destructive');
 
 export function McpPanel() {
   const t = useT();

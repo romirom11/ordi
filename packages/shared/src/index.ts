@@ -19,6 +19,7 @@ export * from './schemas/settings';
 export * from './schemas/agents';
 export * from './schemas/secrets';
 export * from './mcp-library';
+export * from './mcp-tools';
 
 // Pure business calc (single source of truth, unit-tested)
 export * from './calc/money';
