@@ -59,6 +59,20 @@ export const agentProfiles = pgTable('agent_profiles', {
   version: version(),
 });
 
+/**
+ * An agent that runs outside ordi – Claude Code, Codex or anything else on
+ * someone's machine or server – and connects over MCP with a token of its
+ * own. 1:1 with an agent user that has no agent_profiles row, so ordi never
+ * dispatches it. The owner is the person behind it: who it acts for, and who
+ * its questions go to when it names no one.
+ */
+export const externalAgents = pgTable('external_agents', {
+  userId: text('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  ownerUserId: text('owner_user_id').notNull().references(() => users.id),
+  createdBy: createdBy(),
+  ...timestamps,
+});
+
 /** Workspace MCP connector library entry (from the catalogue or by URL). */
 export const mcpConnectors = pgTable('mcp_connectors', {
   id: pk(),

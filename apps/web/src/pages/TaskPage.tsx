@@ -120,9 +120,11 @@ function TaskPageView({ projectId, taskId }: { projectId: string; taskId: string
   // runs borrow it for cancel/retry (agents.manage also unlocks them).
   const projectRole = useProjectRole(projectId, project?.visibility);
   const canWriteTasks = projectRole === 'admin' || projectRole === 'member';
-  const hasAgentAssignee = (task?.assignees ?? []).some(
-    (a) => (usersQ.data ?? []).find((u) => u.id === a.userId)?.actorType === 'agent',
-  );
+  // Only an agent ordi runs has runs to show; an external one works elsewhere.
+  const hasAgentAssignee = (task?.assignees ?? []).some((a) => {
+    const u = (usersQ.data ?? []).find((x) => x.id === a.userId);
+    return u?.actorType === 'agent' && u.agentKind !== 'external';
+  });
 
   usePageTitle(task ? `${refLabel} ${task.title}` : null);
 

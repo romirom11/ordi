@@ -311,7 +311,8 @@ async function enrichNotifyPayload(ev: DomainEvent): Promise<Record<string, unkn
       if (!p.ownerId) p.ownerId = await companyOwnerId(quote.companyId);
     }
   }
-  if (!p.actorName && ev.actorId && ev.actorType === 'user') {
+  // People and agents alike: "someone commented" says nothing about who.
+  if (!p.actorName && ev.actorId && (ev.actorType === 'user' || ev.actorType === 'agent')) {
     const [actor] = await db.select({ name: schema.users.name })
       .from(schema.users).where(eq(schema.users.id, ev.actorId));
     if (actor?.name) p.actorName = actor.name;
@@ -345,10 +346,11 @@ const notifications: Consumer = {
         break;
       case 'comment.created': {
         if (!p.taskId) break;
-        // An agent's comments are announced by its run events instead
+        // An ordi agent's comments are announced by its run events instead
         // (agent.needs_input, agent.run_finished): one run must not fill the
-        // bell twice with the same news.
-        if (ev.actorType === 'agent') break;
+        // bell twice with the same news. An external agent has no runs, so
+        // its comments are the only news there is and go out like a person's.
+        if (ev.actorType === 'agent' && ev.actorId && (await agentProfilesAmong([ev.actorId])).size) break;
         // Everyone with a stake in the thread, not only the @-mentioned: the
         // author of a task heard nothing when someone answered on it, which is
         // the whole point of having raised it. The mentioned people are served

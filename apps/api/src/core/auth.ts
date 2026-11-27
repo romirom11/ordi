@@ -28,6 +28,7 @@ async function resolveActor(c: Parameters<MiddlewareHandler<AppEnv>>[0]): Promis
     const [token] = await db.select().from(schema.apiTokens).where(eq(schema.apiTokens.hash, sha256(raw)));
     if (token) {
       if (token.revokedAt) return null;
+      if (token.expiresAt && token.expiresAt <= new Date()) return null;
       userId = token.userId;
       tokenScopes = (token.scopes as string[]) ?? [];
       readOnly = token.readOnly;

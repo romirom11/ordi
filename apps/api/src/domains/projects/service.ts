@@ -860,6 +860,12 @@ export async function handOffOpenTasks(actor: Actor, fromUserId: string, toUserI
   const open = await openTasksAssignedTo(fromUserId);
   if (!open.length) return { count: 0, taskIds: [] as string[] };
   const ids = open.map((t) => t.id);
+  // An agent successor works only where it is a member – the same rule as
+  // assigning it by hand – so hand-over refuses rather than strand it.
+  if (toUserId) {
+    const projectIds = [...new Set(open.map((t) => t.projectId))];
+    for (const projectId of projectIds) await assertCanAssignAgents(actor, projectId, [toUserId], null, { policy: false });
+  }
   await db.transaction(async (tx) => {
     await tx.delete(taskAssignees).where(and(inArray(taskAssignees.taskId, ids), eq(taskAssignees.userId, fromUserId)));
     if (toUserId) {
@@ -1002,8 +1008,20 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
         customFields: cf, createdBy: t.createdBy, reporterId: await reporterFor(t.reporterId),
       });
     }
-    if (assigneeRows.length) {
-      await tx.insert(taskAssignees).values(assigneeRows.map((row) => ({
+    // Agents work only where they are members: one that is not on the
+    // target project comes off the moved tasks rather than being stranded.
+    const agentAssignees = assigneeRows.length
+      ? await tx.select({ id: schema.users.id }).from(schema.users)
+        .where(and(inArray(schema.users.id, [...new Set(assigneeRows.map((r) => r.userId))]), eq(schema.users.actorType, 'agent')))
+      : [];
+    const agentMembers = agentAssignees.length
+      ? new Set((await tx.select({ userId: projectMembers.userId }).from(projectMembers)
+        .where(and(eq(projectMembers.projectId, targetProjectId), inArray(projectMembers.userId, agentAssignees.map((a) => a.id))))).map((m) => m.userId))
+      : new Set<string>();
+    const strandedAgents = new Set(agentAssignees.map((a) => a.id).filter((id) => !agentMembers.has(id)));
+    const keptAssignees = assigneeRows.filter((row) => !strandedAgents.has(row.userId));
+    if (keptAssignees.length) {
+      await tx.insert(taskAssignees).values(keptAssignees.map((row) => ({
         taskId: newIdOf.get(row.taskId)!, userId: row.userId,
       })));
     }

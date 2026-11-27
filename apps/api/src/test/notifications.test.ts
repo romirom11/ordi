@@ -166,10 +166,13 @@ describe('notifications for a comment', () => {
     expect(notification?.payload).toMatchObject({ taskId: id, projectId });
   });
 
-  it('stays quiet for an agent, whose run events already report it', async () => {
+  it('stays quiet for an ordi agent, whose run events already report it', async () => {
     const { id, ref } = await newTask(users.owner!.cookie, { title: 'Worked by an agent' });
     await processOutboxOnce();
     await clearNotifications();
+    // An agent ordi runs has a profile; one without is external, and its
+    // comments notify like a person's (external-agents.test.ts).
+    await getDb().db.insert(schema.agentProfiles).values({ userId: users.agent!.userId }).onConflictDoNothing();
 
     // A comment from the runtime, which also emits agent.needs_input or
     // agent.run_finished for the same news.
