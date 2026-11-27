@@ -198,6 +198,11 @@ export async function createExternalAgent(actor: Actor, input: CreateExternalAge
   await assertOwner(ownerUserId);
   const id = ulid();
   await db.transaction(async (tx) => {
+    // The owner checked again under a lock deactivation also takes: an agent
+    // cannot be created for someone whose departure is being processed.
+    const [owner] = await tx.select({ isActive: users.isActive, actorType: users.actorType }).from(users)
+      .where(eq(users.id, ownerUserId)).for('share');
+    if (!owner?.isActive || owner.actorType !== 'user') throw err.validation('The owner must be an active person, not an agent');
     await tx.insert(users).values({
       id, email: agentEmail(id, input.name), name: input.name, passwordHash: null, roleId,
       actorType: 'agent', emailNotificationPrefs: { __all: false },
@@ -251,11 +256,21 @@ export async function updateExternalAgent(actor: Actor, id: string, input: Updat
 export async function setExternalAgentActive(actor: Actor, id: string, active: boolean): Promise<ExternalAgentView> {
   const { db } = getDb();
   const row = await loadRow(id);
-  if (active) {
-    const [owner] = await db.select({ isActive: users.isActive }).from(users).where(eq(users.id, row.ext.ownerUserId));
-    if (!owner?.isActive) throw err.domain('Its owner is no longer active – give it a new owner before switching it on');
-  }
   await db.transaction(async (tx) => {
+    if (active) {
+      // Person before agent, the order deactivation locks them in, and the
+      // owner read again under the lock: an owner leaving right now is seen.
+      const [owner] = await tx.select({ isActive: users.isActive, actorType: users.actorType }).from(users)
+        .where(eq(users.id, row.ext.ownerUserId)).for('share');
+      // Then the agent's user row – the lock owner changes hold while they
+      // rewrite the owner – so the owner read next is the current one.
+      await tx.select({ id: users.id }).from(users).where(eq(users.id, id)).for('update');
+      const [still] = await tx.select({ ownerUserId: externalAgents.ownerUserId }).from(externalAgents)
+        .where(eq(externalAgents.userId, id));
+      if (!owner?.isActive || owner.actorType !== 'user' || still?.ownerUserId !== row.ext.ownerUserId) {
+        throw err.domain('Its owner is no longer active – give it a new owner before switching it on');
+      }
+    }
     // Takes the row lock token issuance waits on (see issueExternalAgentToken).
     await tx.update(users).set({ isActive: active }).where(eq(users.id, id));
     if (!active) {

@@ -88,7 +88,9 @@ extendDict({
     'settings.handOffTo': 'Hand open tasks to',
     'settings.leaveUnassigned': 'Leave unassigned',
     'settings.ownedAgents': 'External agents they own',
-    'settings.ownedAgentsHint': 'Their tokens are revoked. They move to the successor, who issues a new token, or are switched off when there is none (or the successor is an agent).',
+    'settings.ownedAgentsHint': 'Their tokens are revoked. They move to the successor (someone with access then issues a new token in Settings → Agents), or are switched off when there is none or the successor is an agent.',
+    'settings.successor': 'Successor',
+    'settings.agentTag': 'agent',
     'settings.noSuccessor': 'No one',
     'settings.previewFailed': 'Could not load what they hold – close and try again before deactivating.',
     'settings.handedOff': 'Tasks handed over',
@@ -172,7 +174,9 @@ extendDict({
     'settings.handOffTo': 'Передати відкриті задачі',
     'settings.leaveUnassigned': 'Залишити без виконавця',
     'settings.ownedAgents': 'Зовнішні агенти, власником яких є людина',
-    'settings.ownedAgentsHint': 'Їхні токени буде відкликано. Агенти перейдуть до наступника, який випустить новий токен, або вимкнуться, якщо наступника немає (чи наступник – агент).',
+    'settings.ownedAgentsHint': 'Їхні токени буде відкликано. Агенти перейдуть до наступника (новий токен потім випускає той, хто має доступ, у Налаштуваннях → Агенти) або вимкнуться, якщо наступника немає чи наступник – агент.',
+    'settings.successor': 'Наступник',
+    'settings.agentTag': 'агент',
     'settings.noSuccessor': 'Ніхто',
     'settings.previewFailed': 'Не вдалося завантажити, що за людиною закріплено, – закрийте й спробуйте ще раз перед деактивацією.',
     'settings.handedOff': 'Задачі передано',
@@ -664,10 +668,13 @@ function DeactivateUserDialog({ user, candidates, pending, onClose, onConfirm }:
               </div>
             )}
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">{t('settings.handOffTo')}</label>
+              <label className="text-xs font-medium text-muted-foreground">{count > 0 ? t('settings.handOffTo') : t('settings.successor')}</label>
               <Select value={reassignTo} onChange={(e) => setReassignTo(e.target.value)} className="w-full">
                 <option value="">{count > 0 ? t('settings.leaveUnassigned') : t('settings.noSuccessor')}</option>
-                {candidates.map((u) => <option key={u.id} value={u.id}>{u.name ?? u.email ?? u.id}</option>)}
+                {/* Their own agents go dark with them, so they cannot take over. */}
+                {candidates.filter((u) => !ownedAgents.some((a) => a.id === u.id)).map((u) => (
+                  <option key={u.id} value={u.id}>{u.name ?? u.email ?? u.id}{u.actorType === 'agent' ? ` · ${t('settings.agentTag')}` : ''}</option>
+                ))}
               </Select>
             </div>
           </>
@@ -696,7 +703,7 @@ function UsersPanel() {
 
   const changeRole = useMutation({
     mutationFn: ({ id, roleId }: { id: string; roleId: string }) => api.patch(`/users/${id}/role`, { roleId }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); qc.invalidateQueries({ queryKey: ['roles'] }); toast(t('settings.roleUpdated')); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); qc.invalidateQueries({ queryKey: ['roles'] }); qc.invalidateQueries({ queryKey: ['external-agents'] }); toast(t('settings.roleUpdated')); },
     // The server says why (an agent cannot be Owner, a role wider than yours).
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('settings.saveFailed')),
   });
@@ -715,7 +722,7 @@ function UsersPanel() {
       if (v.active) toast(t('settings.userReactivated'));
       else toast(r?.handedOffTasks ? `${t('settings.userDeactivated')} · ${t('settings.handedOff')}: ${r.handedOffTasks}` : t('settings.userDeactivated'));
     },
-    onError: () => toast.error(t('settings.saveFailed')),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('settings.saveFailed')),
   });
 
   // Someone who lost their password gets a one-time link, not a password an

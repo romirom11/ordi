@@ -319,6 +319,18 @@ describe('when its owner leaves', () => {
   });
 });
 
+describe('an ordi agent\'s role', () => {
+  it('is never wider than the person giving it, from its settings or the user list', async () => {
+    const { db } = getDb();
+    const [adminRole] = await db.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.key, 'admin'));
+    const managed = await json(owner().post('/agents', { name: 'Runner', runtime: 'claude_code' }));
+    const w = await wrangler();
+    expect((await w.patch(`/users/${managed.id}/role`, { roleId: adminRole!.id })).status).toBe(403);
+    expect((await w.post('/agents', { name: 'Big runner', runtime: 'claude_code', roleId: adminRole!.id })).status).toBe(403);
+    expect((await owner().patch(`/users/${managed.id}/role`, { roleId: ulid() })).status).toBe(400);
+  });
+});
+
 describe('changing an agent\'s role from the user list', () => {
   it('never makes it Owner, nor an external agent wider than the person', async () => {
     const { db } = getDb();

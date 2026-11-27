@@ -13,7 +13,7 @@ import { asLocale, loadBranding, renderEmail, tr } from '../../lib/email-templat
 import { createPasswordReset, sendPasswordResetEmail } from '../../core/password-reset';
 import { env } from '../../env';
 import { handOffOpenTasks, openTasksAssignedTo } from '../projects/service';
-import { assertCanGrantRole, externalAgentsOwnedBy, handOverOwnedAgents } from '../agents/external';
+import { assertCanGrantRole, assertSignedInPerson, externalAgentsOwnedBy, handOverOwnedAgents } from '../agents/external';
 
 export function usersRoutes() {
   const app = new Hono<AppEnv>();
@@ -209,11 +209,14 @@ export function usersRoutes() {
     // external agent – whose tokens are in someone's hands – gets no role
     // wider than the person giving it.
     if (target.actorType === 'agent') {
+      // Set by a person at the keyboard, like everything else about agents.
+      assertSignedInPerson(actor);
       const [role] = await db.select({ key: schema.roles.key }).from(schema.roles).where(eq(schema.roles.id, body.roleId));
       if (!role) throw err.validation('Unknown role');
       if (role.key === 'owner') throw err.domain('An agent cannot hold the Owner role');
-      const [ext] = await db.select({ userId: schema.externalAgents.userId }).from(schema.externalAgents).where(eq(schema.externalAgents.userId, id));
-      if (ext) await assertCanGrantRole(actor, body.roleId);
+      // Its tokens – an external agent's, or the run tokens of one ordi runs –
+      // carry this role, so it is never wider than the person giving it.
+      await assertCanGrantRole(actor, body.roleId);
     }
     await db.update(schema.users).set({ roleId: body.roleId }).where(eq(schema.users.id, id));
     await writeActivity(db, {
