@@ -365,6 +365,13 @@
       "when": 1795815059875,
       "tag": "0051_personal_agents",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1795818434605,
+      "tag": "0052_task_status_own_project",
+      "breakpoints": true
     }
   ]
 }

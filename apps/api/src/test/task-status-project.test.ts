@@ -4,7 +4,8 @@
  * board and its progress, and the other project deleting that status moved it.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import { getDb, schema, eq } from '@ordi/db';
+import { readFileSync } from 'node:fs';
+import { getDb, schema, eq, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import { resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
 import { consumers } from '../workers/consumers';
@@ -89,6 +90,24 @@ describe("a task's status", () => {
     expect(ok.updated).toBe(2);
   });
 
+  it('is refused for a selection spanning projects, before the matching project\'s tasks change', async () => {
+    const mine = await newTask('Span home');
+    const theirs = await json(owner.post('/tasks', { projectId: other, title: 'Span other' }));
+    const res = await owner.post('/tasks/bulk', { taskIds: [mine.id, theirs.id], statusId: homeStatus.id, priority: 'urgent' });
+    expect(res.status).toBe(400);
+    for (const t of [mine, theirs]) {
+      const after = await json(owner.get(`/tasks/${t.id}`));
+      expect(after.statusId).toBe(t.statusId);
+      expect(after.priority).not.toBe('urgent');
+    }
+  });
+
+  it('is refused when it does not exist at all', async () => {
+    const task = await newTask('Ghost status');
+    const res = await owner.patch(`/tasks/${task.id}`, { version: task.version, statusId: ulid() });
+    expect(res.status).toBe(400);
+  });
+
   it('is refused when accepting an intake request into another project\'s status', async () => {
     const { db } = getDb();
     const itemId = ulid();
@@ -117,5 +136,39 @@ describe("a task's status", () => {
     expect(ok.status).toBe(201);
     await automations.handle({ id: ulid(), type: 'git.pr_merged', aggregateType: 'task', aggregateId: task.id, payload: { taskId: task.id, projectId: home } } as never);
     expect(await statusOfTask(task.id)).toBe(homeStatus.id);
+  });
+
+  it('is not set by automation on a task that has since moved to another project', async () => {
+    const task = await newTask('Moving away');
+    const moved = await json(owner.post(`/tasks/${task.id}/move`, { targetProjectId: other }));
+    const automations = consumers.find((c) => c.name === 'automations')!;
+    // The event was queued for the old task, in the old project.
+    await automations.handle({ id: ulid(), type: 'git.pr_merged', aggregateType: 'task', aggregateId: task.id, payload: { taskId: task.id, projectId: home } } as never);
+    expect(await statusOfTask(task.id)).toBe(task.statusId);
+    expect(await statusOfTask(moved.id)).not.toBe(homeStatus.id);
+  });
+});
+
+describe('the repair migration', () => {
+  it("moves tasks out of another project's status and drops rules that point there", async () => {
+    const { db } = getDb();
+    const own = (await statusesOf(home)).find((s) => s.name === homeStatus.name)!;
+    const sameName = (await statusesOf(other)).find((s) => s.name === homeStatus.name)!;
+    const stray = await newTask('Stranded');
+    await db.update(schema.tasks).set({ statusId: sameName.id }).where(eq(schema.tasks.id, stray.id));
+    const fine = await newTask('Fine where it is');
+    const ruleId = ulid();
+    await db.insert(schema.gitAutomationRules).values({ id: ruleId, projectId: home, trigger: 'branch_created', targetStatusId: sameName.id });
+
+    const file = new URL('../../../../packages/db/drizzle/0052_task_status_own_project.sql', import.meta.url);
+    for (const statement of readFileSync(file, 'utf8').split('--> statement-breakpoint')) {
+      await db.execute(sql.raw(statement));
+    }
+
+    // Same name in its own project wins.
+    expect(await statusOfTask(stray.id)).toBe(own.id);
+    expect(await statusOfTask(fine.id)).toBe(fine.statusId);
+    const rules = await db.select().from(schema.gitAutomationRules).where(eq(schema.gitAutomationRules.id, ruleId));
+    expect(rules).toHaveLength(0);
   });
 });

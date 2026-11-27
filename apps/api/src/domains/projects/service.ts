@@ -523,22 +523,22 @@ export async function saveProjectAsTemplate(actor: Actor, projectId: string, nam
 // ─────────────────────────── Tasks ───────────────────────────
 
 /**
- * A milestone belongs to one project, so a task can only carry one of its own
- * project's milestones — otherwise the overview would count work it does not
- * own, and moving a task between projects would drag a stale grouping with it.
- */
-/**
  * A task's status is one of its own project's statuses: the board, progress
  * and that project's status deletion all read it that way. Exported for the
  * git automation rules, which set a status on their own later.
  */
-export async function assertStatusInProject(statusId: string, projectId: string): Promise<void> {
+export async function assertStatusInProject(statusId: string, projectId: string, field = 'statusId'): Promise<void> {
   const { db } = getDb();
   const [status] = await db.select({ id: taskStatuses.id }).from(taskStatuses)
     .where(and(eq(taskStatuses.id, statusId), eq(taskStatuses.projectId, projectId)));
-  if (!status) throw err.validation('statusId must be a status of the same project');
+  if (!status) throw err.validation(`${field} must be a status of the same project`);
 }
 
+/**
+ * A milestone belongs to one project, so a task can only carry one of its own
+ * project's milestones — otherwise the overview would count work it does not
+ * own, and moving a task between projects would drag a stale grouping with it.
+ */
 async function assertMilestoneInProject(milestoneId: string, projectId: string): Promise<void> {
   const { db } = getDb();
   const [ms] = await db.select({ id: schema.milestones.id }).from(schema.milestones)
