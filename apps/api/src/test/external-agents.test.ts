@@ -6,6 +6,8 @@
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import { getDb, schema, eq } from '@ordi/db';
+import { ulid } from 'ulid';
+import { generateToken } from '../lib/crypto';
 import { resetDb, seedRolesAndUsers, reqAs, json, app } from './helpers';
 import { setupWorkspace, addProjectMember, drainOutbox, runsForTask, type Workspace } from './agents-helpers';
 
@@ -70,6 +72,36 @@ describe('setting one up', () => {
     expect((await owner().patch(`/external-agents/${agent.id}`, { ownerUserId: agent.id })).status).toBe(400);
     const moved = await json(owner().patch(`/external-agents/${agent.id}`, { ownerUserId: users.manager!.userId }));
     expect(moved.ownerUserId).toBe(users.manager!.userId);
+  });
+});
+
+describe('handing out no more than you hold', () => {
+  it('refuses a role, or a token for it, that grants what the person does not have', async () => {
+    const { db } = getDb();
+    // Someone who manages agents but is not an admin.
+    const roleId = ulid();
+    await db.insert(schema.roles).values({ id: roleId, key: 'agent-wrangler', name: 'Agent wrangler', isSystem: false });
+    await db.insert(schema.rolePermissions).values(
+      ['agents.manage', 'users.manage', 'projects.read', 'projects.write', 'kb.read'].map((permission) => ({ roleId, permission })),
+    );
+    const wranglerId = ulid();
+    await db.insert(schema.users).values({ id: wranglerId, email: 'wrangler@test.local', name: 'Wrangler', roleId });
+    const session = generateToken();
+    await db.insert(schema.sessions).values({ id: ulid(), userId: wranglerId, token: session, expiresAt: new Date(Date.now() + 3600_000) });
+    const wrangler = reqAs(`ordi_session=${session}`);
+    const [adminRole] = await db.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.key, 'admin'));
+
+    // The Agent role is within reach; Admin is not.
+    const created = await wrangler.post('/external-agents', { name: 'Wrangled' });
+    expect(created.status).toBe(201);
+    const agent = await json(created);
+    expect((await wrangler.post('/external-agents', { name: 'Too big', roleId: adminRole!.id })).status).toBe(403);
+    expect((await wrangler.patch(`/external-agents/${agent.id}`, { roleId: adminRole!.id })).status).toBe(403);
+    expect((await wrangler.post(`/external-agents/${agent.id}/tokens`, {})).status).toBe(201);
+
+    // An owner made it Admin: the wrangler cannot mint its token any more.
+    expect((await owner().patch(`/external-agents/${agent.id}`, { roleId: adminRole!.id })).status).toBe(200);
+    expect((await wrangler.post(`/external-agents/${agent.id}/tokens`, {})).status).toBe(403);
   });
 });
 

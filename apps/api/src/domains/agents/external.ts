@@ -62,6 +62,20 @@ async function assertRole(roleId: string): Promise<void> {
   if (role.key === 'owner') throw err.domain('An agent cannot hold the Owner role');
 }
 
+/**
+ * An external agent's token is in someone's hands, so nobody hands out more
+ * than they hold: giving the agent a role, or a token for it, needs every
+ * permission that role grants. Without this, agents.manage alone would turn
+ * into any role short of Owner – make the agent Admin, mint its token, use it.
+ */
+async function assertCanGrantRole(actor: Actor, roleId: string): Promise<void> {
+  const granted = await loadRolePermissions(roleId);
+  const missing = [...granted].filter((p) => !actor.access.permissions.has(p));
+  if (missing.length) {
+    throw err.forbidden(`This agent's role grants permissions you do not hold (${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ', …' : ''})`, missing[0]!);
+  }
+}
+
 /** The owner is a person: questions without an addressee go to them. */
 async function assertOwner(userId: string): Promise<void> {
   const { db } = getDb();
@@ -133,6 +147,7 @@ export async function createExternalAgent(actor: Actor, input: CreateExternalAge
   const { db } = getDb();
   const roleId = input.roleId ?? await defaultAgentRoleId();
   await assertRole(roleId);
+  await assertCanGrantRole(actor, roleId);
   const ownerUserId = input.ownerUserId ?? actor.userId;
   await assertOwner(ownerUserId);
   const id = ulid();
@@ -155,7 +170,11 @@ export async function updateExternalAgent(actor: Actor, id: string, input: Updat
   await loadRow(id);
   const userPatch: Partial<typeof users.$inferInsert> = {};
   if (input.name !== undefined) userPatch.name = input.name;
-  if (input.roleId !== undefined) { await assertRole(input.roleId); userPatch.roleId = input.roleId; }
+  if (input.roleId !== undefined) {
+    await assertRole(input.roleId);
+    await assertCanGrantRole(actor, input.roleId);
+    userPatch.roleId = input.roleId;
+  }
   if (input.ownerUserId !== undefined) await assertOwner(input.ownerUserId);
   await db.transaction(async (tx) => {
     if (Object.keys(userPatch).length) await tx.update(users).set(userPatch).where(eq(users.id, id));
@@ -199,6 +218,7 @@ export async function issueExternalAgentToken(
   const { db } = getDb();
   const row = await loadRow(id);
   if (!row.user.isActive) throw err.domain('This agent is switched off; switch it on before issuing a token');
+  await assertCanGrantRole(actor, row.user.roleId);
   const raw = `ordi_${generateToken(24)}`;
   const tokenId = ulid();
   const expiresAt = input.expiresInDays ? new Date(Date.now() + input.expiresInDays * 86_400_000) : null;
