@@ -323,9 +323,13 @@ export async function softDeleteProject(actor: Actor, id: string) {
 }
 
 /**
- * Who may see and restore a deleted project: projects.delete, plus project
- * admin rights – from projects.write, or an admin membership row. The access
- * context skips memberships of deleted projects, so the row is read here.
+ * Who may see and restore a deleted project: projects.delete, plus admin rights
+ * on that project as it stood before the delete – the same rank that would let
+ * them delete it. On a workspace project projects.write grants that (not for an
+ * agent, which is admin only where its membership says so); a private project
+ * stays as closed in the trash as it was alive, open only to its admin
+ * members. The access context skips memberships of deleted projects, so the
+ * rows are read here.
  */
 async function deletedProjectsFor(actor: Actor, id?: string) {
   const { db } = getDb();
@@ -334,16 +338,15 @@ async function deletedProjectsFor(actor: Actor, id?: string) {
     id: projects.id, name: projects.name, key: projects.key, visibility: projects.visibility, deletedAt: projects.deletedAt,
   }).from(projects).where(and(isNotNull(projects.deletedAt), id ? eq(projects.id, id) : undefined))
     .orderBy(desc(projects.deletedAt));
-  // projects.write is admin of every workspace project – but not for an agent,
-  // which is admin only where its membership says so.
-  if (actor.access.permissions.has('projects.write') && !actor.access.membershipOnlyProjects) return rows;
   if (!rows.length) return rows;
-  const admin = await db.select({ projectId: projectMembers.projectId }).from(projectMembers).where(and(
-    eq(projectMembers.userId, actor.userId), eq(projectMembers.role, 'admin'),
-    inArray(projectMembers.projectId, rows.map((r) => r.id)),
+  const memberships = await db.select({ projectId: projectMembers.projectId, role: projectMembers.role }).from(projectMembers).where(and(
+    eq(projectMembers.userId, actor.userId), inArray(projectMembers.projectId, rows.map((r) => r.id)),
   ));
-  const ok = new Set(admin.map((r) => r.projectId));
-  return rows.filter((r) => ok.has(r.id));
+  const asBefore: Actor = { ...actor, access: {
+    ...actor.access,
+    projectMemberships: new Map(memberships.map((m) => [m.projectId, m.role as 'admin' | 'member' | 'viewer'])),
+  } };
+  return rows.filter((r) => effectiveProjectRole(asBefore, { id: r.id, visibility: r.visibility as 'workspace' | 'private' }) === 'admin');
 }
 
 export async function listDeletedProjects(actor: Actor) {

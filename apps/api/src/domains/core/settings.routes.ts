@@ -15,6 +15,7 @@ import { invalidateModuleCache } from '../../core/modules';
 import { integrationsConfigSchema, mailRolesSchema, mailSenderInputSchema, mailSenderUpdateSchema } from '@ordi/shared';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
+import { listDeletedProjects } from '../projects/service';
 
 /**
  * Mask a secret webhook URL for GET responses shown to non-managers: keep the
@@ -331,10 +332,12 @@ export function settingsRoutes() {
   });
 
   // Trash (PRD §14.7): list soft-deleted across the main business entities.
+  // Deleted projects follow the project trash's rule: a private one shows only
+  // to its own admins, as it did alive.
   app.get('/trash', guard('settings.manage'), async (c) => {
     const { db } = getDb();
     const [projects, tasks, invoices] = await Promise.all([
-      db.execute(sql`select id, name, deleted_at from projects where deleted_at is not null limit 50`),
+      listDeletedProjects(currentActor(c)).then((rows) => rows.slice(0, 50).map((p) => ({ id: p.id, name: p.name, deleted_at: p.deletedAt }))),
       db.execute(sql`select id, title, deleted_at from tasks where deleted_at is not null limit 50`),
       db.execute(sql`select id, number, deleted_at from invoices where deleted_at is not null limit 50`),
     ]);
