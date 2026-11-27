@@ -4,6 +4,7 @@
  * HTML entities on the way in, and the failure text. Shared by the catalog in
  * server.ts and the project/task tools in tasks.ts.
  */
+import { docToText } from '@ordi/shared';
 import { OrdiApiError } from './client';
 
 /**
@@ -114,4 +115,19 @@ export function wrap<T>(fn: () => Promise<T>, opts?: TextOptions) {
   return fn()
     .then((data) => text(data, opts))
     .catch((e: unknown) => ({ isError: true, content: [{ type: 'text' as const, text: toolErrorText(e) }] }));
+}
+
+/**
+ * The project description column holds a tiptap doc serialized as JSON; older
+ * rows hold plain text. Either way an agent reads plain text.
+ */
+export function projectDescriptionText(raw: unknown): string {
+  if (raw == null || raw === '') return '';
+  if (typeof raw === 'object') return docToText(raw);
+  const value = String(raw);
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === 'object') return docToText(parsed);
+  } catch { /* legacy plain text */ }
+  return value;
 }
