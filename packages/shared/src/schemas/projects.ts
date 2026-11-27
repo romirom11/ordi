@@ -207,8 +207,15 @@ export const taskLinkSchema = z.object({
   title: z.string().min(1),
 });
 
+/**
+ * The most tasks one bulk edit takes. The whole selection is checked, locked
+ * and written in one transaction, so it has to stay a size that transaction
+ * can hold; the web sends a larger selection in parts of this size.
+ */
+export const BULK_TASK_LIMIT = 500;
+
 export const bulkTaskUpdateSchema = z.object({
-  taskIds: z.array(idSchema).min(1),
+  taskIds: z.array(idSchema).min(1).max(BULK_TASK_LIMIT, `Edit at most ${BULK_TASK_LIMIT} tasks at once`),
   statusId: idSchema.optional(),
   assigneeIds: z.array(idSchema).optional(),
   labelIds: z.array(idSchema).optional(),

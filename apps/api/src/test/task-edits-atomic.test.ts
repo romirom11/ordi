@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { getDb, schema, eq, and, inArray, sql } from '@ordi/db';
 import { ulid } from 'ulid';
+import { BULK_TASK_LIMIT } from '@ordi/shared';
 import { resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
 import { setupWorkspace, createAgent, addProjectMember, type Workspace } from './agents-helpers';
 
@@ -178,5 +179,23 @@ describe('a bulk task edit that is refused', () => {
     }
     const types = (await eventsFor([a.id, b.id])).filter((e) => e.type !== 'task.updated').map((e) => e.type).sort();
     expect(types).toEqual(['task.assigned', 'task.assigned', 'task.status_changed', 'task.status_changed']);
+  });
+});
+
+describe('a bulk task edit of a large selection', () => {
+  it('takes at most BULK_TASK_LIMIT tasks, and refuses a larger one before reading any', async () => {
+    const task = await newTask(ws.projectId, 'Not touched by the oversized edit');
+    const ids = (n: number) => [task.id, ...Array.from({ length: n - 1 }, () => ulid())];
+    const tooMany = await owner.post('/tasks/bulk', { taskIds: ids(BULK_TASK_LIMIT + 1), priority: 'urgent' });
+    expect(tooMany.status).toBe(400);
+    const body = await json(tooMany);
+    expect(body.error.code).toBe('validation_error');
+    expect(body.error.details.fieldErrors.taskIds).toEqual([`Edit at most ${BULK_TASK_LIMIT} tasks at once`]);
+    expect((await row(task.id)).priority).toBe(task.priority);
+
+    const atLimit = await owner.post('/tasks/bulk', { taskIds: ids(BULK_TASK_LIMIT), priority: 'urgent' });
+    expect(atLimit.status).toBe(200);
+    expect((await json(atLimit)).updated).toBe(1);
+    expect((await row(task.id)).priority).toBe('urgent');
   });
 });
