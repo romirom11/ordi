@@ -652,8 +652,12 @@ function DeactivateUserDialog({ user, candidates, pending, onClose, onConfirm }:
           <Skeleton className="h-16 w-full" />
         ) : open.isError ? (
           <p className="text-[13px] text-destructive">{t('settings.previewFailed')}</p>
-        ) : count === 0 && ownedAgents.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">{t('settings.openTasksNone')}</p>
+        ) : count === 0 && teamAgents.length === 0 ? (
+          // Nothing to hand on: their own agent, if any, just goes dark with them.
+          <>
+            <p className="text-[13px] text-muted-foreground">{t('settings.openTasksNone')}</p>
+            {ownAgent && <p className="text-xs text-muted-foreground">{t('settings.ownAgentOff').replace('{name}', ownAgent.name)}</p>}
+          </>
         ) : (
           <>
             {count === 0 && <p className="text-[13px] text-muted-foreground">{t('settings.openTasksNone')}</p>}
