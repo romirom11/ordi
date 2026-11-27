@@ -58,6 +58,13 @@ describe('canAccessProject', () => {
   it('membership still wins where permissions stop', () => {
     expect(canAccessProject(ctx([], [['p1', 'admin']]), { visibility: 'private', projectId: 'p1', minRole: 'admin' })).toBe(true);
   });
+  it('membership-only actors (agents) get nothing from workspace visibility', () => {
+    const agent = { ...ctx(['projects.read', 'projects.write'], [['mine', 'member']]), membershipOnlyProjects: true };
+    expect(canAccessProject(agent, { visibility: 'workspace', projectId: 'other' })).toBe(false);
+    expect(canAccessProject(agent, { visibility: 'workspace', projectId: 'mine', minRole: 'member' })).toBe(true);
+    // The membership role is the ceiling: projects.write no longer lifts it to admin.
+    expect(canAccessProject(agent, { visibility: 'workspace', projectId: 'mine', minRole: 'admin' })).toBe(false);
+  });
 });
 
 describe('canAccessSpace with project inheritance', () => {

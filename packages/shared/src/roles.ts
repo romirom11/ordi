@@ -73,7 +73,9 @@ const HR: Permission[] = [
 /**
  * The default role for AI agent users: work tasks in the projects they are a
  * member of and read the knowledge base. No finance, people or settings –
- * an owner who wants more picks another role for the agent.
+ * an owner who wants more picks another role for the agent. Whatever the
+ * role, an agent reaches only the projects it is a member of
+ * (AccessContext.membershipOnlyProjects).
  */
 const AGENT: Permission[] = [
   'projects.read', 'projects.write',

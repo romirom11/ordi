@@ -75,7 +75,7 @@ export async function agentActor(userId: string): Promise<Actor> {
   const [user] = await db.select().from(users).where(eq(users.id, userId));
   if (!user) throw new Error('Agent user not found');
   const permissions = await loadRolePermissions(user.roleId);
-  const access = await buildAccessContext(user.id, permissions, false);
+  const access = await buildAccessContext(user.id, permissions, false, user.actorType);
   return {
     userId: user.id, actorType: user.actorType === 'agent' ? 'agent' : 'user', roleId: user.roleId, roleName: '', email: user.email, name: user.name,
     locale: user.locale, timezone: user.timezone, readOnly: false, tokenScopes: null, access,

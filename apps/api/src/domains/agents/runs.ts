@@ -85,6 +85,12 @@ export async function queueRun(input: QueueRunInput): Promise<string | null> {
   const { db } = getDb();
   const [profile] = await db.select().from(agentProfiles).where(eq(agentProfiles.userId, input.agentUserId));
   if (!profile) return null;
+  // An agent reaches only the projects it is a member of, so a run anywhere
+  // else would fail on its first read. Assignment already refuses a
+  // non-member; this covers an @-mention and an agent removed from the project.
+  const [membership] = await db.select({ userId: schema.projectMembers.userId }).from(schema.projectMembers)
+    .where(and(eq(schema.projectMembers.projectId, input.projectId), eq(schema.projectMembers.userId, input.agentUserId)));
+  if (!membership) return null;
   const id = ulid();
   try {
     await db.insert(agentRuns).values({

@@ -21,6 +21,13 @@ export interface AccessContext {
   /** spaceId -> membership role */
   spaceMemberships: Map<string, 'editor' | 'viewer'>;
   isReadOnlyToken?: boolean;
+  /**
+   * Projects open only through a membership row: `workspace` visibility grants
+   * nothing on its own. Agents work this way – they are added to the projects
+   * they work in, and a task or comment that talks one into reaching further
+   * (prompt injection) must not find the rest of the workspace open to it.
+   */
+  membershipOnlyProjects?: boolean;
 }
 
 export function hasPermission(ctx: AccessContext, required: string): boolean {
@@ -58,7 +65,7 @@ export function projectAccessRank(
 ): number {
   const membership = ctx.projectMemberships.get(params.projectId);
   const memberRank = membership ? PROJECT_ROLE_RANK[membership] ?? 0 : 0;
-  const permRank = params.visibility === 'workspace' ? workspaceProjectRank(ctx.permissions) : 0;
+  const permRank = params.visibility === 'workspace' && !ctx.membershipOnlyProjects ? workspaceProjectRank(ctx.permissions) : 0;
   return Math.max(memberRank, permRank);
 }
 

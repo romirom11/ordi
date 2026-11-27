@@ -311,6 +311,14 @@ request and the task in review.
   write the agent makes is an ordinary authorized API call attributed to it in
   `activity_log`, so "what did the agent do" is answered by the same audit trail
   as for a person. A role change applies to the next run, not the running one.
+- **An agent reaches only its own projects.** For people, a `workspace`-visible
+  project is open on permissions alone (`projects.write` = project admin). For
+  an agent user it is not: `AccessContext.membershipOnlyProjects` makes the
+  membership row the only way in and its role the ceiling, whatever role the
+  agent holds. A task or comment that talks an agent into reaching further
+  (prompt injection) finds nothing outside the projects it was added to, and
+  `queueRun` refuses to start a run in a project the agent is not a member of,
+  whether it was assigned or @-mentioned.
 - **The agent stops at `in_review`.** It moves the task to the project's status
   in the profile's completion category and never to a `done` one; the pull
   request is attached with `add_task_link`, and the existing `pr_merged` git
