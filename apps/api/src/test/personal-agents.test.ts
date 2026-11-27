@@ -173,8 +173,11 @@ describe('what it can do', () => {
     for (const permission of perms) {
       await db.delete(schema.rolePermissions).where(and(eq(schema.rolePermissions.roleId, roleId), eq(schema.rolePermissions.permission, permission)));
     }
-    await owner().get('/me'); // this process has now read the role without them
-    await db.insert(schema.rolePermissions).values(perms.map((permission) => ({ roleId, permission })));
+    try {
+      await owner().get('/me'); // this process has now read the role without them
+    } finally {
+      await db.insert(schema.rolePermissions).values(perms.map((permission) => ({ roleId, permission })));
+    }
     const res = await bearer(token).post('/tasks', { projectId: open.id, title: 'Filed through the lag' });
     expect(res.status).toBe(201);
     expect((await json(res)).reporterId).toBe(users.owner!.userId);

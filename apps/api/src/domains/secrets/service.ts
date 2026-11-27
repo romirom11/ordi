@@ -658,9 +658,13 @@ async function workspaceAccess(projectId: string) {
   const deptOf = new Map(staff.map((e) => [e.userId!, e.departmentId]));
   const roleRanks = ['viewer', 'member', 'admin'] as const;
 
+  // Each role once, not once per person: permissions are read from the
+  // database on every call, and a workspace has a handful of roles.
+  const roleIds = [...new Set(people.map((p) => p.roleId))];
+  const permissionsOf = new Map(await Promise.all(roleIds.map(async (id) => [id, await loadRolePermissions(id)] as const)));
   const rows = [];
   for (const p of people) {
-    const permissions = await loadRolePermissions(p.roleId);
+    const permissions = permissionsOf.get(p.roleId)!;
     const rank = project ? projectAccessRank(
       { permissions, projectMemberships: memberships.has(p.id) ? new Map([[projectId, memberships.get(p.id)!]]) : new Map(), spaceMemberships: new Map() },
       { visibility: project.visibility as 'workspace' | 'private', projectId },
