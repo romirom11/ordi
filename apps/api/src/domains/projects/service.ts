@@ -17,7 +17,9 @@ import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { emit, publishEvent } from '../../core/events';
 import { assertVersion } from '../../core/locking';
-import { assertProject, accessibleProjectIds, effectiveProjectRole, userCanOpenProject } from '../../core/access';
+import {
+  assertProject, accessibleProjectIds, effectiveProjectRole, effectiveProjectRolesIncludingDeleted, userCanOpenProject,
+} from '../../core/access';
 import { closeProjectTimers } from '../time/service';
 import { cancelProjectRuns } from '../agents/runs';
 import { assertCanAssignAgents } from '../agents/profiles';
@@ -323,9 +325,13 @@ export async function softDeleteProject(actor: Actor, id: string) {
 }
 
 /**
- * Who may see and restore a deleted project: projects.delete, plus project
- * admin rights – from projects.write, or an admin membership row. The access
- * context skips memberships of deleted projects, so the row is read here.
+ * Who may see and restore a deleted project: projects.delete, plus admin rights
+ * on that project as it stood before the delete – the same rank that would let
+ * them delete it. On a workspace project projects.write grants that (not for an
+ * agent, which is admin only where its membership says so); a private project
+ * stays as closed in the trash as it was alive, open only to its admin
+ * members (effectiveProjectRolesIncludingDeleted reads those rows, which the
+ * access context skips for a deleted project).
  */
 async function deletedProjectsFor(actor: Actor, id?: string) {
   const { db } = getDb();
@@ -334,16 +340,8 @@ async function deletedProjectsFor(actor: Actor, id?: string) {
     id: projects.id, name: projects.name, key: projects.key, visibility: projects.visibility, deletedAt: projects.deletedAt,
   }).from(projects).where(and(isNotNull(projects.deletedAt), id ? eq(projects.id, id) : undefined))
     .orderBy(desc(projects.deletedAt));
-  // projects.write is admin of every workspace project – but not for an agent,
-  // which is admin only where its membership says so.
-  if (actor.access.permissions.has('projects.write') && !actor.access.membershipOnlyProjects) return rows;
-  if (!rows.length) return rows;
-  const admin = await db.select({ projectId: projectMembers.projectId }).from(projectMembers).where(and(
-    eq(projectMembers.userId, actor.userId), eq(projectMembers.role, 'admin'),
-    inArray(projectMembers.projectId, rows.map((r) => r.id)),
-  ));
-  const ok = new Set(admin.map((r) => r.projectId));
-  return rows.filter((r) => ok.has(r.id));
+  const roles = await effectiveProjectRolesIncludingDeleted(actor, rows.map((r) => ({ id: r.id, visibility: r.visibility as 'workspace' | 'private' })));
+  return rows.filter((r) => roles.get(r.id) === 'admin');
 }
 
 export async function listDeletedProjects(actor: Actor) {
@@ -355,9 +353,15 @@ export async function restoreProject(actor: Actor, id: string) {
   if (!project) throw err.notFound('Project not found');
   const { db } = getDb();
   // The key went back to the pool on delete; someone may have taken it since.
-  const [taken] = await db.select({ id: projects.id, name: projects.name }).from(projects)
+  const [taken] = await db.select({ id: projects.id, name: projects.name, visibility: projects.visibility }).from(projects)
     .where(and(eq(projects.key, project.key), isNull(projects.deletedAt)));
-  if (taken) throw err.domain(`The key ${project.key} now belongs to project "${taken.name}" – rename that project's key or delete it first.`);
+  if (taken) {
+    // Name the project only to someone it is open to: a private one stays unnamed.
+    const open = effectiveProjectRole(actor, { id: taken.id, visibility: taken.visibility as 'workspace' | 'private' }) !== null;
+    throw err.domain(open
+      ? `The key ${project.key} now belongs to project "${taken.name}" – rename that project's key or delete it first.`
+      : `The key ${project.key} now belongs to another project – ask its admin to rename its key or delete it first.`);
+  }
   await db.update(projects).set({ deletedAt: null }).where(eq(projects.id, id));
   await writeActivity(db, { entityType: 'project', entityId: id, action: 'restored', actorId: actor.userId, actorType: actor.actorType });
   const [restored] = await db.select().from(projects).where(eq(projects.id, id));
