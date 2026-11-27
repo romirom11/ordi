@@ -213,7 +213,7 @@ export async function createExternalAgent(actor: Actor, input: CreateExternalAge
 
 export async function updateExternalAgent(actor: Actor, id: string, input: UpdateExternalAgentInput): Promise<ExternalAgentView> {
   const { db } = getDb();
-  await loadRow(id);
+  const row = await loadRow(id);
   const userPatch: Partial<typeof users.$inferInsert> = {};
   if (input.name !== undefined) userPatch.name = input.name;
   if (input.roleId !== undefined) {
@@ -222,10 +222,22 @@ export async function updateExternalAgent(actor: Actor, id: string, input: Updat
     userPatch.roleId = input.roleId;
   }
   if (input.ownerUserId !== undefined) await assertOwner(input.ownerUserId);
+  const ownerChanges = input.ownerUserId !== undefined && input.ownerUserId !== row.ext.ownerUserId;
   await db.transaction(async (tx) => {
+    if (ownerChanges) {
+      // Person before agent – the order deactivation locks them in – and the
+      // new owner checked again under the lock, so a deactivation running at
+      // the same time cannot be handed an agent it has already passed over.
+      const [next] = await tx.select({ isActive: users.isActive, actorType: users.actorType }).from(users)
+        .where(eq(users.id, input.ownerUserId!)).for('share');
+      if (!next?.isActive || next.actorType !== 'user') throw err.validation('The owner must be an active person, not an agent');
+      await tx.select({ id: users.id }).from(users).where(eq(users.id, id)).for('update');
+    }
     if (Object.keys(userPatch).length) await tx.update(users).set(userPatch).where(eq(users.id, id));
-    if (input.ownerUserId !== undefined) {
-      await tx.update(externalAgents).set({ ownerUserId: input.ownerUserId }).where(eq(externalAgents.userId, id));
+    if (ownerChanges) {
+      await tx.update(externalAgents).set({ ownerUserId: input.ownerUserId! }).where(eq(externalAgents.userId, id));
+      // The previous owner may hold a copy of its tokens: the new owner starts fresh.
+      await tx.update(apiTokens).set({ revokedAt: new Date() }).where(and(eq(apiTokens.userId, id), isNull(apiTokens.revokedAt)));
     }
     await writeActivity(tx, {
       entityType: 'agent', entityId: id, action: 'updated', actorId: actor.userId, actorType: actor.actorType,
@@ -238,7 +250,11 @@ export async function updateExternalAgent(actor: Actor, id: string, input: Updat
 /** Switching an agent off revokes every token it holds; switching it back on needs a new one. */
 export async function setExternalAgentActive(actor: Actor, id: string, active: boolean): Promise<ExternalAgentView> {
   const { db } = getDb();
-  await loadRow(id);
+  const row = await loadRow(id);
+  if (active) {
+    const [owner] = await db.select({ isActive: users.isActive }).from(users).where(eq(users.id, row.ext.ownerUserId));
+    if (!owner?.isActive) throw err.domain('Its owner is no longer active – give it a new owner before switching it on');
+  }
   await db.transaction(async (tx) => {
     // Takes the row lock token issuance waits on (see issueExternalAgentToken).
     await tx.update(users).set({ isActive: active }).where(eq(users.id, id));
@@ -270,6 +286,10 @@ export async function issueExternalAgentToken(
   const tokenId = ulid();
   const expiresAt = input.expiresInDays ? new Date(Date.now() + input.expiresInDays * 86_400_000) : null;
   await db.transaction(async (tx) => {
+    // Person before agent, the order deactivation takes them in: an issuer
+    // being deactivated right now is seen as inactive here, not after.
+    const [issuer] = await tx.select({ isActive: users.isActive }).from(users).where(eq(users.id, actor.userId)).for('share');
+    if (!issuer?.isActive) throw err.forbidden('Your account is no longer active', 'agents.manage');
     // The agent row stays locked until the token is in: a switch-off running
     // at the same time either comes first (and this refuses) or comes after
     // (and revokes this token with the rest).
@@ -325,38 +345,41 @@ export async function externalAgentsOwnedBy(userId: string): Promise<{ id: strin
  * tokens they may have a copy of. Every token of each agent they own is
  * revoked. With a successor who is a person the agents move to them – still
  * switched on, waiting for a fresh token; otherwise they are switched off.
- * The agent rows are locked first, so a token issued at the same moment is
- * either refused or revoked with the rest.
+ *
+ * Runs inside the deactivation's transaction, after it has locked the
+ * person's row: owner changes and token issuance lock the person before the
+ * agent (see below), so neither can slip in between and survive.
  */
 export async function handOverOwnedAgents(
+  tx: any,
   actor: Actor,
   fromUserId: string,
   toUserId: string | null,
 ): Promise<{ id: string; name: string; outcome: 'transferred' | 'disabled' }[]> {
-  const { db } = getDb();
-  const owned = await externalAgentsOwnedBy(fromUserId);
+  const owned: { id: string; name: string }[] = await tx.select({ id: users.id, name: users.name }).from(externalAgents)
+    .innerJoin(users, eq(users.id, externalAgents.userId))
+    .where(eq(externalAgents.ownerUserId, fromUserId))
+    .orderBy(users.name)
+    .for('update', { of: users });
   if (!owned.length) return [];
   let successor: string | null = null;
   if (toUserId) {
-    const [next] = await db.select({ isActive: users.isActive, actorType: users.actorType }).from(users).where(eq(users.id, toUserId));
+    const [next] = await tx.select({ isActive: users.isActive, actorType: users.actorType }).from(users).where(eq(users.id, toUserId)).for('share');
     if (next?.isActive && next.actorType === 'user') successor = toUserId;
   }
   const ids = owned.map((a) => a.id);
-  await db.transaction(async (tx) => {
-    await tx.select({ id: users.id }).from(users).where(inArray(users.id, ids)).for('update');
-    await tx.update(apiTokens).set({ revokedAt: new Date() }).where(and(inArray(apiTokens.userId, ids), isNull(apiTokens.revokedAt)));
-    if (successor) {
-      await tx.update(externalAgents).set({ ownerUserId: successor }).where(inArray(externalAgents.userId, ids));
-    } else {
-      await tx.update(users).set({ isActive: false }).where(inArray(users.id, ids));
-    }
-    for (const agent of owned) {
-      await writeActivity(tx, {
-        entityType: 'agent', entityId: agent.id, action: successor ? 'owner_handed_over' : 'disabled',
-        actorId: actor.userId, actorType: actor.actorType,
-        diff: { fromOwner: fromUserId, toOwner: successor, reason: 'owner_deactivated' },
-      });
-    }
-  });
+  await tx.update(apiTokens).set({ revokedAt: new Date() }).where(and(inArray(apiTokens.userId, ids), isNull(apiTokens.revokedAt)));
+  if (successor) {
+    await tx.update(externalAgents).set({ ownerUserId: successor }).where(inArray(externalAgents.userId, ids));
+  } else {
+    await tx.update(users).set({ isActive: false }).where(inArray(users.id, ids));
+  }
+  for (const agent of owned) {
+    await writeActivity(tx, {
+      entityType: 'agent', entityId: agent.id, action: successor ? 'owner_handed_over' : 'disabled',
+      actorId: actor.userId, actorType: actor.actorType,
+      diff: { fromOwner: fromUserId, toOwner: successor, reason: 'owner_deactivated' },
+    });
+  }
   return owned.map((a) => ({ id: a.id, name: a.name, outcome: successor ? 'transferred' : 'disabled' }));
 }

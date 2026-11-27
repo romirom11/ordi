@@ -15,7 +15,7 @@ import {
 import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
-import { emit } from '../../core/events';
+import { emit, publishEvent } from '../../core/events';
 import { assertVersion } from '../../core/locking';
 import { assertProject, accessibleProjectIds, effectiveProjectRole, userCanOpenProject } from '../../core/access';
 import { closeProjectTimers } from '../time/service';
@@ -855,8 +855,12 @@ export async function openTasksAssignedTo(userId: string) {
  * keep their history. Each task gets a `reassigned` activity row, so the
  * hand-off reads on the task itself, not only in the user's audit trail.
  */
-export async function handOffOpenTasks(actor: Actor, fromUserId: string, toUserId: string | null) {
-  const { db } = getDb();
+/**
+ * Runs inside the caller's transaction (deactivation hands tasks, agents and
+ * the account over as one step), events included – they go to the outbox in
+ * the same transaction, so nothing is announced that did not commit.
+ */
+export async function handOffOpenTasks(actor: Actor, fromUserId: string, toUserId: string | null, tx: any) {
   const open = await openTasksAssignedTo(fromUserId);
   if (!open.length) return { count: 0, taskIds: [] as string[] };
   const ids = open.map((t) => t.id);
@@ -866,24 +870,20 @@ export async function handOffOpenTasks(actor: Actor, fromUserId: string, toUserI
     const projectIds = [...new Set(open.map((t) => t.projectId))];
     for (const projectId of projectIds) await assertCanAssignAgents(actor, projectId, [toUserId], null, { policy: false });
   }
-  await db.transaction(async (tx) => {
-    await tx.delete(taskAssignees).where(and(inArray(taskAssignees.taskId, ids), eq(taskAssignees.userId, fromUserId)));
-    if (toUserId) {
-      await tx.insert(taskAssignees).values(ids.map((taskId) => ({ taskId, userId: toUserId }))).onConflictDoNothing();
-    }
-    await tx.update(tasks).set({ updatedAt: new Date() }).where(inArray(tasks.id, ids));
-    for (const t of open) {
-      await writeActivity(tx, {
-        entityType: 'task', entityId: t.id, action: 'reassigned',
-        before: { assigneeId: fromUserId }, after: { assigneeId: toUserId },
-        actorId: actor.userId, actorType: actor.actorType,
-      });
-    }
-  });
+  await tx.delete(taskAssignees).where(and(inArray(taskAssignees.taskId, ids), eq(taskAssignees.userId, fromUserId)));
   if (toUserId) {
+    await tx.insert(taskAssignees).values(ids.map((taskId) => ({ taskId, userId: toUserId }))).onConflictDoNothing();
+  }
+  await tx.update(tasks).set({ updatedAt: new Date() }).where(inArray(tasks.id, ids));
+  for (const t of open) {
+    await writeActivity(tx, {
+      entityType: 'task', entityId: t.id, action: 'reassigned',
+      before: { assigneeId: fromUserId }, after: { assigneeId: toUserId },
+      actorId: actor.userId, actorType: actor.actorType,
+    });
     // The successor learns about their new work the same way any assignee does.
-    for (const t of open) {
-      await emit({ type: 'task.assigned', aggregateType: 'task', aggregateId: t.id, payload: { assigneeIds: [toUserId], ref: t.ref, taskId: t.id, projectId: t.projectId }, actorId: actor.userId, actorType: actor.actorType });
+    if (toUserId) {
+      await publishEvent(tx, { type: 'task.assigned', aggregateType: 'task', aggregateId: t.id, payload: { assigneeIds: [toUserId], ref: t.ref, taskId: t.id, projectId: t.projectId }, actorId: actor.userId, actorType: actor.actorType });
     }
   }
   return { count: ids.length, taskIds: ids };

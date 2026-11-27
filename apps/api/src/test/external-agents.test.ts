@@ -279,6 +279,32 @@ describe('when its owner leaves', () => {
     expect(view).toMatchObject({ ownerUserId: users.manager!.userId, isActive: true });
   });
 
+  it('is not a successor for its own owner, and does not come back on through the user list', async () => {
+    const leaver = await person('Leaving Lara');
+    const agent = await createAgent('Lara\'s bot');
+    await owner().patch(`/external-agents/${agent.id}`, { ownerUserId: leaver });
+    const refused = await owner().post(`/users/${leaver}/deactivate`, { reassignTo: agent.id });
+    expect(refused.status).toBe(400);
+    const [still] = await getDb().db.select({ isActive: schema.users.isActive }).from(schema.users).where(eq(schema.users.id, leaver));
+    expect(still!.isActive).toBe(true);
+
+    await owner().post(`/users/${leaver}/deactivate`, {});
+    // Switched off with its owner: the user list cannot bring it back, and
+    // the agent settings refuse while it has no active owner.
+    expect((await owner().post(`/users/${agent.id}/reactivate`)).status).toBeGreaterThanOrEqual(400);
+    expect((await owner().post(`/external-agents/${agent.id}/enable`)).status).toBeGreaterThanOrEqual(400);
+    await owner().patch(`/external-agents/${agent.id}`, { ownerUserId: users.manager!.userId });
+    expect((await owner().post(`/external-agents/${agent.id}/enable`)).status).toBe(200);
+  });
+
+  it('a new owner starts with no tokens', async () => {
+    const agent = await createAgent('Handed bot');
+    const { token } = await issueToken(agent.id, null);
+    expect((await bearer(token).get('/projects')).status).toBe(200);
+    await owner().patch(`/external-agents/${agent.id}`, { ownerUserId: users.manager!.userId });
+    expect((await bearer(token).get('/projects')).status).toBe(401);
+  });
+
   it('is switched off when there is no one to take it over', async () => {
     const leaver = await person('Leaving Leo');
     const agent = await createAgent('Leo\'s bot');

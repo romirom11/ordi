@@ -253,25 +253,41 @@ export function usersRoutes() {
         .from(schema.users).where(eq(schema.users.id, reassignTo));
       if (!successor) throw err.validation('Unknown user to hand tasks over to', { reassignTo });
       if (!successor.isActive) throw err.validation('Tasks cannot be handed over to a deactivated user');
+      // One of their own agents is about to be switched off with them.
+      const [owned] = await db.select({ userId: schema.externalAgents.userId }).from(schema.externalAgents)
+        .where(and(eq(schema.externalAgents.userId, reassignTo), eq(schema.externalAgents.ownerUserId, id)));
+      if (owned) throw err.validation('That agent works for the person being deactivated and is switched off with them – pick someone else');
     }
-    const handedOff = await handOffOpenTasks(actor, id, reassignTo);
-    // Their external agents lose every token and move to the successor (a
-    // person), or are switched off: a copied token must not outlive them.
-    const agents = await handOverOwnedAgents(actor, id, reassignTo);
 
-    await db.update(schema.users).set({ isActive: false }).where(eq(schema.users.id, id));
-    await db.delete(schema.sessions).where(eq(schema.sessions.userId, id));
-    await db.update(schema.apiTokens).set({ revokedAt: new Date() }).where(eq(schema.apiTokens.userId, id));
-    await writeActivity(db, {
-      entityType: 'user', entityId: id, action: 'deactivated',
-      after: { reassignTo, handedOffTasks: handedOff.count, externalAgents: agents },
-      actorId: actor.userId, actorType: actor.actorType,
+    // One step: tasks, their external agents and the account itself change
+    // together or not at all. The person's row is locked first – owner changes
+    // and token issuance lock it before any agent – so nothing slips between.
+    const { handedOff, agents } = await db.transaction(async (tx) => {
+      await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, id)).for('update');
+      const handedOff = await handOffOpenTasks(actor, id, reassignTo, tx);
+      // Their external agents lose every token and move to the successor (a
+      // person), or are switched off: a copied token must not outlive them.
+      const agents = await handOverOwnedAgents(tx, actor, id, reassignTo);
+      await tx.update(schema.users).set({ isActive: false }).where(eq(schema.users.id, id));
+      await tx.delete(schema.sessions).where(eq(schema.sessions.userId, id));
+      await tx.update(schema.apiTokens).set({ revokedAt: new Date() }).where(eq(schema.apiTokens.userId, id));
+      await writeActivity(tx, {
+        entityType: 'user', entityId: id, action: 'deactivated',
+        after: { reassignTo, handedOffTasks: handedOff.count, externalAgents: agents },
+        actorId: actor.userId, actorType: actor.actorType,
+      });
+      return { handedOff, agents };
     });
     return c.json({ ok: true, handedOffTasks: handedOff.count, reassignTo, externalAgents: agents });
   });
 
   app.post('/:id/reactivate', guard('users.manage'), async (c) => {
     const { db } = getDb();
+    // An external agent comes back on in Settings -> Agents, where its owner
+    // and tokens are checked – not as a side door from the user list.
+    const [ext] = await db.select({ userId: schema.externalAgents.userId }).from(schema.externalAgents)
+      .where(eq(schema.externalAgents.userId, c.req.param('id')));
+    if (ext) throw err.domain('Switch an external agent on in Settings → Agents');
     await db.update(schema.users).set({ isActive: true }).where(eq(schema.users.id, c.req.param('id')));
     return c.json({ ok: true });
   });

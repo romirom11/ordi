@@ -90,6 +90,7 @@ extendDict({
     'settings.ownedAgents': 'External agents they own',
     'settings.ownedAgentsHint': 'Their tokens are revoked. They move to the successor, who issues a new token, or are switched off when there is none (or the successor is an agent).',
     'settings.noSuccessor': 'No one',
+    'settings.previewFailed': 'Could not load what they hold – close and try again before deactivating.',
     'settings.handedOff': 'Tasks handed over',
     'settings.roleUpdated': 'Role updated',
     'settings.inviteSent': 'Invitation created',
@@ -173,6 +174,7 @@ extendDict({
     'settings.ownedAgents': 'Зовнішні агенти, власником яких є людина',
     'settings.ownedAgentsHint': 'Їхні токени буде відкликано. Агенти перейдуть до наступника, який випустить новий токен, або вимкнуться, якщо наступника немає (чи наступник – агент).',
     'settings.noSuccessor': 'Ніхто',
+    'settings.previewFailed': 'Не вдалося завантажити, що за людиною закріплено, – закрийте й спробуйте ще раз перед деактивацією.',
     'settings.handedOff': 'Задачі передано',
     'settings.roleUpdated': 'Роль оновлено',
     'settings.inviteSent': 'Запрошення створено',
@@ -639,6 +641,8 @@ function DeactivateUserDialog({ user, candidates, pending, onClose, onConfirm }:
 
         {open.isLoading ? (
           <Skeleton className="h-16 w-full" />
+        ) : open.isError ? (
+          <p className="text-[13px] text-destructive">{t('settings.previewFailed')}</p>
         ) : count === 0 && ownedAgents.length === 0 ? (
           <p className="text-[13px] text-muted-foreground">{t('settings.openTasksNone')}</p>
         ) : (
@@ -671,7 +675,7 @@ function DeactivateUserDialog({ user, candidates, pending, onClose, onConfirm }:
 
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="ghost" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button type="button" variant="destructive" size="sm" disabled={pending || open.isLoading} onClick={() => onConfirm(reassignTo || null)}>
+          <Button type="button" variant="destructive" size="sm" disabled={pending || open.isLoading || open.isError} onClick={() => onConfirm(reassignTo || null)}>
             {pending && <Spinner className="h-3 w-3" />} {t('settings.deactivate')}
           </Button>
         </div>
