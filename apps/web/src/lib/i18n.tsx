@@ -563,6 +563,7 @@ const en: Dict = {
   'settings.webhooks': 'Outgoing webhooks',
   // tasks (project detail)
   'tasks.addCommentFailed': 'Could not add the comment.',
+  'tasks.mentionedAgentNotStarted': 'Comment posted, but {name} will not start on it: {reason}',
   'tasks.addDescription': 'Add a description…',
   'tasks.comment': 'Comment',
   'tasks.createFailed': 'Could not create the task.',
@@ -1132,6 +1133,7 @@ const uk: Dict = {
   'settings.webhooks': 'Вихідні вебхуки',
   // tasks (project detail)
   'tasks.addCommentFailed': 'Не вдалося додати коментар.',
+  'tasks.mentionedAgentNotStarted': 'Коментар додано, але {name} не візьметься за роботу: {reason}',
   'tasks.addDescription': 'Додайте опис…',
   'tasks.comment': 'Коментувати',
   'tasks.createFailed': 'Не вдалося створити задачу.',

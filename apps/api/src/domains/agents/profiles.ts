@@ -9,7 +9,7 @@ import { getDb, schema, eq, and, inArray } from '@ordi/db';
 import { ulid } from 'ulid';
 import type { CreateAgentInput, UpdateAgentInput } from '@ordi/shared';
 import type { Actor } from '../../context';
-import { err } from '../../lib/errors';
+import { err, type ApiException } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { assertVersion } from '../../core/locking';
 import { loadCredentialSlots, resolveCredentialChain } from './credentials';
@@ -232,6 +232,75 @@ export async function agentProfilesAmong(userIds: string[]): Promise<Map<string,
   return out;
 }
 
+/** An agent the actor may not put work on, and why (the error an assignment answers with). */
+export interface AgentAssignRefusal {
+  userId: string;
+  error: ApiException;
+}
+
+/**
+ * The agents among `assigneeIds` the actor may not assign on this project, in
+ * the order an assignment reports them: someone's own agent first, then an
+ * agent that is not a project member, then one whose assign policy the actor
+ * does not meet. Humans among the ids are never refused here.
+ */
+export async function agentAssignRefusals(
+  actor: Actor,
+  projectId: string,
+  assigneeIds: string[],
+  projectRole: 'admin' | 'member' | 'viewer' | null,
+  /** policy: false checks membership only (a hand-over by an admin, not an assignment). */
+  opts: { policy?: boolean } = {},
+): Promise<AgentAssignRefusal[]> {
+  if (!assigneeIds.length) return [];
+  const { db } = getDb();
+  // Every agent – run by ordi or connected from outside – works only in the
+  // projects it is a member of, so it is assigned only there.
+  const agentRows = await db.select({ id: users.id }).from(users)
+    .where(and(inArray(users.id, assigneeIds), eq(users.actorType, 'agent')));
+  if (!agentRows.length) return [];
+  const agentIds = agentRows.map((a) => a.id);
+  const refusals: AgentAssignRefusal[] = [];
+  // Someone's own agent works their tasks; the task is assigned to them.
+  const personal = await personalAgentIds(agentIds);
+  for (const userId of agentIds) {
+    if (personal.has(userId)) {
+      refusals.push({ userId, error: err.domain('This is someone\'s own agent – assign the task to its owner, and the agent works it from there', { code: 'personal_agent_not_assignable' }) });
+    }
+  }
+  const members = await db.select({ userId: projectMembers.userId }).from(projectMembers)
+    .where(and(eq(projectMembers.projectId, projectId), inArray(projectMembers.userId, agentIds)));
+  const memberSet = new Set(members.map((m) => m.userId));
+  for (const userId of agentIds) {
+    if (!personal.has(userId) && !memberSet.has(userId)) {
+      refusals.push({ userId, error: err.domain('This agent is not a member of the project; add it under project members first', { code: 'agent_not_member', userId }) });
+    }
+  }
+  if (opts.policy === false) return refusals;
+  // The assign policy guards spending ordi's runs, so it applies to ordi's agents.
+  const profiles = await agentProfilesAmong(agentIds.filter((userId) => !personal.has(userId) && memberSet.has(userId)));
+  const canManage = actor.access.permissions.has('agents.manage');
+  for (const [userId, profile] of profiles) {
+    const allowed = profile.assignPolicy === 'project_members'
+      ? projectRole === 'admin' || projectRole === 'member' || canManage
+      : profile.assignPolicy === 'project_admins'
+        ? projectRole === 'admin' || canManage
+        : canManage;
+    if (!allowed) {
+      refusals.push({
+        userId,
+        error: err.forbidden(
+          profile.assignPolicy === 'agents_managers'
+            ? 'Only people with agents.manage may assign work to this agent'
+            : 'Only project admins may assign work to this agent',
+          'agents.manage',
+        ),
+      });
+    }
+  }
+  return refusals;
+}
+
 /**
  * Throw when the actor may not assign one of `assigneeIds` (an agent) on this
  * project: the agent must be a project member and the actor must satisfy the
@@ -245,44 +314,6 @@ export async function assertCanAssignAgents(
   /** policy: false checks membership only (a hand-over by an admin, not an assignment). */
   opts: { policy?: boolean } = {},
 ): Promise<void> {
-  if (!assigneeIds.length) return;
-  const { db } = getDb();
-  // Every agent – run by ordi or connected from outside – works only in the
-  // projects it is a member of, so it is assigned only there.
-  const agentRows = await db.select({ id: users.id }).from(users)
-    .where(and(inArray(users.id, assigneeIds), eq(users.actorType, 'agent')));
-  if (!agentRows.length) return;
-  const agentIds = agentRows.map((a) => a.id);
-  // Someone's own agent works their tasks; the task is assigned to them.
-  const personal = await personalAgentIds(agentIds);
-  if (personal.size) {
-    throw err.domain('This is someone\'s own agent – assign the task to its owner, and the agent works it from there', { code: 'personal_agent_not_assignable' });
-  }
-  const members = await db.select({ userId: projectMembers.userId }).from(projectMembers)
-    .where(and(eq(projectMembers.projectId, projectId), inArray(projectMembers.userId, agentIds)));
-  const memberSet = new Set(members.map((m) => m.userId));
-  for (const userId of agentIds) {
-    if (!memberSet.has(userId)) {
-      throw err.domain('This agent is not a member of the project; add it under project members first', { code: 'agent_not_member', userId });
-    }
-  }
-  if (opts.policy === false) return;
-  // The assign policy guards spending ordi's runs, so it applies to ordi's agents.
-  const profiles = await agentProfilesAmong(agentIds);
-  const canManage = actor.access.permissions.has('agents.manage');
-  for (const [, profile] of profiles) {
-    const allowed = profile.assignPolicy === 'project_members'
-      ? projectRole === 'admin' || projectRole === 'member' || canManage
-      : profile.assignPolicy === 'project_admins'
-        ? projectRole === 'admin' || canManage
-        : canManage;
-    if (!allowed) {
-      throw err.forbidden(
-        profile.assignPolicy === 'agents_managers'
-          ? 'Only people with agents.manage may assign work to this agent'
-          : 'Only project admins may assign work to this agent',
-        'agents.manage',
-      );
-    }
-  }
+  const [first] = await agentAssignRefusals(actor, projectId, assigneeIds, projectRole, opts);
+  if (first) throw first.error;
 }
