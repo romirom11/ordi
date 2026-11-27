@@ -19,7 +19,7 @@ import { useT, extendDict } from '../../lib/i18n';
 import { TaskTimer } from './TaskTimer';
 import { TaskTimeRow } from './TaskTime';
 import type { MilestoneLite, TaskDetail, TaskPatch, TaskStatus, UserLite } from './types';
-import { activeUsers } from '../../lib/queries';
+import { activeUsers, useProjectMembers } from '../../lib/queries';
 import { Calendar } from '../DatePicker';
 
 extendDict({
@@ -231,11 +231,12 @@ export function PropertySidebar({ task, statuses, users, onPatch, hasRepos }: {
   const milestone = milestones.find((m) => m.id === task.milestoneId);
 
   // Cycles, only where the project uses them (the project query is shared with the project page).
-  const { data: projectRow } = useQuery<{ cyclesEnabled?: boolean; settings?: { estimateUnit?: string } }>({
+  const { data: projectRow } = useQuery<{ cyclesEnabled?: boolean; visibility?: string; settings?: { estimateUnit?: string } }>({
     queryKey: ['project', task.projectId],
-    queryFn: () => api.get<{ cyclesEnabled?: boolean; settings?: { estimateUnit?: string } }>(`/projects/${task.projectId}`),
+    queryFn: () => api.get<{ cyclesEnabled?: boolean; visibility?: string; settings?: { estimateUnit?: string } }>(`/projects/${task.projectId}`),
     staleTime: 60_000,
   });
+  const membersQ = useProjectMembers(task.projectId);
   // Time spent compares with the estimate only when both are hours.
   const estimateInHours = projectRow?.settings?.estimateUnit === 'hours';
   const estimateSeconds = estimateInHours && task.estimate != null && Number(task.estimate) > 0
@@ -270,9 +271,13 @@ export function PropertySidebar({ task, statuses, users, onPatch, hasRepos }: {
       .map((a) => users.find((u) => u.id === a.userId) ?? { id: a.userId, name: a.name, avatar: a.avatar, isActive: false }),
   ];
 
-  // The reporter is picked from active people and agents; one who has since
-  // been deactivated still shows, so the task says who set it.
+  // The reporter is shown even when deactivated, so the task says who set it.
   const reporter = task.reporterId ? users.find((u) => u.id === task.reporterId) : undefined;
+  // Offered: who the API accepts – project members, plus, on a workspace
+  // project, the people (not agents) it is open to.
+  const memberIds = new Set((membersQ.data ?? []).map((m) => m.userId));
+  const reporterChoices = activeUsers(users).filter((u) => memberIds.has(u.id)
+    || (projectRow?.visibility !== 'private' && u.actorType !== 'agent'));
 
   return (
     <div className="flex flex-col gap-0.5 py-3">
@@ -398,7 +403,7 @@ export function PropertySidebar({ task, statuses, users, onPatch, hasRepos }: {
           }
         >
           <MenuLabel>{t('task.reporterHint')}</MenuLabel>
-          {activeUsers(users).map((u) => (
+          {reporterChoices.map((u) => (
             <MenuItem
               key={u.id}
               icon={<Avatar name={u.name} src={u.avatar} size={18} agent={u.actorType === 'agent'} />}
