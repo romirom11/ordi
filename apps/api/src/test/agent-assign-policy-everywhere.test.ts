@@ -3,7 +3,9 @@
  * not only on create, edit and bulk edit: a duplicate copies an agent only if
  * the caller may assign it, and an @-mention starts an agent only if the
  * commenter may – the comment itself is posted either way, and the answer
- * says which agents did not start and why.
+ * says which agents did not start and why. A move leaves off an agent the
+ * caller may not assign on the target project, and a run an agent not on the
+ * task made is retried only by someone who may assign it.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import { getDb, schema, eq } from '@ordi/db';
@@ -15,6 +17,10 @@ let guarded: string; // project_admins policy
 let open: string; // project_members policy
 
 const text = (s: string) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: s }] }] });
+/** A comment the way the browser sends it: the mention lives in the body only. */
+const mentioning = (userId: string, s: string) => ({
+  type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'mention', attrs: { id: userId, label: 'Agent' } }, { type: 'text', text: ` ${s}` }] }],
+});
 
 async function assigneesOf(taskId: string): Promise<string[]> {
   const { db } = getDb();
@@ -67,7 +73,7 @@ describe('mentioning an agent in a comment', () => {
     const task = await json(owner.post('/tasks', { projectId: ws.projectId, title: 'Mention me' }));
     await drainOutbox();
 
-    const res = await member.post(`/tasks/${task.id}/comments`, { body: text('@Guarded please fix'), mentions: [guarded] });
+    const res = await member.post(`/tasks/${task.id}/comments`, { body: mentioning(guarded, 'please fix') });
     expect(res.status).toBe(201);
     const body = await res.json() as { id: string; agentsNotStarted: unknown };
     expect(body.agentsNotStarted).toEqual([
@@ -112,5 +118,75 @@ describe('mentioning an agent in a comment', () => {
     expect(res.agentsNotStarted).toEqual([]);
     await drainOutbox();
     expect((await runsForTask(task.id)).filter((r) => r.status === 'queued').map((r) => r.agentUserId)).toEqual([guarded]);
+  });
+
+  it('does not start an agent the commenter may not assign once it is taken off the task before the comment is delivered', async () => {
+    const owner = reqAs(ws.users.owner!.cookie);
+    const member = reqAs(ws.users.member!.cookie);
+    const task = await json(owner.post('/tasks', { projectId: ws.projectId, title: 'Assigned, then not', assigneeIds: [guarded] }));
+    await drainOutbox();
+    const { db } = getDb();
+    await db.update(schema.agentRuns).set({ status: 'succeeded' }).where(eq(schema.agentRuns.taskId, task.id));
+
+    const res = await json(member.post(`/tasks/${task.id}/comments`, { body: mentioning(guarded, 'one more thing') }));
+    // On the task when the comment is written, so it would follow up as an assignee.
+    expect(res.agentsNotStarted).toEqual([]);
+    const fresh = await json(owner.get(`/tasks/${task.id}`));
+    expect((await owner.patch(`/tasks/${task.id}`, { version: fresh.version, assigneeIds: [] })).status).toBe(200);
+    await drainOutbox();
+    expect((await runsForTask(task.id)).filter((r) => r.status === 'queued')).toHaveLength(0);
+  });
+});
+
+describe('moving a task', () => {
+  it('leaves off an agent the caller may not assign on the target project', async () => {
+    const owner = reqAs(ws.users.owner!.cookie);
+    const manager = reqAs(ws.users.manager!.cookie);
+    const target = await setupWorkspace(ws.users, 'POLT');
+    const locked = (await createAgent(ws.users, { name: 'Managers only', assignPolicy: 'agents_managers' })).id;
+    for (const projectId of [ws.projectId, target.projectId]) {
+      await addProjectMember(ws.users, projectId, locked);
+      await addProjectMember(ws.users, projectId, ws.users.manager!.userId, 'admin');
+    }
+    await addProjectMember(ws.users, target.projectId, open);
+    const task = await json(owner.post('/tasks', { projectId: ws.projectId, title: 'Moving work', assigneeIds: [locked, open] }));
+
+    // An admin of both projects without agents.manage moves it.
+    const res = await manager.post(`/tasks/${task.id}/move`, { targetProjectId: target.projectId });
+    expect(res.status).toBe(200);
+    const moved = await res.json() as { id: string };
+    expect(await assigneesOf(moved.id)).toEqual([open]);
+
+    const again = await json(owner.post('/tasks', { projectId: ws.projectId, title: 'Moved by the owner', assigneeIds: [locked] }));
+    const byOwner = await json(owner.post(`/tasks/${again.id}/move`, { targetProjectId: target.projectId }));
+    expect(await assigneesOf(byOwner.id)).toEqual([locked]);
+  });
+});
+
+describe('retrying a run', () => {
+  it('a run a mention started is retried only by someone who may assign the agent', async () => {
+    const owner = reqAs(ws.users.owner!.cookie);
+    const member = reqAs(ws.users.member!.cookie);
+    const task = await json(owner.post('/tasks', { projectId: ws.projectId, title: 'Retry me' }));
+    await owner.post(`/tasks/${task.id}/comments`, { body: mentioning(guarded, 'please look') });
+    await drainOutbox();
+    const [run] = await runsForTask(task.id);
+    expect(run!.agentUserId).toBe(guarded);
+    const { db } = getDb();
+    await db.update(schema.agentRuns).set({ status: 'failed' }).where(eq(schema.agentRuns.id, run!.id));
+
+    expect((await member.post(`/agent-runs/${run!.id}/retry`)).status).toBe(403);
+    expect((await owner.post(`/agent-runs/${run!.id}/retry`)).status).toBe(201);
+  });
+
+  it('a run of an agent on the task is retried by any member, as before', async () => {
+    const owner = reqAs(ws.users.owner!.cookie);
+    const member = reqAs(ws.users.member!.cookie);
+    const task = await json(owner.post('/tasks', { projectId: ws.projectId, title: 'Assigned retry', assigneeIds: [guarded] }));
+    await drainOutbox();
+    const [run] = await runsForTask(task.id);
+    const { db } = getDb();
+    await db.update(schema.agentRuns).set({ status: 'failed' }).where(eq(schema.agentRuns.id, run!.id));
+    expect((await member.post(`/agent-runs/${run!.id}/retry`)).status).toBe(201);
   });
 });

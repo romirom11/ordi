@@ -12,7 +12,8 @@ import { generateToken, sha256 } from '../../lib/crypto';
 import { writeActivity } from '../../core/activity';
 import { emit } from '../../core/events';
 import { loadRolePermissions } from '../../core/rbac';
-import { accessibleProjectIds, assertProject } from '../../core/access';
+import { accessibleProjectIds, assertProject, effectiveProjectRole } from '../../core/access';
+import { assertCanAssignAgents } from './profiles';
 import { recordRunEvent, listRunEvents } from './run-events';
 import type { RuntimeUsage } from './runtime';
 
@@ -376,6 +377,15 @@ export async function retryRun(actor: Actor, id: string): Promise<RunView> {
   const [member] = await db.select({ userId: schema.projectMembers.userId }).from(schema.projectMembers)
     .where(and(eq(schema.projectMembers.projectId, run.projectId), eq(schema.projectMembers.userId, run.agentUserId)));
   if (!member) throw err.domain('The agent is no longer a member of this project; add it back under project members to retry');
+  // An agent on the task is driven by anyone who may write there (R30, R50).
+  // One that is not – a mention started it – is held to its assign policy,
+  // as a new mention would be (R49).
+  const [assigned] = await db.select({ userId: schema.taskAssignees.userId }).from(schema.taskAssignees)
+    .where(and(eq(schema.taskAssignees.taskId, run.taskId), eq(schema.taskAssignees.userId, run.agentUserId)));
+  if (!assigned) {
+    const project = await assertProject(actor, run.projectId, 'viewer');
+    await assertCanAssignAgents(actor, run.projectId, [run.agentUserId], effectiveProjectRole(actor, project));
+  }
   const newId = await queueRun({
     agentUserId: run.agentUserId, taskId: run.taskId, projectId: run.projectId, trigger: 'retry',
     requestedBy: actor.userId, parentRunId: run.id, sessionId: run.sessionId, branch: run.branch, actorType: actor.actorType,
@@ -416,13 +426,27 @@ export async function cancelRequested(runId: string): Promise<boolean> {
  * Follow-up coalescing (R13, R30): after a run ends, a human comment written
  * while it ran becomes the next run's prompt.
  */
-export async function newestHumanCommentSince(taskId: string, since: Date | null, agentUserId: string) {
+export async function newestHumanCommentSince(
+  taskId: string,
+  since: Date | null,
+  agentUserId: string,
+  /**
+   * startingMentionsOnly: count only a comment that mentioned the agent and
+   * whose author may put work on it – the ones the dispatcher would have
+   * started it for (agentMentions on comment.created). For an agent that is
+   * not assigned to the task, any other comment is not addressed to it.
+   */
+  opts: { startingMentionsOnly?: boolean } = {},
+) {
   const { db } = getDb();
+  const startingMention = opts.startingMentionsOnly
+    ? sql`exists (select 1 from ${schema.events} where ${schema.events.type} = 'comment.created' and ${schema.events.aggregateId} = ${comments.id} and ${schema.events.payload} -> 'agentMentions' @> ${JSON.stringify([agentUserId])}::jsonb)`
+    : sql`true`;
   // Other agents' comments do not count either: two agents on one task would
   // otherwise answer each other without end.
   const rows = await db.select({ id: comments.id, authorId: comments.authorId, createdAt: comments.createdAt, authorType: users.actorType })
     .from(comments).leftJoin(users, eq(users.id, comments.authorId))
-    .where(and(eq(comments.taskId, taskId), sql`${comments.deletedAt} is null`, since ? sql`${comments.createdAt} > ${since.toISOString()}::timestamptz` : sql`true`))
+    .where(and(eq(comments.taskId, taskId), sql`${comments.deletedAt} is null`, since ? sql`${comments.createdAt} > ${since.toISOString()}::timestamptz` : sql`true`, startingMention))
     .orderBy(desc(comments.createdAt)).limit(5);
   return rows.find((r) => r.authorId && r.authorId !== agentUserId && r.authorType !== 'agent') ?? null;
 }

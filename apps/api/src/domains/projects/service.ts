@@ -1004,7 +1004,7 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
   const { db } = getDb();
   const source = await loadTask(id);
   await assertProject(actor, source.projectId, 'admin');
-  await assertProject(actor, targetProjectId, 'admin');
+  const targetProject = await assertProject(actor, targetProjectId, 'admin');
   if (source.projectId === targetProjectId) return { ...source, ref: await taskRef(source) };
   const keepKeys = await customFieldKeysFor(targetProjectId);
   const statusFor = new Map<string, string>();
@@ -1060,15 +1060,11 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
     }
     // Agents work only where they are members: one that is not on the
     // target project comes off the moved tasks rather than being stranded.
-    const agentAssignees = assigneeRows.length
-      ? await tx.select({ id: schema.users.id }).from(schema.users)
-        .where(and(inArray(schema.users.id, [...new Set(assigneeRows.map((r) => r.userId))]), eq(schema.users.actorType, 'agent')))
-      : [];
-    const agentMembers = agentAssignees.length
-      ? new Set((await tx.select({ userId: projectMembers.userId }).from(projectMembers)
-        .where(and(eq(projectMembers.projectId, targetProjectId), inArray(projectMembers.userId, agentAssignees.map((a) => a.id))))).map((m) => m.userId))
-      : new Set<string>();
-    const strandedAgents = new Set(agentAssignees.map((a) => a.id).filter((id) => !agentMembers.has(id)));
+    // So does one the caller may not assign there (R49): the moved tasks
+    // put that agent's work on the target project.
+    const strandedAgents = new Set((await agentAssignRefusals(
+      actor, targetProjectId, [...new Set(assigneeRows.map((r) => r.userId))], effectiveProjectRole(actor, targetProject),
+    )).map((r) => r.userId));
     const keptAssignees = assigneeRows.filter((row) => !strandedAgents.has(row.userId));
     if (keptAssignees.length) {
       await tx.insert(taskAssignees).values(keptAssignees.map((row) => ({
@@ -1241,12 +1237,17 @@ async function dispatchableAgentMentions(
 ): Promise<{ agentMentions: string[]; agentsNotStarted: AgentNotStarted[] }> {
   const profiles = await agentProfilesAmong(mentions);
   if (!profiles.size) return { agentMentions: [], agentsNotStarted: [] };
-  const assigned = new Set(await assigneeIdsOf(taskId));
-  const toCheck = [...profiles.keys()].filter((userId) => !assigned.has(userId));
-  const refusals = await agentAssignRefusals(actor, project.id, toCheck, effectiveProjectRole(actor, project));
+  const mentionedAgents = [...profiles.keys()];
+  const refusals = await agentAssignRefusals(actor, project.id, mentionedAgents, effectiveProjectRole(actor, project));
   const refused = new Map<string, string>();
   for (const r of refusals) if (!refused.has(r.userId)) refused.set(r.userId, r.error.message);
-  const agentMentions = [...profiles.keys()].filter((userId) => !refused.has(userId));
+  // The mention itself starts only an agent the commenter may assign. One on
+  // the task follows the comment up as an assignee anyway – for as long as it
+  // stays assigned, which the dispatcher reads when the event is delivered –
+  // so it is not reported as not started.
+  const agentMentions = mentionedAgents.filter((userId) => !refused.has(userId));
+  const assigned = new Set(await assigneeIdsOf(taskId));
+  for (const userId of assigned) refused.delete(userId);
   if (!refused.size) return { agentMentions, agentsNotStarted: [] };
   const { db } = getDb();
   const names = new Map((await db.select({ id: schema.users.id, name: schema.users.name }).from(schema.users)
