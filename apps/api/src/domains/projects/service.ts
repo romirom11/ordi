@@ -9,7 +9,7 @@ import {
 } from '@ordi/db';
 import { ulid } from 'ulid';
 import {
-  MAX_SUBTASK_DEPTH, appendPosition, buildBranchName, normalizeIntakeFormConfig,
+  MAX_SUBTASK_DEPTH, appendPosition, buildBranchName, normalizeIntakeFormConfig, projectAccessRank,
   type CustomFieldFilter, type IntakeAnswer, type LabelScope,
 } from '@ordi/shared';
 import type { Actor } from '../../context';
@@ -17,7 +17,8 @@ import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { emit } from '../../core/events';
 import { assertVersion } from '../../core/locking';
-import { assertProject, accessibleProjectIds, effectiveProjectRole } from '../../core/access';
+import { assertProject, accessibleProjectIds, buildAccessContext, effectiveProjectRole } from '../../core/access';
+import { loadRolePermissions } from '../../core/rbac';
 import { closeProjectTimers } from '../time/service';
 import { cancelProjectRuns } from '../agents/runs';
 import { assertCanAssignAgents } from '../agents/profiles';
@@ -663,19 +664,22 @@ export async function listTasks(actor: Actor, params: {
 
 /**
  * A reporter is someone the task can be taken back to: an active user who can
- * open the project. A private project, or an agent (which reaches only its own
- * projects), needs a membership row.
+ * open the project, by the same rule every request is held to (role
+ * permissions, membership, agents only through membership). The reporter
+ * hears the task's news, so someone who cannot see the project must not be one.
  */
 async function assertReporter(project: { id: string; visibility: string }, userId: string): Promise<void> {
   const { db } = getDb();
-  const [user] = await db.select({ id: schema.users.id, isActive: schema.users.isActive, actorType: schema.users.actorType })
+  const [user] = await db.select({ id: schema.users.id, isActive: schema.users.isActive, actorType: schema.users.actorType, roleId: schema.users.roleId })
     .from(schema.users).where(eq(schema.users.id, userId));
   if (!user || !user.isActive) throw err.validation('The reporter must be an active user');
-  if (project.visibility === 'private' || user.actorType === 'agent') {
-    const [member] = await db.select({ userId: projectMembers.userId }).from(projectMembers)
-      .where(and(eq(projectMembers.projectId, project.id), eq(projectMembers.userId, userId)));
-    if (!member) throw err.validation('The reporter must be a member of this project');
-  }
+  const access = await buildAccessContext(user.id, await loadRolePermissions(user.roleId), false);
+  const visibility = project.visibility === 'private' ? 'private' : 'workspace';
+  // An agent works only where it was added, whatever its role grants elsewhere.
+  const opens = user.actorType === 'agent'
+    ? access.projectMemberships.has(project.id)
+    : projectAccessRank(access, { visibility, projectId: project.id }) > 0;
+  if (!opens) throw err.validation('The reporter must be someone who can open this project – add them to it first');
 }
 
 export async function createTask(actor: Actor, input: any) {

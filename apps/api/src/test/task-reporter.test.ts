@@ -63,6 +63,11 @@ describe('the reporter of a task', () => {
     await getDb().db.update(schema.users).set({ isActive: false }).where(eq(schema.users.id, users.hr!.userId));
     expect((await owner().patch(`/tasks/${task.id}`, { reporterId: users.hr!.userId })).status).toBe(400);
 
+    // Someone whose role cannot read projects cannot be the reporter of a workspace one.
+    expect((await owner().patch(`/tasks/${task.id}`, { reporterId: users.guest!.userId })).status).toBe(400);
+    await owner().post(`/projects/${projectId}/members`, { userId: users.guest!.userId, role: 'viewer', canWriteTasks: false });
+    expect((await owner().patch(`/tasks/${task.id}`, { reporterId: users.guest!.userId })).status).toBe(200);
+
     // A private project only takes its members.
     expect((await owner().post('/tasks', { projectId: privateProjectId, title: 'Secret', reporterId: users.manager!.userId })).status).toBe(400);
     await owner().post(`/projects/${privateProjectId}/members`, { userId: users.manager!.userId, role: 'member', canWriteTasks: true });
