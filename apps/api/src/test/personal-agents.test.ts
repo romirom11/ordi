@@ -9,7 +9,6 @@ import { resetDb, seedRolesAndUsers, reqAs, json, app } from './helpers';
 import { setupWorkspace, drainOutbox, type Workspace } from './agents-helpers';
 import { broadcaster } from '../core/events';
 import { streamTiming } from '../domains/core/stream.routes';
-import { invalidateRoleCache } from '../core/rbac';
 
 /** Slow CI must not turn a late event into a failure. */
 const WAIT = { timeout: 5000, interval: 20 };
@@ -161,9 +160,9 @@ describe('what it can do', () => {
     expect(await createdFor(owner())).toEqual(expect.arrayContaining([filed.id, byOwner.id]));
   });
 
-  it('files for its owner even where this process\'s role cache is behind', async () => {
-    // The owner's role, as this process cached it, cannot read projects; in
-    // the database (another process granted it back) it can.
+  it('files for its owner as soon as another process grants the role back', async () => {
+    // The owner's role, as this process last read it, cannot read projects;
+    // in the database (another process granted it back) it can.
     const { db } = getDb();
     const [ownerUser] = await db.select({ roleId: schema.users.roleId }).from(schema.users).where(eq(schema.users.id, users.owner!.userId));
     const roleId = ownerUser!.roleId;
@@ -174,16 +173,11 @@ describe('what it can do', () => {
     for (const permission of perms) {
       await db.delete(schema.rolePermissions).where(and(eq(schema.rolePermissions.roleId, roleId), eq(schema.rolePermissions.permission, permission)));
     }
-    invalidateRoleCache(roleId);
-    try {
-      await owner().get('/me'); // the cache now holds the role without them
-      await db.insert(schema.rolePermissions).values(perms.map((permission) => ({ roleId, permission })));
-      const res = await bearer(token).post('/tasks', { projectId: open.id, title: 'Filed through the lag' });
-      expect(res.status).toBe(201);
-      expect((await json(res)).reporterId).toBe(users.owner!.userId);
-    } finally {
-      invalidateRoleCache(roleId);
-    }
+    await owner().get('/me'); // this process has now read the role without them
+    await db.insert(schema.rolePermissions).values(perms.map((permission) => ({ roleId, permission })));
+    const res = await bearer(token).post('/tasks', { projectId: open.id, title: 'Filed through the lag' });
+    expect(res.status).toBe(201);
+    expect((await json(res)).reporterId).toBe(users.owner!.userId);
   });
 
   it('never names itself the reporter', async () => {
@@ -192,7 +186,7 @@ describe('what it can do', () => {
     expect((await owner().patch(`/tasks/${ws.taskId}`, { reporterId: agentId })).status).toBe(400);
   });
 
-  it('follows its owner\'s role at once, even where the role cache has not heard', async () => {
+  it('follows its owner\'s role at once, even when another process changed it', async () => {
     // A workspace project the owner reaches through projects.write alone.
     const admin = reqAs(users.admin!.cookie);
     const type = await json(admin.post('/project-types', { name: 'Open type', revenueSource: 'none' }));
@@ -202,7 +196,7 @@ describe('what it can do', () => {
     expect((await bot.patch(`/tasks/${task.id}`, { title: 'Open task (agent)' })).status).toBe(200);
 
     // The role loses projects.write the way another process would see it:
-    // in the database, with this process's cache left as it was.
+    // in the database, without the route that edits roles.
     expect((await owner().get('/me')).status).toBe(200);
     const { db } = getDb();
     const [ownerUser] = await db.select({ roleId: schema.users.roleId }).from(schema.users).where(eq(schema.users.id, users.owner!.userId));

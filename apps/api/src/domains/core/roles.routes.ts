@@ -5,7 +5,6 @@ import { roleInputSchema, PERMISSION_META, PERMISSIONS, isPermission } from '@or
 import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { guard } from '../../core/rbac';
-import { invalidateRoleCache } from '../../core/rbac';
 import { emit } from '../../core/events';
 import { err } from '../../lib/errors';
 
@@ -57,7 +56,6 @@ export function rolesRoutes() {
     if (body.permissions.length) {
       await db.insert(schema.rolePermissions).values(body.permissions.map((p) => ({ roleId: id, permission: p })));
     }
-    invalidateRoleCache(id);
     await emit({ type: 'role.updated', aggregateType: 'role', aggregateId: id, payload: {} });
     return c.json({ ok: true });
   });
