@@ -16,7 +16,7 @@ import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { emit, publishEvent } from '../../core/events';
-import { assertVersion } from '../../core/locking';
+import { assertUpdated, assertVersion } from '../../core/locking';
 import { assertProject, accessibleProjectIds, effectiveProjectRole, userCanOpenProject } from '../../core/access';
 import { closeProjectTimers } from '../time/service';
 import { cancelProjectRuns } from '../agents/runs';
@@ -789,39 +789,43 @@ export async function updateTask(actor: Actor, id: string, input: any) {
   if (input.estimate !== undefined) patch.estimate = input.estimate != null ? String(input.estimate) : null;
   if (input.parentId) await assertParent(input.parentId, before.projectId, id);
   if (input.cycleId) await assertCycleInProject(input.cycleId, before.projectId);
-  if (Object.keys(patch).length) {
-    await db.update(tasks).set(patch).where(and(eq(tasks.id, id), eq(tasks.version, before.version)));
-  }
 
+  // Every check runs before the first write, and the writes, their events and
+  // the activity record share one transaction: a refused or failed request
+  // changes nothing, and nothing is announced that did not happen.
   const oldAssignees = await assigneeIdsOf(id);
-  let finalAssignees = oldAssignees;
-  let newAssignees: string[] = [];
-  if (input.assigneeIds !== undefined) {
-    const next: string[] = input.assigneeIds;
-    const added = next.filter((a) => !oldAssignees.includes(a));
-    // Agents among the new assignees: membership and assign policy (R48, R49).
-    if (added.length) await assertCanAssignAgents(actor, project.id, added, effectiveProjectRole(actor, project));
-    await db.delete(taskAssignees).where(eq(taskAssignees.taskId, id));
-    if (next.length) await db.insert(taskAssignees).values(next.map((userId) => ({ taskId: id, userId })));
-    newAssignees = next.filter((a) => !oldAssignees.includes(a));
-    finalAssignees = next;
-  }
-  if (input.labelIds !== undefined) {
-    const next: string[] = input.labelIds;
-    await assertLabelScope(next, 'task');
-    await db.delete(taskLabels).where(eq(taskLabels.taskId, id));
-    if (next.length) await db.insert(taskLabels).values(next.map((labelId) => ({ taskId: id, labelId })));
-  }
-
+  const nextAssignees: string[] | undefined = input.assigneeIds;
+  const newAssignees = nextAssignees ? nextAssignees.filter((a) => !oldAssignees.includes(a)) : [];
+  // Agents among the new assignees: membership and assign policy (R48, R49).
+  if (newAssignees.length) await assertCanAssignAgents(actor, project.id, newAssignees, effectiveProjectRole(actor, project));
+  const nextLabels: string[] | undefined = input.labelIds;
+  if (nextLabels) await assertLabelScope(nextLabels, 'task');
+  const finalAssignees = nextAssignees ?? oldAssignees;
   const ref = await taskRef(before);
-  if (input.statusId !== undefined && input.statusId !== before.statusId) {
-    await emit({ type: 'task.status_changed', aggregateType: 'task', aggregateId: id, payload: { ref, taskId: id, assigneeIds: finalAssignees, createdBy: before.createdBy, reporterId: patch.reporterId !== undefined ? patch.reporterId : before.reporterId, projectId: before.projectId }, actorId: actor.userId, actorType: actor.actorType });
-  }
-  if (newAssignees.length) {
-    await emit({ type: 'task.assigned', aggregateType: 'task', aggregateId: id, payload: { assigneeIds: newAssignees, ref, taskId: id, projectId: before.projectId }, actorId: actor.userId, actorType: actor.actorType });
-  }
-  await writeActivity(db, { entityType: 'task', entityId: id, action: 'updated', before, after: patch, actorId: actor.userId, actorType: actor.actorType });
-  await emit({ type: 'task.updated', aggregateType: 'task', aggregateId: id, payload: { taskId: id, projectId: before.projectId }, actorId: actor.userId, actorType: actor.actorType });
+
+  await db.transaction(async (tx) => {
+    if (Object.keys(patch).length) {
+      const [written] = await tx.update(tasks).set(patch)
+        .where(and(eq(tasks.id, id), eq(tasks.version, before.version))).returning({ id: tasks.id });
+      assertUpdated(written, before);
+    }
+    if (nextAssignees) {
+      await tx.delete(taskAssignees).where(eq(taskAssignees.taskId, id));
+      if (nextAssignees.length) await tx.insert(taskAssignees).values(nextAssignees.map((userId) => ({ taskId: id, userId })));
+    }
+    if (nextLabels) {
+      await tx.delete(taskLabels).where(eq(taskLabels.taskId, id));
+      if (nextLabels.length) await tx.insert(taskLabels).values(nextLabels.map((labelId) => ({ taskId: id, labelId })));
+    }
+    if (input.statusId !== undefined && input.statusId !== before.statusId) {
+      await publishEvent(tx, { type: 'task.status_changed', aggregateType: 'task', aggregateId: id, payload: { ref, taskId: id, assigneeIds: finalAssignees, createdBy: before.createdBy, reporterId: patch.reporterId !== undefined ? patch.reporterId : before.reporterId, projectId: before.projectId }, actorId: actor.userId, actorType: actor.actorType });
+    }
+    if (newAssignees.length) {
+      await publishEvent(tx, { type: 'task.assigned', aggregateType: 'task', aggregateId: id, payload: { assigneeIds: newAssignees, ref, taskId: id, projectId: before.projectId }, actorId: actor.userId, actorType: actor.actorType });
+    }
+    await writeActivity(tx, { entityType: 'task', entityId: id, action: 'updated', before, after: patch, actorId: actor.userId, actorType: actor.actorType });
+    await publishEvent(tx, { type: 'task.updated', aggregateType: 'task', aggregateId: id, payload: { taskId: id, projectId: before.projectId }, actorId: actor.userId, actorType: actor.actorType });
+  });
   const task = await loadTask(id);
   return { ...task, ref };
 }
@@ -1267,38 +1271,47 @@ export async function bulkUpdateTasks(actor: Actor, input: any) {
       await assertMilestoneInProject(input.milestoneId, projectId);
     }
   }
-  let updated = 0;
-  for (const t of rows) {
-    if (!canEdit(t.projectId)) continue;
-    const role = roleOf.get(t.projectId) ?? null;
-    const patch: Record<string, unknown> = {};
-    if (input.statusId !== undefined) patch.statusId = input.statusId;
-    if (input.cycleId !== undefined) patch.cycleId = input.cycleId;
-    if (input.milestoneId !== undefined) patch.milestoneId = input.milestoneId;
-    if (input.priority !== undefined) patch.priority = input.priority;
-    if (Object.keys(patch).length) await db.update(tasks).set(patch).where(eq(tasks.id, t.id));
-    if (input.assigneeIds !== undefined) {
-      const oldAssignees = await assigneeIdsOf(t.id);
-      const next = input.assigneeIds as string[];
-      const added = next.filter((a) => !oldAssignees.includes(a));
-      if (added.length) await assertCanAssignAgents(actor, t.projectId, added, role);
-      await db.delete(taskAssignees).where(eq(taskAssignees.taskId, t.id));
-      if (next.length) await db.insert(taskAssignees).values(next.map((userId) => ({ taskId: t.id, userId })));
-      // Bulk assignment dispatches and notifies like a single one (R12).
-      if (added.length) {
-        await emit({ type: 'task.assigned', aggregateType: 'task', aggregateId: t.id, payload: { assigneeIds: added, ref: await taskRef(t), taskId: t.id, projectId: t.projectId }, actorId: actor.userId, actorType: actor.actorType });
+
+  // Every check runs before the first write – an agent the caller may not
+  // assign refuses the whole request, not the tasks after the ones already
+  // saved – and the writes and their events share one transaction.
+  const editable = rows.filter((t) => canEdit(t.projectId));
+  const nextAssignees: string[] | undefined = input.assigneeIds;
+  const nextLabels: string[] | undefined = input.labelIds;
+  const plans: { t: typeof rows[number]; ref: string; added: string[]; finalAssignees: string[] }[] = [];
+  for (const t of editable) {
+    const oldAssignees = await assigneeIdsOf(t.id);
+    const added = nextAssignees ? nextAssignees.filter((a) => !oldAssignees.includes(a)) : [];
+    if (added.length) await assertCanAssignAgents(actor, t.projectId, added, roleOf.get(t.projectId) ?? null);
+    plans.push({ t, ref: await taskRef(t), added, finalAssignees: nextAssignees ?? oldAssignees });
+  }
+  const patch: Record<string, unknown> = {};
+  if (input.statusId !== undefined) patch.statusId = input.statusId;
+  if (input.cycleId !== undefined) patch.cycleId = input.cycleId;
+  if (input.milestoneId !== undefined) patch.milestoneId = input.milestoneId;
+  if (input.priority !== undefined) patch.priority = input.priority;
+
+  await db.transaction(async (tx) => {
+    for (const { t, ref, added, finalAssignees } of plans) {
+      if (Object.keys(patch).length) await tx.update(tasks).set(patch).where(eq(tasks.id, t.id));
+      if (nextAssignees) {
+        await tx.delete(taskAssignees).where(eq(taskAssignees.taskId, t.id));
+        if (nextAssignees.length) await tx.insert(taskAssignees).values(nextAssignees.map((userId) => ({ taskId: t.id, userId })));
+        // Bulk assignment dispatches and notifies like a single one (R12).
+        if (added.length) {
+          await publishEvent(tx, { type: 'task.assigned', aggregateType: 'task', aggregateId: t.id, payload: { assigneeIds: added, ref, taskId: t.id, projectId: t.projectId }, actorId: actor.userId, actorType: actor.actorType });
+        }
+      }
+      if (input.statusId !== undefined && input.statusId !== t.statusId) {
+        await publishEvent(tx, { type: 'task.status_changed', aggregateType: 'task', aggregateId: t.id, payload: { ref, taskId: t.id, assigneeIds: finalAssignees, createdBy: t.createdBy, reporterId: t.reporterId, projectId: t.projectId }, actorId: actor.userId, actorType: actor.actorType });
+      }
+      if (nextLabels) {
+        await tx.delete(taskLabels).where(eq(taskLabels.taskId, t.id));
+        if (nextLabels.length) await tx.insert(taskLabels).values(nextLabels.map((labelId) => ({ taskId: t.id, labelId })));
       }
     }
-    if (input.statusId !== undefined && input.statusId !== t.statusId) {
-      await emit({ type: 'task.status_changed', aggregateType: 'task', aggregateId: t.id, payload: { ref: await taskRef(t), taskId: t.id, assigneeIds: await assigneeIdsOf(t.id), createdBy: t.createdBy, reporterId: t.reporterId, projectId: t.projectId }, actorId: actor.userId, actorType: actor.actorType });
-    }
-    if (input.labelIds !== undefined) {
-      await db.delete(taskLabels).where(eq(taskLabels.taskId, t.id));
-      if (input.labelIds.length) await db.insert(taskLabels).values((input.labelIds as string[]).map((labelId) => ({ taskId: t.id, labelId })));
-    }
-    updated++;
-  }
-  return { updated };
+  });
+  return { updated: plans.length };
 }
 
 export async function branchName(actor: Actor, id: string) {
