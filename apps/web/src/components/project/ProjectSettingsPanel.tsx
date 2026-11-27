@@ -10,6 +10,7 @@ import { CustomFieldsPanel } from '../settings/CustomFieldsPanel';
 import { IntakeSettingsSection } from './ProjectIntake';
 import { ProjectAutomationSection } from './ProjectAutomation';
 import { ProjectIntegrations } from './ProjectIntegrations';
+import { TaskStatusesSection } from './ProjectStatuses';
 import { PROJECT_STATUSES, STATUS_META } from './pickers';
 import { useT, extendDict } from '../../lib/i18n';
 
@@ -202,9 +203,10 @@ function ProjectSettings({ projectId, project, onDeleted }: {
         <ProjectAccessPanel projectId={project.id} canManage={isAdmin} />
       </section>
 
-      {/* Intake form, project task fields + task automation – the endpoints demand project admin. */}
+      {/* Task statuses, intake form, project task fields + task automation – the endpoints demand project admin. */}
       {isAdmin && (
         <>
+          <TaskStatusesSection projectId={project.id} />
           <section>
             <CustomFieldsPanel projectId={project.id} />
           </section>
