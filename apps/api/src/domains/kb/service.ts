@@ -240,6 +240,7 @@ function canAccessSpaceRow(
     spaceId: space.id,
     minRole,
     inheritedProjectRole,
+    projectLinked: !!space.projectId,
   });
 }
 

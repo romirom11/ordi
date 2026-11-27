@@ -11,6 +11,8 @@ export async function buildAccessContext(
   userId: string,
   permissions: Set<string>,
   readOnly: boolean,
+  /** The user row's actor type: an agent reaches only the projects it is a member of. */
+  actorType: string = 'user',
 ): Promise<AccessContext> {
   const { db } = getDb();
   const [pms, sms] = await Promise.all([
@@ -27,12 +29,14 @@ export async function buildAccessContext(
     projectMemberships: new Map(pms.map((m) => [m.projectId, m.role as 'admin' | 'member' | 'viewer'])),
     spaceMemberships: new Map(sms.map((m) => [m.spaceId, m.role as 'editor' | 'viewer'])),
     isReadOnlyToken: readOnly,
+    membershipOnlyProjects: actorType === 'agent',
   };
 }
 
 /**
- * All project ids the actor can view: workspace projects (if projects.read) plus
- * every project they're a member of. One query, cached on the request actor.
+ * All project ids the actor can view: workspace projects (if projects.read, and
+ * not an agent – see membershipOnlyProjects) plus every project they're a
+ * member of. One query, cached on the request actor.
  */
 const cacheKey = Symbol('accessibleProjectIds');
 export async function accessibleProjectIds(
@@ -46,7 +50,7 @@ export async function accessibleProjectIds(
   const { db } = getDb();
   const memberIds = [...actor.access.projectMemberships.keys()];
   let rows: { id: string }[];
-  if (actor.access.permissions.has('projects.read')) {
+  if (actor.access.permissions.has('projects.read') && !actor.access.membershipOnlyProjects) {
     rows = await db
       .select({ id: schema.projects.id })
       .from(schema.projects)
@@ -127,6 +131,7 @@ async function spaceAccessSets(
       visibility: s.visibility as 'workspace' | 'private',
       spaceId: s.id,
       inheritedProjectRole: s.projectId ? roleOfProject.get(s.projectId) ?? null : null,
+      projectLinked: !!s.projectId,
     });
     if (rank >= SPACE_RANK.viewer) sets.viewer.push(s.id);
     if (rank >= SPACE_RANK.editor) sets.editor.push(s.id);
@@ -222,6 +227,7 @@ export async function assertSpace(
     visibility: space.visibility as 'workspace' | 'private',
     spaceId,
     inheritedProjectRole,
+    projectLinked: !!space.projectId,
   });
   if (rank < SPACE_RANK[minRole]) {
     if (rank < SPACE_RANK.viewer) throw err.notFound('Space not found');

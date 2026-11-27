@@ -54,7 +54,7 @@ async function resolveActor(c: Parameters<MiddlewareHandler<AppEnv>>[0]): Promis
 
   const [role] = await db.select().from(schema.roles).where(eq(schema.roles.id, user.roleId));
   const permissions = await effectivePermissions(user.roleId, tokenScopes);
-  const access = await buildAccessContext(user.id, permissions, readOnly);
+  const access = await buildAccessContext(user.id, permissions, readOnly, user.actorType);
 
   return {
     userId: user.id,

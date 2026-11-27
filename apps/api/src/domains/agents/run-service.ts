@@ -75,7 +75,7 @@ export async function agentActor(userId: string): Promise<Actor> {
   const [user] = await db.select().from(users).where(eq(users.id, userId));
   if (!user) throw new Error('Agent user not found');
   const permissions = await loadRolePermissions(user.roleId);
-  const access = await buildAccessContext(user.id, permissions, false);
+  const access = await buildAccessContext(user.id, permissions, false, user.actorType);
   return {
     userId: user.id, actorType: user.actorType === 'agent' ? 'agent' : 'user', roleId: user.roleId, roleName: '', email: user.email, name: user.name,
     locale: user.locale, timezone: user.timezone, readOnly: false, tokenScopes: null, access,
@@ -157,6 +157,11 @@ async function loadSetup(run: RunRow): Promise<RunSetup> {
   if (!profile || !agent || !task || !project) throw new Error('Run setup is incomplete (agent, task or project missing)');
   // Deleted after the run was claimed: no credentials or repo token for it.
   if (task.deletedAt || project.deletedAt) throw new Error('Run setup is incomplete (task or project deleted)');
+  // Removed from the project after the run was queued (or queued before agents
+  // were held to their memberships): it gets neither the brief nor the repo.
+  const [member] = await db.select({ userId: schema.projectMembers.userId }).from(schema.projectMembers)
+    .where(and(eq(schema.projectMembers.projectId, run.projectId), eq(schema.projectMembers.userId, run.agentUserId)));
+  if (!member) throw new Error('The agent is no longer a member of this project – add it back under project members to run it here');
   const grants = await db.select({ id: mcpConnectors.id, slug: mcpConnectors.slug, secrets: mcpConnectors.secrets, status: mcpConnectors.status })
     .from(agentConnectors).innerJoin(mcpConnectors, eq(mcpConnectors.id, agentConnectors.connectorId))
     .where(eq(agentConnectors.agentUserId, run.agentUserId));
