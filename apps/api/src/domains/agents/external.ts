@@ -71,7 +71,7 @@ async function assertRole(roleId: string): Promise<void> {
  * permission that role grants. Without this, agents.manage alone would turn
  * into any role short of Owner – make the agent Admin, mint its token, use it.
  */
-async function assertCanGrantRole(actor: Actor, roleId: string): Promise<void> {
+export async function assertCanGrantRole(actor: Actor, roleId: string): Promise<void> {
   const granted = await loadRolePermissions(roleId);
   const missing = [...granted].filter((p) => !actor.access.permissions.has(p));
   if (missing.length) {
@@ -309,4 +309,54 @@ export async function revokeExternalAgentToken(actor: Actor, id: string, tokenId
     diff: { tokenId },
   });
   return { ok: true };
+}
+
+/** The external agents a person owns – what deactivating them would leave behind. */
+export async function externalAgentsOwnedBy(userId: string): Promise<{ id: string; name: string; isActive: boolean }[]> {
+  const { db } = getDb();
+  return db.select({ id: users.id, name: users.name, isActive: users.isActive }).from(externalAgents)
+    .innerJoin(users, eq(users.id, externalAgents.userId))
+    .where(eq(externalAgents.ownerUserId, userId))
+    .orderBy(users.name);
+}
+
+/**
+ * A person is leaving: the agents that work for them must not keep working on
+ * tokens they may have a copy of. Every token of each agent they own is
+ * revoked. With a successor who is a person the agents move to them – still
+ * switched on, waiting for a fresh token; otherwise they are switched off.
+ * The agent rows are locked first, so a token issued at the same moment is
+ * either refused or revoked with the rest.
+ */
+export async function handOverOwnedAgents(
+  actor: Actor,
+  fromUserId: string,
+  toUserId: string | null,
+): Promise<{ id: string; name: string; outcome: 'transferred' | 'disabled' }[]> {
+  const { db } = getDb();
+  const owned = await externalAgentsOwnedBy(fromUserId);
+  if (!owned.length) return [];
+  let successor: string | null = null;
+  if (toUserId) {
+    const [next] = await db.select({ isActive: users.isActive, actorType: users.actorType }).from(users).where(eq(users.id, toUserId));
+    if (next?.isActive && next.actorType === 'user') successor = toUserId;
+  }
+  const ids = owned.map((a) => a.id);
+  await db.transaction(async (tx) => {
+    await tx.select({ id: users.id }).from(users).where(inArray(users.id, ids)).for('update');
+    await tx.update(apiTokens).set({ revokedAt: new Date() }).where(and(inArray(apiTokens.userId, ids), isNull(apiTokens.revokedAt)));
+    if (successor) {
+      await tx.update(externalAgents).set({ ownerUserId: successor }).where(inArray(externalAgents.userId, ids));
+    } else {
+      await tx.update(users).set({ isActive: false }).where(inArray(users.id, ids));
+    }
+    for (const agent of owned) {
+      await writeActivity(tx, {
+        entityType: 'agent', entityId: agent.id, action: successor ? 'owner_handed_over' : 'disabled',
+        actorId: actor.userId, actorType: actor.actorType,
+        diff: { fromOwner: fromUserId, toOwner: successor, reason: 'owner_deactivated' },
+      });
+    }
+  });
+  return owned.map((a) => ({ id: a.id, name: a.name, outcome: successor ? 'transferred' : 'disabled' }));
 }

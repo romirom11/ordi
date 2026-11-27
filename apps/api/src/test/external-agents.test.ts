@@ -250,3 +250,61 @@ describe('assigning work to it', () => {
     expect(await runsForTask(other.taskId)).toEqual([]);
   });
 });
+
+describe('when its owner leaves', () => {
+  /** A person to own agents and then be deactivated, so the seeded users stay as they are. */
+  async function person(name: string): Promise<string> {
+    const { db } = getDb();
+    const [memberRole] = await db.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.key, 'member'));
+    const id = ulid();
+    await db.insert(schema.users).values({ id, email: `${id.toLowerCase()}@test.local`, name, roleId: memberRole!.id });
+    return id;
+  }
+
+  it('is listed before the switch-off, then moves to the successor with its tokens revoked', async () => {
+    const leaver = await person('Leaving Lena');
+    const agent = await createAgent('Lena\'s bot');
+    await owner().patch(`/external-agents/${agent.id}`, { ownerUserId: leaver });
+    const { token } = await issueToken(agent.id, null);
+    expect((await bearer(token).get('/projects')).status).toBe(200);
+
+    const preview = await json(owner().get(`/users/${leaver}/open-tasks`));
+    expect(preview.ownedAgents.map((a: { id: string }) => a.id)).toEqual([agent.id]);
+
+    const res = await json(owner().post(`/users/${leaver}/deactivate`, { reassignTo: users.manager!.userId }));
+    expect(res.externalAgents).toEqual([{ id: agent.id, name: 'Lena\'s bot', outcome: 'transferred' }]);
+    expect((await bearer(token).get('/projects')).status).toBe(401);
+    const view = ((await json(owner().get('/external-agents'))).data as { id: string; ownerUserId: string; isActive: boolean }[])
+      .find((a) => a.id === agent.id)!;
+    expect(view).toMatchObject({ ownerUserId: users.manager!.userId, isActive: true });
+  });
+
+  it('is switched off when there is no one to take it over', async () => {
+    const leaver = await person('Leaving Leo');
+    const agent = await createAgent('Leo\'s bot');
+    await owner().patch(`/external-agents/${agent.id}`, { ownerUserId: leaver });
+    const { token } = await issueToken(agent.id, null);
+
+    const res = await json(owner().post(`/users/${leaver}/deactivate`, {}));
+    expect(res.externalAgents).toEqual([{ id: agent.id, name: 'Leo\'s bot', outcome: 'disabled' }]);
+    expect((await bearer(token).get('/projects')).status).toBe(401);
+    const [row] = await getDb().db.select({ isActive: schema.users.isActive }).from(schema.users).where(eq(schema.users.id, agent.id));
+    expect(row!.isActive).toBe(false);
+  });
+});
+
+describe('changing an agent\'s role from the user list', () => {
+  it('never makes it Owner, nor an external agent wider than the person', async () => {
+    const { db } = getDb();
+    const [ownerRole] = await db.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.key, 'owner'));
+    const [adminRole] = await db.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.key, 'admin'));
+    const agent = await createAgent('Role climber');
+    const toOwner = await owner().patch(`/users/${agent.id}/role`, { roleId: ownerRole!.id });
+    expect(toOwner.status).toBeGreaterThanOrEqual(400);
+    expect(toOwner.status).toBeLessThan(500);
+
+    const w = await wrangler();
+    expect((await w.patch(`/users/${agent.id}/role`, { roleId: adminRole!.id })).status).toBe(403);
+    expect((await owner().patch(`/users/${agent.id}/role`, { roleId: adminRole!.id })).status).toBe(200);
+  });
+});
