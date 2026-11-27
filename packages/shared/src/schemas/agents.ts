@@ -189,6 +189,12 @@ export const issueExternalAgentTokenSchema = z.object({
 
 // ── A person's own agent (Profile → MCP & API) ──
 
+/**
+ * How long a client's token for a personal agent lasts unless the person
+ * picks otherwise; a client connected by signing in (OAuth) gets this too.
+ */
+export const MY_AGENT_TOKEN_DEFAULT_DAYS = 90;
+
 export const myAgentInputSchema = z.object({
   name: z.string().trim().min(1).max(60),
 });
@@ -196,5 +202,5 @@ export const myAgentInputSchema = z.object({
 export const issueMyAgentTokenSchema = z.object({
   /** The client this token is for – shown next to what the agent writes through it. */
   client: z.string().trim().min(1).max(40),
-  expiresInDays: z.number().int().min(1).max(3650).nullable().default(90),
+  expiresInDays: z.number().int().min(1).max(3650).nullable().default(MY_AGENT_TOKEN_DEFAULT_DAYS),
 });
