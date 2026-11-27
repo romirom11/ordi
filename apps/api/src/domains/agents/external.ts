@@ -14,7 +14,9 @@ import { err } from '../../lib/errors';
 import { generateToken, sha256 } from '../../lib/crypto';
 import { writeActivity } from '../../core/activity';
 import { loadRolePermissions } from '../../core/rbac';
-import { accessibleProjectIds, accessibleSpaceIds, editableSpaceIds, effectiveProjectRole } from '../../core/access';
+import {
+  accessibleProjectIds, accessibleSpaceIds, editableSpaceIds, effectiveProjectRolesIncludingDeleted,
+} from '../../core/access';
 
 const { users, roles, externalAgents, apiTokens, projectMembers, projects, spaceMembers } = schema;
 
@@ -25,6 +27,8 @@ export interface ExternalAgentToken {
   lastUsedAt: string | null;
   expiresAt: string | null;
   createdAt: string;
+  /** Issued when a client connected by signing in (OAuth), not made by hand. */
+  oauth: boolean;
 }
 
 export interface ExternalAgentView {
@@ -101,13 +105,16 @@ const PROJECT_RANK: Record<string, number> = { viewer: 1, member: 2, admin: 3 };
 async function assertCanReachAgentResources(actor: Actor, agentId: string): Promise<void> {
   const { db } = getDb();
   const [projectRows, spaceRows] = await Promise.all([
+    // Deleted projects too: a token minted now still works there once the
+    // project is restored.
     db.select({ id: projects.id, key: projects.key, visibility: projects.visibility, role: projectMembers.role })
       .from(projectMembers).innerJoin(projects, eq(projects.id, projectMembers.projectId))
-      .where(and(eq(projectMembers.userId, agentId), isNull(projects.deletedAt))),
+      .where(eq(projectMembers.userId, agentId)),
     db.select({ spaceId: spaceMembers.spaceId, role: spaceMembers.role }).from(spaceMembers).where(eq(spaceMembers.userId, agentId)),
   ]);
+  const roles = await effectiveProjectRolesIncludingDeleted(actor, projectRows.map((p) => ({ id: p.id, visibility: p.visibility as 'workspace' | 'private' })));
   const shortOf = projectRows.filter((p) => {
-    const mine = effectiveProjectRole(actor, { id: p.id, visibility: p.visibility as 'workspace' | 'private' });
+    const mine = roles.get(p.id) ?? null;
     return (mine ? PROJECT_RANK[mine]! : 0) < (PROJECT_RANK[p.role] ?? 0);
   });
   if (shortOf.length) {
@@ -176,6 +183,7 @@ async function views(actor: Actor, ids: string[]): Promise<ExternalAgentView[]> 
         lastUsedAt: t.lastUsedAt?.toISOString() ?? null,
         expiresAt: t.expiresAt?.toISOString() ?? null,
         createdAt: t.createdAt.toISOString(),
+        oauth: !!t.oauthClientId,
       })),
     createdAt: ext.createdAt.toISOString(),
   }));
@@ -281,6 +289,9 @@ export async function setExternalAgentActive(actor: Actor, id: string, active: b
     await tx.update(users).set({ isActive: active }).where(eq(users.id, id));
     if (!active) {
       await tx.update(apiTokens).set({ revokedAt: new Date() }).where(and(eq(apiTokens.userId, id), isNull(apiTokens.revokedAt)));
+      // A consent given before the switch-off must not turn into a token
+      // once it is back on: pending sign-ins as this agent are dropped too.
+      await tx.delete(schema.oauthAuthCodes).where(eq(schema.oauthAuthCodes.agentUserId, id));
     }
     await writeActivity(tx, {
       entityType: 'agent', entityId: id, action: active ? 'enabled' : 'disabled', actorId: actor.userId, actorType: actor.actorType,
@@ -334,7 +345,7 @@ export async function issueExternalAgentToken(
     token: raw,
     tokenInfo: {
       id: tokenId, name: input.name, prefix: created!.prefix, lastUsedAt: null,
-      expiresAt: expiresAt?.toISOString() ?? null, createdAt: created!.createdAt.toISOString(),
+      expiresAt: expiresAt?.toISOString() ?? null, createdAt: created!.createdAt.toISOString(), oauth: false,
     },
   };
 }
@@ -399,6 +410,7 @@ export async function handOverOwnedAgents(
   await tx.update(apiTokens).set({ revokedAt: new Date() }).where(and(inArray(apiTokens.userId, owned.map((a) => a.id)), isNull(apiTokens.revokedAt)));
   if (moved.length) await tx.update(externalAgents).set({ ownerUserId: successor! }).where(inArray(externalAgents.userId, moved));
   if (stopped.length) await tx.update(users).set({ isActive: false }).where(inArray(users.id, stopped));
+  await tx.delete(schema.oauthAuthCodes).where(inArray(schema.oauthAuthCodes.agentUserId, owned.map((a) => a.id)));
   for (const agent of owned) {
     const transferred = moved.includes(agent.id);
     await writeActivity(tx, {
@@ -516,7 +528,7 @@ export async function issueMyAgentToken(
     token: raw,
     tokenInfo: {
       id: tokenId, name: input.client, prefix: created!.prefix, lastUsedAt: null,
-      expiresAt: expiresAt?.toISOString() ?? null, createdAt: created!.createdAt.toISOString(),
+      expiresAt: expiresAt?.toISOString() ?? null, createdAt: created!.createdAt.toISOString(), oauth: false,
     },
   };
 }

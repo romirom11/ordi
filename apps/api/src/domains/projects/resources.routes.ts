@@ -11,7 +11,8 @@
  *   space, draft, someone else's private page) is left out of their list
  *   altogether, title included – the same rule search applies.
  *
- * Reads need project viewer, writes project member.
+ * Reads need project viewer, writes project member; removing a file someone
+ * else uploaded needs project admin, as deleting it through /attachments does.
  */
 import { Hono } from 'hono';
 import { getDb, schema, eq, and, asc, inArray, isNull, sql } from '@ordi/db';
@@ -23,7 +24,7 @@ import {
 import type { Actor, AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { rejectReadOnlyWrites } from '../../core/rbac';
-import { assertProject, accessibleSpaceIds, editableSpaceIds } from '../../core/access';
+import { assertProject, accessibleSpaceIds, editableSpaceIds, effectiveProjectRole } from '../../core/access';
 import { writeActivity } from '../../core/activity';
 import { err } from '../../lib/errors';
 import { actorContext, deleteSecret, listSecrets, type SecretView } from '../secrets/service';
@@ -42,7 +43,8 @@ export interface ProjectResourceView {
   position: number;
   createdBy: string | null;
   createdAt: string;
-  file?: { id: string; filename: string; size: number; mime: string };
+  /** canChange: whether this actor may rename or delete it (DELETE /attachments' rule). */
+  file?: { id: string; filename: string; size: number; mime: string; canChange: boolean };
   page?: { id: string; title: string; icon: string | null; spaceId: string; url: string };
   /** Metadata only – values are revealed one field at a time (POST /project-secrets/:id/reveal). */
   secret?: SecretView;
@@ -96,11 +98,20 @@ export async function listResources(actor: Actor, projectId: string): Promise<Pr
   const fileIds = rows.map((r) => r.attachmentId).filter((id): id is string => !!id);
   const files = fileIds.length
     ? await db
-      .select({ id: attachments.id, filename: attachments.filename, size: attachments.size, mime: attachments.mime })
+      .select({ id: attachments.id, filename: attachments.filename, size: attachments.size, mime: attachments.mime, createdBy: attachments.createdBy })
       .from(attachments)
       .where(inArray(attachments.id, fileIds))
     : [];
-  const fileById = new Map(files.map((f) => [f.id, f]));
+  // The uploader changes their own file as a member; anyone else needs admin.
+  let isAdmin = false;
+  if (files.length && !actor.readOnly) {
+    const [project] = await db.select({ id: schema.projects.id, visibility: schema.projects.visibility })
+      .from(schema.projects).where(eq(schema.projects.id, projectId));
+    isAdmin = !!project && effectiveProjectRole(actor, { id: project.id, visibility: project.visibility as 'workspace' | 'private' }) === 'admin';
+  }
+  const fileById = new Map(files.map(({ createdBy, ...f }) => [f.id, {
+    ...f, canChange: !actor.readOnly && (isAdmin || createdBy === actor.userId),
+  }]));
   const pages = await visiblePages(actor, rows.map((r) => r.kbPageId).filter((id): id is string => !!id));
   // A secret the actor may not list is left out entirely, like a hidden page (secretAccess).
   const secretIds = rows.map((r) => r.secretId).filter((id): id is string => !!id);
@@ -278,13 +289,15 @@ export function projectResourcesRoutes() {
 
     if (row.kind === 'file' && row.attachmentId) {
       const [att] = await db.select().from(attachments).where(eq(attachments.id, row.attachmentId));
-      // Only a file that hangs off this very project is deleted from here:
-      // project membership (checked above) is what DELETE /attachments asks
-      // of a project file too. The row goes with its attachment (ON DELETE
-      // CASCADE); the S3 object stays behind, as with every other delete.
+      // Only a file that hangs off this very project is deleted from here,
+      // by the rule DELETE /attachments holds it to: its uploader as a member
+      // (checked above), anyone else as a project admin. The row goes with
+      // its attachment (ON DELETE CASCADE); the S3 object stays behind, as
+      // with every other delete.
       if (att && (att.entityType !== 'project' || att.entityId !== row.projectId)) {
         throw err.domain('This file belongs to another record');
       }
+      if (att && att.createdBy !== actor.userId) await assertProject(actor, row.projectId, 'admin');
       if (att) {
         logged = { kind: 'file', name: att.filename };
         await db.delete(attachments).where(eq(attachments.id, att.id));

@@ -160,7 +160,7 @@ describe('the repair migration', () => {
     const ruleId = ulid();
     await db.insert(schema.gitAutomationRules).values({ id: ruleId, projectId: home, trigger: 'branch_created', targetStatusId: sameName.id });
 
-    const file = new URL('../../../../packages/db/drizzle/0052_task_status_own_project.sql', import.meta.url);
+    const file = new URL('../../../../packages/db/drizzle/0053_task_status_own_project.sql', import.meta.url);
     for (const statement of readFileSync(file, 'utf8').split('--> statement-breakpoint')) {
       await db.execute(sql.raw(statement));
     }

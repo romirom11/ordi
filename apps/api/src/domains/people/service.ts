@@ -464,6 +464,17 @@ export async function addEmployeeDocument(actor: Actor, employeeId: string, inpu
   if (att.entityType && !(att.entityType === 'employee' && att.entityId === employeeId)) {
     throw err.domain('Attachment already belongs to another record');
   }
+  // Filing a loose file claims it: from here on it answers to this employee's
+  // record, not to whoever uploaded it. Only the uploader hands it over, or a
+  // file someone embedded in a document could be taken over by id.
+  if (!att.entityType && att.createdBy !== actor.userId) throw err.validation('Unknown attachment');
+  // A knowledge-base PDF page shows its file to every reader of the page;
+  // filed on an employee as well, the page would keep republishing it.
+  if (!att.entityType) {
+    const [shown] = await db.select({ id: schema.kbPages.id }).from(schema.kbPages)
+      .where(eq(schema.kbPages.fileId, att.id)).limit(1);
+    if (shown) throw err.domain('Attachment already belongs to another record');
+  }
   const id = ulid();
   await db.insert(schema.employeeDocuments).values({
     id, employeeId, attachmentId: input.attachmentId, type: input.type ?? 'other',
@@ -1068,7 +1079,7 @@ export async function decideLeave(actor: Actor, id: string, newStatus: 'approved
   });
 
   await writeActivity(db, { entityType: 'leave_request', entityId: id, action: newStatus, before: { status: req.status }, after: { status: newStatus, comment }, actorId: actor.userId, actorType: actor.actorType });
-  await emit({ type: 'leave.decided', aggregateType: 'leave_request', aggregateId: id, payload: { decision: newStatus, employeeUserId: employee.userId }, actorId: actor.userId, actorType: actor.actorType });
+  await emit({ type: 'leave.decided', aggregateType: 'leave_request', aggregateId: id, payload: { decision: newStatus, employeeUserId: employee.userId, approverId: req.approverId }, actorId: actor.userId, actorType: actor.actorType });
   const [updated] = await db.select().from(schema.leaveRequests).where(eq(schema.leaveRequests.id, id));
   return updated;
 }

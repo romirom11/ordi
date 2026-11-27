@@ -1,9 +1,11 @@
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import type { AppEnv } from '../../context';
+import { canSeePage } from '@ordi/shared';
+import type { AppEnv, Actor } from '../../context';
 import { requireAuth, currentActor, resolveActor } from '../../core/auth';
 import { broadcaster, type SSEMessage } from '../../core/events';
-import { accessibleProjectIds, accessibleSpaceIds } from '../../core/access';
+import { accessibleProjectIds, spaceAccessSets } from '../../core/access';
+import { isWritePermission } from '../../core/rbac';
 
 /**
  * What a person's own agent hears: the work it does – tasks, their comments
@@ -13,8 +15,16 @@ import { accessibleProjectIds, accessibleSpaceIds } from '../../core/access';
  */
 const PERSONAL_AGENT_NEWS = /^(?:task|comment|cycle|page)\.|^agent\.run_/;
 
-/** How often the stream pings – and re-checks a personal agent's access. Tests shorten it. */
+/** How often the stream pings – and re-checks the caller's access. Tests shorten it. */
 export const streamTiming = { pingMs: 15_000 };
+
+/** The project and space sets one connection judges events by. */
+async function accessOf(actor: Actor) {
+  const [projectIds, spaces] = await Promise.all([
+    accessibleProjectIds(actor, { fresh: true }), spaceAccessSets(actor, { fresh: true }),
+  ]);
+  return { projectIds: new Set(projectIds), spaceIds: new Set(spaces.viewer), editorSpaceIds: new Set(spaces.editor) };
+}
 
 /** SSE stream (PRD §3.4): server pushes events filtered by the actor's access. */
 export function streamRoutes() {
@@ -23,15 +33,14 @@ export function streamRoutes() {
 
   app.get('/', async (c) => {
     let actor = currentActor(c);
-    let projectIds = new Set(await accessibleProjectIds(actor));
-    let spaceIds = new Set(await accessibleSpaceIds(actor));
+    let { projectIds, spaceIds, editorSpaceIds } = await accessOf(actor);
     /** Projects/spaces we re-read for and still could not see – do not re-read again. */
     let denied = new Set<string>();
     let deniedSpaces = new Set<string>();
     /**
-     * Bumped each time a personal agent's access is rebuilt. A re-read that
-     * started before the rebuild must not install the old access over the new
-     * one – nor decide an event by it.
+     * Bumped each time the caller's access is rebuilt. A re-read that started
+     * before the rebuild must not install the old access over the new one –
+     * nor decide an event by it.
      */
     let generation = 0;
 
@@ -62,23 +71,25 @@ export function streamRoutes() {
       if (scope.some((s) => spaceIds.has(s))) return true;
       if (scope.every((s) => deniedSpaces.has(s))) return false;
       const gen = generation;
-      const ids = new Set(await accessibleSpaceIds(actor, { fresh: true }));
+      const sets = await spaceAccessSets(actor, { fresh: true });
       if (gen !== generation) return canSeeSpace(scope);
-      spaceIds = ids;
+      spaceIds = new Set(sets.viewer);
+      editorSpaceIds = new Set(sets.editor);
       if (scope.some((s) => spaceIds.has(s))) return true;
       for (const s of scope) deniedSpaces.add(s);
       return false;
     };
+
+    /** A page inside a visible space: drafts for its editors, a private page for its author too. */
+    const canSeePageOf = (msg: SSEMessage): boolean =>
+      !msg.page || canSeePage(msg.page, actor.userId, !!msg.spaceScope?.some((s) => editorSpaceIds.has(s)));
 
     /** The caller again, as a new request would see it, with its project and space sets. */
     const refreshed = async (userId: string) => {
       // Not a use of the token: an idle stream must not keep "last used" at now.
       const fresh = await resolveActor(c, { touch: false });
       if (!fresh || fresh.userId !== userId) return null;
-      const [projectIds, spaceIds] = await Promise.all([
-        accessibleProjectIds(fresh, { fresh: true }), accessibleSpaceIds(fresh, { fresh: true }),
-      ]);
-      return { actor: fresh, projectIds, spaceIds };
+      return { actor: fresh, ...(await accessOf(fresh)) };
     };
 
     /** Everyone else hears what they did before; a personal agent, PERSONAL_AGENT_NEWS. */
@@ -88,54 +99,78 @@ export function streamRoutes() {
       return PERSONAL_AGENT_NEWS.test(msg.event) && !!(msg.projectScope?.length || msg.spaceScope?.length);
     };
 
+    /**
+     * Workspace news outside projects goes to those who may read it – by the
+     * caller's permissions now, which the refresh below keeps current – and to
+     * the people it is about.
+     */
+    const holdsPermission = (msg: SSEMessage): boolean =>
+      msg.permissionScope!.some((p) => actor.access.permissions.has(p) && !(actor.readOnly && isWritePermission(p)))
+      || !!msg.involvedUsers?.includes(actor.userId);
+
     return streamSSE(c, async (stream) => {
+      const send = (msg: SSEMessage) => {
+        stream.writeSSE({ event: msg.event, data: JSON.stringify(msg.data) }).catch(() => {});
+      };
       const unsub = broadcaster.subscribe((msg) => {
         if (msg.userScope?.length && !msg.userScope.includes(actor.userId)) return;
         if (!personalAgentHears(msg)) return;
-        const gate = msg.projectScope?.length
-          ? canSee(msg.projectScope)
-          : msg.spaceScope?.length
-            ? canSeeSpace(msg.spaceScope)
-            : null;
-        if (!gate) {
-          stream.writeSSE({ event: msg.event, data: JSON.stringify(msg.data) }).catch(() => {});
+        if (msg.permissionScope?.length && !holdsPermission(msg)) return;
+        if (msg.projectScope?.length) {
+          void canSee(msg.projectScope).then((ok) => { if (ok) send(msg); }).catch(() => {});
           return;
         }
-        void gate.then((allowed) => {
-          if (allowed) stream.writeSSE({ event: msg.event, data: JSON.stringify(msg.data) }).catch(() => {});
-        }).catch(() => {});
+        if (msg.spaceScope?.length) {
+          void canSeeSpace(msg.spaceScope).then((ok) => { if (ok && canSeePageOf(msg)) send(msg); }).catch(() => {});
+          return;
+        }
+        // Nothing scoped it: deliver only what was meant for everyone. A page
+        // event with no space is never "everyone".
+        if (msg.page) return;
+        if (msg.userScope?.length || msg.permissionScope?.length || msg.workspaceWide) send(msg);
       });
-      await stream.writeSSE({ event: 'connected', data: JSON.stringify({ ok: true }) });
       let closed = false;
-      stream.onAbort(() => { closed = true; unsub(); });
+      // A wait the abort can cut short, so a closed connection holds no timer.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let wake: (() => void) | undefined;
+      const nap = () => new Promise<void>((res) => { wake = res; timer = setTimeout(res, streamTiming.pingMs); });
+      // Before the first write: an abort is not replayed to a listener added
+      // later, and a write to a closed stream does not fail – a client gone by
+      // then would leave this loop re-reading its access for as long as its
+      // credentials last.
+      stream.onAbort(() => { closed = true; unsub(); clearTimeout(timer); wake?.(); });
+      await stream.writeSSE({ event: 'connected', data: JSON.stringify({ ok: true }) });
       // However the loop ends – aborted, refused, or a failed read – the
       // subscription goes with it: the stream closing does not fire onAbort.
       try {
-        while (!closed) {
-          await stream.sleep(streamTiming.pingMs);
-          if (closed) break;
-          // A personal agent's reach is its owner's, now: a revoked token, an
-          // owner switched off or taken off a project ends what this connection
-          // hears, as it would end the next request. The snapshot above only
-          // ever grows, so it is rebuilt rather than topped up. A read that
-          // fails ends the stream too: the client reconnects through the
+        while (!closed && !stream.aborted) {
+          await nap();
+          if (closed || stream.aborted) break;
+          // The caller's reach is re-read as the next request would see it: a
+          // revoked token or session, an expired one, a user switched off (or a
+          // personal agent's owner), someone taken off a project or a role
+          // changed – each ends what this connection hears. The snapshot above
+          // only ever grows, so it is rebuilt rather than topped up. A read
+          // that fails ends the stream too: the client reconnects through the
           // ordinary checks.
-          if (actor.agentKind === 'personal') {
-            const next = await refreshed(actor.userId).catch(() => null);
-            if (!next) break;
-            // All at once, so no event is judged by half of the old access.
-            generation++;
-            actor = next.actor;
-            projectIds = new Set(next.projectIds);
-            spaceIds = new Set(next.spaceIds);
-          }
+          const next = await refreshed(actor.userId).catch(() => null);
+          if (!next || closed) break;
+          // All at once, so no event is judged by half of the old access.
+          generation++;
+          actor = next.actor;
+          projectIds = next.projectIds;
+          spaceIds = next.spaceIds;
+          editorSpaceIds = next.editorSpaceIds;
           // Access can be granted later too; forget the misses so a project or
           // space the user has since been added to gets one more chance.
           denied = new Set();
           deniedSpaces = new Set();
-          await stream.writeSSE({ event: 'ping', data: '{}' }).catch(() => { closed = true; });
+          // Not awaited: a reader that stops reading must not hold up the next
+          // refresh, or events would go on being judged by the access it had.
+          stream.writeSSE({ event: 'ping', data: '{}' }).catch(() => { closed = true; });
         }
       } finally {
+        clearTimeout(timer);
         unsub();
       }
     });

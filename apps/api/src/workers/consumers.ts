@@ -6,7 +6,7 @@
 import { getDb, schema, eq, and, desc, isNull } from '@ordi/db';
 import { ulid } from 'ulid';
 import type { DomainEvent } from '@ordi/shared';
-import { broadcaster } from '../core/events';
+import { broadcaster, type SSEMessage } from '../core/events';
 import { enqueueEmail, type QueuedEmailInput } from './email-delivery';
 import { appLink, asLocale, loadBranding, renderEmail, tr, type Branding } from '../lib/email-templates';
 import { hmacSha256, decrypt } from '../lib/crypto';
@@ -432,19 +432,67 @@ const notifications: Consumer = {
   },
 };
 
+/**
+ * Who may hear an event on the live stream, or null when nobody should. Each
+ * family is held to the rule its read routes apply, and an event that matches
+ * no rule is not broadcast: the payloads name invoices, deals, leave and
+ * private projects, and the stream used to send anything unscoped to everyone.
+ */
+async function sseAudience(ev: DomainEvent): Promise<Omit<SSEMessage, 'event' | 'data'> | null> {
+  const p = ev.payload as any;
+  const t = ev.type;
+  // A job for the notifications consumer, which tells the person through
+  // notification.created; no client listens for the job itself.
+  if (t === 'sales.work_digest_due') return null;
+  // Before projectId: an invoice or a quote can name a project, and its
+  // members are not, by that, readers of finance.
+  if (t.startsWith('deal.')) return { permissionScope: ['deals.read'] };
+  if (t.startsWith('invoice.') || t.startsWith('payment.') || t.startsWith('quote.')) return { permissionScope: ['finance.read'] };
+  if (t.startsWith('applicant.')) return { permissionScope: ['people.recruit'] };
+  if (t.startsWith('employee.')) {
+    return { permissionScope: ['people.read', 'people.write'], involvedUsers: p.userId ? [p.userId] : [] };
+  }
+  if (t.startsWith('leave.')) {
+    return { permissionScope: ['people.read'], involvedUsers: [p.employeeUserId, p.approverId].filter(Boolean) };
+  }
+  // A project event's project is its aggregate: project.created and
+  // project.completed carry no projectId, and a private project's key went
+  // workspace-wide.
+  if (ev.aggregateType === 'project') return { projectScope: [ev.aggregateId] };
+  // Someone else's time (who, how long, billable) is for time.read_all, as the
+  // entry routes have it: seeing the project does not show it.
+  if (t.startsWith('time.')) {
+    return { projectScope: p.projectId ? [p.projectId] : undefined, permissionScope: ['time.read_all'], involvedUsers: p.userId ? [p.userId] : [] };
+  }
+  if (p.projectId) return { projectScope: [p.projectId] };
+  if (t.startsWith('page.')) {
+    const pageId = p.pageId ?? ev.aggregateId;
+    const { db } = getDb();
+    const [page] = await db.select({
+      spaceId: schema.kbPages.spaceId, published: schema.kbPages.published,
+      visibility: schema.kbPages.visibility, createdBy: schema.kbPages.createdBy, deletedAt: schema.kbPages.deletedAt,
+    }).from(schema.kbPages).where(eq(schema.kbPages.id, pageId));
+    // Deleted before the outbox got to it: as gone as the KB routes have it.
+    if (!page || page.deletedAt) return null;
+    return { spaceScope: [page.spaceId], page: { published: page.published, visibility: page.visibility, createdBy: page.createdBy } };
+  }
+  // KB events carry a spaceId – a private space's page titles must not stream workspace-wide.
+  if (p.spaceId) return { spaceScope: [p.spaceId] };
+  // Says only "some role changed": every client re-reads its own permissions.
+  if (t === 'role.updated') return { workspaceWide: true };
+  return null;
+}
+
 const sse: Consumer = {
   name: 'sse',
   async handle(ev) {
-    const p = ev.payload as any;
+    const audience = await sseAudience(ev);
+    if (!audience) return;
     broadcaster.broadcast({
       event: ev.type,
       // actorId travels with the payload so clients can skip pings for their own actions.
-      data: { aggregateType: ev.aggregateType, aggregateId: ev.aggregateId, actorId: ev.actorId, ...p },
-      projectScope: p.projectId ? [p.projectId] : undefined,
-      // KB events carry a spaceId – a private space's page titles must not
-      // stream workspace-wide.
-      spaceScope: !p.projectId && p.spaceId ? [p.spaceId] : undefined,
-      userScope: ev.type === 'sales.work_digest_due' && p.userId ? [p.userId] : undefined,
+      data: { aggregateType: ev.aggregateType, aggregateId: ev.aggregateId, actorId: ev.actorId, ...(ev.payload as object) },
+      ...audience,
     });
   },
 };
