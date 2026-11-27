@@ -742,7 +742,10 @@ const agents: Consumer = {
       if (ev.actorType === 'agent' || !p.taskId) return;
       const { db } = getDb();
       const assignees = await db.select({ userId: schema.taskAssignees.userId }).from(schema.taskAssignees).where(eq(schema.taskAssignees.taskId, p.taskId));
-      const mentioned = new Set<string>((p.mentions as string[]) ?? []);
+      // A mentioned agent starts only if the commenter may assign it (R49):
+      // addComment lists those in agentMentions. A comment.created written
+      // before that list existed starts the task's agents only.
+      const mentioned = new Set<string>((p.agentMentions as string[] | undefined) ?? []);
       const candidates = [...new Set([...assignees.map((a) => a.userId), ...mentioned])];
       const profiles = await agentProfilesAmong(candidates);
       // A closed task is not reopened by a comment: the agent would drag it back to review.

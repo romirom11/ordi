@@ -302,8 +302,12 @@ export function ActivityFeed({ taskId, comments, users, projectRole }: {
   const canSend = docHasText(draft);
 
   const addComment = useMutation({
-    mutationFn: () => api.post(`/tasks/${taskId}/comments`, { body: draft }),
-    onSuccess: () => {
+    mutationFn: () => api.post<{ id: string; agentsNotStarted?: { userId: string; name: string; reason: string }[] }>(`/tasks/${taskId}/comments`, { body: draft }),
+    onSuccess: (res) => {
+      // The comment is posted; a mentioned agent the author may not put work on does not start.
+      for (const a of res?.agentsNotStarted ?? []) {
+        toast.info(t('tasks.mentionedAgentNotStarted').replace('{name}', a.name || t('common.someone')).replace('{reason}', a.reason));
+      }
       setDraft(EMPTY_DOC);
       setComposerKey((k) => k + 1); // remount the editor to clear it even while focused
       qc.invalidateQueries({ queryKey: ['task', taskId] });
