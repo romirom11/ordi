@@ -1,6 +1,7 @@
 import { useState, type KeyboardEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../../lib/api';
+import { sendBulkTaskEdit } from '../../lib/bulkTasks';
 import { Select, PriorityIcon, cn } from '../ui';
 import { toast } from '../overlays';
 import { DateField } from '../DatePicker';
@@ -40,9 +41,12 @@ export function SpreadsheetView({ tasks, statuses, projectId, onOpenTask }: {
   });
 
   const bulk = useMutation({
-    mutationFn: (body: { taskIds: string[]; statusId?: string; priority?: string }) => api.post('/tasks/bulk', body),
+    mutationFn: (body: { taskIds: string[]; statusId?: string; priority?: string }) =>
+      sendBulkTaskEdit(body, (part) => api.post<{ updated: number }>('/tasks/bulk', part)),
     onSuccess: () => { invalidate(); setSelected(new Set()); },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Bulk update failed.'),
+    // A selection over the API's limit goes in parts, and the parts before a
+    // refused one are saved: show what the tasks are now.
+    onError: (e) => { toast.error(e instanceof ApiError ? e.message : 'Bulk update failed.'); invalidate(); },
   });
 
   const patchField = (t: SheetTask, body: Record<string, unknown>) =>

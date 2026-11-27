@@ -10,8 +10,9 @@ import { MAX_UPLOAD_BYTES } from '@ordi/shared';
 export interface Uploaded {
   id: string;
   /**
-   * Root-relative, signed, non-expiring path for embedding in a document.
-   * Resolve it with resolveFileSrc() before putting it in an <img>.
+   * Root-relative signed path for embedding in a document. It opens the file
+   * for about an hour; the API signs it afresh for every reader of the
+   * document. Resolve it with resolveFileSrc() before putting it in an <img>.
    */
   src: string;
   filename: string;

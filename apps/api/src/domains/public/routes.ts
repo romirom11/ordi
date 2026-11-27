@@ -13,7 +13,9 @@ import { err } from '../../lib/errors';
 import { logger } from '../../lib/logger';
 import { emit } from '../../core/events';
 import { hmacSha256, encrypt, generateToken } from '../../lib/crypto';
-import { verifyFileToken } from '../../lib/file-tokens';
+import { fileTokenSecondsLeft } from '../../lib/file-tokens';
+import { signFileLinksOut, vetFileLinksIn, vetFilePaths } from '../../core/file-links';
+import { assertAttachable } from '../../core/file-access';
 import { getObject, isStorageConfigured } from '../../lib/s3';
 import {
   submitPublicIntake, assertPublicIntakeRate, intakeBodyLimit, intakeSubmitterKey, type IntakeFile,
@@ -114,11 +116,13 @@ export function publicRoutes() {
    * self-hosted MinIO, exists only inside the docker network.
    *
    * A wrong token is a 404, not a 403: the same rule as every other public
-   * token here – existence is never leaked.
+   * token here – existence is never leaked. So is an expired one, and one
+   * from before links expired.
    */
   app.get('/files/:id/:token', async (c) => {
     const id = c.req.param('id');
-    if (!verifyFileToken(id, c.req.param('token'))) throw err.notFound();
+    const token = c.req.param('token');
+    if (fileTokenSecondsLeft(id, token) <= 0) throw err.notFound();
     const { db } = getDb();
     const [att] = await db.select().from(schema.attachments).where(eq(schema.attachments.id, id));
     if (!att) throw err.notFound();
@@ -136,8 +140,11 @@ export function publicRoutes() {
     // RFC 5987 filename* carries any unicode name; the plain fallback is ASCII.
     const asciiName = att.filename.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '');
     c.header('Content-Disposition', `inline; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(att.filename)}`);
-    // An attachment id always names the same bytes, so the link can cache hard.
-    c.header('Cache-Control', 'private, max-age=31536000, immutable');
+    // An attachment id always names the same bytes, so the link caches for
+    // as long as it lives – and not past that, or a lapsed link would keep
+    // showing the file from the cache. Measured after the storage fetch, so a
+    // slow one does not stretch it.
+    c.header('Cache-Control', `private, max-age=${fileTokenSecondsLeft(id, token)}, immutable`);
     return c.body(object.body);
   });
 
@@ -293,7 +300,7 @@ export function publicRoutes() {
   });
 
   // ── Quote accept/decline (PRD §11.2) ──
-  app.post('/q/:token/decision', async (c) => {
+  app.post('/q/:token/decision', vetFileLinksIn, async (c) => {
     const { db } = getDb();
     const token = c.req.param('token');
     const body = publicQuoteDecisionSchema.parse(await c.req.json());
@@ -431,7 +438,7 @@ export function publicRoutes() {
         if (parts.length > config.maxAttachments) throw err.validation('Too many files', { files: 'too_many' });
         if (parts.some((part) => part.size > MAX_UPLOAD_BYTES)) throw err.validation('File too large', { files: 'too_large' });
         for (const part of parts) {
-          files.push({ filename: part.name, mime: part.type, content: new Uint8Array(await part.arrayBuffer()) });
+          files.push({ filename: await vetFilePaths(part.name, undefined), mime: part.type, content: new Uint8Array(await part.arrayBuffer()) });
         }
       } else {
         body = await c.req.json().catch(() => {
@@ -440,6 +447,14 @@ export function publicRoutes() {
       }
     });
 
+    // File paths are vetted here, after the size cap, and in the payload as it
+    // was parsed – a multipart part's JSON escapes never show in its bytes. A
+    // visitor has no rights of their own: only a recent link is kept
+    // (core/file-links).
+    if (body !== undefined) {
+      const text = JSON.stringify(body);
+      if (text.includes('/api/v1/files/')) body = JSON.parse(await vetFilePaths(text, undefined));
+    }
     await submitPublicIntake({ projectId: settings.projectId, formConfig: settings.formConfig, body, files, submitterKey });
     return c.json({ ok: true });
   });
@@ -455,7 +470,8 @@ export function publicRoutes() {
   });
 
   // ── Careers public page + application (PRD §12.3) ──
-  app.get('/careers/:token', async (c) => {
+  // The job description is a document: images in it are signed for the visitor.
+  app.get('/careers/:token', signFileLinksOut, async (c) => {
     const { db } = getDb();
     const [job] = await db.select().from(schema.jobOpenings)
       .where(and(eq(schema.jobOpenings.publicToken, c.req.param('token')), isNull(schema.jobOpenings.deletedAt)));
@@ -463,7 +479,7 @@ export function publicRoutes() {
     return c.json({ title: job.title, description: job.description });
   });
 
-  app.post('/careers/:token', async (c) => {
+  app.post('/careers/:token', vetFileLinksIn, async (c) => {
     const { db } = getDb();
     const [job] = await db.select().from(schema.jobOpenings)
       .where(and(eq(schema.jobOpenings.publicToken, c.req.param('token')), isNull(schema.jobOpenings.deletedAt)));
@@ -471,6 +487,9 @@ export function publicRoutes() {
 
     const body = careersApplySchema.parse(await c.req.json());
     if (body.honeypot && body.honeypot.trim() !== '') return c.json({ ok: true });
+    // A visitor has no uploads of their own, so any attachment id named here
+    // is someone else's file – which recruiters would then open as a CV.
+    await assertAttachable(null, body.resumeAttachmentId);
     if (!rateLimitOk(`careers:${clientIp(c)}`)) throw err.rateLimited();
 
     const [stage] = await db.select({ id: schema.applicantStages.id })

@@ -17,6 +17,7 @@ import {
 import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
 import { assertLiveProject, notInDeletedProject } from '../../core/access';
+import { assertAttachable } from '../../core/file-access';
 import { writeActivity } from '../../core/activity';
 import { emit } from '../../core/events';
 import { assertVersion } from '../../core/locking';
@@ -1067,6 +1068,9 @@ export async function listExpenses(params: { projectId?: string; companyId?: str
 
 export async function createExpense(actor: Actor, input: any) {
   if (input.projectId) await assertLiveProject(input.projectId);
+  // Everyone with finance.read opens an expense's receipt: only a file of the
+  // caller's own upload may be named, or any attachment id read as a receipt.
+  await assertAttachable(actor, input.attachmentId);
   const { db } = getDb();
   const id = ulid();
   await db.insert(schema.expenses).values({
@@ -1088,6 +1092,8 @@ export async function updateExpense(actor: Actor, id: string, input: any) {
   const { db } = getDb();
   const [before] = await db.select().from(schema.expenses).where(and(eq(schema.expenses.id, id), isNull(schema.expenses.deletedAt)));
   if (!before) throw err.notFound('Expense not found');
+  // The receipt it names already is fine; a new one has to be the caller's own upload.
+  if (input.attachmentId !== undefined) await assertAttachable(actor, input.attachmentId, before.attachmentId);
   const patch: Record<string, unknown> = {};
   for (const k of ['companyId', 'projectId', 'categoryId', 'currency', 'date', 'description', 'attachmentId', 'billable']) {
     if (input[k] !== undefined) patch[k] = input[k];

@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, CalendarDays, ChevronRight, Diamond, Plus } from 'lucide-react';
 import { api, getAllPages, ApiError } from '../../lib/api';
+import { sendBulkTaskEdit } from '../../lib/bulkTasks';
 import { useT, extendDict } from '../../lib/i18n';
 import type { OpenIntent } from '../../lib/router';
 import { Button, EmptyState, Input, PageBody, ProgressBar, Skeleton, Spinner, fmtDate, cn } from '../ui';
@@ -139,12 +140,18 @@ export function PlanTab({ projectId, projectKey, cyclesEnabled, canWrite, isAdmi
   }, [tasks, current, category]);
 
   const pull = useMutation({
-    mutationFn: (taskIds: string[]) => api.post('/tasks/bulk', { taskIds, cycleId: current!.id }),
+    mutationFn: (taskIds: string[]) =>
+      sendBulkTaskEdit({ taskIds, cycleId: current!.id }, (part) => api.post<{ updated: number }>('/tasks/bulk', part)),
     onSuccess: (_r, taskIds) => {
       toast(t('plan.pulled').replace('{n}', String(taskIds.length)).replace('{cycle}', current!.name));
       qc.invalidateQueries({ queryKey: ['tasks', projectId] });
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed')),
+    // Over the API's limit the tasks go in parts; the parts before a refused
+    // one are pulled in, so refresh either way.
+    onError: (e) => {
+      toast.error(e instanceof ApiError ? e.message : t('common.saveFailed'));
+      qc.invalidateQueries({ queryKey: ['tasks', projectId] });
+    },
   });
 
   const upcoming = cycles.filter((c) => cyclePhase(c) === 'upcoming').sort((a, b) => (a.startDate ?? '').localeCompare(b.startDate ?? ''));

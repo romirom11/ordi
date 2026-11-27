@@ -13,6 +13,7 @@ import {
 import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
 import { assertLiveProject } from '../../core/access';
+import { assertAttachable } from '../../core/file-access';
 import { writeActivity, recordSensitiveAccess } from '../../core/activity';
 import { emit } from '../../core/events';
 import { assertVersion, assertUpdated } from '../../core/locking';
@@ -956,6 +957,9 @@ export async function createLeaveRequest(actor: Actor, input: any) {
   if (!canForOthers && employee.userId !== actor.userId) {
     throw err.forbidden('Cannot request leave for another employee', 'people.write');
   }
+  // Whoever reads the request can open its attachment: only a file of the
+  // caller's own upload may be named here.
+  await assertAttachable(actor, input.attachmentId);
 
   const days = leaveDays(input.fromDate, input.toDate, input.halfDay ?? false,
     await employeeHolidaySet(employee.id, input.fromDate, input.toDate));
@@ -1242,6 +1246,8 @@ export async function getApplicant(id: string) {
 
 export async function createApplicant(actor: Actor, input: any) {
   const { db } = getDb();
+  // Recruiters open the applicant's CV: it has to be a file the caller uploaded.
+  await assertAttachable(actor, input.resumeAttachmentId);
   let stageId = input.stageId;
   if (!stageId) {
     const [first] = await db.select().from(schema.applicantStages).orderBy(asc(schema.applicantStages.position)).limit(1);
