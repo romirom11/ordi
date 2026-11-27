@@ -160,3 +160,29 @@ export const agentCredentialViewSchema = z.object({
   version: z.number(),
   baseUrl: z.string().nullable().optional(),
 });
+
+// ── External agents: run outside ordi, connect over MCP with a token of their own ──
+
+export const createExternalAgentSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  /** The person behind the agent; defaults to whoever creates it. */
+  ownerUserId: idSchema.optional(),
+  /** Defaults to the Agent role. Never Owner. */
+  roleId: idSchema.optional(),
+});
+export type CreateExternalAgentInput = z.infer<typeof createExternalAgentSchema>;
+
+export const updateExternalAgentSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  ownerUserId: idSchema.optional(),
+  roleId: idSchema.optional(),
+});
+export type UpdateExternalAgentInput = z.infer<typeof updateExternalAgentSchema>;
+
+/** Token lifetimes the settings offer; null never expires. */
+export const EXTERNAL_AGENT_TOKEN_DAYS = [30, 90, 365] as const;
+
+export const issueExternalAgentTokenSchema = z.object({
+  name: z.string().trim().min(1).max(120).default('MCP token'),
+  expiresInDays: z.number().int().min(1).max(3650).nullable().default(90),
+});

@@ -79,6 +79,8 @@ export interface UserLite {
   isActive?: boolean;
   /** `agent` marks an AI agent employee – avatars carry a badge. */
   actorType?: string;
+  /** For agents: `managed` – ordi runs it; `external` – it connects from outside and has no runs. */
+  agentKind?: 'managed' | 'external' | null;
 }
 
 export interface SubtaskRow {

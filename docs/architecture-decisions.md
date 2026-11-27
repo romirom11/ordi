@@ -319,6 +319,19 @@ request and the task in review.
   (prompt injection) finds nothing outside the projects it was added to, and
   `queueRun` refuses to start a run in a project the agent is not a member of,
   whether it was assigned or @-mentioned.
+- **External agents are agent users ordi does not run.** An agent that works
+  outside ordi (Claude Code, Codex, a script) connected with a person's token
+  and so acted as that person: the audit trail could not tell them apart, it
+  held all of their permissions, and a question it asked them notified no one
+  (people are not told about their own actions). It now gets an agent user of
+  its own with an `external_agents` row – its owner, the person behind it –
+  and no `agent_profiles` row, which is what dispatch keys on, so it is never
+  run by ordi. It is held to the same rules as ordi's agents (membership-only
+  project access, assignable only where it is a member), connects over MCP
+  with tokens issued in Settings → Agents (`api_tokens.expires_at`, revocable
+  one by one, all revoked when it is switched off), and its comments notify
+  like a person's because no run events speak for it. `/users/lookup` says
+  `agentKind: managed | external` so the UI shows runs only for the first.
 - **The agent stops at `in_review`.** It moves the task to the project's status
   in the profile's completion category and never to a `done` one; the pull
   request is attached with `add_task_link`, and the existing `pr_merged` git

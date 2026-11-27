@@ -148,6 +148,8 @@ export const apiTokens = pgTable('api_tokens', {
   readOnly: boolean('read_only').notNull().default(false),
   lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  /** Past this moment the token is refused, as if revoked. Null = no expiry. */
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
   ...timestamps,
 }, (t) => ({
   hashIdx: uniqueIndex('api_tokens_hash_idx').on(t.hash),

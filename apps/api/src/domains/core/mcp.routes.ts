@@ -93,7 +93,7 @@ async function tokenIsValid(raw: string): Promise<boolean> {
   const { db } = getDb();
   const [token] = await db.select().from(schema.apiTokens)
     .where(eq(schema.apiTokens.hash, sha256(raw)));
-  if (token) return !token.revokedAt;
+  if (token) return !token.revokedAt && !(token.expiresAt && token.expiresAt <= new Date());
   // Bearer session tokens (desktop) are valid API credentials too.
   const [session] = await db.select().from(schema.sessions)
     .where(eq(schema.sessions.token, raw));

@@ -23,6 +23,7 @@ import {
 } from '../ui';
 import { Dialog, ConfirmDialog, DropdownMenu, MenuItem, toast } from '../overlays';
 import { SectionHead, Field, RowList, AnimatedRow, StatusChip } from './primitives';
+import { ExternalAgentsSection } from './ExternalAgentsSection';
 import { useT, extendDict } from '../../lib/i18n';
 
 extendDict({
@@ -958,6 +959,9 @@ export function AgentsPanel() {
           ))}
         </RowList>
       )}
+
+      {/* ── External agents: run elsewhere, connect over MCP ── */}
+      <ExternalAgentsSection />
 
       {/* ── Workers ── */}
       <div className="mb-2 mt-8">

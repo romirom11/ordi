@@ -351,6 +351,13 @@
       "when": 1795805148406,
       "tag": "0049_task_reporter",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1795809033201,
+      "tag": "0050_external_agents",
+      "breakpoints": true
     }
   ]
 }

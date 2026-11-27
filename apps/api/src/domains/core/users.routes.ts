@@ -41,7 +41,7 @@ export function usersRoutes() {
   // pickers showed "Vasyl" next to fully-named colleagues.
   app.get('/lookup', async (c) => {
     const { db } = getDb();
-    const [rows, emps] = await Promise.all([
+    const [rows, emps, managed] = await Promise.all([
       db.select({
         id: schema.users.id, name: schema.users.name, avatar: schema.users.avatar, isActive: schema.users.isActive,
         actorType: schema.users.actorType,
@@ -50,7 +50,13 @@ export function usersRoutes() {
         userId: schema.employees.userId, firstName: schema.employees.firstName,
         lastName: schema.employees.lastName, status: schema.employees.status,
       }).from(schema.employees),
+      db.select({ userId: schema.agentProfiles.userId }).from(schema.agentProfiles),
     ]);
+    // An agent ordi runs ('managed') or one that connects from outside
+    // ('external'): only the first has runs to show on a task.
+    const managedIds = new Set(managed.map((m) => m.userId));
+    const agentKind = (u: { id: string; actorType: string }) =>
+      (u.actorType !== 'agent' ? null : managedIds.has(u.id) ? 'managed' : 'external');
     const cardName = new Map<string, { name: string; active: boolean }>();
     for (const e of emps) {
       if (!e.userId) continue;
@@ -62,7 +68,7 @@ export function usersRoutes() {
       // active one names them.
       if (!seen || (active && !seen.active)) cardName.set(e.userId, { name: full, active });
     }
-    return c.json({ data: rows.map((u) => ({ ...u, name: cardName.get(u.id)?.name ?? u.name })) });
+    return c.json({ data: rows.map((u) => ({ ...u, name: cardName.get(u.id)?.name ?? u.name, agentKind: agentKind(u) })) });
   });
 
   /**

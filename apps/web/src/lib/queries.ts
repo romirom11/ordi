@@ -24,6 +24,8 @@ export interface UserLookup {
   isActive?: boolean;
   /** `agent` marks an AI agent employee – rendered with a badge everywhere. */
   actorType?: string;
+  /** For agents: `managed` – ordi runs it; `external` – it connects from outside and has no runs. */
+  agentKind?: 'managed' | 'external' | null;
 }
 
 /** Everyone in the workspace, past and present – for resolving people on records. */
