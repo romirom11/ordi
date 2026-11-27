@@ -318,13 +318,7 @@ describe('the clean-up of unused sign-ins', () => {
     await age(usedRecently, { created: 200 * DAY, used: 2 * DAY });
     await age(usedLongAgo, { created: 200 * DAY, used: 89 * DAY });
     for (const raw of [handMade, myAgentCard, teamBot, agentRun]) await age(raw, { created: 400 * DAY, used: null });
-    for (const raw of [neverUsedMe, idleMe, usedRecently]) expect(await tokenWorks(raw)).toBe(true);
-    // tokenWorks touched those three: put them back where the test needs them.
-    await age(neverUsedMe, { created: 25 * HOUR, used: null });
-    await age(idleMe, { created: 200 * DAY, used: 91 * DAY });
-    await age(usedRecently, { created: 200 * DAY, used: 2 * DAY });
 
-    const before = new Date();
     const result = await runOAuthTokenCleanup();
     expect(result.revoked).toBeGreaterThanOrEqual(4);
     expect(await revokedOf([neverUsedMe, neverUsedAgent, idleMe, idleAgent])).toEqual({
@@ -339,8 +333,10 @@ describe('the clean-up of unused sign-ins', () => {
     for (const raw of [freshUnused, usedRecently, usedLongAgo, handMade, myAgentCard, agentRun]) expect(await tokenWorks(raw)).toBe(true);
 
     // One activity entry per token, on the agent or the person, by the system.
-    const entries = await db.select().from(schema.activityLog)
-      .where(sql`${schema.activityLog.action} = 'token_revoked' and ${schema.activityLog.actorType} = 'system' and ${schema.activityLog.createdAt} >= ${before.toISOString()}`);
+    // Matched by token, not by time: the database keeps its own clock.
+    const systemRevocations = () => db.select().from(schema.activityLog)
+      .where(sql`${schema.activityLog.action} = 'token_revoked' and ${schema.activityLog.actorType} = 'system'`);
+    const entries = await systemRevocations();
     const byToken = new Map(entries.map((e) => [(e.diff as { tokenId: string }).tokenId, e]));
     expect(byToken.get((await rowOf(neverUsedMe)).id)).toMatchObject({ entityType: 'user', entityId: users.owner!.userId, diff: { client: 'Claude Code', reason: 'never_used', oauth: true } });
     expect(byToken.get((await rowOf(neverUsedAgent)).id)).toMatchObject({ entityType: 'agent', entityId: agentId, diff: { client: 'Claude Code', reason: 'never_used' } });
@@ -349,11 +345,28 @@ describe('the clean-up of unused sign-ins', () => {
     for (const raw of [freshUnused, usedRecently, usedLongAgo]) expect(byToken.has((await rowOf(raw)).id)).toBe(false);
 
     // Running it again finds nothing more to do.
-    const entriesBefore = entries.length;
+    expect((await runOAuthTokenCleanup()).revoked).toBe(0);
+    expect((await systemRevocations()).length).toBe(entries.length);
+  });
+
+  it('leaves an expired token alone, and a late use never stamps a revoked one', async () => {
+    const clientId = await registerClient('Claude Code');
+    // An agent connection past its 90-day expiry is already refused: not the clean-up's.
+    const expired = await connect(users.owner!.cookie, clientId, 'agent');
+    await age(expired, { created: 200 * DAY, used: 120 * DAY });
+    await db.update(schema.apiTokens).set({ expiresAt: new Date(Date.now() - 30 * DAY) }).where(eq(schema.apiTokens.prefix, expired.slice(0, 12)));
+    const unused = await connect(users.owner!.cookie, clientId, 'me');
+    await age(unused, { created: 25 * HOUR, used: null });
     await runOAuthTokenCleanup();
-    const after = await db.select().from(schema.activityLog)
-      .where(sql`${schema.activityLog.action} = 'token_revoked' and ${schema.activityLog.actorType} = 'system' and ${schema.activityLog.createdAt} >= ${before.toISOString()}`);
-    expect(after.length).toBe(entriesBefore);
+    expect((await rowOf(expired)).revokedAt).toBeNull();
+    expect(await tokenWorks(expired)).toBe(false);
+    // The revoked one presented again, on the API and on /mcp: refused, and still "never used".
+    expect((await rowOf(unused)).revokedAt).not.toBeNull();
+    expect(await tokenWorks(unused)).toBe(false);
+    const mcp = await app.request('/api/v1/mcp', { method: 'POST', headers: { authorization: `Bearer ${unused}`, 'content-type': 'application/json' }, body: '{}' });
+    expect(mcp.status).toBe(401);
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await rowOf(unused)).lastUsedAt).toBeNull();
   });
 
   it('a client that only connects and lists its tools has used its sign-in', async () => {

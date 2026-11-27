@@ -15,7 +15,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { buildServer } from '@ordi/mcp/server';
 import { OrdiClient } from '@ordi/mcp/client';
-import { getDb, schema, eq } from '@ordi/db';
+import { getDb, schema, eq, and, isNull } from '@ordi/db';
 import { sha256 } from '../../lib/crypto';
 import type { AppEnv } from '../../context';
 import { env } from '../../env';
@@ -97,7 +97,7 @@ async function tokenIsValid(raw: string): Promise<boolean> {
     const valid = !token.revokedAt && !(token.expiresAt && token.expiresAt <= new Date());
     // A client that connects and lists its tools without calling one has
     // still used its sign-in: the clean-up must not take it for an unused one.
-    if (valid) db.update(schema.apiTokens).set({ lastUsedAt: new Date() }).where(eq(schema.apiTokens.id, token.id)).catch(() => {});
+    if (valid) db.update(schema.apiTokens).set({ lastUsedAt: new Date() }).where(and(eq(schema.apiTokens.id, token.id), isNull(schema.apiTokens.revokedAt))).catch(() => {});
     return valid;
   }
   // Bearer session tokens (desktop) are valid API credentials too.

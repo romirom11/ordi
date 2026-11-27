@@ -2,7 +2,7 @@
  * Scheduled jobs (PRD §8.4, §8.7, §11.5, §11.6). All idempotent: safe to run more
  * often than required (reminder_log dedup, next_run guards, per-day snapshot unique).
  */
-import { getDb, schema, eq, and, or, lt, lte, isNull, isNotNull, sql, inArray, desc } from '@ordi/db';
+import { getDb, schema, eq, and, or, gt, lt, lte, isNull, isNotNull, sql, inArray, desc } from '@ordi/db';
 import { ulid } from 'ulid';
 import { notInDeletedProject } from '../core/access';
 import { computeDocumentTotals, addMonthsIso } from '@ordi/shared';
@@ -316,10 +316,14 @@ export const OAUTH_IDLE_MS = 90 * 86_400_000;
  * hand, issued from the My agent card or for a team bot, minted for an agent
  * run – records no OAuth client and is never touched.
  *
+ * A token past its expiry is already refused and gone from the lists: it is
+ * left alone rather than logged, months later, as idle.
+ *
  * One UPDATE over the partial index of live OAuth tokens, so it is cheap and
- * idempotent. A request touching a token at the same moment either commits
- * first (Postgres re-checks the row, sees it used, and skips it) or comes
- * after and finds it revoked.
+ * idempotent. A use whose "last used" write commits first is seen when
+ * Postgres re-checks the row, which is then skipped. A request that read the
+ * token just before the revocation still finishes, as it would after a
+ * Revoke click; its late write does not stamp the revoked row.
  */
 export async function runOAuthTokenCleanup(now = new Date()): Promise<{ revoked: number }> {
   const { db } = getDb();
@@ -330,6 +334,7 @@ export async function runOAuthTokenCleanup(now = new Date()): Promise<{ revoked:
     const rows = await tx.update(t).set({ revokedAt: now })
       .where(and(
         isNotNull(t.oauthClientId), isNull(t.revokedAt),
+        or(isNull(t.expiresAt), gt(t.expiresAt, now)),
         or(and(isNull(t.lastUsedAt), lt(t.createdAt, unusedBefore)), lt(t.lastUsedAt, idleBefore)),
       ))
       .returning({ id: t.id, userId: t.userId, name: t.name, lastUsedAt: t.lastUsedAt });

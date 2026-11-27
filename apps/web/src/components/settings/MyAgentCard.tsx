@@ -195,7 +195,7 @@ function AgentDetails({ agent, onChanged, onError }: { agent: MyAgent; onChanged
                     badge={<span className="truncate text-xs text-muted-foreground">· {t('myAgent.viaSignIn')}</span>}
                     revokeLabel={t('myAgent.disconnect')}
                     onRevoke={setRevoking}
-                    detail={(tok) => <>{lastUsed(tok)}{' · '}{expiry(tok)}</>}
+                    detail={(tok) => <><span className="font-mono text-[11px]">{tok.prefix}…</span>{' · '}{lastUsed(tok)}{' · '}{expiry(tok)}</>}
                   />
                 </div>
               ))}
@@ -249,7 +249,8 @@ function AgentDetails({ agent, onChanged, onError }: { agent: MyAgent; onChanged
         onClose={() => setRevoking(null)}
         onConfirm={() => { if (revoking) revoke.mutate(revoking.id); }}
         title={t('myAgent.disconnectTitle')}
-        body={t('myAgent.disconnectBody')}
+        // Several connections of one client look alike: name the one going.
+        body={revoking ? `${revoking.name} (${revoking.prefix}…). ${t('myAgent.disconnectBody')}` : t('myAgent.disconnectBody')}
         confirmLabel={t('myAgent.disconnect')}
         danger
         pending={revoke.isPending}

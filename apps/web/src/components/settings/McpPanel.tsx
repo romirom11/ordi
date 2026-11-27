@@ -322,7 +322,7 @@ export function McpPanel() {
         onClose={() => setRevokeTarget(null)}
         onConfirm={() => { if (revokeTarget) revoke.mutate(revokeTarget.id); }}
         title={t('mcp.revokeTitle')}
-        body={t('mcp.revokeBody').replace('{name}', revokeTarget?.name ?? '')}
+        body={t('mcp.revokeBody').replace('{name}', revokeTarget ? `${revokeTarget.name}${revokeTarget.prefix ? ` (${revokeTarget.prefix}…)` : ''}` : '')}
         confirmLabel={t('mcp.revoke')}
         danger
         pending={revoke.isPending}
