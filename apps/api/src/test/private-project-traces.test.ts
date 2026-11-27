@@ -127,10 +127,11 @@ describe('filtering tasks by a private project\'s field', () => {
     expect(((await json(res)).data as ListedTask[]).map((t) => t.id)).toEqual([marked]);
     // The key's type still decides the operators.
     expect((await filter(insider, 'falcon_budget', 'contains', 'x')).status).toBe(400);
-    // Listing another project with it finds nothing there, as it always did.
+    // Listing one project, a key it does not define is an unknown field there,
+    // so a client (MCP's findByKey) can fall back to scanning the values.
     const elsewhere = await filter(insider, 'falcon_budget', 'gt', 100, `projectId=${openProject}&`);
-    expect(elsewhere.status).toBe(200);
-    expect((await json(elsewhere)).data).toEqual([]);
+    expect(elsewhere.status).toBe(400);
+    expect(JSON.stringify(await json(elsewhere))).toContain('Unknown custom field');
   });
 
   it('casts a shared key only in the projects where it has that type', async () => {
@@ -204,6 +205,19 @@ describe('a company\'s overview', () => {
     expect(o.openTasks).toBe(1);
   });
 
+  it('counts nothing for someone who can open none of its projects', async () => {
+    const { db } = getDb();
+    const crmOnly = ulid();
+    await db.insert(schema.roles).values({ id: crmOnly, key: `crm-${crmOnly}`, name: 'CRM only', description: 'custom', isSystem: false });
+    await db.insert(schema.rolePermissions).values({ roleId: crmOnly, permission: 'crm.read' as any });
+    const userId = ulid();
+    await db.insert(schema.users).values({ id: userId, email: `${userId}@test.local`, name: 'Sales', passwordHash: 'x', roleId: crmOnly });
+    const token = generateToken();
+    await db.insert(schema.sessions).values({ id: ulid(), userId, token, expiresAt: new Date(Date.now() + 3600_000) });
+    const o = await json(reqAs(`ordi_session=${token}`).get(`/companies/${company}/overview`));
+    expect([o.totalProjects, o.activeProjects, o.openTasks]).toEqual([0, 0, 0]);
+  });
+
   it('counts the private project for its member', async () => {
     const o = await overview(insider);
     expect(o.totalProjects).toBe(2);
@@ -238,6 +252,11 @@ describe('a task moved into a private project', () => {
 
   it('names the destination to a member of it', async () => {
     const record = await movedRecord((await json(insider.as.get(`/audit/entity/task/${left}`))).data as ActivityRow[]);
+    expect(record?.diff).toMatchObject({ targetProjectId: { to: secretProject }, newTaskId: { to: moved } });
+  });
+
+  it('stays whole for full audit access', async () => {
+    const record = await movedRecord((await json(owner.get(`/audit/entity/task/${left}`))).data as ActivityRow[]);
     expect(record?.diff).toMatchObject({ targetProjectId: { to: secretProject }, newTaskId: { to: moved } });
   });
 });

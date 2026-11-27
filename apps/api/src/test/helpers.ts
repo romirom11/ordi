@@ -5,6 +5,7 @@ import { ALL_ROLE_SEEDS, resolveRolePermissions } from '@ordi/shared';
 import { createApp } from '../app';
 import { hashPassword, generateToken } from '../lib/crypto';
 import { invalidateRuntimeConfig } from '../lib/runtime-config';
+import { invalidateRegistry } from '../core/customfields';
 
 export const app = createApp();
 
@@ -32,6 +33,8 @@ const TABLES = [
 export async function resetDb(): Promise<void> {
   const { db } = getDb();
   await db.execute(sql.raw(`TRUNCATE ${TABLES.join(', ')} RESTART IDENTITY CASCADE`));
+  // The field registry is cached per process: it must not outlive the rows.
+  invalidateRegistry();
 }
 
 export interface SeededRole { key: string; roleId: string }
