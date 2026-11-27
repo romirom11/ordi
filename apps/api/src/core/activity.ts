@@ -3,11 +3,11 @@
  * redacted diff. Redaction is centralised (one serializer + registry): sensitive
  * values recorded as fact-only, secrets excluded entirely.
  */
-import { getDb, schema, eq, and, inArray } from '@ordi/db';
+import { getDb, schema, eq, and, inArray, isNull } from '@ordi/db';
 import { buildRedactedDiff, canSeePage, type Permission } from '@ordi/shared';
 import { ulid } from 'ulid';
 import type { Actor } from '../context';
-import { accessibleProjectIds, accessibleSpaceIds, editableSpaceIds } from './access';
+import { accessibleProjectIds, accessibleSpaceIds, editableSpaceIds, effectiveProjectRole } from './access';
 
 /**
  * Cross-entity feeds (home dashboard): the permission required to see activity
@@ -271,6 +271,21 @@ export async function scopeActivityToResources<T extends { entityType: string; e
     activityOwners(scoped),
   ]);
   const projects = new Set(projectIds);
+  // An intake item's files answer to the triage queue's rule: project member.
+  const intakeProjects = [...new Set([...owners.attachmentParentOf]
+    .filter(([, p]) => p.type === 'intake_item')
+    .map(([attId]) => owners.projectOf.get(attId))
+    .filter((id): id is string => !!id && projects.has(id)))];
+  const memberProjects = new Set<string>();
+  if (intakeProjects.length) {
+    const { db } = getDb();
+    const rows = await db.select({ id: schema.projects.id, visibility: schema.projects.visibility }).from(schema.projects)
+      .where(and(inArray(schema.projects.id, intakeProjects), isNull(schema.projects.deletedAt)));
+    for (const p of rows) {
+      const role = effectiveProjectRole(actor, { id: p.id, visibility: p.visibility as 'workspace' | 'private' });
+      if (role === 'member' || role === 'admin') memberProjects.add(p.id);
+    }
+  }
   const spaces = new Set(spaceIds);
   const editorSpaces = new Set(editorIds);
   return rows.filter((r) => {
@@ -289,7 +304,8 @@ export async function scopeActivityToResources<T extends { entityType: string; e
       if (!needed || !actor.access.permissions.has(needed)) return false;
       if (!ATTACHMENT_IN_PROJECT.has(parent.type)) return true;
       const owner = owners.projectOf.get(r.entityId);
-      return owner ? projects.has(owner) : false;
+      if (!owner) return false;
+      return parent.type === 'intake_item' ? memberProjects.has(owner) : projects.has(owner);
     }
     if (r.entityType === 'custom_field') {
       // A project's own field is that project's configuration.

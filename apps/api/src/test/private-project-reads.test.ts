@@ -136,6 +136,29 @@ describe('activity of a file in a private project', () => {
   });
 });
 
+describe('activity of a file on an intake item', () => {
+  let fileId = '';
+  beforeAll(async () => {
+    const { db } = getDb();
+    const itemId = ulid();
+    await db.insert(schema.intakeItems).values({ id: itemId, projectId: openProject, source: 'email', status: 'pending', title: 'Request', description: '' });
+    expect((await owner.post(`/projects/${openProject}/members`, { userId: insider.userId, role: 'member', canWriteTasks: true })).status).toBe(201);
+    const fd = new FormData();
+    fd.append('file', new File([new Uint8Array([1])], 'client-brief.pdf', { type: 'application/pdf' }), 'client-brief.pdf');
+    fd.append('entityType', 'intake_item');
+    fd.append('entityId', itemId);
+    const res = await owner.postForm('/attachments', fd);
+    expect(res.status).toBe(201);
+    fileId = (await json(res)).id;
+  });
+
+  it('follows the triage queue: a workspace viewer does not see it, a project member does', async () => {
+    const trail = (id: string, who: typeof outsider) => json(who.as.get(`/audit/entity/attachment/${id}`));
+    expect((await trail(fileId, outsider)).data).toEqual([]);
+    expect((await trail(fileId, insider)).data).toHaveLength(1);
+  });
+});
+
 describe('relations to a task in a private project', () => {
   beforeAll(async () => {
     // The owner is on both projects and links them.
