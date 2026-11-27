@@ -9,7 +9,11 @@ ALTER TABLE "oauth_auth_codes" ADD CONSTRAINT "oauth_auth_codes_agent_user_id_us
 -- its owner approved that client in the ten minutes (a code's lifetime)
 -- before it was created: every approval has been logged as oauth.authorize.
 UPDATE "api_tokens" AS t SET "oauth_client_id" = (
-  SELECT c."id" FROM "oauth_clients" AS c WHERE t."name" = c."name" || ' (OAuth)' ORDER BY c."created_at" DESC LIMIT 1
+  -- The latest registration of that name made before the token: a client
+  -- registered later, a look-alike included, cannot have issued it.
+  SELECT c."id" FROM "oauth_clients" AS c
+  WHERE t."name" = c."name" || ' (OAuth)' AND c."created_at" <= t."created_at"
+  ORDER BY c."created_at" DESC LIMIT 1
 ) WHERE t."oauth_client_id" IS NULL AND t."name" LIKE '% (OAuth)' AND EXISTS (
   SELECT 1 FROM "activity_log" AS a
   WHERE a."entity_type" = 'user' AND a."entity_id" = t."user_id" AND a."action" = 'oauth.authorize'

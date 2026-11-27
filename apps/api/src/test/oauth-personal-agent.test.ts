@@ -279,6 +279,9 @@ describe('connecting the same client again', () => {
     await db.update(schema.apiTokens).set({ createdAt: new Date(Date.now() - 86_400_000) })
       .where(eq(schema.apiTokens.prefix, handMadeSuffix.slice(0, 12)));
     const unknownClient = await insert('Gone client (OAuth)');
+    // A look-alike registered after those tokens were issued cannot have issued them.
+    await new Promise((r) => setTimeout(r, 5));
+    await registerClient('Claude', 'https://evil.example.com/cb');
     // What the migration does to the rows an upgrade finds.
     const migration = readFileSync(fileURLToPath(new URL('../../../../packages/db/drizzle/0052_oauth_connect_as_agent.sql', import.meta.url)), 'utf8');
     const backfill = migration.split('--> statement-breakpoint').find((st) => st.includes('UPDATE "api_tokens"'))!;
@@ -344,5 +347,39 @@ describe('races and changes between approve and exchange', () => {
       expect(res.status).toBe(400);
       expect(((await res.json()) as { error: string }).error).toBe('invalid_grant');
     }
+  });
+
+  it('a person who leaves and comes back within a code\'s lifetime finds their pending sign-in gone', async () => {
+    const clientId = await registerClient('Claude Code');
+    const pending = await approved(users.hr!.cookie, clientId, 'me');
+    expect((await owner().post(`/users/${users.hr!.userId}/deactivate`, { reassignTo: users.manager!.userId })).status).toBe(200);
+    expect((await owner().post(`/users/${users.hr!.userId}/reactivate`)).status).toBe(200);
+    expect((await exchange(clientId, pending.code, pending.verifier)).status).toBe(400);
+  });
+});
+
+describe('what the client gets', () => {
+  it('the agent\'s token comes with its lifetime and is held to what a personal agent may do', async () => {
+    const clientId = await registerClient('Claude Code');
+    const { res, verifier } = await approve(users.owner!.cookie, clientId, 'agent');
+    const code = new URL(((await res.json()) as { redirectTo: string }).redirectTo).searchParams.get('code')!;
+    const grant = (await (await exchange(clientId, code, verifier)).json()) as { access_token: string; token_type: string; expires_in: number };
+    expect(grant).toMatchObject({ token_type: 'bearer', expires_in: 90 * 86_400 });
+    // Its owner may do these; the agent may not.
+    expect((await bearer(grant.access_token).get('/invoices')).status).toBe(403);
+    expect((await bearer(grant.access_token).get('/users')).status).toBe(403);
+    expect(await tokenWorks(grant.access_token)).toBe(true);
+  });
+
+  it('a client registering with a blank name is still named', async () => {
+    const res = await app.request('/api/v1/oauth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '10.9.1.1' },
+      body: JSON.stringify({ redirect_uris: [REDIRECT], client_name: '  ' }),
+    });
+    const body = (await res.json()) as { client_id: string; client_name: string };
+    expect(body.client_name).toBe('MCP client');
+    const raw = await connect(users.owner!.cookie, body.client_id, 'agent');
+    expect(await commentAuthor(raw, 'Unnamed client at work.')).toEqual({ authorId: agentId, via: 'MCP client' });
   });
 });

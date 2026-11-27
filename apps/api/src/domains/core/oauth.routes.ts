@@ -147,13 +147,15 @@ export function oauthRoutes() {
 
     const { db } = getDb();
     const id = `mcp_${generateToken(16)}`;
+    // A blank name is no name: the tokens and the comments it writes need one.
+    const clientName = body.client_name?.trim() || 'MCP client';
     await db.insert(schema.oauthClients).values({
-      id, name: body.client_name ?? 'MCP client', redirectUris: body.redirect_uris,
+      id, name: clientName, redirectUris: body.redirect_uris,
     });
     logger.info({ clientId: id, name: body.client_name, redirectHosts: body.redirect_uris.map((u) => { try { return new URL(u).host; } catch { return u; } }) }, 'oauth client registered');
     return c.json({
       client_id: id,
-      client_name: body.client_name ?? 'MCP client',
+      client_name: clientName,
       redirect_uris: body.redirect_uris,
       token_endpoint_auth_method: 'none',
       grant_types: ['authorization_code'],
@@ -288,7 +290,7 @@ export function oauthRoutes() {
     }
 
     const [client] = await db.select().from(schema.oauthClients).where(eq(schema.oauthClients.id, row.clientId));
-    const clientName = client?.name ?? 'MCP client';
+    const clientName = client?.name?.trim() || 'MCP client';
     const token = `ordi_${generateToken(24)}`;
     const tokenId = ulid();
 

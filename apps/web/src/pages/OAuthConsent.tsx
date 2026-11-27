@@ -95,6 +95,8 @@ export function OAuthConsentPage() {
     queryFn: () => api.get<ClientInfo>(`/oauth/client?client_id=${encodeURIComponent(params.clientId)}`),
     enabled: paramsOk && !!me.data,
     retry: false,
+    // Back from creating or switching on their agent in the other tab: offer it now.
+    refetchOnWindowFocus: true,
   });
 
   const canAsAgent = !!client.data?.myAgent?.isActive;
