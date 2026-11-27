@@ -5,6 +5,7 @@ import type { AppEnv, Actor } from '../../context';
 import { requireAuth, currentActor, resolveActor } from '../../core/auth';
 import { broadcaster, type SSEMessage } from '../../core/events';
 import { accessibleProjectIds, spaceAccessSets } from '../../core/access';
+import { isWritePermission } from '../../core/rbac';
 
 /**
  * What a person's own agent hears: the work it does – tasks, their comments
@@ -104,7 +105,8 @@ export function streamRoutes() {
      * the people it is about.
      */
     const holdsPermission = (msg: SSEMessage): boolean =>
-      msg.permissionScope!.some((p) => actor.access.permissions.has(p)) || !!msg.involvedUsers?.includes(actor.userId);
+      msg.permissionScope!.some((p) => actor.access.permissions.has(p) && !(actor.readOnly && isWritePermission(p)))
+      || !!msg.involvedUsers?.includes(actor.userId);
 
     return streamSSE(c, async (stream) => {
       const send = (msg: SSEMessage) => {
@@ -127,15 +129,23 @@ export function streamRoutes() {
         if (msg.page) return;
         if (msg.userScope?.length || msg.permissionScope?.length || msg.workspaceWide) send(msg);
       });
-      await stream.writeSSE({ event: 'connected', data: JSON.stringify({ ok: true }) });
       let closed = false;
-      stream.onAbort(() => { closed = true; unsub(); });
+      // A wait the abort can cut short, so a closed connection holds no timer.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let wake: (() => void) | undefined;
+      const nap = () => new Promise<void>((res) => { wake = res; timer = setTimeout(res, streamTiming.pingMs); });
+      // Before the first write: an abort is not replayed to a listener added
+      // later, and a write to a closed stream does not fail – a client gone by
+      // then would leave this loop re-reading its access for as long as its
+      // credentials last.
+      stream.onAbort(() => { closed = true; unsub(); clearTimeout(timer); wake?.(); });
+      await stream.writeSSE({ event: 'connected', data: JSON.stringify({ ok: true }) });
       // However the loop ends – aborted, refused, or a failed read – the
       // subscription goes with it: the stream closing does not fire onAbort.
       try {
-        while (!closed) {
-          await stream.sleep(streamTiming.pingMs);
-          if (closed) break;
+        while (!closed && !stream.aborted) {
+          await nap();
+          if (closed || stream.aborted) break;
           // The caller's reach is re-read as the next request would see it: a
           // revoked token or session, an expired one, a user switched off (or a
           // personal agent's owner), someone taken off a project or a role
@@ -160,6 +170,7 @@ export function streamRoutes() {
           stream.writeSSE({ event: 'ping', data: '{}' }).catch(() => { closed = true; });
         }
       } finally {
+        clearTimeout(timer);
         unsub();
       }
     });

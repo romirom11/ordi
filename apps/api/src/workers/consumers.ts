@@ -441,7 +441,9 @@ const notifications: Consumer = {
 async function sseAudience(ev: DomainEvent): Promise<Omit<SSEMessage, 'event' | 'data'> | null> {
   const p = ev.payload as any;
   const t = ev.type;
-  if (t === 'sales.work_digest_due') return p.userId ? { userScope: [p.userId] } : null;
+  // A job for the notifications consumer, which tells the person through
+  // notification.created; no client listens for the job itself.
+  if (t === 'sales.work_digest_due') return null;
   // Before projectId: an invoice or a quote can name a project, and its
   // members are not, by that, readers of finance.
   if (t.startsWith('deal.')) return { permissionScope: ['deals.read'] };

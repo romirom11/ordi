@@ -202,6 +202,44 @@ describe('news without a project or a space', () => {
     } finally { await mine.close(); await theirs.close(); await all.close(); }
   });
 
+  it('a decision on leave reaches the employee and the approver, not the rest of the workspace', async () => {
+    const hr = reqAs(users.hr!.cookie);
+    const member = reqAs(users.member!.cookie);
+    const boss = (await json(hr.post('/employees', { firstName: 'Boss', lastName: 'M', userId: users.manager!.userId }))).id;
+    expect((await hr.post('/employees', { firstName: 'Ivan', lastName: 'P', userId: users.member!.userId, managerId: boss })).status).toBe(201);
+    const typeId = (await json(hr.post('/leave-types', { name: 'Unpaid', affectsBalance: false, annualQuota: 0 }))).id;
+    const filed = await member.post('/leave-requests', { leaveTypeId: typeId, fromDate: '2027-03-01', toDate: '2027-03-02' });
+    expect(filed.status).toBe(201);
+    const { id, approverId } = await json(filed);
+    expect(approverId).toBe(users.manager!.userId);
+    await drainOutbox();
+    // The Manager role reads no HR: the approver hears it for being the approver.
+    const approver = await openStream({ cookie: users.manager!.cookie });
+    const bystander = await openStream({ cookie: users.sales!.cookie });
+    try {
+      expect((await member.post(`/leave-requests/${id}/cancel`, {})).status).toBe(200);
+      await drainOutbox();
+      await vi.waitFor(() => expect(approver.events()).toContain('leave.decided'), WAIT);
+      await pingsPass(bystander);
+      expect(bystander.events()).not.toContain('leave.decided');
+    } finally { await approver.close(); await bystander.close(); }
+  });
+
+  it('a read-only token does not hear news held to a permission it may not use', async () => {
+    const hr = reqAs(users.hr!.cookie);
+    const minted = await hr.post('/auth/tokens', { name: 'ro', scopes: ['people.read', 'people.recruit'], readOnly: true });
+    expect(minted.status).toBe(201);
+    const readOnly = await openStream({ authorization: `Bearer ${(await json(minted)).token}` });
+    const session = await openStream({ cookie: users.hr!.cookie });
+    try {
+      await emit({ type: 'applicant.hired', aggregateType: 'applicant', aggregateId: ulid(), payload: { employeeId: ulid(), jobOpeningId: null } });
+      await drainOutbox();
+      await vi.waitFor(() => expect(session.events()).toContain('applicant.hired'), WAIT);
+      await pingsPass(readOnly);
+      expect(readOnly.events()).not.toContain('applicant.hired');
+    } finally { await readOnly.close(); await session.close(); }
+  });
+
   it('a message nobody scoped goes nowhere', async () => {
     const stream = await openStream({ cookie: users.owner!.cookie });
     try {
