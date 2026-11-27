@@ -25,6 +25,8 @@ export interface ExternalAgentToken {
   lastUsedAt: string | null;
   expiresAt: string | null;
   createdAt: string;
+  /** Issued when a client connected by signing in (OAuth), not made by hand. */
+  oauth: boolean;
 }
 
 export interface ExternalAgentView {
@@ -176,6 +178,7 @@ async function views(actor: Actor, ids: string[]): Promise<ExternalAgentView[]> 
         lastUsedAt: t.lastUsedAt?.toISOString() ?? null,
         expiresAt: t.expiresAt?.toISOString() ?? null,
         createdAt: t.createdAt.toISOString(),
+        oauth: !!t.oauthClientId,
       })),
     createdAt: ext.createdAt.toISOString(),
   }));
@@ -334,7 +337,7 @@ export async function issueExternalAgentToken(
     token: raw,
     tokenInfo: {
       id: tokenId, name: input.name, prefix: created!.prefix, lastUsedAt: null,
-      expiresAt: expiresAt?.toISOString() ?? null, createdAt: created!.createdAt.toISOString(),
+      expiresAt: expiresAt?.toISOString() ?? null, createdAt: created!.createdAt.toISOString(), oauth: false,
     },
   };
 }
@@ -516,7 +519,7 @@ export async function issueMyAgentToken(
     token: raw,
     tokenInfo: {
       id: tokenId, name: input.client, prefix: created!.prefix, lastUsedAt: null,
-      expiresAt: expiresAt?.toISOString() ?? null, createdAt: created!.createdAt.toISOString(),
+      expiresAt: expiresAt?.toISOString() ?? null, createdAt: created!.createdAt.toISOString(), oauth: false,
     },
   };
 }
