@@ -372,6 +372,10 @@ export async function retryRun(actor: Actor, id: string): Promise<RunView> {
   const run = await loadRun(id);
   await assertRunWrite(actor, run);
   if ((AGENT_RUN_ACTIVE_STATUSES as readonly string[]).includes(run.status)) throw err.domain('The run is still active');
+  const { db } = getDb();
+  const [member] = await db.select({ userId: schema.projectMembers.userId }).from(schema.projectMembers)
+    .where(and(eq(schema.projectMembers.projectId, run.projectId), eq(schema.projectMembers.userId, run.agentUserId)));
+  if (!member) throw err.domain('The agent is no longer a member of this project; add it back under project members to retry');
   const newId = await queueRun({
     agentUserId: run.agentUserId, taskId: run.taskId, projectId: run.projectId, trigger: 'retry',
     requestedBy: actor.userId, parentRunId: run.id, sessionId: run.sessionId, branch: run.branch, actorType: actor.actorType,

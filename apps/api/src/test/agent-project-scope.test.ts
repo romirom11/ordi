@@ -71,6 +71,21 @@ describe('an agent in its own project', () => {
   });
 });
 
+describe('the knowledge base of a project it is not on', () => {
+  it('stays closed, while the workspace knowledge base stays open', async () => {
+    const { db } = getDb();
+    const linked = ulid();
+    const shared = ulid();
+    await db.insert(schema.kbSpaces).values([
+      { id: linked, name: 'Other project notes', visibility: 'workspace', projectId: other.projectId },
+      { id: shared, name: 'Team handbook', visibility: 'workspace' },
+    ]);
+    const spaces = (await json(agent.get('/spaces'))).data.map((s: { id: string }) => s.id);
+    expect(spaces).toContain(shared);
+    expect(spaces).not.toContain(linked);
+  });
+});
+
 describe('an agent given the Admin role', () => {
   it('still sees only its own projects, their runs and their trash', async () => {
     const { db } = getDb();

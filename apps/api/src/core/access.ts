@@ -131,6 +131,7 @@ async function spaceAccessSets(
       visibility: s.visibility as 'workspace' | 'private',
       spaceId: s.id,
       inheritedProjectRole: s.projectId ? roleOfProject.get(s.projectId) ?? null : null,
+      projectLinked: !!s.projectId,
     });
     if (rank >= SPACE_RANK.viewer) sets.viewer.push(s.id);
     if (rank >= SPACE_RANK.editor) sets.editor.push(s.id);
@@ -226,6 +227,7 @@ export async function assertSpace(
     visibility: space.visibility as 'workspace' | 'private',
     spaceId,
     inheritedProjectRole,
+    projectLinked: !!space.projectId,
   });
   if (rank < SPACE_RANK[minRole]) {
     if (rank < SPACE_RANK.viewer) throw err.notFound('Space not found');

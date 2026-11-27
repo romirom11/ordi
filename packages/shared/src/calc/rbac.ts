@@ -84,6 +84,8 @@ export function spaceAccessRank(
     visibility: 'workspace' | 'private';
     spaceId: string;
     inheritedProjectRole?: 'admin' | 'member' | 'viewer' | null;
+    /** The space belongs to a project: for a membership-only actor, only that project opens it. */
+    projectLinked?: boolean;
   },
 ): number {
   const membership = ctx.spaceMemberships.get(params.spaceId);
@@ -92,7 +94,8 @@ export function spaceAccessRank(
   const inheritedRank = params.inheritedProjectRole
     ? SPACE_ROLE_RANK[params.inheritedProjectRole === 'viewer' ? 'viewer' : 'editor']!
     : 0;
-  const permRank = params.visibility === 'workspace' ? workspaceSpaceRank(ctx.permissions) : 0;
+  const permRank = params.visibility === 'workspace' && !(ctx.membershipOnlyProjects && params.projectLinked)
+    ? workspaceSpaceRank(ctx.permissions) : 0;
   return Math.max(memberRank, inheritedRank, permRank);
 }
 
@@ -103,6 +106,7 @@ export function canAccessSpace(
     spaceId: string;
     minRole?: 'viewer' | 'editor';
     inheritedProjectRole?: 'admin' | 'member' | 'viewer' | null;
+    projectLinked?: boolean;
   },
 ): boolean {
   const minRank = SPACE_ROLE_RANK[params.minRole ?? 'viewer']!;
