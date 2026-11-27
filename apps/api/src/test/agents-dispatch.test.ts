@@ -581,6 +581,50 @@ describe('the worker end to end', () => {
     expect(texts.some((t) => t.includes('Docs updated too.'))).toBe(false);
   });
 
+  it('an agent a mention started follows up only on a mention whose author may start it (R49)', async () => {
+    const owner = reqAs(ws.users.owner!.cookie);
+    const member = reqAs(ws.users.member!.cookie);
+    const guarded = await createAgent(ws.users, { name: 'Guarded follow-up', assignPolicy: 'project_admins' });
+    await addProjectMember(ws.users, ws.projectId, guarded.id);
+    const doc = (text: string, mention?: string) => ({ type: 'doc', content: [{ type: 'paragraph', content: [
+      ...(mention ? [{ type: 'mention', attrs: { id: mention, label: 'Guarded' } }] : []), { type: 'text', text },
+    ] }] });
+
+    // Started by an admin's mention, not assigned. A member's mention and a
+    // plain comment written while it runs start nothing afterwards.
+    const task = await newTask('Mentioned, not assigned');
+    await owner.post(`/tasks/${task.id}/comments`, { body: doc(' please look', guarded.id) });
+    await drainOutbox();
+    expect((await runsForTask(task.id)).map((r) => r.agentUserId)).toEqual([guarded.id]);
+    restoreAdapter = setRuntimeAdapter(adapter(async () => {
+      const refused = await json(member.post(`/tasks/${task.id}/comments`, { body: doc(' and this too', guarded.id) }));
+      expect(refused.agentsNotStarted.map((a: { userId: string }) => a.userId)).toEqual([guarded.id]);
+      await member.post(`/tasks/${task.id}/comments`, { body: doc('Thanks!') });
+      return done();
+    }));
+    expect((await runToEnd(task.id)).status).toBe('succeeded');
+    await drainOutbox();
+    expect(await runsForTask(task.id)).toHaveLength(1);
+
+    // An admin's mention during the run does become the follow-up.
+    restoreAdapter();
+    const other = await newTask('Mentioned again by an admin');
+    await owner.post(`/tasks/${other.id}/comments`, { body: doc(' please look', guarded.id) });
+    await drainOutbox();
+    restoreAdapter = setRuntimeAdapter(adapter(async () => {
+      await owner.post(`/tasks/${other.id}/comments`, { body: doc(' one more thing', guarded.id) });
+      return done();
+    }));
+    const first = await runToEnd(other.id);
+    expect(first.status).toBe('succeeded');
+    const runs = (await runsForTask(other.id)).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    expect(runs).toHaveLength(2);
+    expect(runs[1]).toMatchObject({ agentUserId: guarded.id, trigger: 'comment', status: 'queued', parentRunId: first.id });
+    // Later scenarios claim from the same queue.
+    await drainOutbox();
+    await getDb().db.update(schema.agentRuns).set({ status: 'cancelled' }).where(eq(schema.agentRuns.agentUserId, guarded.id));
+  });
+
   it('a comment written while the run was still queued is not lost', async () => {
     const owner = reqAs(ws.users.owner!.cookie);
     const task = await newTask('Early bird');
