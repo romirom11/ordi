@@ -28,6 +28,14 @@ export interface AccessContext {
    * (prompt injection) must not find the rest of the workspace open to it.
    */
   membershipOnlyProjects?: boolean;
+  /**
+   * The most this actor holds on any project (1 viewer, 2 member, 3 admin) and
+   * on any space (1 viewer, 2 editor), whatever its permissions or memberships
+   * say. A person's own agent works with the person's reach, but as a member
+   * at most – tasks, not project settings – and reads the knowledge base.
+   */
+  projectRankCap?: number;
+  spaceRankCap?: number;
 }
 
 export function hasPermission(ctx: AccessContext, required: string): boolean {
@@ -66,7 +74,7 @@ export function projectAccessRank(
   const membership = ctx.projectMemberships.get(params.projectId);
   const memberRank = membership ? PROJECT_ROLE_RANK[membership] ?? 0 : 0;
   const permRank = params.visibility === 'workspace' && !ctx.membershipOnlyProjects ? workspaceProjectRank(ctx.permissions) : 0;
-  return Math.max(memberRank, permRank);
+  return Math.min(Math.max(memberRank, permRank), ctx.projectRankCap ?? Infinity);
 }
 
 export function canAccessProject(
@@ -96,7 +104,7 @@ export function spaceAccessRank(
     : 0;
   const permRank = params.visibility === 'workspace' && !(ctx.membershipOnlyProjects && params.projectLinked)
     ? workspaceSpaceRank(ctx.permissions) : 0;
-  return Math.max(memberRank, inheritedRank, permRank);
+  return Math.min(Math.max(memberRank, inheritedRank, permRank), ctx.spaceRankCap ?? Infinity);
 }
 
 export function canAccessSpace(

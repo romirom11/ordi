@@ -253,6 +253,8 @@ export const comments = pgTable('comments', {
   id: pk(),
   taskId: text('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
   authorId: text('author_id').references(() => users.id),
+  /** The client an agent wrote through ("Codex", "Claude Code"), shown next to its name. */
+  via: text('via'),
   body: jsonb('body').notNull().default({}),
   reactions: jsonb('reactions').notNull().default({}),
   editedAt: timestamp('edited_at', { withTimezone: true }),

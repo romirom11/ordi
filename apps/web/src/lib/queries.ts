@@ -25,7 +25,9 @@ export interface UserLookup {
   /** `agent` marks an AI agent employee – rendered with a badge everywhere. */
   actorType?: string;
   /** For agents: `managed` – ordi runs it; `external` – it connects from outside and has no runs. */
-  agentKind?: 'managed' | 'external' | null;
+  agentKind?: 'managed' | 'external' | 'personal' | null;
+  /** A person's own agent: whose it is. */
+  ownerUserId?: string | null;
 }
 
 /** Everyone in the workspace, past and present – for resolving people on records. */
@@ -38,8 +40,10 @@ export function useUsersLookup(): UseQueryResult<UserLookup[]> {
 }
 
 /** The pickable subset of a lookup result: people who can still be assigned. */
-export function activeUsers<T extends { isActive?: boolean }>(users: T[] | undefined): T[] {
-  return (users ?? []).filter((u) => u.isActive !== false);
+export function activeUsers<T extends { isActive?: boolean; agentKind?: string | null }>(users: T[] | undefined): T[] {
+  // People's own agents are never picked – not as assignees, reporters,
+  // members or successors: they work their owner's tasks.
+  return (users ?? []).filter((u) => u.isActive !== false && u.agentKind !== 'personal');
 }
 
 /**

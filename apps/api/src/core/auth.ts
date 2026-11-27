@@ -8,8 +8,9 @@ import { getDb, schema, eq, and } from '@ordi/db';
 import type { AppEnv, Actor } from '../context';
 import { err } from '../lib/errors';
 import { sha256 } from '../lib/crypto';
-import { effectivePermissions } from './rbac';
-import { buildAccessContext } from './access';
+import { PERSONAL_AGENT_PERMISSIONS } from '@ordi/shared';
+import { effectivePermissions, loadRolePermissions } from './rbac';
+import { buildAccessContext, buildPersonalAgentAccess } from './access';
 
 export const SESSION_COOKIE = 'ordi_session';
 
@@ -22,6 +23,7 @@ async function resolveActor(c: Parameters<MiddlewareHandler<AppEnv>>[0]): Promis
   let tokenScopes: string[] | null = null;
   let readOnly = false;
   let apiTokenId: string | null = null;
+  let tokenName: string | null = null;
 
   if (authHeader?.startsWith('Bearer ')) {
     const raw = authHeader.slice(7).trim();
@@ -33,6 +35,7 @@ async function resolveActor(c: Parameters<MiddlewareHandler<AppEnv>>[0]): Promis
       tokenScopes = (token.scopes as string[]) ?? [];
       readOnly = token.readOnly;
       apiTokenId = token.id;
+      tokenName = token.name.replace(/\s*\(OAuth\)$/, '');
       db.update(schema.apiTokens).set({ lastUsedAt: new Date() }).where(eq(schema.apiTokens.id, token.id)).catch(() => {});
     } else {
       // Bearer session token (desktop/Tauri client, PRD §18): the tauri://
@@ -54,6 +57,38 @@ async function resolveActor(c: Parameters<MiddlewareHandler<AppEnv>>[0]): Promis
   if (!user || !user.isActive) return null;
 
   const [role] = await db.select().from(schema.roles).where(eq(schema.roles.id, user.roleId));
+
+  // A person's own agent: its owner's current reach, bounded, every request.
+  if (user.actorType === 'agent') {
+    const [ext] = await db.select({ kind: schema.externalAgents.kind, ownerUserId: schema.externalAgents.ownerUserId })
+      .from(schema.externalAgents).where(eq(schema.externalAgents.userId, user.id));
+    if (ext?.kind === 'personal') {
+      const [owner] = await db.select({ isActive: schema.users.isActive, roleId: schema.users.roleId })
+        .from(schema.users).where(eq(schema.users.id, ext.ownerUserId));
+      if (!owner?.isActive) return null;
+      const ownerPerms = await loadRolePermissions(owner.roleId);
+      const allowed = PERSONAL_AGENT_PERMISSIONS.filter((p) => ownerPerms.has(p) && (!tokenScopes || tokenScopes.includes(p)));
+      const permissions = new Set<string>(allowed);
+      return {
+        userId: user.id,
+        actorType: 'agent',
+        roleId: user.roleId,
+        roleName: role?.name ?? 'unknown',
+        email: user.email,
+        name: user.name,
+        locale: user.locale,
+        timezone: user.timezone,
+        readOnly,
+        tokenScopes,
+        apiTokenId,
+        ownerUserId: ext.ownerUserId,
+        agentKind: 'personal',
+        clientLabel: tokenName,
+        access: await buildPersonalAgentAccess(ext.ownerUserId, permissions, readOnly),
+      };
+    }
+  }
+
   const permissions = await effectivePermissions(user.roleId, tokenScopes);
   const access = await buildAccessContext(user.id, permissions, readOnly, user.actorType);
 

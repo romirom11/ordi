@@ -14,6 +14,11 @@ export interface Actor {
   tokenScopes: string[] | null;
   /** The API token the request came with; agent runs are recognised by theirs. */
   apiTokenId?: string | null;
+  /** A person's own agent: whose it is. Its reach is that person's, bounded. */
+  ownerUserId?: string | null;
+  agentKind?: 'personal' | null;
+  /** For a personal agent: the client it connected with ("Codex"), from its token's name. */
+  clientLabel?: string | null;
   access: AccessContext;
 }
 

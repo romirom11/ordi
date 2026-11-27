@@ -186,3 +186,15 @@ export const issueExternalAgentTokenSchema = z.object({
   name: z.string().trim().min(1).max(120).default('MCP token'),
   expiresInDays: z.number().int().min(1).max(3650).nullable().default(90),
 });
+
+// ── A person's own agent (Profile → MCP & API) ──
+
+export const myAgentInputSchema = z.object({
+  name: z.string().trim().min(1).max(60),
+});
+
+export const issueMyAgentTokenSchema = z.object({
+  /** The client this token is for – shown next to what the agent writes through it. */
+  client: z.string().trim().min(1).max(40),
+  expiresInDays: z.number().int().min(1).max(3650).nullable().default(90),
+});

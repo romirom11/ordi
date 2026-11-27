@@ -44,6 +44,8 @@ export function meRoutes() {
 
   app.patch('/', async (c) => {
     const actor = currentActor(c);
+    // An agent's name and settings are set by the people who manage it.
+    if (actor.actorType === 'agent') throw err.forbidden('An agent cannot change its own profile', 'users.manage');
     const body = updateProfileSchema.parse(await c.req.json());
     const { db } = getDb();
     await db.update(schema.users).set({

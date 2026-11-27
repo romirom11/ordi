@@ -20,11 +20,11 @@ import { useT, extendDict } from '../../lib/i18n';
 
 extendDict({
   en: {
-    'extAgents.title': 'External agents',
-    'extAgents.desc': 'Agents that run elsewhere – Claude Code, Codex, a script on a server – and connect over MCP under their own name. They work only in the projects they are added to.',
-    'extAgents.new': 'New external agent',
-    'extAgents.none': 'No external agents yet',
-    'extAgents.noneHint': 'Create one for each agent that works on its own, so its comments and changes carry its name instead of yours.',
+    'extAgents.title': 'Team bots',
+    'extAgents.desc': 'Shared bots that belong to the team rather than one person – a triage bot, a bot on a server. They connect over MCP under their own name, work only in the projects they are added to, and can be assigned tasks. Everyone\'s own agent lives in their Profile → MCP & API.',
+    'extAgents.new': 'New team bot',
+    'extAgents.none': 'No team bots yet',
+    'extAgents.noneHint': 'Create one for a bot the whole team relies on. For your own Claude Code or Codex, use My agent in your Profile.',
     'extAgents.owner': 'Owner',
     'extAgents.ownerHint': 'The person behind the agent – who it works for.',
     'extAgents.noProjects': 'No projects yet – add it under a project\'s Settings → Access',
@@ -55,11 +55,11 @@ extendDict({
     'extAgents.ownerChangeHint': 'A new owner revokes its tokens – issue a fresh one after.',
   },
   uk: {
-    'extAgents.title': 'Зовнішні агенти',
-    'extAgents.desc': 'Агенти, які працюють деінде – Claude Code, Codex, скрипт на сервері – і підключаються через MCP під власним іменем. Вони працюють лише в проєктах, куди їх додано.',
-    'extAgents.new': 'Новий зовнішній агент',
-    'extAgents.none': 'Зовнішніх агентів ще немає',
-    'extAgents.noneHint': 'Створіть по одному на кожного агента, що працює сам, – тоді його коментарі й зміни будуть під його іменем, а не вашим.',
+    'extAgents.title': 'Боти команди',
+    'extAgents.desc': 'Спільні боти, які належать команді, а не одній людині, – бот розбору помилок, бот на сервері. Вони підключаються через MCP під власним іменем, працюють лише в проєктах, куди їх додано, і на них можна призначати задачі. Свій агент у кожного – в Профілі → MCP & API.',
+    'extAgents.new': 'Новий бот команди',
+    'extAgents.none': 'Ботів команди ще немає',
+    'extAgents.noneHint': 'Створіть бота, на якого покладається вся команда. Для власного Claude Code чи Codex – «Мій агент» у Профілі.',
     'extAgents.owner': 'Власник',
     'extAgents.ownerHint': 'Людина, яка стоїть за агентом, – на кого він працює.',
     'extAgents.noProjects': 'Ще немає проєктів – додайте його в Налаштуваннях проєкту → Доступ',
@@ -93,6 +93,7 @@ extendDict({
 
 interface ExternalAgentToken { id: string; name: string; prefix: string; lastUsedAt: string | null; expiresAt: string | null; createdAt: string }
 interface ExternalAgent {
+  kind?: 'team' | 'personal';
   id: string; name: string; avatar: string | null; isActive: boolean; roleName: string;
   ownerUserId: string; ownerName: string | null;
   projects: { id: string; key: string; name: string }[];
@@ -108,7 +109,8 @@ export function ExternalAgentsSection() {
     queryKey: KEY,
     queryFn: () => api.get<{ data: ExternalAgent[] }>('/external-agents').then((r) => r.data),
   });
-  const agents = agentsQ.data ?? [];
+  // People's own agents live in their Profiles; this is the team's bots.
+  const agents = (agentsQ.data ?? []).filter((a) => a.kind !== 'personal');
   const [creating, setCreating] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const open = agents.find((a) => a.id === openId) ?? null;
@@ -326,7 +328,7 @@ function ManageDialog({ agent, onClose }: { agent: ExternalAgent; onClose: () =>
 }
 
 /** The token once, with the two ways to plug it in. */
-function IssuedToken({ token }: { token: string }) {
+export function IssuedToken({ token }: { token: string }) {
   const t = useT();
   const url = `${appOrigin()}/api/v1/mcp`;
   const claudeCode = `claude mcp add --transport http ordi ${url} --header "Authorization: Bearer ${token}"`;

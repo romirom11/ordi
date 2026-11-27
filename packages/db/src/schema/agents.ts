@@ -69,9 +69,17 @@ export const agentProfiles = pgTable('agent_profiles', {
 export const externalAgents = pgTable('external_agents', {
   userId: text('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
   ownerUserId: text('owner_user_id').notNull().references(() => users.id),
+  /**
+   * 'team' – a shared bot an admin sets up: its own memberships, assignable.
+   * 'personal' – one person's own agent: works their tasks with their reach
+   * (bounded per request), never assigned, one per person, gone with them.
+   */
+  kind: text('kind').notNull().default('team'),
   createdBy: createdBy(),
   ...timestamps,
-});
+}, (t) => ({
+  onePersonalPerOwner: uniqueIndex('external_agents_one_personal_idx').on(t.ownerUserId).where(sql`${t.kind} = 'personal'`),
+}));
 
 /** Workspace MCP connector library entry (from the catalogue or by URL). */
 export const mcpConnectors = pgTable('mcp_connectors', {

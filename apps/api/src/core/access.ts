@@ -260,3 +260,22 @@ export async function userCanOpenProject(userId: string, projectId: string): Pro
   if (user.actorType === 'agent') return access.projectMemberships.has(projectId);
   return projectAccessRank(access, { visibility: project.visibility as 'workspace' | 'private', projectId }) > 0;
 }
+
+/**
+ * A person's own agent reaches what its owner reaches – the owner's
+ * memberships and, through the given permissions (already intersected with
+ * the owner's), workspace projects – but as a member at most on a project and
+ * a reader on a space: it works tasks, it does not run projects. Built on
+ * every request, so losing a project or a permission takes effect at once.
+ */
+export async function buildPersonalAgentAccess(ownerUserId: string, permissions: Set<string>, readOnly: boolean): Promise<AccessContext> {
+  const base = await buildAccessContext(ownerUserId, permissions, readOnly, 'user');
+  return {
+    ...base,
+    projectMemberships: new Map([...base.projectMemberships].map(([id, role]) => [id, role === 'admin' ? 'member' : role])),
+    spaceMemberships: new Map([...base.spaceMemberships].map(([id]) => [id, 'viewer' as const])),
+    membershipOnlyProjects: false,
+    projectRankCap: 2,
+    spaceRankCap: 1,
+  };
+}
