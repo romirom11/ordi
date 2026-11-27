@@ -354,9 +354,11 @@ export async function revokeExternalAgentToken(actor: Actor, id: string, tokenId
 }
 
 /** The external agents a person owns – what deactivating them would leave behind. */
-export async function externalAgentsOwnedBy(userId: string): Promise<{ id: string; name: string; isActive: boolean }[]> {
+export async function externalAgentsOwnedBy(userId: string): Promise<{ id: string; name: string; isActive: boolean; kind: string }[]> {
   const { db } = getDb();
-  return db.select({ id: users.id, name: users.name, isActive: users.isActive }).from(externalAgents)
+  // `kind` tells the deactivation dialog which go to the successor (team
+  // bots) and which are switched off whatever happens (their own agent).
+  return db.select({ id: users.id, name: users.name, isActive: users.isActive, kind: externalAgents.kind }).from(externalAgents)
     .innerJoin(users, eq(users.id, externalAgents.userId))
     .where(eq(externalAgents.ownerUserId, userId))
     .orderBy(users.name);
@@ -455,8 +457,10 @@ export async function createMyAgent(actor: Actor, name: string): Promise<Externa
       });
     });
   } catch (e) {
-    // Two tabs at once: the one-per-person index decides.
-    if ((e as { code?: string }).code === '23505') throw err.domain('You already have an agent');
+    // Two tabs at once: the one-per-person index decides. The driver's code
+    // sits on the error itself or, wrapped by the ORM, on its cause.
+    const pg = e as { code?: string; cause?: { code?: string } };
+    if ((pg.code ?? pg.cause?.code) === '23505') throw err.domain('You already have an agent');
     throw e;
   }
   return (await views(actor, [id]))[0]!;
@@ -529,6 +533,15 @@ export async function personalAgentIds(userIds: string[]): Promise<Set<string>> 
   const rows = await db.select({ id: externalAgents.userId }).from(externalAgents)
     .where(and(inArray(externalAgents.userId, userIds), eq(externalAgents.kind, 'personal')));
   return new Set(rows.map((r) => r.id));
+}
+
+/** The own agents of these people (at most one each). */
+export async function personalAgentIdsOf(ownerUserIds: string[]): Promise<string[]> {
+  if (!ownerUserIds.length) return [];
+  const { db } = getDb();
+  const rows = await db.select({ id: externalAgents.userId }).from(externalAgents)
+    .where(and(inArray(externalAgents.ownerUserId, ownerUserIds), eq(externalAgents.kind, 'personal')));
+  return rows.map((r) => r.id);
 }
 
 export async function assertNotPersonalAgent(userId: string, what: string): Promise<void> {

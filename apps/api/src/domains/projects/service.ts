@@ -21,7 +21,7 @@ import { assertProject, accessibleProjectIds, effectiveProjectRole, userCanOpenP
 import { closeProjectTimers } from '../time/service';
 import { cancelProjectRuns } from '../agents/runs';
 import { assertCanAssignAgents } from '../agents/profiles';
-import { assertNotPersonalAgent } from '../agents/external';
+import { assertNotPersonalAgent, personalAgentIdsOf } from '../agents/external';
 import { buildCustomFieldFilter, mergeCustomFields } from '../../core/customfields';
 import { extractMentions } from '../kb/service';
 import { encrypt, generateToken } from '../../lib/crypto';
@@ -671,6 +671,8 @@ export async function listTasks(actor: Actor, params: {
  * so someone the project is closed to must not be one.
  */
 async function assertReporter(project: { id: string }, userId: string): Promise<void> {
+  // Someone's own agent files work for its owner; it is never the one who set it.
+  await assertNotPersonalAgent(userId, "a task's reporter");
   const { db } = getDb();
   const [user] = await db.select({ isActive: schema.users.isActive }).from(schema.users).where(eq(schema.users.id, userId));
   if (!user || !user.isActive) throw err.validation('The reporter must be an active user');
@@ -687,7 +689,8 @@ export async function createTask(actor: Actor, input: any) {
   if (assigneeIds.length) await assertCanAssignAgents(actor, project.id, assigneeIds, effectiveProjectRole(actor, project));
   // A person's own agent files work for its owner: the owner set it.
   const reporterId: string | null = input.reporterId === undefined ? (actor.ownerUserId ?? actor.userId) : input.reporterId;
-  if (reporterId && reporterId !== actor.userId) await assertReporter(project, reporterId);
+  // A personal agent naming itself is checked too: it may not be the reporter.
+  if (reporterId && (reporterId !== actor.userId || actor.agentKind === 'personal')) await assertReporter(project, reporterId);
   const labelIds: string[] = input.labelIds ?? [];
   // Before the row exists: a rejected label must not leave a half-created task.
   await assertLabelScope(labelIds, 'task');
@@ -1529,6 +1532,11 @@ export async function myTasks(actor: Actor) {
     where t.deleted_at is null and ts.category not in ('done','canceled') and t.project_id in ${inList}
     order by t.due_date nulls last`) as any[];
 
+  // A person and their own agent share one list: what either filed (the agent
+  // files for its owner, who is the task's reporter).
+  const person = actor.ownerUserId ?? actor.userId;
+  const filers = [person, ...(await personalAgentIdsOf([person]))];
+  const createdBy = sql`(${sql.join(filers.map((id) => sql`${id}`), sql`, `)})`;
   const created = await db.execute(sql`
     select t.id, t.title, t.due_date, t.priority, t.number, t.project_id, t.status_id, t.version,
       p.key, p.visibility, ts.category, ts.name as status_name, ts.color as status_color,
@@ -1536,7 +1544,7 @@ export async function myTasks(actor: Actor) {
     from tasks t
     join projects p on p.id = t.project_id
     join task_statuses ts on ts.id = t.status_id
-    where t.deleted_at is null and t.created_by = ${actor.userId}
+    where t.deleted_at is null and t.created_by in ${createdBy}
       and ts.category not in ('done','canceled') and t.project_id in ${inList}
     order by t.due_date nulls last`) as any[];
 

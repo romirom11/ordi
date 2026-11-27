@@ -45,8 +45,11 @@ interface NotifyOptions {
   quietFor?: string | null;
 }
 
-/** Types that reach a personal agent's owner even though the agent caused them. */
-const REACHES_OWNER = new Set(['comment.mentioned']);
+/**
+ * Types that reach a personal agent's owner even though the agent caused
+ * them: a question put to them, on a task or on a knowledge-base page.
+ */
+const REACHES_OWNER = new Set(['comment.mentioned', 'page.mentioned']);
 
 async function notify(
   eventId: string,
