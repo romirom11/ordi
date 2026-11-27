@@ -17,7 +17,7 @@ import { env } from '../env';
 import { salesWork, summarizeSalesWork } from '../domains/crm/work';
 import { queueRun, activeRunForTask } from '../domains/agents/runs';
 import { agentProfilesAmong } from '../domains/agents/profiles';
-import { userCanOpenProject } from '../core/access';
+import { userCanOpenPage, userCanOpenProject } from '../core/access';
 
 export interface Consumer {
   name: string;
@@ -37,6 +37,13 @@ interface NotifyOptions {
    * must not reach someone the project is closed to.
    */
   projectId?: string | null;
+  /**
+   * The knowledge-base page the news is about. Recipients who cannot open it
+   * now – outside its space, or kept out of a draft or a private page – are
+   * skipped: being @-mentioned on a page does not open it, and the email and
+   * the bell row carry its title.
+   */
+  pageId?: string | null;
   /**
    * The owner of the person's own agent that caused the event. Its routine
    * work (comments, status moves) is theirs already and would bury them;
@@ -71,6 +78,7 @@ async function notify(
     // both only added rows nobody would ever open.
     if (!user || !user.isActive || user.actorType !== 'user') continue;
     if (options.projectId && !(await userCanOpenProject(userId, options.projectId))) continue;
+    if (options.pageId && !(await userCanOpenPage(userId, options.pageId))) continue;
     const prefs = (user?.emailNotificationPrefs as Record<string, boolean>) ?? {};
     const dedupeKey = `${eventId}:notifications:${userId}:${type}`;
     let email: QueuedEmailInput | null = null;
@@ -384,7 +392,11 @@ const notifications: Consumer = {
         await notify(ev.id, [...(p.assigneeIds ?? []), reporterOf(p)], 'task.status_changed', p.ref ?? null, p, self);
         break;
       case 'page.mentioned':
-        await notify(ev.id, p.mentions ?? [], 'page.mentioned', p.ref ?? null, p, self);
+        // Read at delivery, not when the mention was written: the page may
+        // have been made private, or the person moved out of its space, since.
+        // No page id, nobody to check against – and so nobody told.
+        if (!p.pageId) break;
+        await notify(ev.id, p.mentions ?? [], 'page.mentioned', p.ref ?? null, p, { ...self, pageId: p.pageId });
         break;
       case 'payment.recorded':
         await notify(ev.id, [p.createdBy, p.ownerId], 'payment.recorded', p.ref ?? null, p, self);
