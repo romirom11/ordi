@@ -3,7 +3,7 @@
  * redacted diff. Redaction is centralised (one serializer + registry): sensitive
  * values recorded as fact-only, secrets excluded entirely.
  */
-import { getDb, schema, eq, and, inArray, isNull } from '@ordi/db';
+import { getDb, schema, eq, and, desc, inArray, isNull } from '@ordi/db';
 import { buildRedactedDiff, canSeePage, type Permission } from '@ordi/shared';
 import { ulid } from 'ulid';
 import type { Actor } from '../context';
@@ -92,6 +92,16 @@ export const ATTACHMENT_READ_PERM: Record<string, Permission> = {
   task: 'projects.read', project: 'projects.read', intake_item: 'projects.read',
   employee: 'people.read_documents',
 };
+/**
+ * The record a file hangs off, as its activity names it. Every record of a
+ * file's trail carries it, so once the file is gone its trail still answers
+ * to the record it was last on (core/activity), not the one it started on – a
+ * task moved into a private project takes its files with it.
+ */
+export function onRecord(att: { entityType: string | null; entityId: string | null }): { on?: { to: string } } {
+  return att.entityType ? { on: { to: `${att.entityType}:${att.entityId ?? ''}` } } : {};
+}
+
 /** Record types whose files belong to a project (and answer to its access). */
 const ATTACHMENT_IN_PROJECT = new Set(['project', 'task', 'intake_item']);
 
@@ -205,9 +215,11 @@ async function customFieldScopes(ids: string[], projectOf: Map<string, string>):
 /**
  * The record each attachment hangs off, and for a file on a project, a task or
  * an intake item, the project (into projectOf). A deleted file's row is gone,
- * so its parent is read from the `created` record of its own trail, which
- * names it (`on: "task:<id>"`). An attachment found in neither is left out of
- * the map: nothing says whose it was, so the caller fails closed.
+ * so its parent is read from the latest record of its own trail that names
+ * one (`on: "task:<id>"`: the upload, and since then every rename and the
+ * delete) – the record it was last on, so a file whose task moved into a
+ * private project stays with that project. An attachment found in neither is
+ * left out of the map: nothing says whose it was, so the caller fails closed.
  */
 async function attachmentParents(ids: string[], projectOf: Map<string, string>): Promise<Map<string, AttachmentParent>> {
   const out = new Map<string, AttachmentParent>();
@@ -216,13 +228,20 @@ async function attachmentParents(ids: string[], projectOf: Map<string, string>):
   const live = await db.select({ id: schema.attachments.id, type: schema.attachments.entityType, entityId: schema.attachments.entityId })
     .from(schema.attachments).where(inArray(schema.attachments.id, ids));
   for (const a of live) out.set(a.id, { type: a.type, id: a.entityId });
-  const created = await createdDiffs('attachment', ids.filter((id) => !out.has(id)));
-  for (const [id, diff] of created) {
-    const on = (diff.on as { to?: unknown } | undefined)?.to;
-    if (typeof on !== 'string') continue;
-    const at = on.indexOf(':');
-    if (at < 1) continue;
-    out.set(id, { type: on.slice(0, at), id: on.slice(at + 1) || null });
+  const gone = ids.filter((id) => !out.has(id));
+  if (gone.length) {
+    const trail = await db.select({ entityId: schema.activityLog.entityId, diff: schema.activityLog.diff })
+      .from(schema.activityLog)
+      .where(and(eq(schema.activityLog.entityType, 'attachment'), inArray(schema.activityLog.entityId, gone)))
+      .orderBy(desc(schema.activityLog.createdAt), desc(schema.activityLog.id));
+    for (const r of trail) {
+      if (out.has(r.entityId)) continue; // newest first: the first that names a record wins
+      const on = ((r.diff ?? {}) as { on?: { to?: unknown } }).on?.to;
+      if (typeof on !== 'string') continue;
+      const at = on.indexOf(':');
+      if (at < 1) continue;
+      out.set(r.entityId, { type: on.slice(0, at), id: on.slice(at + 1) || null });
+    }
   }
   const parentIds = (type: string) => [...new Set([...out.values()].filter((p) => p.type === type && p.id).map((p) => p.id!))];
   const taskIds = parentIds('task');

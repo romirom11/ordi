@@ -6,7 +6,7 @@ import type { Actor, AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { rejectReadOnlyWrites } from '../../core/rbac';
 import { assertProject } from '../../core/access';
-import { writeActivity, ATTACHMENT_READ_PERM } from '../../core/activity';
+import { writeActivity, ATTACHMENT_READ_PERM, onRecord } from '../../core/activity';
 import { putObject } from '../../lib/s3';
 import { fileSrc } from '../../lib/file-tokens';
 import { err } from '../../lib/errors';
@@ -178,7 +178,7 @@ export function attachmentsRoutes() {
       await db.update(schema.attachments).set({ filename }).where(eq(schema.attachments.id, att.id));
       await writeActivity(db, {
         entityType: 'attachment', entityId: att.id, action: 'updated',
-        diff: { file: { from: att.filename, to: filename } },
+        diff: { file: { from: att.filename, to: filename }, ...onRecord(att) },
         actorId: actor.userId, actorType: actor.actorType,
       });
     }
@@ -196,7 +196,7 @@ export function attachmentsRoutes() {
     await db.delete(schema.attachments).where(eq(schema.attachments.id, att.id));
     await writeActivity(db, {
       entityType: 'attachment', entityId: att.id, action: 'deleted',
-      diff: { file: { from: att.filename } },
+      diff: { file: { from: att.filename }, ...onRecord(att) },
       actorId: actor.userId, actorType: actor.actorType,
     });
     return c.json({ ok: true });

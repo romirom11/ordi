@@ -102,8 +102,10 @@ describe('canAccessSpace on workspace spaces', () => {
     expect(canAccessSpace(kb, { visibility: 'workspace', spaceId: 's1', projectLinked: true, inheritedProjectRole: null })).toBe(false);
     // Can open it as a viewer: kb.write still makes them an editor of a workspace space.
     expect(canAccessSpace(kb, { visibility: 'workspace', spaceId: 's1', projectLinked: true, inheritedProjectRole: 'viewer', minRole: 'editor' })).toBe(true);
-    // An explicit space membership still counts.
-    expect(canAccessSpace(ctx(['kb.read'], [], [['s1', 'viewer']]), { visibility: 'workspace', spaceId: 's1', projectLinked: true, inheritedProjectRole: null })).toBe(true);
+    // Nor does a space membership left over from when they were on the project.
+    expect(canAccessSpace(ctx(['kb.read'], [], [['s1', 'editor']]), { visibility: 'private', spaceId: 's1', projectLinked: true, inheritedProjectRole: null })).toBe(false);
+    // On the project, a space membership still lifts a project viewer to editor.
+    expect(canAccessSpace(ctx(['kb.read'], [], [['s1', 'editor']]), { visibility: 'private', spaceId: 's1', minRole: 'editor', projectLinked: true, inheritedProjectRole: 'viewer' })).toBe(true);
   });
 });
 

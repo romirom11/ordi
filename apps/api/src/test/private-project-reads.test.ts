@@ -95,6 +95,18 @@ describe('KB: a private project\'s space', () => {
     expect((await insider.as.get(`/spaces/${space}/members`)).status).toBe(200);
   });
 
+  it('closes to someone taken off the project, whatever space membership they kept', async () => {
+    const leaver = await person('Leaver');
+    expect((await owner.post(`/projects/${secretProject}/members`, { userId: leaver.userId, role: 'member', canWriteTasks: true })).status).toBe(201);
+    expect((await owner.post(`/spaces/${space}/members`, { userId: leaver.userId, role: 'editor' })).status).toBe(201);
+    expect((await leaver.as.get(`/spaces/${space}/pages`)).status).toBe(200);
+    expect((await owner.del(`/projects/${secretProject}/members/${leaver.userId}`)).status).toBe(200);
+    expect((await leaver.as.get(`/spaces/${space}`)).status).toBe(404);
+    expect((await leaver.as.get(`/spaces/${space}/pages`)).status).toBe(404);
+    const listed = (await json(leaver.as.get('/spaces'))).data as { id: string }[];
+    expect(listed.some((s) => s.id === space)).toBe(false);
+  });
+
   it('a workspace project\'s space still opens through kb rights and kb.manage_spaces', async () => {
     const openSpace = (await json(owner.post('/spaces', { name: 'Open notes', projectId: openProject, visibility: 'workspace' }))).id;
     expect((await outsider.as.get(`/spaces/${openSpace}`)).status).toBe(200);
@@ -133,6 +145,52 @@ describe('activity of a file in a private project', () => {
     expect(namesFile(trail)).toBe(false);
     const forMember = (await json(insider.as.get(`/audit/entity/attachment/${fileId}`))).data as { action: string }[];
     expect(forMember.map((r) => r.action).sort()).toEqual(['created', 'deleted']);
+  });
+});
+
+describe('a file whose task moved into a private project', () => {
+  it('takes its later trail with it, once deleted', async () => {
+    const moving = (await json(owner.post('/tasks', { projectId: openProject, title: 'To be moved' }))).id;
+    const fd = new FormData();
+    fd.append('file', new File([new Uint8Array([1])], 'draft.pdf', { type: 'application/pdf' }), 'draft.pdf');
+    fd.append('entityType', 'task');
+    fd.append('entityId', moving);
+    const fileId = (await json(owner.postForm('/attachments', fd))).id;
+    expect((await owner.post(`/tasks/${moving}/move`, { targetProjectId: secretProject })).status).toBe(200);
+    expect((await owner.patch(`/attachments/${fileId}`, { filename: 'falcon-term-sheet.pdf' })).status).toBe(200);
+    expect((await owner.del(`/attachments/${fileId}`)).status).toBe(200);
+    const trail = (await json(outsider.as.get(`/audit/entity/attachment/${fileId}`))).data;
+    expect(JSON.stringify(trail)).not.toContain('falcon-term-sheet');
+    const forMember = (await json(insider.as.get(`/audit/entity/attachment/${fileId}`))).data as { action: string }[];
+    expect(forMember.map((r) => r.action).sort()).toEqual(['created', 'deleted', 'updated']);
+  });
+});
+
+describe('agents on a private project', () => {
+  it('do not name it to an agents.manage holder outside it', async () => {
+    const res = await owner.post('/agents', { name: 'Falcon bot', runtime: 'claude_code' });
+    expect(res.status).toBe(201);
+    const agentId = (await json(res)).id;
+    expect((await owner.post(`/projects/${secretProject}/members`, { userId: agentId, role: 'member', canWriteTasks: true })).status).toBe(201);
+    const seen = async (who: typeof outsider) => {
+      const list = (await json(who.as.get('/agents'))).data as { id: string; projectIds: string[] }[];
+      const one = await json(who.as.get(`/agents/${agentId}`));
+      return [list.find((a) => a.id === agentId)!.projectIds, one.projectIds];
+    };
+    expect(await seen(outsider)).toEqual([[], []]);
+    expect(await seen(insider)).toEqual([[secretProject], [secretProject]]);
+  });
+});
+
+describe('shared saved views of a private project', () => {
+  it('are listed only for those who can open it, and none can be saved onto it from outside', async () => {
+    const res = await insider.as.post('/saved-views', { entityType: 'tasks', name: 'Falcon blockers', isShared: true, projectId: secretProject });
+    expect(res.status).toBe(201);
+    const viewId = (await json(res)).id;
+    const ids = async (who: typeof outsider) => ((await json(who.as.get('/saved-views'))).data as { id: string }[]).map((v) => v.id);
+    expect(await ids(outsider)).not.toContain(viewId);
+    expect(await ids(insider)).toContain(viewId);
+    expect((await outsider.as.post('/saved-views', { entityType: 'tasks', name: 'Probe', projectId: secretProject })).status).toBe(404);
   });
 });
 
