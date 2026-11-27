@@ -6,6 +6,7 @@ import { getDb, schema, eq, and, inArray, isNull, or, sql, type SQL } from '@ord
 import { type AccessContext, projectAccessRank, spaceAccessRank } from '@ordi/shared';
 import type { Actor } from '../context';
 import { err } from '../lib/errors';
+import { loadRolePermissions } from './rbac';
 
 export async function buildAccessContext(
   userId: string,
@@ -231,4 +232,25 @@ export async function assertSpace(
     );
   }
   return { ...space, visibility: space.visibility as 'workspace' | 'private' };
+}
+
+/**
+ * Whether a given person (not the request's actor) can open a project now, by
+ * the rule every request is held to: role permissions plus memberships. Used
+ * where someone is named on a project's work – a task's reporter – and before
+ * telling them about it, so news never reaches someone the project is closed to.
+ * An agent opens only the projects it is a member of. A deleted project, an
+ * inactive or unknown user: no.
+ */
+export async function userCanOpenProject(userId: string, projectId: string): Promise<boolean> {
+  const { db } = getDb();
+  const [user] = await db.select({ id: schema.users.id, isActive: schema.users.isActive, actorType: schema.users.actorType, roleId: schema.users.roleId })
+    .from(schema.users).where(eq(schema.users.id, userId));
+  if (!user || !user.isActive) return false;
+  const [project] = await db.select({ visibility: schema.projects.visibility })
+    .from(schema.projects).where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
+  if (!project) return false;
+  const access = await buildAccessContext(user.id, await loadRolePermissions(user.roleId), false);
+  if (user.actorType === 'agent') return access.projectMemberships.has(projectId);
+  return projectAccessRank(access, { visibility: project.visibility as 'workspace' | 'private', projectId }) > 0;
 }

@@ -96,9 +96,41 @@ describe('the reporter of a task', () => {
     expect(await notificationTypes(users.owner!.userId)).not.toContain('task.status_changed');
   });
 
-  it('travels with a duplicate', async () => {
+  it('travels with a duplicate, including the lack of one', async () => {
     const task = await json(owner().post('/tasks', { projectId, title: 'Original', reporterId: users.manager!.userId }));
     const copy = await json(reqAs(users.admin!.cookie).post(`/tasks/${task.id}/duplicate`));
     expect(copy.reporterId).toBe(users.manager!.userId);
+
+    const orphan = await json(owner().post('/tasks', { projectId, title: 'No one asked', reporterId: null }));
+    const orphanCopy = await json(reqAs(users.admin!.cookie).post(`/tasks/${orphan.id}/duplicate`));
+    expect(orphanCopy.reporterId).toBeNull();
+  });
+
+  it('is dropped when the task moves where the reporter cannot follow', async () => {
+    const typeId = ulid();
+    await getDb().db.insert(schema.projectTypes).values({ id: typeId, name: 'Closed' });
+    const closed = await project('CLS', 'private', typeId);
+    const task = await json(owner().post('/tasks', { projectId, title: 'Moving out', reporterId: users.sales!.userId }));
+    const moved = await json(owner().post(`/tasks/${task.id}/move`, { targetProjectId: closed }));
+    expect(moved.reporterId).toBeNull();
+  });
+
+  it('hears nothing about a project closed to them since', async () => {
+    const typeId = ulid();
+    await getDb().db.insert(schema.projectTypes).values({ id: typeId, name: 'Shrinking' });
+    const closed = await project('SHR', 'private', typeId);
+    await owner().post(`/projects/${closed}/members`, { userId: users.sales!.userId, role: 'member', canWriteTasks: true });
+    const statuses = (await json(owner().get(`/projects/${closed}/task-statuses`))).data as { id: string; category: string }[];
+    const task = await json(owner().post('/tasks', { projectId: closed, title: 'Was yours', reporterId: users.sales!.userId }));
+    await drainOutbox();
+
+    // Taken off the project; the task still names them as reporter.
+    await owner().del(`/projects/${closed}/members/${users.sales!.userId}`);
+    await getDb().db.delete(schema.notifications);
+    // The owner created the private project, so is on it and can move the task.
+    const moved = await owner().patch(`/tasks/${task.id}`, { statusId: statuses.find((s) => s.category === 'done')!.id });
+    expect(moved.status).toBe(200);
+    await drainOutbox();
+    expect(await notificationTypes(users.sales!.userId)).toEqual([]);
   });
 });

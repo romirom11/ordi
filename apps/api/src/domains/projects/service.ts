@@ -9,7 +9,7 @@ import {
 } from '@ordi/db';
 import { ulid } from 'ulid';
 import {
-  MAX_SUBTASK_DEPTH, appendPosition, buildBranchName, normalizeIntakeFormConfig, projectAccessRank,
+  MAX_SUBTASK_DEPTH, appendPosition, buildBranchName, normalizeIntakeFormConfig,
   type CustomFieldFilter, type IntakeAnswer, type LabelScope,
 } from '@ordi/shared';
 import type { Actor } from '../../context';
@@ -17,8 +17,7 @@ import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { emit } from '../../core/events';
 import { assertVersion } from '../../core/locking';
-import { assertProject, accessibleProjectIds, buildAccessContext, effectiveProjectRole } from '../../core/access';
-import { loadRolePermissions } from '../../core/rbac';
+import { assertProject, accessibleProjectIds, effectiveProjectRole, userCanOpenProject } from '../../core/access';
 import { closeProjectTimers } from '../time/service';
 import { cancelProjectRuns } from '../agents/runs';
 import { assertCanAssignAgents } from '../agents/profiles';
@@ -664,22 +663,16 @@ export async function listTasks(actor: Actor, params: {
 
 /**
  * A reporter is someone the task can be taken back to: an active user who can
- * open the project, by the same rule every request is held to (role
- * permissions, membership, agents only through membership). The reporter
- * hears the task's news, so someone who cannot see the project must not be one.
+ * open the project (userCanOpenProject). The reporter hears the task's news,
+ * so someone the project is closed to must not be one.
  */
-async function assertReporter(project: { id: string; visibility: string }, userId: string): Promise<void> {
+async function assertReporter(project: { id: string }, userId: string): Promise<void> {
   const { db } = getDb();
-  const [user] = await db.select({ id: schema.users.id, isActive: schema.users.isActive, actorType: schema.users.actorType, roleId: schema.users.roleId })
-    .from(schema.users).where(eq(schema.users.id, userId));
+  const [user] = await db.select({ isActive: schema.users.isActive }).from(schema.users).where(eq(schema.users.id, userId));
   if (!user || !user.isActive) throw err.validation('The reporter must be an active user');
-  const access = await buildAccessContext(user.id, await loadRolePermissions(user.roleId), false);
-  const visibility = project.visibility === 'private' ? 'private' : 'workspace';
-  // An agent works only where it was added, whatever its role grants elsewhere.
-  const opens = user.actorType === 'agent'
-    ? access.projectMemberships.has(project.id)
-    : projectAccessRank(access, { visibility, projectId: project.id }) > 0;
-  if (!opens) throw err.validation('The reporter must be someone who can open this project – add them to it first');
+  if (!(await userCanOpenProject(userId, project.id))) {
+    throw err.validation('The reporter must be someone who can open this project – add them to it first');
+  }
 }
 
 export async function createTask(actor: Actor, input: any) {
@@ -966,6 +959,14 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
   const newId = await db.transaction(async (tx) => {
     // Collect the subtree breadth-first, so a parent is always inserted first.
     const subtree = [source];
+    // A reporter the target project is closed to would keep hearing about the
+    // task there; the moved copy has none instead.
+    const reporterOk = new Map<string, boolean>();
+    const reporterFor = async (reporterId: string | null): Promise<string | null> => {
+      if (!reporterId) return null;
+      if (!reporterOk.has(reporterId)) reporterOk.set(reporterId, await userCanOpenProject(reporterId, targetProjectId));
+      return reporterOk.get(reporterId) ? reporterId : null;
+    };
     let frontier = [source.id];
     while (frontier.length) {
       const children = await tx.select().from(tasks)
@@ -996,7 +997,7 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
         parentId: t.parentId ? newIdOf.get(t.parentId) ?? null : null,
         milestoneId: null, dueDate: t.dueDate, startDate: t.startDate,
         estimate: t.estimate, cycleId: null, position: String(lastPos),
-        customFields: cf, createdBy: t.createdBy, reporterId: t.reporterId,
+        customFields: cf, createdBy: t.createdBy, reporterId: await reporterFor(t.reporterId),
       });
     }
     if (assigneeRows.length) {
@@ -1049,8 +1050,8 @@ export async function duplicateTask(actor: Actor, id: string) {
     description: source.description, statusId: source.statusId, typeId: source.typeId, priority: source.priority,
     parentId: source.parentId, dueDate: source.dueDate, startDate: source.startDate,
     estimate: source.estimate, cycleId: source.cycleId, position, customFields: source.customFields,
-    // A copy answers the same request, so it keeps the reporter.
-    createdBy: actor.userId, reporterId: source.reporterId ?? actor.userId,
+    // A copy answers the same request, so it keeps the reporter – or the lack of one.
+    createdBy: actor.userId, reporterId: source.reporterId,
   });
   const assignees = await assigneeIdsOf(id);
   if (assignees.length) await db.insert(taskAssignees).values(assignees.map((userId) => ({ taskId: newId, userId })));
