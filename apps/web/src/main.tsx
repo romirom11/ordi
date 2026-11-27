@@ -36,12 +36,13 @@ applyStoredTheme();
 // Desktop only: the webview drops target="_blank" instead of asking the OS,
 // so every external link needs routing to the browser (no-op on the web).
 installExternalLinkHandler();
-// File links expire within the hour: an image that outlived its link asks for a fresh one.
-installFileLinkRefresh();
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
 });
+// File links expire within the hour: an image that outlived its link asks for
+// a fresh one, or has the documents on screen read again.
+installFileLinkRefresh(() => { void queryClient.invalidateQueries({ type: 'active' }); });
 
 /** Desktop first launch (PRD §18): ask for the ordi instance URL. */
 function InstanceGate() {

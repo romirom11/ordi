@@ -4,8 +4,10 @@
  * lapsed one – except a page left open past that hour: a lazy image scrolled
  * into view, an editor reopened from a draft. When such an image fails to
  * load, this asks the API for a fresh link to the same path and swaps it in,
- * once per image. The API decides whether the path still opens for this
- * reader; when it does not, the image simply stays broken.
+ * once per image. The API renews a path only for a reader with a right of
+ * their own to the file (its uploader, a reader of the record it hangs off);
+ * an image someone else embedded comes back signed with its document, so for
+ * those the page's data is fetched again instead.
  */
 import { api, appOrigin } from './api';
 
@@ -39,6 +41,17 @@ async function freshPath(path: string): Promise<string | null> {
 
 const RETRIED = 'ordiFileRetried';
 
+let onStale: (() => void) | null = null;
+let lastStale = 0;
+
+/** Refetch the page's data, at most twice a minute however many images fail. */
+function refetchDocuments(): void {
+  const now = Date.now();
+  if (!onStale || now - lastStale < 30_000) return;
+  lastStale = now;
+  onStale();
+}
+
 async function onImageError(event: Event): Promise<void> {
   const img = event.target;
   if (!(img instanceof HTMLImageElement)) return;
@@ -48,12 +61,17 @@ async function onImageError(event: Event): Promise<void> {
   img.dataset[RETRIED] = '1';
   const next = await freshPath(path);
   if (next) img.src = appOrigin() + next;
+  else refetchDocuments();
 }
 
 let installed = false;
 
-/** Listen for failed images app-wide. `error` does not bubble, so capture it. */
-export function installFileLinkRefresh(): void {
+/**
+ * Listen for failed images app-wide (`error` does not bubble, so capture it).
+ * `refetch` reloads the documents on screen, whose reads sign their images afresh.
+ */
+export function installFileLinkRefresh(refetch: () => void): void {
+  onStale = refetch;
   if (installed || typeof document === 'undefined') return;
   installed = true;
   document.addEventListener('error', (e) => { void onImageError(e); }, true);

@@ -166,12 +166,39 @@ describe('an embedded file opens for the readers of its document', () => {
     expect(res.status).toBe(400);
   });
 
-  it('refreshes a recent path and nothing older', async () => {
+  it('refuses a url hiding the path behind an encoding a strict decoder rejects', async () => {
     const { id } = await upload(owner);
-    const fresh = await json(member.post('/attachments/refresh', { srcs: [lapsedPath(id, 3600)] }));
-    expect((await open(fresh.srcs[0])).status).toBe(200);
+    // A broken %-run makes decodeURIComponent throw; Hono decodes the rest anyway.
+    const q = `${encodeURIComponent(lapsedPath(id, FILE_LINK_GRACE_SECONDS + 60))}%E0%A4%A`;
+    expect((await member.get(`/search?q=${q}`)).status).toBe(400);
+  });
+
+  it('renews a path on refresh only for a reader with a right of their own', async () => {
+    const { id } = await upload(owner);
+    const recent = lapsedPath(id, 3600);
+    // The uploader gets a fresh link.
+    const mine = await json(owner.post('/attachments/refresh', { srcs: [recent] }));
+    expect((await open(mine.srcs[0])).status).toBe(200);
+    // Anyone else gets it back as it came: a recent link cannot be renewed
+    // forever without the file living in a document they read.
+    const theirs = await json(member.post('/attachments/refresh', { srcs: [recent] }));
+    expect(theirs.srcs[0]).toBe(recent);
+    expect((await open(theirs.srcs[0])).status).toBe(404);
     const stale = await json(member.post('/attachments/refresh', { srcs: [lapsedPath(id, FILE_LINK_GRACE_SECONDS + 60)] }));
     expect((await open(stale.srcs[0])).status).toBe(404);
+  });
+
+  it('stores dead an old path a visitor sends through a public form', async () => {
+    const { db } = getDb();
+    const { id } = await upload(owner);
+    const stageId = ulid();
+    await db.insert(schema.applicantStages).values({ id: stageId, name: 'Inbox', position: -1 });
+    const token = ulid();
+    await db.insert(schema.jobOpenings).values({ id: ulid(), title: 'Ops', publicToken: token, publicEnabled: true });
+    const coverText = `See ![cv](${legacyPath(id)})`;
+    expect((await anon().post(`/careers/${token}`, { name: 'E', email: 'e@x.test', coverText })).status).toBe(200);
+    const [row] = await db.select({ coverText: schema.applicants.coverText }).from(schema.applicants).where(eq(schema.applicants.email, 'e@x.test'));
+    expect(row!.coverText).toContain(deadFileToken(id));
   });
 });
 

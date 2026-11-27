@@ -14,7 +14,7 @@ import { logger } from '../../lib/logger';
 import { emit } from '../../core/events';
 import { hmacSha256, encrypt, generateToken } from '../../lib/crypto';
 import { fileTokenSecondsLeft } from '../../lib/file-tokens';
-import { signFileLinksOut } from '../../core/file-links';
+import { signFileLinksOut, vetFileLinksIn } from '../../core/file-links';
 import { assertAttachable } from '../../core/file-access';
 import { getObject, isStorageConfigured } from '../../lib/s3';
 import {
@@ -299,7 +299,7 @@ export function publicRoutes() {
   });
 
   // ── Quote accept/decline (PRD §11.2) ──
-  app.post('/q/:token/decision', async (c) => {
+  app.post('/q/:token/decision', vetFileLinksIn, async (c) => {
     const { db } = getDb();
     const token = c.req.param('token');
     const body = publicQuoteDecisionSchema.parse(await c.req.json());
@@ -400,7 +400,7 @@ export function publicRoutes() {
    * A submission: JSON (`{ values, honeypot }`), or multipart with the same
    * JSON in a `payload` part and the files in `files` parts.
    */
-  app.post('/intake/:token', async (c) => {
+  app.post('/intake/:token', vetFileLinksIn, async (c) => {
     const { db } = getDb();
     const [settings] = await db.select().from(schema.intakeSettings)
       .where(eq(schema.intakeSettings.formToken, c.req.param('token')));
@@ -470,7 +470,7 @@ export function publicRoutes() {
     return c.json({ title: job.title, description: job.description });
   });
 
-  app.post('/careers/:token', async (c) => {
+  app.post('/careers/:token', vetFileLinksIn, async (c) => {
     const { db } = getDb();
     const [job] = await db.select().from(schema.jobOpenings)
       .where(and(eq(schema.jobOpenings.publicToken, c.req.param('token')), isNull(schema.jobOpenings.deletedAt)));
