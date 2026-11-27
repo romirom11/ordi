@@ -4,6 +4,7 @@ import { ulid } from 'ulid';
 import { MAX_FILENAME_LENGTH, MAX_UPLOAD_BYTES, attachmentPatchSchema, isBlockedFilename, type Permission } from '@ordi/shared';
 import type { Actor, AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
+import { rejectReadOnlyWrites } from '../../core/rbac';
 import { assertProject } from '../../core/access';
 import { writeActivity } from '../../core/activity';
 import { putObject } from '../../lib/s3';
@@ -87,6 +88,9 @@ async function assertCanChange(
 export function attachmentsRoutes() {
   const app = new Hono<AppEnv>();
   app.use('*', requireAuth);
+  // Access here is decided per record, not by guard(), so a read-only token
+  // has to be refused explicitly or it writes wherever its owner can.
+  app.use('*', rejectReadOnlyWrites());
 
   // Files of one entity (a company's or deal's Files section).
   app.get('/', async (c) => {

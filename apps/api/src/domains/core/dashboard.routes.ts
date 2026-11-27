@@ -4,6 +4,7 @@ import { ulid } from 'ulid';
 import { dashboardInputSchema, dashboardWidgetInputSchema } from '@ordi/shared';
 import type { Actor, AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
+import { rejectReadOnlyWrites } from '../../core/rbac';
 import { scopeActivityToResources, visibleActivityTypes } from '../../core/activity';
 import { accessibleProjectIds } from '../../core/access';
 import { err } from '../../lib/errors';
@@ -11,6 +12,9 @@ import { err } from '../../lib/errors';
 export function dashboardRoutes() {
   const app = new Hono<AppEnv>();
   app.use('*', requireAuth);
+  // Access here is decided per record, not by guard(), so a read-only token
+  // has to be refused explicitly or it writes wherever its owner can.
+  app.use('*', rejectReadOnlyWrites());
 
   // Home dashboard (PRD §14.1): one response, widgets gated by permissions.
   app.get('/dashboard', async (c) => {

@@ -24,7 +24,7 @@ import {
 import type { Actor, AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { rejectReadOnlyWrites } from '../../core/rbac';
-import { assertProject, accessibleSpaceIds, editableSpaceIds } from '../../core/access';
+import { assertProject, accessibleSpaceIds, editableSpaceIds, effectiveProjectRole } from '../../core/access';
 import { writeActivity } from '../../core/activity';
 import { err } from '../../lib/errors';
 import { actorContext, deleteSecret, listSecrets, type SecretView } from '../secrets/service';
@@ -43,7 +43,8 @@ export interface ProjectResourceView {
   position: number;
   createdBy: string | null;
   createdAt: string;
-  file?: { id: string; filename: string; size: number; mime: string };
+  /** canChange: whether this actor may rename or delete it (DELETE /attachments' rule). */
+  file?: { id: string; filename: string; size: number; mime: string; canChange: boolean };
   page?: { id: string; title: string; icon: string | null; spaceId: string; url: string };
   /** Metadata only – values are revealed one field at a time (POST /project-secrets/:id/reveal). */
   secret?: SecretView;
@@ -97,11 +98,20 @@ export async function listResources(actor: Actor, projectId: string): Promise<Pr
   const fileIds = rows.map((r) => r.attachmentId).filter((id): id is string => !!id);
   const files = fileIds.length
     ? await db
-      .select({ id: attachments.id, filename: attachments.filename, size: attachments.size, mime: attachments.mime })
+      .select({ id: attachments.id, filename: attachments.filename, size: attachments.size, mime: attachments.mime, createdBy: attachments.createdBy })
       .from(attachments)
       .where(inArray(attachments.id, fileIds))
     : [];
-  const fileById = new Map(files.map((f) => [f.id, f]));
+  // The uploader changes their own file as a member; anyone else needs admin.
+  let isAdmin = false;
+  if (files.length && !actor.readOnly) {
+    const [project] = await db.select({ id: schema.projects.id, visibility: schema.projects.visibility })
+      .from(schema.projects).where(eq(schema.projects.id, projectId));
+    isAdmin = !!project && effectiveProjectRole(actor, { id: project.id, visibility: project.visibility as 'workspace' | 'private' }) === 'admin';
+  }
+  const fileById = new Map(files.map(({ createdBy, ...f }) => [f.id, {
+    ...f, canChange: !actor.readOnly && (isAdmin || createdBy === actor.userId),
+  }]));
   const pages = await visiblePages(actor, rows.map((r) => r.kbPageId).filter((id): id is string => !!id));
   // A secret the actor may not list is left out entirely, like a hidden page (secretAccess).
   const secretIds = rows.map((r) => r.secretId).filter((id): id is string => !!id);

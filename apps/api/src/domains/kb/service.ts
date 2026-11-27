@@ -584,7 +584,9 @@ export async function getPage(actor: Actor, id: string, includeBacklinks: boolea
 
   const out: Record<string, unknown> = { ...pg, mentions, links, canEdit: isEditor };
 
-  if (pg.fileId) {
+  // Only a pdf page shows its file; a fileId left on any other page (stored
+  // before createPage dropped it) is not served.
+  if (pg.type === 'pdf' && pg.fileId) {
     const [att] = await db
       .select()
       .from(schema.attachments)
@@ -984,7 +986,7 @@ export async function duplicatePage(actor: Actor, id: string, input: any): Promi
     parentId,
     title,
     type: source.type,
-    fileId: source.fileId,
+    fileId: source.type === 'pdf' ? source.fileId : null,
     body: source.body,
     icon: source.icon,
     position: String(position),

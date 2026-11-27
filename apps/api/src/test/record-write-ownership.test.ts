@@ -7,7 +7,9 @@
  * user is refused, the owner (and the admin the rule names) still gets through.
  */
 import { describe, it, expect, beforeAll, vi } from 'vitest';
-import { resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
+import { getDb, schema, eq } from '@ordi/db';
+import { ulid } from 'ulid';
+import { app, resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
 
 vi.mock('../lib/s3', () => import('./s3-mock'));
 
@@ -105,6 +107,37 @@ describe('a file among a project’s resources', () => {
   });
 });
 
+describe('a file from the public intake form', () => {
+  it('has no uploader, so only a project admin renames or deletes it', async () => {
+    const { db } = getDb();
+    const itemId = ulid();
+    const attachmentId = ulid();
+    await db.insert(schema.attachments).values({
+      id: attachmentId, entityType: 'intake_item', entityId: itemId,
+      fileKey: `uploads/${attachmentId}/brief.pdf`, filename: 'brief.pdf', size: 10, mime: 'application/pdf',
+    });
+    await db.insert(schema.intakeItems).values({
+      id: itemId, projectId, source: 'email', status: 'pending', title: 'Brief', description: '',
+      attachments: [{ attachmentId, filename: 'brief.pdf', size: 10, mime: 'application/pdf' }],
+    });
+    expect((await as('member').patch(`/attachments/${attachmentId}`, { filename: 'x.pdf' })).status).toBe(403);
+    expect((await as('member').del(`/attachments/${attachmentId}`)).status).toBe(403);
+    expect((await as('owner').patch(`/attachments/${attachmentId}`, { filename: 'Brief.pdf' })).status).toBe(200);
+    expect((await as('owner').del(`/attachments/${attachmentId}`)).status).toBe(200);
+  });
+});
+
+describe('the resources list', () => {
+  it('tells each user which files they may change', async () => {
+    const id = await uploadId('member', { entityType: 'project', entityId: projectId });
+    const flag = async (key: string) =>
+      ((await json(as(key).get(`/projects/${projectId}/resources`))).data as any[]).find((r) => r.file?.id === id).file.canChange;
+    expect(await flag('member')).toBe(true);
+    expect(await flag('sales')).toBe(false);
+    expect(await flag('owner')).toBe(true);
+  });
+});
+
 describe('re-binding a loose file', () => {
   let employeeId: string;
   let spaceId: string;
@@ -159,6 +192,23 @@ describe('re-binding a loose file', () => {
   });
 });
 
+describe('a file id left on a page that is not a PDF page', () => {
+  it('is neither served nor carried into a duplicate', async () => {
+    const spaceId = (await json(as('owner').post('/spaces', { name: 'Legacy', visibility: 'workspace' }))).id;
+    const pageId = (await json(as('owner').post('/pages', { spaceId, title: 'Old article' }))).id;
+    // What createPage used to store when a client sent a fileId with an article.
+    const contract = await uploadId('admin');
+    const { db } = getDb();
+    await db.update(schema.kbPages).set({ fileId: contract }).where(eq(schema.kbPages.id, pageId));
+
+    expect((await json(as('member').get(`/pages/${pageId}`))).file).toBeUndefined();
+    const copy = await as('owner').post(`/pages/${pageId}/duplicate`, {});
+    expect(copy.status).toBe(201);
+    const [row] = await db.select().from(schema.kbPages).where(eq(schema.kbPages.id, (await json(copy)).id));
+    expect(row!.fileId).toBeNull();
+  });
+});
+
 describe('dashboard widgets', () => {
   const widget = { widgetType: 'bar', source: 'tasks', config: { filters: {}, groupBy: 'status', metric: 'count' } };
 
@@ -193,6 +243,7 @@ describe('dashboard widgets', () => {
     const w = (await json(as('owner').post(`/dashboards/${theirs}/widgets`, widget))).id;
     const mine = (await json(as('member').post('/dashboards', { name: 'Mine', visibility: 'private' }))).id;
     expect((await as('member').del(`/dashboards/${mine}/widgets/${w}`)).status).toBe(404);
+    expect((await as('member').get(`/dashboards/${mine}/widgets/${w}/data`)).status).toBe(404);
     expect((await json(as('owner').get(`/dashboards/${theirs}`))).widgets).toHaveLength(1);
   });
 });
@@ -226,5 +277,44 @@ describe('shared saved views', () => {
     expect((await listed('member', id)).canDelete).toBe(true);
     expect((await as('admin').del(`/saved-views/${id}`)).status).toBe(403);
     expect((await as('member').del(`/saved-views/${id}`)).status).toBe(200);
+  });
+});
+
+/**
+ * These routers decide access per record rather than through guard(), which
+ * is where a read-only token is normally refused – so they refuse it themselves.
+ */
+describe('a read-only token', () => {
+  let headers: Record<string, string>;
+  const call = (method: string, path: string, body?: unknown) =>
+    app.request(`/api/v1${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+
+  beforeAll(async () => {
+    const minted = await json(as('member').post('/auth/tokens', {
+      name: 'ro', scopes: ['projects.read', 'projects.create', 'kb.read'], readOnly: true,
+    }));
+    headers = { authorization: `Bearer ${minted.token}`, 'content-type': 'application/json' };
+  });
+
+  it('cannot rename or delete even its owner’s own file', async () => {
+    const id = await uploadId('member');
+    expect((await call('PATCH', `/attachments/${id}`, { filename: 'ro.pdf' })).status).toBe(403);
+    expect((await call('DELETE', `/attachments/${id}`)).status).toBe(403);
+    expect((await call('GET', `/attachments/${id}/url`)).status).toBe(200);
+  });
+
+  it('cannot change its owner’s dashboard', async () => {
+    const dash = (await json(as('member').post('/dashboards', { name: 'Mine', visibility: 'private' }))).id;
+    const widget = { widgetType: 'bar', source: 'tasks', config: { filters: {}, groupBy: 'status', metric: 'count' } };
+    const w = (await json(as('member').post(`/dashboards/${dash}/widgets`, widget))).id;
+    expect((await call('POST', `/dashboards/${dash}/widgets`, widget)).status).toBe(403);
+    expect((await call('DELETE', `/dashboards/${dash}/widgets/${w}`)).status).toBe(403);
+    expect((await call('GET', `/dashboards/${dash}`)).status).toBe(200);
+  });
+
+  it('cannot delete its owner’s saved view', async () => {
+    const id = (await json(as('member').post('/saved-views', { entityType: 'tasks', name: 'Mine', filters: {} }))).id;
+    expect((await call('DELETE', `/saved-views/${id}`)).status).toBe(403);
+    expect((await call('GET', '/saved-views?entityType=tasks')).status).toBe(200);
   });
 });

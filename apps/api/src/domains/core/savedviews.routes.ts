@@ -4,6 +4,7 @@ import { ulid } from 'ulid';
 import { savedViewInputSchema } from '@ordi/shared';
 import type { Actor, AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
+import { rejectReadOnlyWrites } from '../../core/rbac';
 import { err } from '../../lib/errors';
 
 /**
@@ -21,6 +22,9 @@ function canDeleteView(actor: Actor, view: { userId: string | null; createdBy: s
 export function savedViewsRoutes() {
   const app = new Hono<AppEnv>();
   app.use('*', requireAuth);
+  // Access here is decided per record, not by guard(), so a read-only token
+  // has to be refused explicitly or it writes wherever its owner can.
+  app.use('*', rejectReadOnlyWrites());
 
   app.get('/', async (c) => {
     const actor = currentActor(c);
