@@ -5,6 +5,7 @@ import type { AppEnv } from './context';
 import { env } from './env';
 import { handleError } from './lib/errors';
 import { authMiddleware } from './core/auth';
+import { fileLinks } from './core/file-links';
 import { scrubAgentWrites } from './core/agent-write-scrub';
 import { moduleGate } from './core/modules';
 import { SERVER_VERSION } from './version';
@@ -135,6 +136,8 @@ export function createApp() {
   api.use('*', authMiddleware);
   // An agent run's writes are cleaned of its secrets before any route reads them.
   api.use('*', scrubAgentWrites);
+  // File paths: vetted on the way in, signed afresh for the reader on the way out.
+  api.use('*', fileLinks);
   api.use('*', moduleGate); // a module switched off answers 404, not just hidden nav
   api.route('/auth', authRoutes());
   api.route('/setup', setupRoutes()); // first-run setup (public; locked once an owner exists)

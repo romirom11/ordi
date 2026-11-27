@@ -216,3 +216,17 @@ describe('stored drafts', () => {
     expect(writeStoredDraft(full, key, edit(s, { body: doc('more') }))).toBe(false);
   });
 });
+
+describe('file links in compared values', () => {
+  const doc = (token: string) => ({ type: 'doc', content: [{ type: 'image', attrs: { src: `/api/v1/files/01ABC/${token}` } }] });
+
+  it('treats the same file under a freshly signed link as unchanged', () => {
+    expect(sameValue(doc(`1800000000.${'a'.repeat(32)}`), doc(`1800003600.${'b'.repeat(32)}`))).toBe(true);
+    expect(sameValue(doc('c'.repeat(32)), doc(`1800003600.${'b'.repeat(32)}`))).toBe(true);
+  });
+
+  it('still tells another file apart', () => {
+    const other = { type: 'doc', content: [{ type: 'image', attrs: { src: `/api/v1/files/01XYZ/1800000000.${'a'.repeat(32)}` } }] };
+    expect(sameValue(doc(`1800000000.${'a'.repeat(32)}`), other)).toBe(false);
+  });
+});

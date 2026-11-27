@@ -1,58 +1,20 @@
 import { Hono } from 'hono';
 import { getDb, schema, eq, and, desc } from '@ordi/db';
 import { ulid } from 'ulid';
-import { MAX_FILENAME_LENGTH, MAX_UPLOAD_BYTES, attachmentPatchSchema, isBlockedFilename, type Permission } from '@ordi/shared';
+import { MAX_FILENAME_LENGTH, MAX_UPLOAD_BYTES, attachmentPatchSchema, isBlockedFilename } from '@ordi/shared';
+import { z } from 'zod';
 import type { Actor, AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { rejectReadOnlyWrites } from '../../core/rbac';
-import { assertProject } from '../../core/access';
+import {
+  READ_PERM, WRITE_PERM, PROJECT_SCOPED, requireEntityPerm, assertEntityAccess, canReadAttachment,
+} from '../../core/file-access';
 import { writeActivity } from '../../core/activity';
 import { putObject } from '../../lib/s3';
 import { fileSrc } from '../../lib/file-tokens';
+import { vetFilePaths } from '../../core/file-links';
 import { err } from '../../lib/errors';
 import { appendFileResource } from '../projects/resources.routes';
-
-/** Which permission covers files hanging off each entity type. */
-const READ_PERM: Record<string, Permission> = { company: 'crm.read', lead: 'crm.read', deal: 'deals.read', task: 'projects.read', project: 'projects.read', employee: 'people.read_documents', intake_item: 'projects.read' };
-const WRITE_PERM: Record<string, Permission> = { company: 'crm.write', lead: 'crm.write', deal: 'deals.write', task: 'projects.read', project: 'projects.read', employee: 'people.write', intake_item: 'projects.read' };
-
-function requireEntityPerm(perms: ReadonlySet<string>, map: Record<string, Permission>, entityType: string): void {
-  const needed = map[entityType];
-  if (!needed) throw err.validation('Unknown entity type');
-  if (!perms.has(needed)) throw err.forbidden(`Requires ${needed}`, needed);
-}
-
-/**
- * A workspace-wide `projects.read` is not access to a *private* project, and
- * files are exactly what a private project keeps private. Anything hanging off
- * a project or one of its tasks is therefore membership-gated too, the same way
- * the project's own reads are (core/access).
- */
-async function assertEntityAccess(
-  actor: Actor, entityType: string, entityId: string | null | undefined, minRole: 'viewer' | 'member' | 'admin',
-): Promise<void> {
-  if (!entityId) return;
-  if (entityType === 'project') {
-    await assertProject(actor, entityId, minRole);
-    return;
-  }
-  if (entityType === 'task') {
-    const { db } = getDb();
-    const [task] = await db.select({ projectId: schema.tasks.projectId }).from(schema.tasks).where(eq(schema.tasks.id, entityId));
-    if (!task) throw err.notFound('Task not found');
-    await assertProject(actor, task.projectId, minRole);
-  }
-  if (entityType === 'intake_item') {
-    const { db } = getDb();
-    const [item] = await db.select({ projectId: schema.intakeItems.projectId }).from(schema.intakeItems).where(eq(schema.intakeItems.id, entityId));
-    if (!item) throw err.notFound('Intake item not found');
-    // The triage queue itself demands project membership; its files do too.
-    await assertProject(actor, item.projectId, minRole === 'admin' ? 'admin' : 'member');
-  }
-}
-
-/** Entity types whose files answer to a project's membership (assertEntityAccess). */
-const PROJECT_SCOPED = new Set(['project', 'task', 'intake_item']);
 
 /**
  * Who may rename or delete a file that already exists.
@@ -125,6 +87,9 @@ export function attachmentsRoutes() {
     if (file.name.length > MAX_FILENAME_LENGTH) throw err.validation(`Filename is longer than ${MAX_FILENAME_LENGTH} characters`);
     if (file.size < 1 || file.size > MAX_UPLOAD_BYTES) throw err.validation('File exceeds the size cap');
     if (isBlockedFilename(file.name)) throw err.domain('File type not allowed');
+    // The name is shown back in every list: a file path in it is vetted like
+    // one in a document (multipart bodies are not, core/file-links).
+    const filename = await vetFilePaths(file.name, actor);
     const entityType = typeof form['entityType'] === 'string' && form['entityType'] ? form['entityType'] : null;
     const entityId = typeof form['entityId'] === 'string' && form['entityId'] ? form['entityId'] : null;
     // A type with no id would hang the file off nothing: only the permission
@@ -144,20 +109,22 @@ export function attachmentsRoutes() {
     const id = ulid();
     await db.insert(schema.attachments).values({
       id, entityType, entityId,
-      fileKey: key, filename: file.name, size: file.size, mime,
+      fileKey: key, filename, size: file.size, mime,
       createdBy: actor.userId,
     });
     if (entityType) {
       await writeActivity(db, {
         entityType: 'attachment', entityId: id, action: 'created',
-        diff: { file: { to: file.name }, on: { to: `${entityType}:${entityId}` } },
+        diff: { file: { to: filename }, on: { to: `${entityType}:${entityId}` } },
         actorId: actor.userId, actorType: actor.actorType,
       });
       // A project's files are listed among its resources.
-      if (entityType === 'project' && entityId) await appendFileResource(db, entityId, id, file.name, actor);
+      if (entityType === 'project' && entityId) await appendFileResource(db, entityId, id, filename, actor);
     }
-    // `src` is what an editor stores in the document: a signed, non-expiring
-    // path that an <img> can fetch with no session at all (lib/file-tokens).
+    // `src` is what an editor stores in the document: a signed path that an
+    // <img> can fetch with no session at all. It expires within the hour;
+    // the document's readers get it signed afresh with every read of the
+    // document (lib/file-tokens, core/file-links).
     return c.json({ id, src: fileSrc(id) }, 201);
   });
 
@@ -207,18 +174,35 @@ export function attachmentsRoutes() {
     const { db } = getDb();
     const [att] = await db.select().from(schema.attachments).where(eq(schema.attachments.id, c.req.param('id')));
     if (!att) throw err.notFound();
-    // A file with no entity is embedded in a document and is reached through
-    // its own signed src; one hanging off a record answers to that record.
+    // A file hanging off a record answers to that record. A loose one opens
+    // here for its uploader and for readers of a record that names it; a
+    // document's readers get its embedded files signed with the document
+    // itself (core/file-links). Knowing the id used to be enough.
     if (att.entityType) {
       requireEntityPerm(actor.access.permissions, READ_PERM, att.entityType);
       await assertEntityAccess(actor, att.entityType, att.entityId, 'viewer');
+    } else if (!(await canReadAttachment(actor, att))) {
+      throw err.notFound();
     }
-    // Both are the signed API path now: the file streams back through /files,
-    // so storage stays private.
+    // Both are the signed API path: the file streams back through /files,
+    // so storage stays private. The link expires within the hour.
     return c.json({
       url: fileSrc(att.id), src: fileSrc(att.id),
       filename: att.filename, mime: att.mime,
     });
+  });
+
+  /**
+   * Fresh links for paths a client already holds – an image that failed to
+   * load because the page around it has been open longer than its link
+   * lives. The answer is the request itself: every path that comes in is
+   * checked (core/file-links: the caller was handed it within the last day,
+   * or may open the file on their own) and every path that goes out is
+   * signed afresh, so echoing them is the whole of the work.
+   */
+  app.post('/refresh', async (c) => {
+    const { srcs } = z.object({ srcs: z.array(z.string().max(2048)).max(50) }).parse(await c.req.json());
+    return c.json({ srcs });
   });
 
   return app;
