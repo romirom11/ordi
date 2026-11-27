@@ -106,16 +106,19 @@ function signedInPerson(actor: Actor): boolean {
 
 /**
  * The live OAuth tokens a new consent replaces: the target user's tokens
- * issued through the consent page to a client of the same name. Clients
- * register again on reconnect and get a new client id, so the name is what
- * makes "the same client". Hand-made tokens record no client and are never
- * among them.
+ * issued through the consent page to the same client. Clients register again
+ * on reconnect and get a new client id, so "the same client" is one of the
+ * same name that also lists the redirect this code went to (a loopback port
+ * may differ). The name alone is anyone's to claim: a look-alike registration
+ * sending codes elsewhere must not cut off the real client. Hand-made tokens
+ * record no client and are never among them.
  */
-async function replacedOAuthTokens(tx: any, userId: string, clientName: string): Promise<string[]> {
-  const rows: { id: string }[] = await tx.select({ id: schema.apiTokens.id }).from(schema.apiTokens)
+async function replacedOAuthTokens(tx: any, userId: string, clientName: string, redirectUri: string): Promise<string[]> {
+  const rows: { id: string; redirectUris: unknown }[] = await tx.select({ id: schema.apiTokens.id, redirectUris: schema.oauthClients.redirectUris })
+    .from(schema.apiTokens)
     .innerJoin(schema.oauthClients, eq(schema.oauthClients.id, schema.apiTokens.oauthClientId))
     .where(and(eq(schema.apiTokens.userId, userId), isNull(schema.apiTokens.revokedAt), eq(schema.oauthClients.name, clientName)));
-  return rows.map((r) => r.id);
+  return rows.filter((r) => redirectAllowed((r.redirectUris as string[]) ?? [], redirectUri)).map((r) => r.id);
 }
 
 export function oauthRoutes() {
@@ -308,7 +311,7 @@ export function oauthRoutes() {
           return 'The agent is not the approver\'s own';
         }
         if (!agent.isActive) return 'The agent is switched off';
-        replaced = await replacedOAuthTokens(tx, agentUserId, clientName);
+        replaced = await replacedOAuthTokens(tx, agentUserId, clientName, row.redirectUri);
         if (replaced.length) await tx.update(schema.apiTokens).set({ revokedAt: new Date() }).where(inArray(schema.apiTokens.id, replaced));
         await tx.insert(schema.apiTokens).values({
           // Named after the client alone, like a token from the My agent
@@ -341,7 +344,7 @@ export function oauthRoutes() {
     const name = `${clientName} (OAuth)`;
     let replaced: string[] = [];
     await db.transaction(async (tx) => {
-      replaced = await replacedOAuthTokens(tx, user.id, clientName);
+      replaced = await replacedOAuthTokens(tx, user.id, clientName, row.redirectUri);
       if (replaced.length) await tx.update(schema.apiTokens).set({ revokedAt: new Date() }).where(inArray(schema.apiTokens.id, replaced));
       await tx.insert(schema.apiTokens).values({
         id: tokenId, userId: user.id, name,

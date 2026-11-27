@@ -37,39 +37,39 @@ function pkce() {
   return { verifier, challenge: createHash('sha256').update(verifier).digest('base64url') };
 }
 
-async function registerClient(name: string): Promise<string> {
+async function registerClient(name: string, redirect = REDIRECT): Promise<string> {
   const res = await app.request('/api/v1/oauth/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ redirect_uris: [REDIRECT], client_name: name }),
+    body: JSON.stringify({ redirect_uris: [redirect], client_name: name }),
   });
   expect(res.status).toBe(201);
   return ((await res.json()) as { client_id: string }).client_id;
 }
 
-async function approve(cookie: string, clientId: string, actAs?: 'me' | 'agent') {
+async function approve(cookie: string, clientId: string, actAs?: 'me' | 'agent', redirect = REDIRECT) {
   const { verifier, challenge } = pkce();
   const res = await reqAs(cookie).post('/oauth/approve', {
-    clientId, redirectUri: REDIRECT, codeChallenge: challenge, codeChallengeMethod: 'S256',
+    clientId, redirectUri: redirect, codeChallenge: challenge, codeChallengeMethod: 'S256',
     ...(actAs ? { actAs } : {}),
   });
   return { res, verifier };
 }
 
-async function exchange(clientId: string, code: string, verifier: string) {
+async function exchange(clientId: string, code: string, verifier: string, redirect = REDIRECT) {
   return app.request('/api/v1/oauth/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'authorization_code', code, code_verifier: verifier, redirect_uri: REDIRECT, client_id: clientId }),
+    body: new URLSearchParams({ grant_type: 'authorization_code', code, code_verifier: verifier, redirect_uri: redirect, client_id: clientId }),
   });
 }
 
 /** The whole dance for one signed-in person; returns the access token. */
-async function connect(cookie: string, clientId: string, actAs?: 'me' | 'agent'): Promise<string> {
-  const { res, verifier } = await approve(cookie, clientId, actAs);
+async function connect(cookie: string, clientId: string, actAs?: 'me' | 'agent', redirect = REDIRECT): Promise<string> {
+  const { res, verifier } = await approve(cookie, clientId, actAs, redirect);
   expect(res.status).toBe(200);
   const code = new URL(((await res.json()) as { redirectTo: string }).redirectTo).searchParams.get('code')!;
-  const tokenRes = await exchange(clientId, code, verifier);
+  const tokenRes = await exchange(clientId, code, verifier, redirect);
   expect(tokenRes.status).toBe(200);
   return ((await tokenRes.json()) as { access_token: string }).access_token;
 }
@@ -236,6 +236,21 @@ describe('connecting the same client again', () => {
 
     const live = await db.select().from(schema.apiTokens).where(eq(schema.apiTokens.userId, agentId));
     expect(live.filter((t) => !t.revokedAt && t.name === 'Codex CLI').length).toBe(2); // the OAuth one and the hand-made one
+  });
+
+  it('a look-alike client under the same name does not cut off the real one', async () => {
+    const real = await connect(users.owner!.cookie, await registerClient('Claude Desktop'), 'agent');
+    // Someone registers a client called the same, sending codes to their own host.
+    const evilRedirect = 'https://evil.example.com/cb';
+    const lookAlike = await connect(users.owner!.cookie, await registerClient('Claude Desktop', evilRedirect), 'agent', evilRedirect);
+    expect(await tokenWorks(lookAlike)).toBe(true);
+    expect(await tokenWorks(real)).toBe(true);
+    // The real client reconnecting on another loopback port is still the same client.
+    const otherPort = 'http://127.0.0.1:47001/callback';
+    const again = await connect(users.owner!.cookie, await registerClient('Claude Desktop', otherPort), 'agent', otherPort);
+    expect(await tokenWorks(again)).toBe(true);
+    expect(await tokenWorks(real)).toBe(false);
+    expect(await tokenWorks(lookAlike)).toBe(true);
   });
 
   it('a person\'s pile of OAuth tokens from before the upgrade is cleared by the next consent', async () => {
