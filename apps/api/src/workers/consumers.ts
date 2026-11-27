@@ -457,15 +457,21 @@ async function sseAudience(ev: DomainEvent): Promise<Omit<SSEMessage, 'event' | 
   // project.completed carry no projectId, and a private project's key went
   // workspace-wide.
   if (ev.aggregateType === 'project') return { projectScope: [ev.aggregateId] };
+  // Someone else's time (who, how long, billable) is for time.read_all, as the
+  // entry routes have it: seeing the project does not show it.
+  if (t.startsWith('time.')) {
+    return { projectScope: p.projectId ? [p.projectId] : undefined, permissionScope: ['time.read_all'], involvedUsers: p.userId ? [p.userId] : [] };
+  }
   if (p.projectId) return { projectScope: [p.projectId] };
   if (t.startsWith('page.')) {
     const pageId = p.pageId ?? ev.aggregateId;
     const { db } = getDb();
     const [page] = await db.select({
       spaceId: schema.kbPages.spaceId, published: schema.kbPages.published,
-      visibility: schema.kbPages.visibility, createdBy: schema.kbPages.createdBy,
+      visibility: schema.kbPages.visibility, createdBy: schema.kbPages.createdBy, deletedAt: schema.kbPages.deletedAt,
     }).from(schema.kbPages).where(eq(schema.kbPages.id, pageId));
-    if (!page) return null;
+    // Deleted before the outbox got to it: as gone as the KB routes have it.
+    if (!page || page.deletedAt) return null;
     return { spaceScope: [page.spaceId], page: { published: page.published, visibility: page.visibility, createdBy: page.createdBy } };
   }
   // KB events carry a spaceId – a private space's page titles must not stream workspace-wide.

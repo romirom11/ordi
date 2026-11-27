@@ -155,7 +155,9 @@ export function streamRoutes() {
           // space the user has since been added to gets one more chance.
           denied = new Set();
           deniedSpaces = new Set();
-          await stream.writeSSE({ event: 'ping', data: '{}' }).catch(() => { closed = true; });
+          // Not awaited: a reader that stops reading must not hold up the next
+          // refresh, or events would go on being judged by the access it had.
+          stream.writeSSE({ event: 'ping', data: '{}' }).catch(() => { closed = true; });
         }
       } finally {
         unsub();

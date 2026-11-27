@@ -179,6 +179,29 @@ describe('news without a project or a space', () => {
     } finally { await reader.close(); await member.close(); }
   });
 
+  it('someone else\'s time on a project reaches time.read_all and the person who logged it, not every member', async () => {
+    const projectId = await privateProject('TIM');
+    const logger = await customRole('Logger', ['projects.read', 'time.track']);
+    const colleague = await customRole('Colleague', ['projects.read']);
+    for (const u of [logger, colleague]) {
+      expect((await admin.post(`/projects/${projectId}/members`, { userId: u.userId, role: 'member' })).status).toBeLessThan(300);
+    }
+    const mine = await openStream({ cookie: logger.cookie });
+    const theirs = await openStream({ cookie: colleague.cookie });
+    const all = await openStream({ cookie: users.admin!.cookie });
+    try {
+      await emit({ type: 'time.entry_created', aggregateType: 'time_entry', aggregateId: ulid(), payload: { taskId: ulid(), projectId, userId: logger.userId, durationSeconds: 3600, billable: true } });
+      await emit({ type: 'task.updated', aggregateType: 'task', aggregateId: ulid(), payload: { projectId } });
+      await drainOutbox();
+      await vi.waitFor(() => expect(mine.events()).toContain('time.entry_created'), WAIT);
+      await vi.waitFor(() => expect(all.events()).toContain('time.entry_created'), WAIT);
+      // The colleague still hears the project's task work.
+      await vi.waitFor(() => expect(theirs.events()).toContain('task.updated'), WAIT);
+      await pingsPass(theirs);
+      expect(theirs.events()).not.toContain('time.entry_created');
+    } finally { await mine.close(); await theirs.close(); await all.close(); }
+  });
+
   it('a message nobody scoped goes nowhere', async () => {
     const stream = await openStream({ cookie: users.owner!.cookie });
     try {
@@ -218,5 +241,23 @@ describe('knowledge-base pages', () => {
       expect(pagesOf(readerStream)).not.toContain(draft);
       expect(pagesOf(readerStream)).not.toContain(hidden);
     } finally { await readerStream.close(); await editorStream.close(); await authorStream.close(); }
+  });
+
+  it('an event for a page deleted before it was sent goes nowhere', async () => {
+    const owner = reqAs(users.owner!.cookie);
+    const spaceId = (await json(owner.post('/spaces', { name: 'Archive', visibility: 'workspace' }))).id;
+    const doomed = (await json(owner.post('/pages', { spaceId, title: 'Soon gone' }))).id;
+    const kept = (await json(owner.post('/pages', { spaceId, title: 'Staying' }))).id;
+    await drainOutbox();
+    const stream = await openStream({ cookie: users.owner!.cookie });
+    try {
+      for (const id of [doomed, kept]) expect((await owner.patch(`/pages/${id}`, { title: `Renamed ${id}` })).status).toBe(200);
+      await getDb().db.update(schema.kbPages).set({ deletedAt: new Date() }).where(eq(schema.kbPages.id, doomed));
+      await drainOutbox();
+      const pagesOf = () => stream.frames.filter((f) => f.event.startsWith('page.')).map((f) => f.data.pageId);
+      await vi.waitFor(() => expect(pagesOf()).toContain(kept), WAIT);
+      await pingsPass(stream);
+      expect(pagesOf()).not.toContain(doomed);
+    } finally { await stream.close(); }
   });
 });
