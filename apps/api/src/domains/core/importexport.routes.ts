@@ -680,7 +680,7 @@ export function importExportRoutes() {
         const id = ulid();
         // number: 0 – the per-project number is assigned by a DB trigger.
         const [row] = await tx.insert(schema.tasks)
-          .values({ id, ...v, number: 0, position: String(position), createdBy: actor.userId } as typeof schema.tasks.$inferInsert)
+          .values({ id, ...v, number: 0, position: String(position), createdBy: actor.userId, reporterId: actor.userId } as typeof schema.tasks.$inferInsert)
           .returning({ number: schema.tasks.number });
         const ref = `${key}-${row?.number}`;
         created.push({ id, ref, projectId: v.projectId });

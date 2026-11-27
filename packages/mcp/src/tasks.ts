@@ -204,6 +204,7 @@ function compact(task: Row, vocab: Vocab | null, labelIds?: string[]) {
     parentId: task.parentId ?? null,
     cycleId: task.cycleId ?? null,
     milestoneId: task.milestoneId ?? null,
+    reporterId: task.reporterId ?? null,
     priority: task.priority,
     dueDate: task.dueDate ?? null,
     startDate: task.startDate ?? null,
@@ -329,6 +330,7 @@ interface WriteArgs {
   startDate?: string | null;
   labels?: string[];
   assigneeIds?: string[];
+  reporterId?: string | null;
   customFields?: Record<string, unknown>;
   parentId?: string | null;
   cycle?: string | null;
@@ -348,6 +350,7 @@ async function writeBody(args: WriteArgs, vocab: () => Promise<Vocab>, target: W
   if (args.startDate !== undefined) body.startDate = args.startDate;
   if (args.customFields !== undefined) body.customFields = args.customFields;
   if (args.assigneeIds !== undefined) body.assigneeIds = args.assigneeIds;
+  if (args.reporterId !== undefined) body.reporterId = args.reporterId;
   if (args.status !== undefined) body.statusId = resolveStatus(await vocab(), args.status);
   if (args.type !== undefined) body.typeId = resolveType(await vocab(), args.type);
   if (args.labels !== undefined) body.labelIds = resolveLabels(await vocab(), args.labels);
@@ -376,6 +379,7 @@ const writeSchema = {
   startDate: z.string().nullable().optional().describe('YYYY-MM-DD'),
   labels: z.array(z.string()).optional().describe('Label ids or names; replaces the label set'),
   assigneeIds: z.array(z.string()).optional().describe('User ids (see list_users)'),
+  reporterId: z.string().nullable().optional().describe('User id of who set the task – the person to ask what it is for (see list_users). Defaults to you on create; set it when you file a task on someone\'s behalf. null clears it'),
   customFields: z.record(z.string(), z.unknown()).optional().describe('Keyed by custom field key, e.g. { platform: "linkedin", rubric: "case-study" } (see list_custom_fields); merged by key on update, null clears one'),
   parentId: z.string().nullable().optional().describe('Id of the parent task (see list_tasks / get_task) – makes this a subtask; the parent must be in the same project. null makes it a top-level task again'),
   cycle: z.string().nullable().optional().describe('Cycle id or name (see get_project_schema) to put the task in; null takes it out of its cycle. Only for projects with cyclesEnabled.'),

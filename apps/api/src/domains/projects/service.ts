@@ -661,12 +661,31 @@ export async function listTasks(actor: Actor, params: {
   return { data, nextCursor: paged.nextCursor };
 }
 
+/**
+ * A reporter is someone the task can be taken back to: an active user who can
+ * open the project. A private project, or an agent (which reaches only its own
+ * projects), needs a membership row.
+ */
+async function assertReporter(project: { id: string; visibility: string }, userId: string): Promise<void> {
+  const { db } = getDb();
+  const [user] = await db.select({ id: schema.users.id, isActive: schema.users.isActive, actorType: schema.users.actorType })
+    .from(schema.users).where(eq(schema.users.id, userId));
+  if (!user || !user.isActive) throw err.validation('The reporter must be an active user');
+  if (project.visibility === 'private' || user.actorType === 'agent') {
+    const [member] = await db.select({ userId: projectMembers.userId }).from(projectMembers)
+      .where(and(eq(projectMembers.projectId, project.id), eq(projectMembers.userId, userId)));
+    if (!member) throw err.validation('The reporter must be a member of this project');
+  }
+}
+
 export async function createTask(actor: Actor, input: any) {
   const project = await assertProject(actor, input.projectId, 'member');
   if (input.parentId) await assertParent(input.parentId, input.projectId);
   if (input.cycleId) await assertCycleInProject(input.cycleId, input.projectId);
   const assigneeIds: string[] = input.assigneeIds ?? [];
   if (assigneeIds.length) await assertCanAssignAgents(actor, project.id, assigneeIds, effectiveProjectRole(actor, project));
+  const reporterId: string | null = input.reporterId === undefined ? actor.userId : input.reporterId;
+  if (reporterId && reporterId !== actor.userId) await assertReporter(project, reporterId);
   const labelIds: string[] = input.labelIds ?? [];
   // Before the row exists: a rejected label must not leave a half-created task.
   await assertLabelScope(labelIds, 'task');
@@ -683,7 +702,7 @@ export async function createTask(actor: Actor, input: any) {
     dueDate: input.dueDate ?? null, startDate: input.startDate ?? null,
     estimate: input.estimate != null ? String(input.estimate) : null,
     cycleId: input.cycleId ?? null, position, customFields: input.customFields ?? {},
-    createdBy: actor.userId,
+    createdBy: actor.userId, reporterId,
   });
   if (assigneeIds.length) await db.insert(taskAssignees).values(assigneeIds.map((userId) => ({ taskId: id, userId })));
   if (labelIds.length) await db.insert(taskLabels).values(labelIds.map((labelId) => ({ taskId: id, labelId })));
@@ -753,9 +772,10 @@ export async function updateTask(actor: Actor, id: string, input: any) {
   assertVersion(before, input.version, before);
 
   const patch: Record<string, unknown> = {};
-  for (const k of ['title', 'description', 'statusId', 'typeId', 'priority', 'parentId', 'milestoneId', 'dueDate', 'startDate', 'cycleId']) {
+  for (const k of ['title', 'description', 'statusId', 'typeId', 'priority', 'parentId', 'milestoneId', 'dueDate', 'startDate', 'cycleId', 'reporterId']) {
     if (input[k] !== undefined) patch[k] = input[k];
   }
+  if (input.reporterId) await assertReporter(project, input.reporterId);
   if (input.milestoneId) await assertMilestoneInProject(input.milestoneId, before.projectId);
   if (input.customFields !== undefined) patch.customFields = mergeCustomFields(before.customFields, input.customFields);
   if (input.estimate !== undefined) patch.estimate = input.estimate != null ? String(input.estimate) : null;
@@ -787,7 +807,7 @@ export async function updateTask(actor: Actor, id: string, input: any) {
 
   const ref = await taskRef(before);
   if (input.statusId !== undefined && input.statusId !== before.statusId) {
-    await emit({ type: 'task.status_changed', aggregateType: 'task', aggregateId: id, payload: { ref, taskId: id, assigneeIds: finalAssignees, createdBy: before.createdBy, projectId: before.projectId }, actorId: actor.userId, actorType: actor.actorType });
+    await emit({ type: 'task.status_changed', aggregateType: 'task', aggregateId: id, payload: { ref, taskId: id, assigneeIds: finalAssignees, createdBy: before.createdBy, reporterId: patch.reporterId !== undefined ? patch.reporterId : before.reporterId, projectId: before.projectId }, actorId: actor.userId, actorType: actor.actorType });
   }
   if (newAssignees.length) {
     await emit({ type: 'task.assigned', aggregateType: 'task', aggregateId: id, payload: { assigneeIds: newAssignees, ref, taskId: id, projectId: before.projectId }, actorId: actor.userId, actorType: actor.actorType });
@@ -972,7 +992,7 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
         parentId: t.parentId ? newIdOf.get(t.parentId) ?? null : null,
         milestoneId: null, dueDate: t.dueDate, startDate: t.startDate,
         estimate: t.estimate, cycleId: null, position: String(lastPos),
-        customFields: cf, createdBy: t.createdBy,
+        customFields: cf, createdBy: t.createdBy, reporterId: t.reporterId,
       });
     }
     if (assigneeRows.length) {
@@ -1025,7 +1045,8 @@ export async function duplicateTask(actor: Actor, id: string) {
     description: source.description, statusId: source.statusId, typeId: source.typeId, priority: source.priority,
     parentId: source.parentId, dueDate: source.dueDate, startDate: source.startDate,
     estimate: source.estimate, cycleId: source.cycleId, position, customFields: source.customFields,
-    createdBy: actor.userId,
+    // A copy answers the same request, so it keeps the reporter.
+    createdBy: actor.userId, reporterId: source.reporterId ?? actor.userId,
   });
   const assignees = await assigneeIdsOf(id);
   if (assignees.length) await db.insert(taskAssignees).values(assignees.map((userId) => ({ taskId: newId, userId })));
@@ -1221,7 +1242,7 @@ export async function bulkUpdateTasks(actor: Actor, input: any) {
       }
     }
     if (input.statusId !== undefined && input.statusId !== t.statusId) {
-      await emit({ type: 'task.status_changed', aggregateType: 'task', aggregateId: t.id, payload: { ref: await taskRef(t), taskId: t.id, assigneeIds: await assigneeIdsOf(t.id), createdBy: t.createdBy, projectId: t.projectId }, actorId: actor.userId, actorType: actor.actorType });
+      await emit({ type: 'task.status_changed', aggregateType: 'task', aggregateId: t.id, payload: { ref: await taskRef(t), taskId: t.id, assigneeIds: await assigneeIdsOf(t.id), createdBy: t.createdBy, reporterId: t.reporterId, projectId: t.projectId }, actorId: actor.userId, actorType: actor.actorType });
     }
     if (input.labelIds !== undefined) {
       await db.delete(taskLabels).where(eq(taskLabels.taskId, t.id));

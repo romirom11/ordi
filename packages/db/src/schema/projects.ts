@@ -186,11 +186,18 @@ export const tasks = pgTable('tasks', {
   redirectToTaskId: text('redirect_to_task_id'),
   customFields: customFields(),
   createdBy: createdBy(),
+  /**
+   * Who set the task – the person (or agent) to ask what it is for. Starts as
+   * the creator and can be changed, unlike created_by, which only records who
+   * wrote the row (an intake form, an import, someone filing it for a colleague).
+   */
+  reporterId: text('reporter_id'),
   ...timestamps,
   version: version(),
   deletedAt: deletedAt(),
 }, (t) => ({
   projectNumberIdx: uniqueIndex('tasks_project_number_idx').on(t.projectId, t.number),
+  reporterIdx: index('tasks_reporter_idx').on(t.reporterId),
   statusIdx: index('tasks_status_idx').on(t.statusId),
   cycleIdx: index('tasks_cycle_idx').on(t.cycleId),
   parentIdx: index('tasks_parent_idx').on(t.parentId),

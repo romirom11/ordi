@@ -37,6 +37,9 @@ extendDict({
     'task.cycleCurrent': 'current',
     'task.unassigned': 'Unassigned',
     'task.deactivatedUser': 'deactivated',
+    'task.reporter': 'Reporter',
+    'task.noReporter': 'No reporter',
+    'task.reporterHint': 'Who set the task – the person to ask what it is for',
     'task.addLabel': 'Add label',
     'task.setDue': 'Set due date',
     'task.setStart': 'Set start date',
@@ -70,6 +73,9 @@ extendDict({
     'task.cycleCurrent': 'поточний',
     'task.unassigned': 'Не призначено',
     'task.deactivatedUser': 'деактивовано',
+    'task.reporter': 'Постановник',
+    'task.noReporter': 'Без постановника',
+    'task.reporterHint': 'Хто поставив задачу – кого питати, для чого вона',
     'task.addLabel': 'Додати мітку',
     'task.setDue': 'Вказати дедлайн',
     'task.setStart': 'Вказати початок',
@@ -264,6 +270,10 @@ export function PropertySidebar({ task, statuses, users, onPatch, hasRepos }: {
       .map((a) => users.find((u) => u.id === a.userId) ?? { id: a.userId, name: a.name, avatar: a.avatar, isActive: false }),
   ];
 
+  // The reporter is picked from active people and agents; one who has since
+  // been deactivated still shows, so the task says who set it.
+  const reporter = task.reporterId ? users.find((u) => u.id === task.reporterId) : undefined;
+
   return (
     <div className="flex flex-col gap-0.5 py-3">
       <TaskTimer taskId={task.id} />
@@ -363,6 +373,47 @@ export function PropertySidebar({ task, statuses, users, onPatch, hasRepos }: {
               ) : u.name}
             </ToggleItem>
           ))}
+        </DropdownMenu>
+      </Row>
+
+      {/* Reporter */}
+      <Row label={t('task.reporter')}>
+        <DropdownMenu
+          className="w-full"
+          width={220}
+          trigger={
+            <Chip empty={!task.reporterId}>
+              {reporter ? (
+                <>
+                  <Avatar name={reporter.name} src={reporter.avatar} size={18} agent={reporter.actorType === 'agent'} className={reporter.isActive === false ? 'opacity-60' : undefined} />
+                  <span className="truncate">{reporter.name}</span>
+                </>
+              ) : (
+                <>
+                  <UserPlus2 size={14} />
+                  <span className="truncate">{t('task.noReporter')}</span>
+                </>
+              )}
+            </Chip>
+          }
+        >
+          <MenuLabel>{t('task.reporterHint')}</MenuLabel>
+          {activeUsers(users).map((u) => (
+            <MenuItem
+              key={u.id}
+              icon={<Avatar name={u.name} src={u.avatar} size={18} agent={u.actorType === 'agent'} />}
+              checked={u.id === task.reporterId}
+              onSelect={() => { if (u.id !== task.reporterId) onPatch({ reporterId: u.id }); }}
+            >
+              {u.name}
+            </MenuItem>
+          ))}
+          {task.reporterId && (
+            <>
+              <MenuSeparator />
+              <MenuItem icon={<X size={14} />} danger onSelect={() => onPatch({ reporterId: null })}>{t('task.clear')}</MenuItem>
+            </>
+          )}
         </DropdownMenu>
       </Row>
 
