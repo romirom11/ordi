@@ -106,6 +106,19 @@ describe('accepting an intake item', () => {
     expect(results.map((r) => r.status).sort()).toEqual([201, 422]);
     expect(await tasksTitled('Accepted twice')).toHaveLength(1);
   });
+
+  it('accepted and declined at once ends one way only', async () => {
+    const itemId = await intakeItem('Accepted or declined');
+    const [accept, decline] = await Promise.all([
+      owner.post(`/intake/${itemId}/accept`, {}),
+      owner.post(`/intake/${itemId}/decline`, { reason: 'Duplicate' }),
+    ]);
+    expect([accept.status, decline.status].filter((s) => s >= 400)).toEqual([422]);
+    const [item] = await getDb().db.select().from(schema.intakeItems).where(eq(schema.intakeItems.id, itemId));
+    const made = await tasksTitled('Accepted or declined');
+    if (accept.status === 201) expect({ status: item!.status, tasks: made.length }).toEqual({ status: 'accepted', tasks: 1 });
+    else expect({ status: item!.status, tasks: made.length }).toEqual({ status: 'declined', tasks: 0 });
+  });
 });
 
 describe('duplicating a task', () => {
@@ -138,6 +151,21 @@ describe('moving a task', () => {
     expect(moved.ref).toMatch(/^WRTB-\d+$/);
     const [event] = await eventsAbout([moved.id], ['task.created']);
     expect(event!.payload).toMatchObject({ ref: moved.ref, projectId: target.projectId, movedFrom: task.id });
+  });
+
+  it('to two projects at once lands in one of them', async () => {
+    const third = await setupWorkspace(users, 'WRTC');
+    const task = await json(owner.post('/tasks', { projectId: ws.projectId, title: 'Moved twice' }));
+    const results = await Promise.all([
+      owner.post(`/tasks/${task.id}/move`, { targetProjectId: target.projectId }),
+      owner.post(`/tasks/${task.id}/move`, { targetProjectId: third.projectId }),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 404]);
+    const live = (await tasksTitled('Moved twice')).filter((t) => t.deletedAt === null);
+    expect(live).toHaveLength(1);
+    const [source] = (await tasksTitled('Moved twice')).filter((t) => t.id === task.id);
+    expect(source!.redirectToTaskId).toBe(live[0]!.id);
+    expect(await eventsAbout(live.map((t) => t.id), ['task.created'])).toHaveLength(1);
   });
 });
 

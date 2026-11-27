@@ -14,6 +14,7 @@ import {
 } from '@ordi/shared';
 import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
+import { logger } from '../../lib/logger';
 import { writeActivity } from '../../core/activity';
 import { emit, publishEvent } from '../../core/events';
 import { assertVersion } from '../../core/locking';
@@ -1062,6 +1063,15 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
       subtree.push(...children);
       frontier = children.map((child) => child.id);
     }
+    // Lock the subtree in id order – the order a task edit and a bulk edit
+    // lock in – so a second move of the same task waits and then finds it
+    // gone, instead of copying it into a second project too.
+    const live = new Set((await tx.select({ id: tasks.id }).from(tasks)
+      .where(and(inArray(tasks.id, subtree.map((t) => t.id)), isNull(tasks.deletedAt)))
+      .orderBy(asc(tasks.id)).for('update')).map((r) => r.id));
+    if (!live.has(source.id)) throw err.notFound('Task not found');
+    // A subtask moved elsewhere in between went with its own subtasks.
+    for (let i = subtree.length - 1; i >= 0; i--) if (!live.has(subtree[i]!.id)) subtree.splice(i, 1);
     const oldIds = subtree.map((t) => t.id);
     const newIdOf = new Map(oldIds.map((oldId) => [oldId, ulid()]));
 
@@ -1565,8 +1575,11 @@ export async function acceptIntake(actor: Actor, itemId: string, input: any) {
       .where(and(eq(schema.attachments.entityType, 'intake_item'), eq(schema.attachments.entityId, itemId)));
     return created;
   });
+  // The accept has committed: a mail server that refuses the notice does not
+  // turn it into a failed request, which a retry would answer with "triaged".
   if (item.requesterEmail) {
-    await sendIntakeMail(item.requesterEmail, 'intakeAccepted', item.title, null);
+    await sendIntakeMail(item.requesterEmail, 'intakeAccepted', item.title, null)
+      .catch((e) => logger.warn({ err: e, itemId }, 'intake accepted mail failed'));
   }
   return { taskId: task.id, ref: task.ref };
 }
@@ -1581,7 +1594,8 @@ export async function declineIntake(actor: Actor, itemId: string, input: any) {
     .where(and(eq(schema.intakeItems.id, itemId), eq(schema.intakeItems.status, 'pending'))).returning({ id: schema.intakeItems.id });
   if (!declined.length) throw err.domain('Intake item already triaged');
   if (input.notify && item.requesterEmail) {
-    await sendIntakeMail(item.requesterEmail, 'intakeDeclined', item.title, input.reason ?? null);
+    await sendIntakeMail(item.requesterEmail, 'intakeDeclined', item.title, input.reason ?? null)
+      .catch((e) => logger.warn({ err: e, itemId }, 'intake declined mail failed'));
   }
   return { ok: true };
 }
