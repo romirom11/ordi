@@ -5,7 +5,7 @@
  * edit, every task before the refused one fully edited, events and all.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import { getDb, schema, eq, and, inArray } from '@ordi/db';
+import { getDb, schema, eq, and, inArray, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import { resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
 import { setupWorkspace, createAgent, addProjectMember, type Workspace } from './agents-helpers';
@@ -108,6 +108,52 @@ describe('a bulk task edit that is refused', () => {
     const res = await owner.post('/tasks/bulk', { taskIds: [a.id, b.id], priority: 'urgent', assigneeIds: [ulid()] });
     expect(res.status).toBeGreaterThanOrEqual(400);
     for (const t of [a, b]) expect((await row(t.id)).priority).toBe(t.priority);
+  });
+
+  it('that fails on a later task takes back the events already written for earlier ones', async () => {
+    const a = await newTask(ws.projectId, 'Late failure A');
+    const b = await newTask(ws.projectId, 'Late failure B');
+    const label = await json(owner.post('/labels', { name: 'Atomic', scope: 'task' }));
+    const before = await eventsFor([a.id, b.id]);
+    // A write that fails only for B, after A's status change and its event.
+    const { db } = getDb();
+    await db.execute(sql.raw(`
+      CREATE OR REPLACE FUNCTION test_refuse_label() RETURNS trigger AS $$
+      BEGIN IF NEW.task_id = '${b.id}' THEN RAISE EXCEPTION 'refused for the test'; END IF; RETURN NEW; END $$ LANGUAGE plpgsql;
+      CREATE TRIGGER test_refuse_label BEFORE INSERT ON task_labels FOR EACH ROW EXECUTE FUNCTION test_refuse_label();`));
+    try {
+      const res = await owner.post('/tasks/bulk', { taskIds: [a.id, b.id], statusId: ws.reviewStatusId, labelIds: [label.id] });
+      expect(res.status).toBeGreaterThanOrEqual(400);
+    } finally {
+      await db.execute(sql.raw('DROP TRIGGER test_refuse_label ON task_labels; DROP FUNCTION test_refuse_label();'));
+    }
+    for (const t of [a, b]) expect((await row(t.id)).statusId).toBe(t.statusId);
+    expect(await eventsFor([a.id, b.id])).toHaveLength(before.length);
+  });
+
+  it('waits for a concurrent edit of the same task instead of merging assignee lists', async () => {
+    const task = await newTask(ws.projectId, 'Contended');
+    const { db } = getDb();
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    let locked!: () => void;
+    const lockTaken = new Promise<void>((r) => { locked = r; });
+    // Another edit, mid-way: it holds the task and has assigned the admin,
+    // not committed yet.
+    const other = db.transaction(async (tx) => {
+      await tx.select({ id: schema.tasks.id }).from(schema.tasks).where(eq(schema.tasks.id, task.id)).for('update');
+      await tx.insert(schema.taskAssignees).values({ taskId: task.id, userId: users.admin!.userId });
+      locked();
+      await held;
+    });
+    await lockTaken;
+    const patch = owner.patch(`/tasks/${task.id}`, { assigneeIds: [users.member!.userId] });
+    await new Promise((r) => setTimeout(r, 300));
+    release();
+    await other;
+    expect((await patch).status).toBe(200);
+    // The later edit replaced the list it found, rather than adding to it.
+    expect((await row(task.id)).assignees).toEqual([users.member!.userId]);
   });
 
   it('goes through whole when nothing refuses it', async () => {

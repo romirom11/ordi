@@ -16,7 +16,7 @@ import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { emit, publishEvent } from '../../core/events';
-import { assertUpdated, assertVersion } from '../../core/locking';
+import { assertVersion } from '../../core/locking';
 import { assertProject, accessibleProjectIds, effectiveProjectRole, userCanOpenProject } from '../../core/access';
 import { closeProjectTimers } from '../time/service';
 import { cancelProjectRuns } from '../agents/runs';
@@ -793,22 +793,38 @@ export async function updateTask(actor: Actor, id: string, input: any) {
   // Every check runs before the first write, and the writes, their events and
   // the activity record share one transaction: a refused or failed request
   // changes nothing, and nothing is announced that did not happen.
-  const oldAssignees = await assigneeIdsOf(id);
   const nextAssignees: string[] | undefined = input.assigneeIds;
-  const newAssignees = nextAssignees ? nextAssignees.filter((a) => !oldAssignees.includes(a)) : [];
-  // Agents among the new assignees: membership and assign policy (R48, R49).
-  if (newAssignees.length) await assertCanAssignAgents(actor, project.id, newAssignees, effectiveProjectRole(actor, project));
+  const role = effectiveProjectRole(actor, project);
+  const checked = new Set<string>();
+  const assertAssignable = async (added: string[]) => {
+    const unchecked = added.filter((a) => !checked.has(a));
+    // Agents among the new assignees: membership and assign policy (R48, R49).
+    if (unchecked.length) await assertCanAssignAgents(actor, project.id, unchecked, role);
+    for (const a of unchecked) checked.add(a);
+  };
+  if (nextAssignees) {
+    const current = await assigneeIdsOf(id);
+    await assertAssignable(nextAssignees.filter((a) => !current.includes(a)));
+  }
   const nextLabels: string[] | undefined = input.labelIds;
   if (nextLabels) await assertLabelScope(nextLabels, 'task');
-  const finalAssignees = nextAssignees ?? oldAssignees;
   const ref = await taskRef(before);
 
   await db.transaction(async (tx) => {
-    if (Object.keys(patch).length) {
-      const [written] = await tx.update(tasks).set(patch)
-        .where(and(eq(tasks.id, id), eq(tasks.version, before.version))).returning({ id: tasks.id });
-      assertUpdated(written, before);
-    }
+    // The row lock serializes edits of this task (an assignee-only edit too).
+    // The patch was built from `before` (custom fields merge into it), so a
+    // change in between is a conflict, answered with the task as it is now.
+    const [locked] = await tx.select({ version: tasks.version }).from(tasks)
+      .where(and(eq(tasks.id, id), isNull(tasks.deletedAt))).for('update');
+    if (!locked) throw err.notFound('Task not found');
+    if (Object.keys(patch).length && locked.version !== before.version) throw err.conflict('The record was modified by someone else', await loadTask(id).catch(() => before));
+    const oldAssignees = (await tx.select({ userId: taskAssignees.userId }).from(taskAssignees)
+      .where(eq(taskAssignees.taskId, id))).map((r) => r.userId);
+    const newAssignees = nextAssignees ? nextAssignees.filter((a) => !oldAssignees.includes(a)) : [];
+    // Someone may have taken an assignee off since the check above.
+    await assertAssignable(newAssignees);
+    const finalAssignees = nextAssignees ?? oldAssignees;
+    if (Object.keys(patch).length) await tx.update(tasks).set(patch).where(eq(tasks.id, id));
     if (nextAssignees) {
       await tx.delete(taskAssignees).where(eq(taskAssignees.taskId, id));
       if (nextAssignees.length) await tx.insert(taskAssignees).values(nextAssignees.map((userId) => ({ taskId: id, userId })));
@@ -883,6 +899,9 @@ export async function handOffOpenTasks(actor: Actor, fromUserId: string, toUserI
     const projectIds = [...new Set(open.map((t) => t.projectId))];
     for (const projectId of projectIds) await assertCanAssignAgents(actor, projectId, [toUserId], null, { policy: false });
   }
+  // Tasks first, in id order – the order a task edit locks in – so a hand-off
+  // and a concurrent edit of the same task wait for each other, not deadlock.
+  await tx.select({ id: tasks.id }).from(tasks).where(inArray(tasks.id, ids)).orderBy(asc(tasks.id)).for('update');
   await tx.delete(taskAssignees).where(and(inArray(taskAssignees.taskId, ids), eq(taskAssignees.userId, fromUserId)));
   if (toUserId) {
     await tx.insert(taskAssignees).values(ids.map((taskId) => ({ taskId, userId: toUserId }))).onConflictDoNothing();
@@ -1278,12 +1297,21 @@ export async function bulkUpdateTasks(actor: Actor, input: any) {
   const editable = rows.filter((t) => canEdit(t.projectId));
   const nextAssignees: string[] | undefined = input.assigneeIds;
   const nextLabels: string[] | undefined = input.labelIds;
-  const plans: { t: typeof rows[number]; ref: string; added: string[]; finalAssignees: string[] }[] = [];
+  const checked = new Map<string, Set<string>>();
+  const assertAssignable = async (t: typeof rows[number], added: string[]) => {
+    const done = checked.get(t.projectId) ?? new Set<string>();
+    const unchecked = added.filter((a) => !done.has(a));
+    if (unchecked.length) await assertCanAssignAgents(actor, t.projectId, unchecked, roleOf.get(t.projectId) ?? null);
+    for (const a of unchecked) done.add(a);
+    checked.set(t.projectId, done);
+  };
+  const refs = new Map<string, string>();
   for (const t of editable) {
-    const oldAssignees = await assigneeIdsOf(t.id);
-    const added = nextAssignees ? nextAssignees.filter((a) => !oldAssignees.includes(a)) : [];
-    if (added.length) await assertCanAssignAgents(actor, t.projectId, added, roleOf.get(t.projectId) ?? null);
-    plans.push({ t, ref: await taskRef(t), added, finalAssignees: nextAssignees ?? oldAssignees });
+    if (nextAssignees) {
+      const current = await assigneeIdsOf(t.id);
+      await assertAssignable(t, nextAssignees.filter((a) => !current.includes(a)));
+    }
+    refs.set(t.id, await taskRef(t));
   }
   const patch: Record<string, unknown> = {};
   if (input.statusId !== undefined) patch.statusId = input.statusId;
@@ -1291,8 +1319,29 @@ export async function bulkUpdateTasks(actor: Actor, input: any) {
   if (input.milestoneId !== undefined) patch.milestoneId = input.milestoneId;
   if (input.priority !== undefined) patch.priority = input.priority;
 
-  await db.transaction(async (tx) => {
-    for (const { t, ref, added, finalAssignees } of plans) {
+  return db.transaction(async (tx) => {
+    if (!editable.length) return { updated: 0 };
+    // Lock the selection in one order, so overlapping edits wait instead of
+    // deadlocking. A task deleted or moved to another project since it was
+    // read is left alone: what was checked was its old place.
+    const locked = await tx.select({ id: tasks.id, projectId: tasks.projectId, statusId: tasks.statusId }).from(tasks)
+      .where(and(inArray(tasks.id, editable.map((t) => t.id)), isNull(tasks.deletedAt)))
+      .orderBy(asc(tasks.id)).for('update');
+    const now = new Map(locked.map((r) => [r.id, r]));
+    const live = editable.filter((t) => now.get(t.id)?.projectId === t.projectId);
+    const assigned = new Map<string, string[]>();
+    if (live.length) {
+      for (const r of await tx.select({ taskId: taskAssignees.taskId, userId: taskAssignees.userId }).from(taskAssignees)
+        .where(inArray(taskAssignees.taskId, live.map((t) => t.id)))) {
+        assigned.set(r.taskId, [...(assigned.get(r.taskId) ?? []), r.userId]);
+      }
+    }
+    for (const t of live) {
+      const ref = refs.get(t.id)!;
+      const oldAssignees = assigned.get(t.id) ?? [];
+      const added = nextAssignees ? nextAssignees.filter((a) => !oldAssignees.includes(a)) : [];
+      // Someone may have taken an assignee off since the check above.
+      await assertAssignable(t, added);
       if (Object.keys(patch).length) await tx.update(tasks).set(patch).where(eq(tasks.id, t.id));
       if (nextAssignees) {
         await tx.delete(taskAssignees).where(eq(taskAssignees.taskId, t.id));
@@ -1302,16 +1351,16 @@ export async function bulkUpdateTasks(actor: Actor, input: any) {
           await publishEvent(tx, { type: 'task.assigned', aggregateType: 'task', aggregateId: t.id, payload: { assigneeIds: added, ref, taskId: t.id, projectId: t.projectId }, actorId: actor.userId, actorType: actor.actorType });
         }
       }
-      if (input.statusId !== undefined && input.statusId !== t.statusId) {
-        await publishEvent(tx, { type: 'task.status_changed', aggregateType: 'task', aggregateId: t.id, payload: { ref, taskId: t.id, assigneeIds: finalAssignees, createdBy: t.createdBy, reporterId: t.reporterId, projectId: t.projectId }, actorId: actor.userId, actorType: actor.actorType });
+      if (input.statusId !== undefined && input.statusId !== now.get(t.id)!.statusId) {
+        await publishEvent(tx, { type: 'task.status_changed', aggregateType: 'task', aggregateId: t.id, payload: { ref, taskId: t.id, assigneeIds: nextAssignees ?? oldAssignees, createdBy: t.createdBy, reporterId: t.reporterId, projectId: t.projectId }, actorId: actor.userId, actorType: actor.actorType });
       }
       if (nextLabels) {
         await tx.delete(taskLabels).where(eq(taskLabels.taskId, t.id));
         if (nextLabels.length) await tx.insert(taskLabels).values(nextLabels.map((labelId) => ({ taskId: t.id, labelId })));
       }
     }
+    return { updated: live.length };
   });
-  return { updated: plans.length };
 }
 
 export async function branchName(actor: Actor, id: string) {
