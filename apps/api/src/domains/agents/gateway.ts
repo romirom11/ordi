@@ -31,8 +31,9 @@ interface RunContext {
 /** The per-run token identifies the run; anything else is refused. */
 async function resolveRun(bearer: string): Promise<RunContext | null> {
   const { db } = getDb();
-  const [token] = await db.select({ id: apiTokens.id, revokedAt: apiTokens.revokedAt }).from(apiTokens).where(eq(apiTokens.hash, sha256(bearer)));
-  if (!token || token.revokedAt) return null;
+  const [token] = await db.select({ id: apiTokens.id, revokedAt: apiTokens.revokedAt, expiresAt: apiTokens.expiresAt })
+    .from(apiTokens).where(eq(apiTokens.hash, sha256(bearer)));
+  if (!token || token.revokedAt || (token.expiresAt && token.expiresAt <= new Date())) return null;
   const [run] = await db.select({ id: agentRuns.id, agentUserId: agentRuns.agentUserId, status: agentRuns.status })
     .from(agentRuns).where(eq(agentRuns.tokenId, token.id));
   if (!run || !(AGENT_RUN_ACTIVE_STATUSES as readonly string[]).includes(run.status)) return null;

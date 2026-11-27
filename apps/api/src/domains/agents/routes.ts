@@ -63,32 +63,38 @@ export function agentsRoutes() {
   app.post('/agents/:id/enable', guard('agents.manage'), async (c) => c.json(await profiles.setAgentActive(currentActor(c), c.req.param('id'), true)));
 
   // ── External agents: run elsewhere, connect over MCP with their own token ──
-  app.get('/external-agents', guard('agents.manage'), async (c) => c.json({ data: await external.listExternalAgents() }));
+  app.get('/external-agents', guard('agents.manage'), async (c) => c.json({ data: await external.listExternalAgents(currentActor(c)) }));
+
+  // Every change needs a signed-in person: an agent or an API token setting
+  // up agents (or minting their tokens) could keep itself alive forever.
+  const person = (c: Parameters<typeof currentActor>[0]) => { const actor = currentActor(c); external.assertSignedInPerson(actor); return actor; };
 
   app.post('/external-agents', guard('agents.manage'), async (c) => {
-    const actor = currentActor(c);
+    const actor = person(c);
     if (!actor.access.permissions.has('users.manage')) throw err.forbidden('Creating an agent also needs users.manage', 'users.manage');
     const body = createExternalAgentSchema.parse(await c.req.json());
     return c.json(await external.createExternalAgent(actor, body), 201);
   });
 
   app.patch('/external-agents/:id', guard('agents.manage'), async (c) => {
+    const actor = person(c);
     const body = updateExternalAgentSchema.parse(await c.req.json());
-    return c.json(await external.updateExternalAgent(currentActor(c), c.req.param('id'), body));
+    return c.json(await external.updateExternalAgent(actor, c.req.param('id'), body));
   });
 
   app.post('/external-agents/:id/disable', guard('agents.manage'), async (c) =>
-    c.json(await external.setExternalAgentActive(currentActor(c), c.req.param('id'), false)));
+    c.json(await external.setExternalAgentActive(person(c), c.req.param('id'), false)));
   app.post('/external-agents/:id/enable', guard('agents.manage'), async (c) =>
-    c.json(await external.setExternalAgentActive(currentActor(c), c.req.param('id'), true)));
+    c.json(await external.setExternalAgentActive(person(c), c.req.param('id'), true)));
 
   app.post('/external-agents/:id/tokens', guard('agents.manage'), async (c) => {
+    const actor = person(c);
     const body = issueExternalAgentTokenSchema.parse(await c.req.json().catch(() => ({})));
-    return c.json(await external.issueExternalAgentToken(currentActor(c), c.req.param('id'), body), 201);
+    return c.json(await external.issueExternalAgentToken(actor, c.req.param('id'), body), 201);
   });
 
   app.delete('/external-agents/:id/tokens/:tokenId', guard('agents.manage'), async (c) =>
-    c.json(await external.revokeExternalAgentToken(currentActor(c), c.req.param('id'), c.req.param('tokenId'))));
+    c.json(await external.revokeExternalAgentToken(person(c), c.req.param('id'), c.req.param('tokenId'))));
 
   // ── Credentials ──
   app.get('/agent-credentials', guard('agents.manage'), async (c) => c.json({ data: await credentials.listCredentials() }));

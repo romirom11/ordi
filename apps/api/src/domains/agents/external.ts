@@ -14,8 +14,9 @@ import { err } from '../../lib/errors';
 import { generateToken, sha256 } from '../../lib/crypto';
 import { writeActivity } from '../../core/activity';
 import { loadRolePermissions } from '../../core/rbac';
+import { accessibleProjectIds, accessibleSpaceIds, editableSpaceIds, effectiveProjectRole } from '../../core/access';
 
-const { users, roles, externalAgents, apiTokens, projectMembers, projects } = schema;
+const { users, roles, externalAgents, apiTokens, projectMembers, projects, spaceMembers } = schema;
 
 export interface ExternalAgentToken {
   id: string;
@@ -36,6 +37,8 @@ export interface ExternalAgentView {
   ownerUserId: string;
   ownerName: string | null;
   projects: { id: string; key: string; name: string }[];
+  /** Projects it is on that the viewer cannot open. */
+  hiddenProjects: number;
   /** Live tokens only: revoked and expired ones are not listed. */
   tokens: ExternalAgentToken[];
   createdAt: string;
@@ -85,6 +88,46 @@ async function assertOwner(userId: string): Promise<void> {
   }
 }
 
+const PROJECT_RANK: Record<string, number> = { viewer: 1, member: 2, admin: 3 };
+
+/**
+ * A token works wherever the agent is a member, so whoever mints one must
+ * reach all of that themselves, at the same level or higher: otherwise
+ * agents.manage would open every private project or space an agent was ever
+ * added to.
+ */
+async function assertCanReachAgentResources(actor: Actor, agentId: string): Promise<void> {
+  const { db } = getDb();
+  const [projectRows, spaceRows] = await Promise.all([
+    db.select({ id: projects.id, key: projects.key, visibility: projects.visibility, role: projectMembers.role })
+      .from(projectMembers).innerJoin(projects, eq(projects.id, projectMembers.projectId))
+      .where(and(eq(projectMembers.userId, agentId), isNull(projects.deletedAt))),
+    db.select({ spaceId: spaceMembers.spaceId, role: spaceMembers.role }).from(spaceMembers).where(eq(spaceMembers.userId, agentId)),
+  ]);
+  const shortOf = projectRows.filter((p) => {
+    const mine = effectiveProjectRole(actor, { id: p.id, visibility: p.visibility as 'workspace' | 'private' });
+    return (mine ? PROJECT_RANK[mine]! : 0) < (PROJECT_RANK[p.role] ?? 0);
+  });
+  if (shortOf.length) {
+    throw err.forbidden(`The agent works in projects you cannot reach at its level (${shortOf.map((p) => p.key).join(', ')}) – ask someone who can to issue its token`, 'projects.write');
+  }
+  if (spaceRows.length) {
+    const [viewable, editable] = await Promise.all([accessibleSpaceIds(actor), editableSpaceIds(actor)]);
+    const short = spaceRows.filter((s) => !(s.role === 'editor' ? editable : viewable).includes(s.spaceId));
+    if (short.length) throw err.forbidden('The agent is a member of knowledge-base spaces you cannot reach at its level – ask someone who can to issue its token', 'kb.write');
+  }
+}
+
+/**
+ * Agents are set up by a person at the keyboard: not by an agent, and not
+ * with an API token – otherwise a token could mint its own permanent successor.
+ */
+export function assertSignedInPerson(actor: Actor): void {
+  if (actor.actorType === 'agent' || actor.apiTokenId) {
+    throw err.forbidden('Managing external agents needs a signed-in person, not an API token', 'agents.manage');
+  }
+}
+
 async function loadRow(id: string) {
   const { db } = getDb();
   const [row] = await db.select({ user: users, ext: externalAgents }).from(users)
@@ -93,9 +136,10 @@ async function loadRow(id: string) {
   return row;
 }
 
-async function views(ids: string[]): Promise<ExternalAgentView[]> {
+async function views(actor: Actor, ids: string[]): Promise<ExternalAgentView[]> {
   if (!ids.length) return [];
   const { db } = getDb();
+  const reachable = new Set(await accessibleProjectIds(actor));
   const rows = await db.select({ user: users, ext: externalAgents, roleName: roles.name }).from(users)
     .innerJoin(externalAgents, eq(externalAgents.userId, users.id))
     .leftJoin(roles, eq(roles.id, users.roleId))
@@ -119,7 +163,9 @@ async function views(ids: string[]): Promise<ExternalAgentView[]> {
     roleName: roleName ?? '',
     ownerUserId: ext.ownerUserId,
     ownerName: owners.find((o) => o.id === ext.ownerUserId)?.name ?? null,
-    projects: memberships.filter((m) => m.userId === user.id).map(({ id, key, name }) => ({ id, key, name })),
+    // Projects the viewer cannot open are counted, not named.
+    projects: memberships.filter((m) => m.userId === user.id && reachable.has(m.id)).map(({ id, key, name }) => ({ id, key, name })),
+    hiddenProjects: memberships.filter((m) => m.userId === user.id && !reachable.has(m.id)).length,
     tokens: tokens
       .filter((t) => t.userId === user.id && !(t.expiresAt && t.expiresAt.getTime() <= now))
       .map((t) => ({
@@ -132,15 +178,15 @@ async function views(ids: string[]): Promise<ExternalAgentView[]> {
   }));
 }
 
-export async function listExternalAgents(): Promise<ExternalAgentView[]> {
+export async function listExternalAgents(actor: Actor): Promise<ExternalAgentView[]> {
   const { db } = getDb();
   const rows = await db.select({ id: externalAgents.userId }).from(externalAgents);
-  return views(rows.map((r) => r.id));
+  return views(actor, rows.map((r) => r.id));
 }
 
-export async function getExternalAgent(id: string): Promise<ExternalAgentView> {
+export async function getExternalAgent(actor: Actor, id: string): Promise<ExternalAgentView> {
   await loadRow(id);
-  return (await views([id]))[0]!;
+  return (await views(actor, [id]))[0]!;
 }
 
 export async function createExternalAgent(actor: Actor, input: CreateExternalAgentInput): Promise<ExternalAgentView> {
@@ -162,7 +208,7 @@ export async function createExternalAgent(actor: Actor, input: CreateExternalAge
       diff: { name: input.name, kind: 'external', roleId, ownerUserId },
     });
   });
-  return getExternalAgent(id);
+  return getExternalAgent(actor, id);
 }
 
 export async function updateExternalAgent(actor: Actor, id: string, input: UpdateExternalAgentInput): Promise<ExternalAgentView> {
@@ -186,7 +232,7 @@ export async function updateExternalAgent(actor: Actor, id: string, input: Updat
       diff: { ...input },
     });
   });
-  return getExternalAgent(id);
+  return getExternalAgent(actor, id);
 }
 
 /** Switching an agent off revokes every token it holds; switching it back on needs a new one. */
@@ -194,6 +240,7 @@ export async function setExternalAgentActive(actor: Actor, id: string, active: b
   const { db } = getDb();
   await loadRow(id);
   await db.transaction(async (tx) => {
+    // Takes the row lock token issuance waits on (see issueExternalAgentToken).
     await tx.update(users).set({ isActive: active }).where(eq(users.id, id));
     if (!active) {
       await tx.update(apiTokens).set({ revokedAt: new Date() }).where(and(eq(apiTokens.userId, id), isNull(apiTokens.revokedAt)));
@@ -202,7 +249,7 @@ export async function setExternalAgentActive(actor: Actor, id: string, active: b
       entityType: 'agent', entityId: id, action: active ? 'enabled' : 'disabled', actorId: actor.userId, actorType: actor.actorType,
     });
   });
-  return getExternalAgent(id);
+  return getExternalAgent(actor, id);
 }
 
 /**
@@ -217,14 +264,21 @@ export async function issueExternalAgentToken(
 ): Promise<{ token: string; tokenInfo: ExternalAgentToken }> {
   const { db } = getDb();
   const row = await loadRow(id);
-  if (!row.user.isActive) throw err.domain('This agent is switched off; switch it on before issuing a token');
   await assertCanGrantRole(actor, row.user.roleId);
+  await assertCanReachAgentResources(actor, id);
   const raw = `ordi_${generateToken(24)}`;
   const tokenId = ulid();
   const expiresAt = input.expiresInDays ? new Date(Date.now() + input.expiresInDays * 86_400_000) : null;
-  const scopes = [...(await loadRolePermissions(row.user.roleId))];
-  await db.insert(apiTokens).values({
-    id: tokenId, userId: id, name: input.name, hash: sha256(raw), prefix: raw.slice(0, 12), scopes, readOnly: false, expiresAt,
+  await db.transaction(async (tx) => {
+    // The agent row stays locked until the token is in: a switch-off running
+    // at the same time either comes first (and this refuses) or comes after
+    // (and revokes this token with the rest).
+    const [locked] = await tx.select({ isActive: users.isActive, roleId: users.roleId }).from(users).where(eq(users.id, id)).for('update');
+    if (!locked?.isActive) throw err.domain('This agent is switched off; switch it on before issuing a token');
+    const scopes = [...(await loadRolePermissions(locked.roleId))];
+    await tx.insert(apiTokens).values({
+      id: tokenId, userId: id, name: input.name, hash: sha256(raw), prefix: raw.slice(0, 12), scopes, readOnly: false, expiresAt,
+    });
   });
   await writeActivity(db, {
     entityType: 'agent', entityId: id, action: 'token_issued', actorId: actor.userId, actorType: actor.actorType,

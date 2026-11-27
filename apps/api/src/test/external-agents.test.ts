@@ -75,10 +75,11 @@ describe('setting one up', () => {
   });
 });
 
-describe('handing out no more than you hold', () => {
-  it('refuses a role, or a token for it, that grants what the person does not have', async () => {
+/** Someone who manages agents but is not an admin – once per file. */
+let wranglerCookie: string | null = null;
+async function wrangler() {
+  if (!wranglerCookie) {
     const { db } = getDb();
-    // Someone who manages agents but is not an admin.
     const roleId = ulid();
     await db.insert(schema.roles).values({ id: roleId, key: 'agent-wrangler', name: 'Agent wrangler', isSystem: false });
     await db.insert(schema.rolePermissions).values(
@@ -88,20 +89,52 @@ describe('handing out no more than you hold', () => {
     await db.insert(schema.users).values({ id: wranglerId, email: 'wrangler@test.local', name: 'Wrangler', roleId });
     const session = generateToken();
     await db.insert(schema.sessions).values({ id: ulid(), userId: wranglerId, token: session, expiresAt: new Date(Date.now() + 3600_000) });
-    const wrangler = reqAs(`ordi_session=${session}`);
+    wranglerCookie = `ordi_session=${session}`;
+  }
+  return reqAs(wranglerCookie);
+}
+
+describe('handing out no more than you hold', () => {
+  it('refuses a role, or a token for it, that grants what the person does not have', async () => {
+    const { db } = getDb();
+    const w = await wrangler();
     const [adminRole] = await db.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.key, 'admin'));
 
     // The Agent role is within reach; Admin is not.
-    const created = await wrangler.post('/external-agents', { name: 'Wrangled' });
+    const created = await w.post('/external-agents', { name: 'Wrangled' });
     expect(created.status).toBe(201);
     const agent = await json(created);
-    expect((await wrangler.post('/external-agents', { name: 'Too big', roleId: adminRole!.id })).status).toBe(403);
-    expect((await wrangler.patch(`/external-agents/${agent.id}`, { roleId: adminRole!.id })).status).toBe(403);
-    expect((await wrangler.post(`/external-agents/${agent.id}/tokens`, {})).status).toBe(201);
+    expect((await w.post('/external-agents', { name: 'Too big', roleId: adminRole!.id })).status).toBe(403);
+    expect((await w.patch(`/external-agents/${agent.id}`, { roleId: adminRole!.id })).status).toBe(403);
+    expect((await w.post(`/external-agents/${agent.id}/tokens`, {})).status).toBe(201);
 
     // An owner made it Admin: the wrangler cannot mint its token any more.
     expect((await owner().patch(`/external-agents/${agent.id}`, { roleId: adminRole!.id })).status).toBe(200);
-    expect((await wrangler.post(`/external-agents/${agent.id}/tokens`, {})).status).toBe(403);
+    expect((await w.post(`/external-agents/${agent.id}/tokens`, {})).status).toBe(403);
+  });
+
+  it('refuses a token for an agent on a private project the person cannot open, and does not name it', async () => {
+    const w = await wrangler();
+    const secret = await json(owner().post('/projects', { name: 'Secret client', key: 'SEC', projectTypeId: (await json(owner().get(`/projects/${ws.projectId}`))).projectTypeId, visibility: 'private' }));
+    const agent = await createAgent('Insider');
+    await addProjectMember(users, secret.id, agent.id);
+    expect((await w.post(`/external-agents/${agent.id}/tokens`, {})).status).toBe(403);
+    expect((await owner().post(`/external-agents/${agent.id}/tokens`, {})).status).toBe(201);
+
+    const seen = ((await json(w.get('/external-agents'))).data as { id: string; projects: { key: string }[]; hiddenProjects: number }[])
+      .find((a) => a.id === agent.id)!;
+    expect(seen.projects.map((p) => p.key)).not.toContain('SEC');
+    expect(seen.hiddenProjects).toBe(1);
+  });
+
+  it('is done by a signed-in person, never with a token', async () => {
+    const [adminRole] = await getDb().db.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.key, 'admin'));
+    const agent = await createAgent('Self-renewing');
+    await owner().patch(`/external-agents/${agent.id}`, { roleId: adminRole!.id });
+    const { token } = await issueToken(agent.id, 30);
+    // An Admin-role agent holds agents.manage, but its token cannot mint its successor.
+    const minted = await bearer(token).post(`/external-agents/${agent.id}/tokens`, { expiresInDays: null });
+    expect(minted.status).toBe(403);
   });
 });
 
@@ -171,6 +204,25 @@ describe('working with its token', () => {
 });
 
 describe('assigning work to it', () => {
+  it('is not handed a leaving person\'s tasks in projects it is not on', async () => {
+    const agent = await createAgent('Successor bot');
+    await owner().post(`/projects/${other.projectId}/members`, { userId: users.hr!.userId, role: 'member', canWriteTasks: true });
+    await owner().patch(`/tasks/${other.taskId}`, { assigneeIds: [users.hr!.userId] });
+    const refused = await owner().post(`/users/${users.hr!.userId}/deactivate`, { reassignTo: agent.id });
+    expect(refused.status).toBeGreaterThanOrEqual(400);
+    const [hr] = await getDb().db.select({ isActive: schema.users.isActive }).from(schema.users).where(eq(schema.users.id, users.hr!.userId));
+    expect(hr!.isActive).toBe(true);
+  });
+
+  it('comes off a task moved to a project it is not on', async () => {
+    const agent = await createAgent('Mover bot');
+    await addProjectMember(users, ws.projectId, agent.id);
+    const task = await json(owner().post('/tasks', { projectId: ws.projectId, title: 'Moving house', assigneeIds: [agent.id, users.owner!.userId] }));
+    const moved = await json(owner().post(`/tasks/${task.id}/move`, { targetProjectId: other.projectId }));
+    const card = await json(owner().get(`/tasks/${moved.id}?include=assignees`));
+    expect(card.assignees.map((a: { userId: string }) => a.userId)).toEqual([users.owner!.userId]);
+  });
+
   it('needs it on the project, and queues no ordi run', async () => {
     const agent = await createAgent('Assignee bot');
     const refused = await owner().patch(`/tasks/${other.taskId}`, { assigneeIds: [agent.id] });

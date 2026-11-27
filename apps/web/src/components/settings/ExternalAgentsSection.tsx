@@ -26,7 +26,7 @@ extendDict({
     'extAgents.none': 'No external agents yet',
     'extAgents.noneHint': 'Create one for each agent that works on its own, so its comments and changes carry its name instead of yours.',
     'extAgents.owner': 'Owner',
-    'extAgents.ownerHint': 'The person behind the agent. Its questions go to them when it names no one.',
+    'extAgents.ownerHint': 'The person behind the agent – who it works for.',
     'extAgents.noProjects': 'No projects yet – add it under a project\'s Settings → Access',
     'extAgents.projects': 'Projects',
     'extAgents.tokens': 'Tokens',
@@ -51,6 +51,7 @@ extendDict({
     'extAgents.otherClients': 'Other MCP clients (JSON)',
     'extAgents.manage': 'Manage',
     'extAgents.copied': 'Copied',
+    'extAgents.hidden': '{n} more you cannot open',
   },
   uk: {
     'extAgents.title': 'Зовнішні агенти',
@@ -59,7 +60,7 @@ extendDict({
     'extAgents.none': 'Зовнішніх агентів ще немає',
     'extAgents.noneHint': 'Створіть по одному на кожного агента, що працює сам, – тоді його коментарі й зміни будуть під його іменем, а не вашим.',
     'extAgents.owner': 'Власник',
-    'extAgents.ownerHint': 'Людина, яка стоїть за агентом. Його питання без адресата йдуть їй.',
+    'extAgents.ownerHint': 'Людина, яка стоїть за агентом, – на кого він працює.',
     'extAgents.noProjects': 'Ще немає проєктів – додайте його в Налаштуваннях проєкту → Доступ',
     'extAgents.projects': 'Проєкти',
     'extAgents.tokens': 'Токени',
@@ -84,6 +85,7 @@ extendDict({
     'extAgents.otherClients': 'Інші MCP-клієнти (JSON)',
     'extAgents.manage': 'Керувати',
     'extAgents.copied': 'Скопійовано',
+    'extAgents.hidden': 'ще {n}, недоступних вам',
   },
 });
 
@@ -92,6 +94,7 @@ interface ExternalAgent {
   id: string; name: string; avatar: string | null; isActive: boolean; roleName: string;
   ownerUserId: string; ownerName: string | null;
   projects: { id: string; key: string; name: string }[];
+  hiddenProjects: number;
   tokens: ExternalAgentToken[];
 }
 
@@ -136,7 +139,7 @@ export function ExternalAgentsSection() {
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-faint">
                     <span>{t('extAgents.owner')}: {a.ownerName ?? '–'}</span>
                     <span>· {a.roleName || '–'}</span>
-                    <span>· {a.projects.length ? a.projects.map((p) => p.key).join(', ') : t('extAgents.noProjects')}</span>
+                    <span>· {a.projects.length || a.hiddenProjects ? [...a.projects.map((p) => p.key), ...(a.hiddenProjects ? [t('extAgents.hidden').replace('{n}', String(a.hiddenProjects))] : [])].join(', ') : t('extAgents.noProjects')}</span>
                     <span>· {t('extAgents.tokens')}: {a.tokens.length}</span>
                   </div>
                 </div>
@@ -260,7 +263,8 @@ function ManageDialog({ agent, onClose }: { agent: ExternalAgent; onClose: () =>
         <div>
           <div className="mb-1 text-xs font-medium text-muted-foreground">{t('extAgents.projects')}</div>
           <p className="text-[13px]">
-            {agent.projects.length ? agent.projects.map((p) => `${p.key} · ${p.name}`).join(', ') : <span className="text-muted-foreground">{t('extAgents.noProjects')}</span>}
+            {agent.projects.length ? agent.projects.map((p) => `${p.key} · ${p.name}`).join(', ') : !agent.hiddenProjects && <span className="text-muted-foreground">{t('extAgents.noProjects')}</span>}
+            {agent.hiddenProjects > 0 && <span className="text-muted-foreground">{agent.projects.length ? ' · ' : ''}{t('extAgents.hidden').replace('{n}', String(agent.hiddenProjects))}</span>}
           </p>
         </div>
 
