@@ -4,7 +4,7 @@
  */
 import type { MiddlewareHandler } from 'hono';
 import { getCookie } from 'hono/cookie';
-import { getDb, schema, eq, and } from '@ordi/db';
+import { getDb, schema, eq, and, isNull } from '@ordi/db';
 import type { AppEnv, Actor } from '../context';
 import { err } from '../lib/errors';
 import { sha256 } from '../lib/crypto';
@@ -45,7 +45,9 @@ export async function resolveActor(
       readOnly = token.readOnly;
       apiTokenId = token.id;
       tokenName = token.name.replace(/\s*\(OAuth\)$/, '');
-      if (opts.touch !== false) db.update(schema.apiTokens).set({ lastUsedAt: new Date() }).where(eq(schema.apiTokens.id, token.id)).catch(() => {});
+      // Never stamped on a token revoked since it was read (the OAuth clean-up
+      // may have just taken it): a revoked row keeps its last real use.
+      if (opts.touch !== false) db.update(schema.apiTokens).set({ lastUsedAt: new Date() }).where(and(eq(schema.apiTokens.id, token.id), isNull(schema.apiTokens.revokedAt))).catch(() => {});
     } else {
       // Bearer session token (desktop/Tauri client, PRD §18): the tauri://
       // origin cannot share same-site cookies, so the login-issued session

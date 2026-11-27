@@ -9,6 +9,8 @@ import { SectionHead, Field, RowList, AnimatedRow, Disclosure } from './primitiv
 import { useT, extendDict } from '../../lib/i18n';
 import { mcpToolsOfKind } from '@ordi/shared';
 import { MyAgentCard } from './MyAgentCard';
+import { OAuthConnectionGroup } from './OAuthConnectionGroup';
+import { groupConnections } from './oauthConnections';
 
 extendDict({
   en: {
@@ -146,6 +148,8 @@ interface ApiToken {
   lastUsedAt?: string | null;
   revokedAt?: string | null;
   createdAt?: string | null;
+  /** The client a sign-in connected; null for a token made by hand. */
+  client?: string | null;
 }
 
 /** The catalog the MCP server serves, split by whether a tool changes anything. */
@@ -175,6 +179,8 @@ export function McpPanel() {
   });
 
   const rows = tokens.data?.data ?? [];
+  // Sign-ins grouped by client; tokens made by hand one by one, as before.
+  const { groups, others } = groupConnections(rows, (tok) => tok.client);
   const mcpUrl = `${appOrigin()}/api/v1/mcp`;
 
   return (
@@ -202,7 +208,7 @@ export function McpPanel() {
       <div className="mb-2 flex items-end justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">{t('mcp.access')}</div>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t('mcp.accessHint')}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{t('mcp.accessHint')} {t('oauth.cleanup')}</p>
         </div>
         {/* Plain API tokens (CI, scripts) are made here too – this is the only
           * token list, the profile no longer keeps a second one. */}
@@ -231,11 +237,28 @@ export function McpPanel() {
         <div className="space-y-2">{[0, 1].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
       ) : tokens.isError ? (
         <p className="py-3 text-[13px] text-destructive">{t('mcp.loadFailed')}</p>
-      ) : rows.length === 0 ? (
+      ) : groups.length === 0 && others.length === 0 ? (
         <RowList><EmptyState icon={<KeyRound size={18} />} title={t('mcp.noTokens')} hint={t('mcp.noTokensHint')} /></RowList>
       ) : (
         <RowList>
-          {rows.map((tok, i) => {
+          {groups.map((group, i) => (
+            <AnimatedRow key={`client:${group.client}`} index={i} className="flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-0">
+              <OAuthConnectionGroup
+                group={group}
+                revokeLabel={t('mcp.revoke')}
+                onRevoke={setRevokeTarget}
+                detail={(tok) => (
+                  <>
+                    <span className="font-mono text-[11px]">{tok.prefix ?? '?'}…</span>
+                    {tok.createdAt && <> · {t('oauth.signedIn').replace('{date}', fmtDate(tok.createdAt))}</>}
+                    {' · '}{t('mcp.lastUsed')}: {tok.lastUsedAt ? fmtRelative(tok.lastUsedAt) : t('mcp.never')}
+                  </>
+                )}
+              />
+            </AnimatedRow>
+          ))}
+          {others.map((tok, j) => {
+            const i = groups.length + j;
             const dead = !!tok.revokedAt;
             return (
               <AnimatedRow key={tok.id} index={i} className="flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-0">
@@ -299,7 +322,7 @@ export function McpPanel() {
         onClose={() => setRevokeTarget(null)}
         onConfirm={() => { if (revokeTarget) revoke.mutate(revokeTarget.id); }}
         title={t('mcp.revokeTitle')}
-        body={t('mcp.revokeBody').replace('{name}', revokeTarget?.name ?? '')}
+        body={t('mcp.revokeBody').replace('{name}', revokeTarget ? `${revokeTarget.name}${revokeTarget.prefix ? ` (${revokeTarget.prefix}…)` : ''}` : '')}
         confirmLabel={t('mcp.revoke')}
         danger
         pending={revoke.isPending}

@@ -1,0 +1,1 @@
+CREATE INDEX "api_tokens_oauth_live_idx" ON "api_tokens" USING btree ("last_used_at","created_at") WHERE oauth_client_id is not null and revoked_at is null;
