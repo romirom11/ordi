@@ -25,6 +25,7 @@ import { CareersPage } from './pages/public/Careers';
 import { Spinner, Button, Input, Card } from './components/ui';
 import { BrandMark } from './components/BrandMark';
 import { installErrorReporting } from './lib/sentry';
+import { installFileLinkRefresh } from './lib/fileLinks';
 import { isTauri, installExternalLinkHandler } from './lib/desktop';
 import { getInstanceUrl, setInstanceUrl } from './lib/api';
 import { useT } from './lib/i18n';
@@ -39,6 +40,9 @@ installExternalLinkHandler();
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
 });
+// File links expire within the hour: an image that outlived its link asks for
+// a fresh one, or has the documents on screen read again.
+installFileLinkRefresh(() => { void queryClient.invalidateQueries({ type: 'active' }); });
 
 /** Desktop first launch (PRD §18): ask for the ordi instance URL. */
 function InstanceGate() {

@@ -3,7 +3,7 @@
  * (one cached query per request), and assert helpers used by services.
  */
 import { getDb, schema, eq, and, inArray, isNull, or, sql, type SQL } from '@ordi/db';
-import { type AccessContext, projectAccessRank, spaceAccessRank } from '@ordi/shared';
+import { type AccessContext, canSeePage, projectAccessRank, spaceAccessRank } from '@ordi/shared';
 import type { Actor } from '../context';
 import { err } from '../lib/errors';
 import { loadRolePermissions } from './rbac';
@@ -224,6 +224,44 @@ export async function assertProject(
 }
 
 /**
+ * The level an access context holds on a space – membership, the linked
+ * project's effective role, or workspace permissions – or null when the space
+ * (or the project it went with) is gone. The one reading of the rule, for the
+ * request's actor (assertSpace) and for a named person (userCanOpenPage).
+ */
+async function spaceRank(
+  access: AccessContext,
+  spaceId: string,
+): Promise<{ space: { id: string; visibility: 'workspace' | 'private'; projectId: string | null }; rank: number } | null> {
+  const { db } = getDb();
+  const [space] = await db
+    .select({ id: schema.kbSpaces.id, visibility: schema.kbSpaces.visibility, projectId: schema.kbSpaces.projectId })
+    .from(schema.kbSpaces)
+    .where(and(eq(schema.kbSpaces.id, spaceId), isNull(schema.kbSpaces.deletedAt)));
+  if (!space) return null;
+  let inheritedProjectRole: 'admin' | 'member' | 'viewer' | null = null;
+  if (space.projectId) {
+    const [project] = await db
+      .select({ id: schema.projects.id, visibility: schema.projects.visibility })
+      .from(schema.projects)
+      .where(and(eq(schema.projects.id, space.projectId), isNull(schema.projects.deletedAt)));
+    if (!project) return null; // went with its deleted project
+    inheritedProjectRole = PROJECT_ROLE_OF_RANK[projectAccessRank(access, {
+      visibility: project.visibility as 'workspace' | 'private',
+      projectId: project.id,
+    })] ?? null;
+  }
+  const visibility = space.visibility as 'workspace' | 'private';
+  const rank = spaceAccessRank(access, {
+    visibility,
+    spaceId,
+    inheritedProjectRole,
+    projectLinked: !!space.projectId,
+  });
+  return { space: { ...space, visibility }, rank };
+}
+
+/**
  * Assert space access; project-linked spaces inherit project membership.
  * Same 404-vs-403 split as assertProject.
  */
@@ -232,30 +270,9 @@ export async function assertSpace(
   spaceId: string,
   minRole: 'viewer' | 'editor' = 'viewer',
 ): Promise<{ id: string; visibility: 'workspace' | 'private'; projectId: string | null }> {
-  const { db } = getDb();
-  const [space] = await db
-    .select({ id: schema.kbSpaces.id, visibility: schema.kbSpaces.visibility, projectId: schema.kbSpaces.projectId })
-    .from(schema.kbSpaces)
-    .where(and(eq(schema.kbSpaces.id, spaceId), isNull(schema.kbSpaces.deletedAt)));
-  if (!space) throw err.notFound('Space not found');
-  let inheritedProjectRole: 'admin' | 'member' | 'viewer' | null = null;
-  if (space.projectId) {
-    const [project] = await db
-      .select({ id: schema.projects.id, visibility: schema.projects.visibility })
-      .from(schema.projects)
-      .where(and(eq(schema.projects.id, space.projectId), isNull(schema.projects.deletedAt)));
-    if (!project) throw err.notFound('Space not found'); // went with its deleted project
-    inheritedProjectRole = effectiveProjectRole(actor, {
-      id: project.id,
-      visibility: project.visibility as 'workspace' | 'private',
-    });
-  }
-  const rank = spaceAccessRank(actor.access, {
-    visibility: space.visibility as 'workspace' | 'private',
-    spaceId,
-    inheritedProjectRole,
-    projectLinked: !!space.projectId,
-  });
+  const found = await spaceRank(actor.access, spaceId);
+  if (!found) throw err.notFound('Space not found');
+  const { space, rank } = found;
   if (rank < SPACE_RANK[minRole]) {
     if (rank < SPACE_RANK.viewer) throw err.notFound('Space not found');
     throw err.forbidden(
@@ -263,7 +280,7 @@ export async function assertSpace(
       'kb.write',
     );
   }
-  return { ...space, visibility: space.visibility as 'workspace' | 'private' };
+  return space;
 }
 
 /**
@@ -285,6 +302,33 @@ export async function userCanOpenProject(userId: string, projectId: string): Pro
   const access = await buildAccessContext(user.id, await loadRolePermissions(user.roleId), false);
   if (user.actorType === 'agent') return access.projectMemberships.has(projectId);
   return projectAccessRank(access, { visibility: project.visibility as 'workspace' | 'private', projectId }) > 0;
+}
+
+/**
+ * Whether a given person can open a knowledge-base page now: the space by the
+ * rule assertSpace holds every request to (project-linked spaces included),
+ * then the page itself by canSeePage – a draft is for the space's editors, a
+ * private page for its author and the editors. Checked before telling someone
+ * about a page, so a mention never carries the title of a page closed to them.
+ * A deleted page, space or project, an inactive or unknown user: no. An agent:
+ * no as well – agents are never told about anything, and a personal agent's
+ * reach is its owner's, bounded (buildPersonalAgentAccess), which this does
+ * not model; answering from the agent's own role would be wrong either way.
+ */
+export async function userCanOpenPage(userId: string, pageId: string): Promise<boolean> {
+  const { db } = getDb();
+  const [user] = await db.select({ id: schema.users.id, isActive: schema.users.isActive, actorType: schema.users.actorType, roleId: schema.users.roleId })
+    .from(schema.users).where(eq(schema.users.id, userId));
+  if (!user || !user.isActive || user.actorType !== 'user') return false;
+  const [page] = await db
+    .select({ spaceId: schema.kbPages.spaceId, published: schema.kbPages.published, visibility: schema.kbPages.visibility, createdBy: schema.kbPages.createdBy })
+    .from(schema.kbPages)
+    .where(and(eq(schema.kbPages.id, pageId), isNull(schema.kbPages.deletedAt)));
+  if (!page) return false;
+  const access = await buildAccessContext(user.id, await loadRolePermissions(user.roleId), false);
+  const found = await spaceRank(access, page.spaceId);
+  if (!found || found.rank < SPACE_RANK.viewer) return false;
+  return canSeePage(page, user.id, found.rank >= SPACE_RANK.editor);
 }
 
 /**

@@ -1,40 +1,32 @@
 /**
- * RBAC execution (PRD §4.5). Permission set per role is cached in-process and
- * invalidated by the `role.updated` event. Guards are declarative per route.
+ * RBAC execution (PRD §4.5). A role's permission set is read from the database
+ * on every request (see loadRolePermissions). Guards are declarative per route.
  */
 import type { MiddlewareHandler } from 'hono';
-import { getDb, schema, eq } from '@ordi/db';
+import { getDb, schema, eq, type Database } from '@ordi/db';
 import { type Permission } from '@ordi/shared';
 import type { AppEnv, Actor } from '../context';
 import { err } from '../lib/errors';
 
-const rolePermCache = new Map<string, Set<string>>();
-
-export async function loadRolePermissions(roleId: string): Promise<Set<string>> {
-  const cached = rolePermCache.get(roleId);
-  if (cached) return cached;
-  const { db } = getDb();
-  const rows = await db.select().from(schema.rolePermissions).where(eq(schema.rolePermissions.roleId, roleId));
-  const set = new Set(rows.map((r) => r.permission));
-  rolePermCache.set(roleId, set);
-  return set;
-}
-
 /**
- * The role's permissions straight from the database. The cache above is
- * cleared only in the process that edited the role; a personal agent's reach
- * must follow its owner's role at once in every process, so it reads this.
+ * A role's permissions, read from the database on every call – deliberately
+ * not cached. The API, the agent worker and any extra API replica each
+ * resolve actors, and a cache held in one of them was cleared only by the
+ * process that edited the role: everywhere else a removed permission kept
+ * working until a restart. The read is one lookup on the role_permissions
+ * primary key, next to the session, user and membership reads every request
+ * makes anyway; a cache would need cross-process invalidation to be correct,
+ * and saving one indexed query is not worth that.
+ *
+ * Pass `reader` (a transaction) to read inside one, on its own connection.
  */
-export async function readRolePermissions(roleId: string): Promise<Set<string>> {
-  const { db } = getDb();
-  const rows = await db.select({ permission: schema.rolePermissions.permission }).from(schema.rolePermissions)
+export async function loadRolePermissions(
+  roleId: string,
+  reader: Pick<Database, 'select'> = getDb().db,
+): Promise<Set<string>> {
+  const rows = await reader.select({ permission: schema.rolePermissions.permission }).from(schema.rolePermissions)
     .where(eq(schema.rolePermissions.roleId, roleId));
   return new Set(rows.map((r) => r.permission));
-}
-
-export function invalidateRoleCache(roleId?: string): void {
-  if (roleId) rolePermCache.delete(roleId);
-  else rolePermCache.clear();
 }
 
 /**

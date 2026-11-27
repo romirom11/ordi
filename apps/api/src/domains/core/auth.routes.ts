@@ -192,7 +192,12 @@ export function authRoutes() {
       scopes: schema.apiTokens.scopes, readOnly: schema.apiTokens.readOnly,
       lastUsedAt: schema.apiTokens.lastUsedAt, revokedAt: schema.apiTokens.revokedAt,
       createdAt: schema.apiTokens.createdAt,
-    }).from(schema.apiTokens).where(eq(schema.apiTokens.userId, actor.userId));
+      // The client a sign-in connected, so the panel can group its
+      // connections; null for a token made by hand.
+      client: schema.oauthClients.name,
+    }).from(schema.apiTokens)
+      .leftJoin(schema.oauthClients, eq(schema.oauthClients.id, schema.apiTokens.oauthClientId))
+      .where(eq(schema.apiTokens.userId, actor.userId));
     return c.json({ data: rows });
   });
 

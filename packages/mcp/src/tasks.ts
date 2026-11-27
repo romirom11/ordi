@@ -224,7 +224,11 @@ const normalizeText = (value: string): string => docToText(textToDoc(value));
  * the card still says what MCP put there, different means somebody changed it.
  */
 function fingerprint(parts: { title?: unknown; text?: unknown; dueDate?: unknown; statusId?: unknown }): string {
-  const flat = [parts.title, parts.text, parts.dueDate, parts.statusId].map((p) => (p == null ? '' : String(p))).join('\u0000');
+  // An embedded file's link is signed afresh with every read (it expires
+  // within the hour): the file it names is what counts, not the token.
+  const flat = [parts.title, parts.text, parts.dueDate, parts.statusId]
+    .map((p) => (p == null ? '' : String(p).replace(/(\/api\/v1\/files\/[0-9A-Za-z_-]+)\/[0-9]*\.?[0-9a-f]{32}/g, '$1')))
+    .join('\u0000');
   return createHash('sha256').update(flat).digest('hex').slice(0, 16);
 }
 

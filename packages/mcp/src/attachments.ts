@@ -48,6 +48,7 @@ export function registerAttachmentTools(server: McpServer, client: OrdiClient): 
     'Upload a file to ordi storage and get back its signed src/url. '
       + 'For images that should appear inline in a task description, upload once per image (no entityType), then embed each returned src exactly where you want it in the task text as `![alt](src)` – that lets you interleave multiple images with prose at arbitrary positions (e.g. Step 1, screenshot, Step 2, screenshot). '
       + 'With entityType + entityId the file appears in that record\'s Files section instead. '
+      + 'The url opens the file for about an hour; a src embedded in a body keeps working, because every read of the body signs it afresh. '
       + 'Typical flow for a bug report with two screenshots at different steps: '
       + '1) upload_attachment {filename:"step1.png", data:"<base64>"} → {src}, '
       + '2) upload_attachment {filename:"step2.png", data:"<base64>"} → {src}, '

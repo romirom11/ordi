@@ -4,12 +4,12 @@
  */
 import type { MiddlewareHandler } from 'hono';
 import { getCookie } from 'hono/cookie';
-import { getDb, schema, eq, and } from '@ordi/db';
+import { getDb, schema, eq, and, isNull } from '@ordi/db';
 import type { AppEnv, Actor } from '../context';
 import { err } from '../lib/errors';
 import { sha256 } from '../lib/crypto';
 import { PERSONAL_AGENT_PERMISSIONS } from '@ordi/shared';
-import { effectivePermissions, readRolePermissions } from './rbac';
+import { effectivePermissions, loadRolePermissions } from './rbac';
 import { buildAccessContext, buildPersonalAgentAccess } from './access';
 
 export const SESSION_COOKIE = 'ordi_session';
@@ -45,7 +45,9 @@ export async function resolveActor(
       readOnly = token.readOnly;
       apiTokenId = token.id;
       tokenName = token.name.replace(/\s*\(OAuth\)$/, '');
-      if (opts.touch !== false) db.update(schema.apiTokens).set({ lastUsedAt: new Date() }).where(eq(schema.apiTokens.id, token.id)).catch(() => {});
+      // Never stamped on a token revoked since it was read (the OAuth clean-up
+      // may have just taken it): a revoked row keeps its last real use.
+      if (opts.touch !== false) db.update(schema.apiTokens).set({ lastUsedAt: new Date() }).where(and(eq(schema.apiTokens.id, token.id), isNull(schema.apiTokens.revokedAt))).catch(() => {});
     } else {
       // Bearer session token (desktop/Tauri client, PRD §18): the tauri://
       // origin cannot share same-site cookies, so the login-issued session
@@ -75,8 +77,8 @@ export async function resolveActor(
       const [owner] = await db.select({ isActive: schema.users.isActive, roleId: schema.users.roleId })
         .from(schema.users).where(eq(schema.users.id, ext.ownerUserId));
       if (!owner?.isActive) return null;
-      // Uncached: a role edited in another process must bind the agent now.
-      const ownerPerms = await readRolePermissions(owner.roleId);
+      // The owner's role as it stands now, like every actor's.
+      const ownerPerms = await loadRolePermissions(owner.roleId);
       const allowed = PERSONAL_AGENT_PERMISSIONS.filter((p) => ownerPerms.has(p) && (!tokenScopes || tokenScopes.includes(p)));
       const permissions = new Set<string>(allowed);
       return {

@@ -40,9 +40,23 @@ export interface DraftSyncState<F extends DraftFields> {
 
 export type SyncStatus = 'saved' | 'unsaved' | 'restored' | 'saving' | 'failed' | 'conflict';
 
-/** Order-independent comparison: jsonb hands object keys back in its own order. */
+/**
+ * A file path without its token. Every read signs the files a document
+ * embeds afresh (links expire within the hour), so the same document comes
+ * back with different tokens: that is not a change anybody made.
+ */
+const FILE_TOKEN = /(\/api\/v1\/files\/[0-9A-Za-z_-]+)\/[0-9]*\.?[0-9a-f]{32}/g;
+export function withoutFileTokens(s: string): string {
+  return s.replace(FILE_TOKEN, '$1');
+}
+
+/**
+ * Order-independent comparison: jsonb hands object keys back in its own
+ * order. File links compare by the file they name, not by their token.
+ */
 export function stableKey(value: unknown): string {
   return JSON.stringify(value, (_k, v: unknown) => {
+    if (typeof v === 'string') return withoutFileTokens(v);
     if (!v || typeof v !== 'object' || Array.isArray(v)) return v;
     const out: Record<string, unknown> = {};
     for (const k of Object.keys(v as Record<string, unknown>).sort()) out[k] = (v as Record<string, unknown>)[k];

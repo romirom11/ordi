@@ -1,8 +1,9 @@
 /**
  * Connecting an MCP client by signing in, as the person's own agent: the
  * consent page offers it, the code carries it, the exchange checks it again
- * and issues the agent's token. Connecting the same client again for the
- * same target replaces the earlier OAuth token instead of adding one.
+ * and issues the agent's token. Every consent is a connection of its own:
+ * signing in again keeps the earlier ones, and the scheduled clean-up
+ * revokes those never used or long idle – and nothing else.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import { createHash, randomBytes } from 'node:crypto';
@@ -10,6 +11,7 @@ import { ulid } from 'ulid';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { getDb, schema, eq, sql } from '@ordi/db';
+import { runOAuthTokenCleanup } from '../workers/scheduled';
 import { PERSONAL_AGENT_PERMISSIONS } from '@ordi/shared';
 import { app, resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
 import { setupWorkspace, type Workspace } from './agents-helpers';
@@ -58,10 +60,12 @@ async function approve(cookie: string, clientId: string, actAs?: 'me' | 'agent',
   return { res, verifier };
 }
 
+let exchanges = 0;
 async function exchange(clientId: string, code: string, verifier: string, redirect = REDIRECT) {
   return app.request('/api/v1/oauth/token', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    // Its own address each: the token endpoint is rate-limited per address too.
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'x-forwarded-for': `10.8.${Math.floor(++exchanges / 250)}.${exchanges % 250}` },
     body: new URLSearchParams({ grant_type: 'authorization_code', code, code_verifier: verifier, redirect_uri: redirect, client_id: clientId }),
   });
 }
@@ -209,53 +213,22 @@ describe('the agent is checked again at the exchange', () => {
 });
 
 describe('connecting the same client again', () => {
-  it('replaces the earlier OAuth token for that target, and nothing else', async () => {
-    const { db } = getDb();
-    // Clients register afresh on reconnect: a new client id under the same name.
-    const first = await connect(users.owner!.cookie, await registerClient('Codex CLI'), 'agent');
-    const asMe = await connect(users.owner!.cookie, await registerClient('Codex CLI'), 'me');
-    const otherClient = await connect(users.owner!.cookie, await registerClient('Zed'), 'agent');
-    const handMadeForAgent = (await json(owner().post('/my-agent/tokens', { client: 'Codex CLI', expiresInDays: 30 }))).token as string;
-    const handMadeForMe = (await json(owner().post('/auth/tokens', { name: 'Codex CLI (OAuth)', scopes: ['projects.read'], readOnly: true }))).token as string;
-    for (const raw of [first, asMe, otherClient, handMadeForAgent]) expect(await tokenWorks(raw)).toBe(true);
-
-    const second = await connect(users.owner!.cookie, await registerClient('Codex CLI'), 'agent');
-    expect(await tokenWorks(second)).toBe(true);
-    expect(await tokenWorks(first)).toBe(false);
-    // The person's own connection of that client, another client, and tokens
-    // made by hand all keep working.
-    expect(await tokenWorks(asMe)).toBe(true);
-    expect(await tokenWorks(otherClient)).toBe(true);
-    expect(await tokenWorks(handMadeForAgent)).toBe(true);
-
-    // As me, again: the person's earlier connection goes, the agent's stays.
-    const asMeAgain = await connect(users.owner!.cookie, await registerClient('Codex CLI'), 'me');
-    expect(await tokenWorks(asMeAgain)).toBe(true);
-    expect(await tokenWorks(asMe)).toBe(false);
-    expect(await tokenWorks(second)).toBe(true);
-    // A hand-made token is never an OAuth one, whatever it is called.
-    expect(await tokenWorks(handMadeForMe)).toBe(true);
-
-    const live = await db.select().from(schema.apiTokens).where(eq(schema.apiTokens.userId, agentId));
-    expect(live.filter((t) => !t.revokedAt && t.name === 'Codex CLI').length).toBe(2); // the OAuth one and the hand-made one
-  });
-
-  it('a look-alike client under the same name does not cut off the real one', async () => {
-    const real = await connect(users.owner!.cookie, await registerClient('Claude Desktop'), 'agent');
-    // Someone registers a client called the same, sending codes to their own host.
-    const evilRedirect = 'https://evil.example.com/cb';
-    const lookAlike = await connect(users.owner!.cookie, await registerClient('Claude Desktop', evilRedirect), 'agent', evilRedirect);
-    expect(await tokenWorks(lookAlike)).toBe(true);
-    expect(await tokenWorks(real)).toBe(true);
-    // The real client reconnecting on another loopback port is still the same client.
+  it('keeps every earlier connection, for both targets', async () => {
+    // Clients register afresh on reconnect: a new client id under the same
+    // name. A laptop and a server each sign in; neither cuts the other off.
+    const laptop = await connect(users.owner!.cookie, await registerClient('Codex CLI'), 'agent');
+    const laptopAsMe = await connect(users.owner!.cookie, await registerClient('Codex CLI'), 'me');
+    const server = await connect(users.owner!.cookie, await registerClient('Codex CLI'), 'agent');
+    const serverAsMe = await connect(users.owner!.cookie, await registerClient('Codex CLI'), 'me');
+    // The same machine on another loopback port, the same registration twice.
     const otherPort = 'http://127.0.0.1:47001/callback';
-    const again = await connect(users.owner!.cookie, await registerClient('Claude Desktop', otherPort), 'agent', otherPort);
-    expect(await tokenWorks(again)).toBe(true);
-    expect(await tokenWorks(real)).toBe(false);
-    expect(await tokenWorks(lookAlike)).toBe(true);
+    const clientId = await registerClient('Codex CLI', otherPort);
+    const again = await connect(users.owner!.cookie, clientId, 'agent', otherPort);
+    const againSame = await connect(users.owner!.cookie, clientId, 'agent', otherPort);
+    for (const raw of [laptop, laptopAsMe, server, serverAsMe, again, againSame]) expect(await tokenWorks(raw)).toBe(true);
   });
 
-  it('a person\'s pile of OAuth tokens from before the upgrade is cleared by the next consent', async () => {
+  it('a person\'s OAuth tokens from before the upgrade are tied to their client, and kept by the next consent', async () => {
     const { db } = getDb();
     const clientId = await registerClient('Claude');
     const legacy: string[] = [];
@@ -288,14 +261,138 @@ describe('connecting the same client again', () => {
     await db.execute(sql.raw(backfill));
     const tied = await db.select().from(schema.apiTokens).where(eq(schema.apiTokens.userId, users.manager!.userId));
     expect(tied.filter((t) => t.oauthClientId === clientId)).toHaveLength(3);
-    for (const raw of [...legacy, handMade, handMadeSuffix, unknownClient]) expect(await tokenWorks(raw)).toBe(true);
+    // Only the tied ones are the clean-up's to judge.
+    for (const raw of [handMade, handMadeSuffix, unknownClient]) {
+      expect(tied.find((t) => t.prefix === raw.slice(0, 12))!.oauthClientId).toBeNull();
+    }
 
     const fresh = await connect(users.manager!.cookie, await registerClient('Claude'));
-    expect(await tokenWorks(fresh)).toBe(true);
-    for (const raw of legacy) expect(await tokenWorks(raw)).toBe(false);
-    expect(await tokenWorks(handMade)).toBe(true);
-    expect(await tokenWorks(handMadeSuffix)).toBe(true);
-    expect(await tokenWorks(unknownClient)).toBe(true);
+    for (const raw of [fresh, ...legacy, handMade, handMadeSuffix, unknownClient]) expect(await tokenWorks(raw)).toBe(true);
+  });
+});
+
+describe('the clean-up of unused sign-ins', () => {
+  const HOUR = 3600_000;
+  const DAY = 24 * HOUR;
+  const { db } = getDb();
+  const rowOf = async (raw: string) => (await db.select().from(schema.apiTokens).where(eq(schema.apiTokens.prefix, raw.slice(0, 12))))[0]!;
+  const age = async (raw: string, { created, used }: { created: number; used: number | null }) => {
+    await db.update(schema.apiTokens).set({
+      createdAt: new Date(Date.now() - created),
+      lastUsedAt: used === null ? null : new Date(Date.now() - used),
+    }).where(eq(schema.apiTokens.prefix, raw.slice(0, 12)));
+  };
+  /** Every token of the test that is still live, so earlier tests' tokens do not count. */
+  const revokedOf = async (raws: string[]) => {
+    const out: Record<string, boolean> = {};
+    for (const raw of raws) out[raw] = !!(await rowOf(raw)).revokedAt;
+    return out;
+  };
+
+  it('revokes OAuth tokens never used within a day or idle for 90 days, and nothing else', async () => {
+    const clientId = await registerClient('Claude Code');
+    // Issued through the sign-in, for the person and for their agent.
+    const neverUsedMe = await connect(users.owner!.cookie, clientId, 'me');
+    const neverUsedAgent = await connect(users.owner!.cookie, clientId, 'agent');
+    const idleMe = await connect(users.owner!.cookie, clientId, 'me');
+    const idleAgent = await connect(users.owner!.cookie, clientId, 'agent');
+    const freshUnused = await connect(users.owner!.cookie, clientId, 'me');
+    const usedRecently = await connect(users.owner!.cookie, clientId, 'agent');
+    const usedLongAgo = await connect(users.owner!.cookie, clientId, 'me');
+    // Every other kind of token, all as old and unused as can be.
+    const handMade = (await json(owner().post('/auth/tokens', { name: 'Claude Code (OAuth)', scopes: ['projects.read'], readOnly: true }))).token as string;
+    const myAgentCard = (await json(owner().post('/my-agent/tokens', { client: 'Claude Code', expiresInDays: null }))).token as string;
+    const bot = await json(owner().post('/external-agents', { name: 'Cleanup bot' }));
+    const teamBot = (await json(owner().post(`/external-agents/${bot.id}/tokens`, { name: 'CI', expiresInDays: null }))).token as string;
+    const agentRun = `ordi_${randomBytes(18).toString('base64url')}`;
+    await db.insert(schema.apiTokens).values({
+      id: ulid(), userId: agentId, name: 'agent run 01TEST', hash: createHash('sha256').update(agentRun).digest('hex'),
+      prefix: agentRun.slice(0, 12), scopes: ['projects.read'],
+    });
+
+    await age(neverUsedMe, { created: 25 * HOUR, used: null });
+    await age(neverUsedAgent, { created: 25 * HOUR, used: null });
+    await age(idleMe, { created: 200 * DAY, used: 91 * DAY });
+    await age(idleAgent, { created: 95 * DAY, used: 91 * DAY });
+    await age(freshUnused, { created: 23 * HOUR, used: null });
+    await age(usedRecently, { created: 200 * DAY, used: 2 * DAY });
+    await age(usedLongAgo, { created: 200 * DAY, used: 89 * DAY });
+    for (const raw of [handMade, myAgentCard, teamBot, agentRun]) await age(raw, { created: 400 * DAY, used: null });
+
+    const result = await runOAuthTokenCleanup();
+    expect(result.revoked).toBeGreaterThanOrEqual(4);
+    expect(await revokedOf([neverUsedMe, neverUsedAgent, idleMe, idleAgent])).toEqual({
+      [neverUsedMe]: true, [neverUsedAgent]: true, [idleMe]: true, [idleAgent]: true,
+    });
+    expect(await revokedOf([freshUnused, usedRecently, usedLongAgo, handMade, myAgentCard, teamBot, agentRun])).toEqual({
+      [freshUnused]: false, [usedRecently]: false, [usedLongAgo]: false,
+      [handMade]: false, [myAgentCard]: false, [teamBot]: false, [agentRun]: false,
+    });
+    for (const raw of [neverUsedMe, neverUsedAgent, idleMe, idleAgent]) expect(await tokenWorks(raw)).toBe(false);
+    // The team bot is in no project, so it cannot open the task either way: its row says it is live.
+    for (const raw of [freshUnused, usedRecently, usedLongAgo, handMade, myAgentCard, agentRun]) expect(await tokenWorks(raw)).toBe(true);
+
+    // One activity entry per token, on the agent or the person, by the system.
+    // Matched by token, not by time: the database keeps its own clock.
+    const systemRevocations = () => db.select().from(schema.activityLog)
+      .where(sql`${schema.activityLog.action} = 'token_revoked' and ${schema.activityLog.actorType} = 'system'`);
+    const entries = await systemRevocations();
+    const byToken = new Map(entries.map((e) => [(e.diff as { tokenId: string }).tokenId, e]));
+    expect(byToken.get((await rowOf(neverUsedMe)).id)).toMatchObject({ entityType: 'user', entityId: users.owner!.userId, diff: { client: 'Claude Code', reason: 'never_used', oauth: true } });
+    expect(byToken.get((await rowOf(neverUsedAgent)).id)).toMatchObject({ entityType: 'agent', entityId: agentId, diff: { client: 'Claude Code', reason: 'never_used' } });
+    expect(byToken.get((await rowOf(idleMe)).id)).toMatchObject({ entityType: 'user', diff: { reason: 'idle' } });
+    expect(byToken.get((await rowOf(idleAgent)).id)).toMatchObject({ entityType: 'agent', diff: { reason: 'idle' } });
+    for (const raw of [freshUnused, usedRecently, usedLongAgo]) expect(byToken.has((await rowOf(raw)).id)).toBe(false);
+
+    // Running it again finds nothing more to do.
+    expect((await runOAuthTokenCleanup()).revoked).toBe(0);
+    expect((await systemRevocations()).length).toBe(entries.length);
+  });
+
+  it('leaves an expired token alone, and a late use never stamps a revoked one', async () => {
+    const clientId = await registerClient('Claude Code');
+    // An agent connection past its 90-day expiry is already refused: not the clean-up's.
+    const expired = await connect(users.owner!.cookie, clientId, 'agent');
+    await age(expired, { created: 200 * DAY, used: 120 * DAY });
+    await db.update(schema.apiTokens).set({ expiresAt: new Date(Date.now() - 30 * DAY) }).where(eq(schema.apiTokens.prefix, expired.slice(0, 12)));
+    const unused = await connect(users.owner!.cookie, clientId, 'me');
+    await age(unused, { created: 25 * HOUR, used: null });
+    await runOAuthTokenCleanup();
+    expect((await rowOf(expired)).revokedAt).toBeNull();
+    expect(await tokenWorks(expired)).toBe(false);
+    // The revoked one presented again, on the API and on /mcp: refused, and still "never used".
+    expect((await rowOf(unused)).revokedAt).not.toBeNull();
+    expect(await tokenWorks(unused)).toBe(false);
+    const mcp = await app.request('/api/v1/mcp', { method: 'POST', headers: { authorization: `Bearer ${unused}`, 'content-type': 'application/json' }, body: '{}' });
+    expect(mcp.status).toBe(401);
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await rowOf(unused)).lastUsedAt).toBeNull();
+  });
+
+  it('a client that only connects and lists its tools has used its sign-in', async () => {
+    const raw = await connect(users.owner!.cookie, await registerClient('Claude Code'), 'me');
+    await age(raw, { created: 25 * HOUR, used: null });
+    // The MCP endpoint checks the token before it needs the node server.
+    const res = await app.request('/api/v1/mcp', {
+      method: 'POST', headers: { authorization: `Bearer ${raw}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    });
+    expect(res.status).toBe(501);
+    // The touch is fire-and-forget: wait for it to land.
+    for (let i = 0; i < 50 && !(await rowOf(raw)).lastUsedAt; i++) await new Promise((r) => setTimeout(r, 10));
+    expect((await rowOf(raw)).lastUsedAt).not.toBeNull();
+    await runOAuthTokenCleanup();
+    expect(await tokenWorks(raw)).toBe(true);
+  });
+
+  it('the panel groups sign-ins by client', async () => {
+    const clientId = await registerClient('Grouped client');
+    await connect(users.manager!.cookie, clientId, 'me');
+    await connect(users.manager!.cookie, await registerClient('Grouped client'), 'me');
+    const handMade = await json(reqAs(users.manager!.cookie).post('/auth/tokens', { name: 'Grouped client (OAuth)', scopes: ['projects.read'], readOnly: true }));
+    const list = (await json(reqAs(users.manager!.cookie).get('/auth/tokens'))).data as { id: string; name: string; client: string | null }[];
+    expect(list.filter((t) => t.client === 'Grouped client')).toHaveLength(2);
+    expect(list.find((t) => t.id === handMade.id)!.client).toBeNull();
   });
 });
 
@@ -313,7 +410,7 @@ describe('races and changes between approve and exchange', () => {
     expect(results.map((r) => r.status).sort()).toEqual([200, 400, 400]);
   });
 
-  it('two reconnects of the same client at once leave one live token', async () => {
+  it('two sign-ins of the same client at once both get a working token', async () => {
     const { db } = getDb();
     for (const actAs of ['me', 'agent'] as const) {
       const a = await registerClient(`Twin ${actAs}`);
@@ -323,7 +420,7 @@ describe('races and changes between approve and exchange', () => {
       expect(results.map((r) => r.status)).toEqual([200, 200]);
       const rows = await db.select().from(schema.apiTokens).innerJoin(schema.oauthClients, eq(schema.oauthClients.id, schema.apiTokens.oauthClientId))
         .where(eq(schema.oauthClients.name, `Twin ${actAs}`));
-      expect(rows.filter((r) => !r.api_tokens.revokedAt)).toHaveLength(1);
+      expect(rows.filter((r) => !r.api_tokens.revokedAt)).toHaveLength(2);
     }
   });
 

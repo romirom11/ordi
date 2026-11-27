@@ -8,7 +8,7 @@ import { env } from '../env';
 import { logger } from '../lib/logger';
 import { startRelay } from './relay';
 import { logConsumers } from './consumers';
-import { runAllDailyJobs } from './scheduled';
+import { runAllDailyJobs, runOAuthTokenCleanup } from './scheduled';
 import { pollIntakeMailboxes } from './imap';
 import { startEmailDeliveryWorker } from './email-delivery';
 import { runSalesWorkDigests } from './sales-digest';
@@ -45,17 +45,24 @@ export async function startWorkers(): Promise<void> {
     await boss.createQueue(imapQueue);
     await boss.work(imapQueue, async () => { await pollIntakeMailboxes(); });
     await boss.schedule(imapQueue, '*/10 * * * *');
-    logger.info('pg-boss scheduled daily jobs + sales digests + imap polling');
+    // Unused OAuth sign-ins: hourly, so "a day" means a day and not two.
+    const oauthQueue = 'oauth-token-cleanup';
+    await boss.createQueue(oauthQueue);
+    await boss.work(oauthQueue, async () => { await runOAuthTokenCleanup(); });
+    await boss.schedule(oauthQueue, '35 * * * *');
+    logger.info('pg-boss scheduled daily jobs + sales digests + imap polling + oauth clean-up');
   } catch (e) {
     logger.warn({ err: e }, 'pg-boss unavailable; using interval fallback for daily jobs');
     setInterval(() => { runAllDailyJobs().catch((err) => logger.error({ err }, 'daily jobs failed')); }, 6 * 3600_000);
     setInterval(() => { runSalesWorkDigests().catch((err) => logger.error({ err }, 'sales digest failed')); }, 60 * 60_000);
     setInterval(() => { pollIntakeMailboxes().catch((err) => logger.error({ err }, 'imap poll failed')); }, 10 * 60_000);
+    setInterval(() => { runOAuthTokenCleanup().catch((err) => logger.error({ err }, 'oauth clean-up failed')); }, 60 * 60_000);
   }
 
   // run once shortly after boot so a fresh instance catches up
   setTimeout(() => { runAllDailyJobs().catch((err) => logger.error({ err }, 'initial daily jobs failed')); }, 5_000);
   setTimeout(() => { runSalesWorkDigests().catch((err) => logger.error({ err }, 'initial sales digest failed')); }, 7_000);
+  setTimeout(() => { runOAuthTokenCleanup().catch((err) => logger.error({ err }, 'initial oauth clean-up failed')); }, 9_000);
 }
 
 export async function stopWorkers(): Promise<void> {
