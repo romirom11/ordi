@@ -9,7 +9,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bot, KeyRound } from 'lucide-react';
-import { EXTERNAL_AGENT_TOKEN_DAYS } from '@ordi/shared';
+import { EXTERNAL_AGENT_TOKEN_DAYS, MY_AGENT_TOKEN_DEFAULT_DAYS } from '@ordi/shared';
 import { api, ApiError } from '../../lib/api';
 import { Avatar, Button, Input, Select, Skeleton, Spinner, Switch, cn, fmtDate, fmtRelative } from '../ui';
 import { ConfirmDialog, toast } from '../overlays';
@@ -44,7 +44,8 @@ extendDict({
     'myAgent.offTitle': 'Switch your agent off?',
     'myAgent.offBody': 'Every connected client is disconnected for good: switching it back on needs a new token for each.',
     'myAgent.off': 'Switch off',
-    'myAgent.asYou': 'To work as yourself instead, connect with the browser sign-in below.',
+    'myAgent.asYou': 'A client that connects by signing in through the browser asks whether it works as your agent or as you.',
+    'myAgent.viaSignIn': 'connected by signing in',
   },
   uk: {
     'myAgent.title': 'Мій агент',
@@ -72,11 +73,12 @@ extendDict({
     'myAgent.offTitle': 'Вимкнути вашого агента?',
     'myAgent.offBody': 'Усі підключені клієнти буде відключено назавжди: після ввімкнення кожному знадобиться новий токен.',
     'myAgent.off': 'Вимкнути',
-    'myAgent.asYou': 'Щоб працювати від свого імені, підключіться через вхід у браузері нижче.',
+    'myAgent.asYou': 'Клієнт, що підключається через вхід у браузері, питає, чи працювати як ваш агент, чи як ви.',
+    'myAgent.viaSignIn': 'підключено через вхід',
   },
 });
 
-interface AgentToken { id: string; name: string; prefix: string; lastUsedAt: string | null; expiresAt: string | null }
+interface AgentToken { id: string; name: string; prefix: string; lastUsedAt: string | null; expiresAt: string | null; oauth?: boolean }
 interface MyAgent { id: string; name: string; avatar: string | null; isActive: boolean; tokens: AgentToken[] }
 
 const CLIENTS = ['Claude Code', 'Codex', 'Cursor'] as const;
@@ -126,7 +128,7 @@ function AgentDetails({ agent, onChanged, onError }: { agent: MyAgent; onChanged
   const [name, setName] = useState(agent.name);
   const [client, setClient] = useState<string>(CLIENTS[0]);
   const [otherClient, setOtherClient] = useState('');
-  const [days, setDays] = useState('90');
+  const [days, setDays] = useState(String(MY_AGENT_TOKEN_DEFAULT_DAYS));
   const [issued, setIssued] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<AgentToken | null>(null);
   const [confirmOff, setConfirmOff] = useState(false);
@@ -181,6 +183,7 @@ function AgentDetails({ agent, onChanged, onError }: { agent: MyAgent; onChanged
             <div key={tok.id} className={cn('flex items-center gap-3 px-3 py-2', i > 0 && 'border-t border-border')}>
               <span className="text-[13px] font-medium">{tok.name}</span>
               <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                {tok.oauth && <>{t('myAgent.viaSignIn')}{' · '}</>}
                 {tok.lastUsedAt ? t('myAgent.lastUsed').replace('{when}', fmtRelative(tok.lastUsedAt)) : t('myAgent.neverUsed')}
                 {' · '}
                 {tok.expiresAt ? t('myAgent.expires').replace('{date}', fmtDate(tok.expiresAt)) : t('myAgent.never')}

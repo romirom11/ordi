@@ -111,6 +111,21 @@ describe('an agent given the Admin role', () => {
     const trash = (await json(bot.get('/projects/deleted'))).data.map((p: { id: string }) => p.id);
     expect(trash).not.toContain(gone.projectId);
     expect((await bot.post(`/projects/${gone.projectId}/restore`)).status).toBe(404);
+    // A private project it administers stays its to restore; one where it is a
+    // plain member does not.
+    const owner = reqAs(users.owner!.cookie);
+    const typeId = (await json(owner.get(`/projects/${mine.projectId}`))).projectTypeId;
+    const ownsIt = await json(owner.post('/projects', { name: 'Bot admin', key: 'BADM', projectTypeId: typeId, visibility: 'private' }));
+    const worksIt = await json(owner.post('/projects', { name: 'Bot member', key: 'BMEM', projectTypeId: typeId, visibility: 'private' }));
+    await addProjectMember(users, ownsIt.id, boss.id, 'admin');
+    await addProjectMember(users, worksIt.id, boss.id, 'member');
+    expect((await owner.del(`/projects/${ownsIt.id}`)).status).toBe(200);
+    expect((await owner.del(`/projects/${worksIt.id}`)).status).toBe(200);
+    const privateTrash = (await json(bot.get('/projects/deleted'))).data.map((p: { id: string }) => p.id);
+    expect(privateTrash).toContain(ownsIt.id);
+    expect(privateTrash).not.toContain(worksIt.id);
+    expect((await bot.post(`/projects/${worksIt.id}/restore`)).status).toBe(404);
+    expect((await bot.post(`/projects/${ownsIt.id}/restore`)).status).toBe(200);
   });
 });
 

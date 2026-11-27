@@ -287,6 +287,9 @@ export function usersRoutes() {
       await tx.update(schema.users).set({ isActive: false }).where(eq(schema.users.id, id));
       await tx.delete(schema.sessions).where(eq(schema.sessions.userId, id));
       await tx.update(schema.apiTokens).set({ revokedAt: new Date() }).where(eq(schema.apiTokens.userId, id));
+      // Sign-ins they approved but no client has redeemed yet go too: if they
+      // come back within a code's lifetime, it must not turn into a token.
+      await tx.delete(schema.oauthAuthCodes).where(eq(schema.oauthAuthCodes.userId, id));
       await writeActivity(tx, {
         entityType: 'user', entityId: id, action: 'deactivated',
         after: { reassignTo, handedOffTasks: handedOff.count, externalAgents: agents },
