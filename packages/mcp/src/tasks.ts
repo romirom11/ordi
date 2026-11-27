@@ -25,7 +25,6 @@ import { z } from 'zod';
 import { MAX_SUBTASK_DEPTH, TASK_PRIORITIES, docToText, secretEnvVars, textToDoc } from '@ordi/shared';
 import { OrdiApiError, type OrdiClient } from './client';
 import { absolutizeImageSrcs, projectDescriptionText, relativizeImageSrcs, wrap } from './format';
-// Project-level vocabulary for update_project; kept apart from the task imports above.
 import { PROJECT_STATUSES } from '@ordi/shared';
 
 type Row = Record<string, any>;
