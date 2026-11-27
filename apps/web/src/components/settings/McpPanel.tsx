@@ -165,7 +165,7 @@ const ACTION_TOOLS = [
   'send_payment_reminder', 'create_quote', 'create_note', 'create_company', 'create_contact',
   'create_lead', 'update_lead', 'schedule_sales_activity',
   'complete_sales_activity', 'convert_lead',
-  'create_deal', 'move_deal', 'create_custom_field', 'create_kb_page',
+  'create_deal', 'move_deal', 'create_custom_field', 'create_kb_page', 'update_project',
   'request_leave', 'approve_leave', 'create_job_opening', 'move_applicant',
 ];
 

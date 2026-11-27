@@ -11,7 +11,7 @@ import {
   dateOnlySchema, docToText, textToDoc,
 } from '@ordi/shared';
 import { OrdiClient } from './client';
-import { absolutizeImageSrcs, decodeEntities, relativizeImageSrcs, scrub, text, wrap } from './format';
+import { absolutizeImageSrcs, decodeEntities, projectDescriptionText, relativizeImageSrcs, scrub, text, wrap } from './format';
 import { registerAttachmentTools } from './attachments';
 import { registerTaskTools } from './tasks';
 
@@ -222,8 +222,11 @@ export function buildServer(client: OrdiClient): McpServer {
   server.tool('list_my_tasks', 'The token owner’s assigned/created tasks grouped by due date', {},
   () => wrap(() => client.get('/me/tasks')));
 
-  server.tool('get_project_status', 'Project details and task summary', { projectId: z.string() },
-  ({ projectId }) => wrap(() => client.get(`/projects/${projectId}`)));
+  server.tool('get_project_status', 'Project details and task summary. description comes back as plain text, version is what update_project takes as expectedVersion.', { projectId: z.string() },
+  ({ projectId }) => wrap(async () => {
+    const project = await client.get<Record<string, unknown>>(`/projects/${projectId}`);
+    return { ...project, description: toAgent(projectDescriptionText(project.description)) };
+  }, { keep: ['version'] }));
 
   server.tool('get_cycle_progress', 'Cycle progress and burndown snapshots', { cycleId: z.string() },
   ({ cycleId }) => wrap(() => client.get(`/cycles/${cycleId}`)));

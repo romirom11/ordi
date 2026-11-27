@@ -24,7 +24,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { MAX_SUBTASK_DEPTH, TASK_PRIORITIES, TASK_STATUS_CATEGORIES, docToText, secretEnvVars, textToDoc } from '@ordi/shared';
 import { OrdiApiError, type OrdiClient } from './client';
-import { absolutizeImageSrcs, relativizeImageSrcs, wrap } from './format';
+import { absolutizeImageSrcs, projectDescriptionText, relativizeImageSrcs, wrap } from './format';
+import { PROJECT_STATUSES } from '@ordi/shared';
 
 type Row = Record<string, any>;
 
@@ -562,6 +563,52 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
       members: { added: invite.filter((id) => !failed.some((f) => f.userId === id)), ...(failed.length ? { failed } : {}) },
     };
   }));
+
+  server.tool('update_project', 'Edit a project: its description, one-line summary, name, status, priority, dates or lead. '
+    + 'description replaces the whole description with plain text (blank lines separate paragraphs) – headings, lists and other formatting in the current one are not kept, so read it with get_project_status first and write back the full text you want. '
+    + 'Send the version get_project_status returned as expectedVersion and the call refuses instead of overwriting an edit someone made in ordi meanwhile. Needs project admin.', {
+    project: z.string().describe('Project key (e.g. CONTENT) or id'),
+    description: z.string().nullable().optional().describe('Plain text; empty string or null clears it'),
+    summary: z.string().max(500).optional().describe('One line; empty string clears it'),
+    name: z.string().min(1).optional(),
+    status: z.enum(PROJECT_STATUSES).optional(),
+    priority: z.enum(TASK_PRIORITIES).optional(),
+    startDate: z.string().nullable().optional().describe('YYYY-MM-DD; null clears it'),
+    targetDate: z.string().nullable().optional().describe('YYYY-MM-DD; null clears it'),
+    leadId: z.string().nullable().optional().describe('User id of the project lead (list_users); null clears it'),
+    expectedVersion: z.number().int().optional().describe('The version get_project_status returned; omit only for a blind write'),
+  }, ({ project, expectedVersion, description, summary, ...rest }) => wrap(async () => {
+    const projectId = await resolveProjectId(client, project);
+    const body: Row = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined));
+    if (summary !== undefined) body.summary = summary.trim();
+    if (description !== undefined) {
+      const plain = description === null ? '' : fromAgent(description.trim());
+      // The project page reads the description as stored tiptap JSON.
+      body.description = plain ? JSON.stringify(textToDoc(plain)) : null;
+    }
+    if (!Object.keys(body).length) throw new Error('Nothing to update – pass description, summary, name, status, priority, startDate, targetDate or leadId.');
+
+    // Always lock: with no expectedVersion a fresh read is the baseline.
+    const version = expectedVersion ?? (await client.get<Row>(`/projects/${projectId}`)).version;
+    let updated: Row;
+    try {
+      updated = await client.patch<Row>(`/projects/${projectId}`, { ...body, version });
+    } catch (e) {
+      if (e instanceof OrdiApiError && e.code === 'version_conflict') {
+        throw new Error('The project was changed in ordi after you read it – read it again with get_project_status and re-apply your change on top of the current version instead of overwriting it.');
+      }
+      throw e;
+    }
+    return {
+      action: 'updated',
+      project: {
+        id: updated.id, key: updated.key, name: updated.name, status: updated.status, priority: updated.priority,
+        summary: updated.summary ?? null, description: toAgent(projectDescriptionText(updated.description)),
+        startDate: updated.startDate ?? null, targetDate: updated.targetDate ?? null, leadId: updated.leadId ?? null,
+        version: updated.version,
+      },
+    };
+  }, VERSIONED));
 
   // ── Plan: milestones (what, by when) and cycles (time boxes) ──
 

@@ -278,3 +278,24 @@ describe('what a token cannot reach', () => {
     expect((res.content as any)[0].text).toContain('CNT');
   });
 });
+
+describe('editing the project itself', () => {
+  it('rewrites the description as text the project page renders, and refuses a stale version', async () => {
+    const before = out(await tool('get_project_status', { projectId }));
+    expect(typeof before.version).toBe('number');
+
+    const res = out(await tool('update_project', {
+      project: 'CNT', description: 'What we publish\n\nOne post a week', expectedVersion: before.version,
+    }));
+    expect(res.project).toMatchObject({ key: 'CNT', description: 'What we publish\n\nOne post a week' });
+    expect(res.project.version).toBeGreaterThan(before.version);
+
+    // Stored the way the web editor stores it: a serialized tiptap doc.
+    const stored = await json(owner.get(`/projects/${projectId}`));
+    expect(JSON.parse(stored.description)).toMatchObject({ type: 'doc' });
+    expect(out(await tool('get_project_status', { projectId })).description).toBe('What we publish\n\nOne post a week');
+
+    const stale = failure(await tool('update_project', { project: 'CNT', description: 'Overwrite', expectedVersion: before.version }));
+    expect(stale).toContain('get_project_status');
+  });
+});
