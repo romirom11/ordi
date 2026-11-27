@@ -181,6 +181,29 @@ describe('re-binding a loose file', () => {
     expect((await as('owner').patch(`/pages/${pageId}`, { fileId: next, version: page.version })).status).toBe(200);
   });
 
+  it('does not file a document a PDF page already shows', async () => {
+    const shown = await uploadId('admin');
+    expect((await as('admin').post('/pages', { spaceId, title: 'Handbook PDF', type: 'pdf', fileId: shown })).status).toBe(201);
+    expect((await as('admin').post(`/employees/${employeeId}/documents`, { attachmentId: shown })).status).toBe(422);
+  });
+
+  it('lets another space editor save a PDF page without touching its file', async () => {
+    const file = await uploadId('owner');
+    const pageId = (await json(as('owner').post('/pages', { spaceId, title: 'Shared PDF', type: 'pdf', fileId: file }))).id;
+    // `member` edits the workspace space through kb.write; the page's file is the owner's.
+    const page = await json(as('member').get(`/pages/${pageId}`));
+    const res = await as('member').patch(`/pages/${pageId}`, { title: 'Shared PDF (2026)', fileId: file, version: page.version });
+    expect(res.status).toBe(200);
+  });
+
+  it('drops a fileId sent when saving a page that is not a PDF page', async () => {
+    const theirs = await uploadId('member');
+    const pageId = (await json(as('owner').post('/pages', { spaceId, title: 'Plain' }))).id;
+    const page = await json(as('owner').get(`/pages/${pageId}`));
+    expect((await as('owner').patch(`/pages/${pageId}`, { fileId: theirs, version: page.version })).status).toBe(200);
+    expect((await json(as('owner').get(`/pages/${pageId}`))).fileId).toBeNull();
+  });
+
   it('keeps a file off a page that is not a PDF page', async () => {
     const contract = await uploadId('hr');
     await as('hr').post(`/employees/${employeeId}/documents`, { attachmentId: contract });

@@ -646,10 +646,13 @@ export async function updatePage(actor: Actor, id: string, input: any) {
     else if (!input.fileId) throw err.validation('A PDF page needs an uploaded file');
     else await assertPdfAttachment(actor, input.fileId, before.fileId);
   }
-  await db
-    .update(schema.kbPages)
-    .set(patch)
-    .where(and(eq(schema.kbPages.id, id), eq(schema.kbPages.version, before.version)));
+  // Nothing left to write (a fileId sent for a page that has none) is a no-op, not an error.
+  if (Object.keys(patch).length) {
+    await db
+      .update(schema.kbPages)
+      .set(patch)
+      .where(and(eq(schema.kbPages.id, id), eq(schema.kbPages.version, before.version)));
+  }
 
   const after = await loadPage(id);
   await emit({ type: 'page.updated', aggregateType: 'page', aggregateId: id, payload: { pageId: id, spaceId: after.spaceId }, actorId: actor.userId, actorType: actor.actorType });

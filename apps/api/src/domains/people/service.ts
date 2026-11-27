@@ -468,6 +468,13 @@ export async function addEmployeeDocument(actor: Actor, employeeId: string, inpu
   // record, not to whoever uploaded it. Only the uploader hands it over, or a
   // file someone embedded in a document could be taken over by id.
   if (!att.entityType && att.createdBy !== actor.userId) throw err.validation('Unknown attachment');
+  // A knowledge-base PDF page shows its file to every reader of the page;
+  // filed on an employee as well, the page would keep republishing it.
+  if (!att.entityType) {
+    const [shown] = await db.select({ id: schema.kbPages.id }).from(schema.kbPages)
+      .where(eq(schema.kbPages.fileId, att.id)).limit(1);
+    if (shown) throw err.domain('Attachment already belongs to another record');
+  }
   const id = ulid();
   await db.insert(schema.employeeDocuments).values({
     id, employeeId, attachmentId: input.attachmentId, type: input.type ?? 'other',
