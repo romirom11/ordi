@@ -88,6 +88,7 @@ extendDict({
     'settings.handOffTo': 'Hand open tasks to',
     'settings.leaveUnassigned': 'Leave unassigned',
     'settings.ownedAgents': 'External agents they own',
+    'settings.ownAgentOff': 'Their own agent, {name}, is switched off with them and is not handed to anyone.',
     'settings.ownedAgentsHint': 'Their tokens are revoked. They move to the successor (someone with access then issues a new token in Settings → Agents), or are switched off when there is none or the successor is an agent.',
     'settings.successor': 'Successor',
     'settings.agentTag': 'agent',
@@ -174,6 +175,7 @@ extendDict({
     'settings.handOffTo': 'Передати відкриті задачі',
     'settings.leaveUnassigned': 'Залишити без виконавця',
     'settings.ownedAgents': 'Зовнішні агенти, власником яких є людина',
+    'settings.ownAgentOff': 'Їхній власний агент {name} вимкнеться разом із ними й нікому не перейде.',
     'settings.ownedAgentsHint': 'Їхні токени буде відкликано. Агенти перейдуть до наступника (новий токен потім випускає той, хто має доступ, у Налаштуваннях → Агенти) або вимкнуться, якщо наступника немає чи наступник – агент.',
     'settings.successor': 'Наступник',
     'settings.agentTag': 'агент',
@@ -624,12 +626,15 @@ function DeactivateUserDialog({ user, candidates, pending, onClose, onConfirm }:
   useEffect(() => { setReassignTo(''); }, [user?.id]);
   const open = useQuery({
     queryKey: ['user-open-tasks', user?.id],
-    queryFn: () => api.get<{ count: number; data: { id: string; ref: string; title: string }[]; ownedAgents?: { id: string; name: string }[] }>(`/users/${user!.id}/open-tasks`),
+    queryFn: () => api.get<{ count: number; data: { id: string; ref: string; title: string }[]; ownedAgents?: { id: string; name: string; kind?: string }[] }>(`/users/${user!.id}/open-tasks`),
     enabled: !!user,
   });
   const count = open.data?.count ?? 0;
   const sample = open.data?.data ?? [];
   const ownedAgents = open.data?.ownedAgents ?? [];
+  // Their own agent is never handed on: it goes dark with them.
+  const teamAgents = ownedAgents.filter((a) => a.kind !== 'personal');
+  const ownAgent = ownedAgents.find((a) => a.kind === 'personal');
 
   return (
     <Dialog open={!!user} onClose={onClose} title={t('settings.deactivateTitle')} width={440}>
@@ -661,11 +666,14 @@ function DeactivateUserDialog({ user, candidates, pending, onClose, onConfirm }:
                 {count > sample.length && <li className="text-xs text-faint">…</li>}
               </ul>
             </div>}
-            {ownedAgents.length > 0 && (
+            {teamAgents.length > 0 && (
               <div className="rounded-md border border-border bg-muted/40 px-3 py-2">
-                <div className="text-xs font-medium text-muted-foreground">{t('settings.ownedAgents')}: <span className="text-foreground">{ownedAgents.map((a) => a.name).join(', ')}</span></div>
+                <div className="text-xs font-medium text-muted-foreground">{t('settings.ownedAgents')}: <span className="text-foreground">{teamAgents.map((a) => a.name).join(', ')}</span></div>
                 <p className="mt-1 text-xs text-muted-foreground">{t('settings.ownedAgentsHint')}</p>
               </div>
+            )}
+            {ownAgent && (
+              <p className="text-xs text-muted-foreground">{t('settings.ownAgentOff').replace('{name}', ownAgent.name)}</p>
             )}
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">{count > 0 ? t('settings.handOffTo') : t('settings.successor')}</label>

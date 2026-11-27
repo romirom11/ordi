@@ -6,7 +6,7 @@
  * secrets. Each client gets its own token, so the comments it writes say
  * which one, and each can be cut off on its own.
  */
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bot, KeyRound } from 'lucide-react';
 import { EXTERNAL_AGENT_TOKEN_DAYS } from '@ordi/shared';
@@ -15,6 +15,7 @@ import { Avatar, Button, Input, Select, Skeleton, Spinner, Switch, cn, fmtDate, 
 import { ConfirmDialog, toast } from '../overlays';
 import { IssuedToken } from './ExternalAgentsSection';
 import { useT, extendDict } from '../../lib/i18n';
+import { myAgentView } from './myAgentView';
 
 extendDict({
   en: {
@@ -40,6 +41,9 @@ extendDict({
     'myAgent.disconnectTitle': 'Disconnect this client?',
     'myAgent.disconnectBody': 'Its token stops working at the next request.',
     'myAgent.disconnected': 'Client disconnected',
+    'myAgent.offTitle': 'Switch your agent off?',
+    'myAgent.offBody': 'Every connected client is disconnected for good: switching it back on needs a new token for each.',
+    'myAgent.off': 'Switch off',
     'myAgent.asYou': 'To work as yourself instead, connect with the browser sign-in below.',
   },
   uk: {
@@ -65,6 +69,9 @@ extendDict({
     'myAgent.disconnectTitle': 'Відключити цей клієнт?',
     'myAgent.disconnectBody': 'Його токен перестане працювати на наступному запиті.',
     'myAgent.disconnected': 'Клієнт відключено',
+    'myAgent.offTitle': 'Вимкнути вашого агента?',
+    'myAgent.offBody': 'Усі підключені клієнти буде відключено назавжди: після ввімкнення кожному знадобиться новий токен.',
+    'myAgent.off': 'Вимкнути',
     'myAgent.asYou': 'Щоб працювати від свого імені, підключіться через вхід у браузері нижче.',
   },
 });
@@ -81,6 +88,7 @@ export function MyAgentCard() {
   const q = useQuery({ queryKey: KEY, queryFn: () => api.get<{ agent: MyAgent | null }>('/my-agent').then((r) => r.agent) });
   const refresh = () => { qc.invalidateQueries({ queryKey: KEY }); qc.invalidateQueries({ queryKey: ['users-lookup'] }); };
   const apiError = (e: unknown) => toast.error(e instanceof ApiError ? e.message : t('common.saveFailed'));
+  const view = myAgentView(q);
 
   const [name, setName] = useState('');
   const create = useMutation({
@@ -93,9 +101,14 @@ export function MyAgentCard() {
     <div className="mb-8 rounded-lg border border-border bg-card p-4">
       <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-faint"><Bot size={13} /> {t('myAgent.title')}</div>
       <p className="mt-1 text-xs text-muted-foreground">{t('myAgent.desc')}</p>
-      {q.isLoading ? (
+      {view === 'loading' ? (
         <Skeleton className="mt-3 h-16 w-full" />
-      ) : !q.data ? (
+      ) : view === 'error' ? (
+        <div className="mt-3 flex items-center gap-2 text-[13px] text-muted-foreground">
+          {t('common.loadFailed')}
+          <Button size="xs" variant="ghost" onClick={() => q.refetch()}>{t('common.retry')}</Button>
+        </div>
+      ) : view === 'none' || !q.data ? (
         <form className="mt-3 flex gap-2" onSubmit={(e: FormEvent) => { e.preventDefault(); if (name.trim()) create.mutate(); }}>
           <Input value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder={t('myAgent.namePh')} className="max-w-xs" />
           <Button type="submit" size="sm" disabled={!name.trim() || create.isPending}>{create.isPending && <Spinner />} {t('myAgent.create')}</Button>
@@ -116,12 +129,19 @@ function AgentDetails({ agent, onChanged, onError }: { agent: MyAgent; onChanged
   const [days, setDays] = useState('90');
   const [issued, setIssued] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<AgentToken | null>(null);
+  const [confirmOff, setConfirmOff] = useState(false);
+  // Renamed elsewhere (another tab) or put back after a failed rename.
+  useEffect(() => { setName(agent.name); }, [agent.name]);
 
-  const rename = useMutation({ mutationFn: (n: string) => api.patch('/my-agent', { name: n }), onSuccess: onChanged, onError });
+  const rename = useMutation({
+    mutationFn: (n: string) => api.patch('/my-agent', { name: n }),
+    onSuccess: onChanged,
+    onError: (e) => { setName(agent.name); onError(e); },
+  });
   const toggle = useMutation({
     mutationFn: (on: boolean) => api.post(`/my-agent/${on ? 'enable' : 'disable'}`),
-    onSuccess: (_r, on) => { if (!on) setIssued(null); onChanged(); },
-    onError,
+    onSuccess: (_r, on) => { setConfirmOff(false); if (!on) setIssued(null); onChanged(); },
+    onError: (e) => { setConfirmOff(false); onError(e); },
   });
   const clientName = client === 'other' ? otherClient.trim() : client;
   const issue = useMutation({
@@ -131,7 +151,8 @@ function AgentDetails({ agent, onChanged, onError }: { agent: MyAgent; onChanged
   });
   const revoke = useMutation({
     mutationFn: (id: string) => api.del(`/my-agent/tokens/${id}`),
-    onSuccess: () => { setRevoking(null); onChanged(); toast(t('myAgent.disconnected')); },
+    // The token shown once may be the one just cut off: do not leave it on screen.
+    onSuccess: () => { setRevoking(null); setIssued(null); onChanged(); toast(t('myAgent.disconnected')); },
     onError: (e) => { setRevoking(null); onError(e); },
   });
 
@@ -140,10 +161,14 @@ function AgentDetails({ agent, onChanged, onError }: { agent: MyAgent; onChanged
       <div className="flex items-center gap-3">
         <Avatar name={agent.name} src={agent.avatar} size={28} agent className={agent.isActive ? undefined : 'opacity-50'} />
         <Input value={name} maxLength={60} className="max-w-xs" onChange={(e) => setName(e.target.value)}
-          onBlur={() => { if (name.trim() && name.trim() !== agent.name) rename.mutate(name.trim()); }} />
+          onBlur={() => {
+            const next = name.trim();
+            if (!next) setName(agent.name);
+            else if (next !== agent.name) rename.mutate(next);
+          }} />
         <div className="ml-auto flex items-center gap-2" title={t('myAgent.onHint')}>
           <span className="text-xs text-muted-foreground">{t('myAgent.on')}</span>
-          <Switch checked={agent.isActive} disabled={toggle.isPending} onChange={(v) => toggle.mutate(v)} label={t('myAgent.on')} />
+          <Switch checked={agent.isActive} disabled={toggle.isPending} onChange={(v) => (v ? toggle.mutate(true) : setConfirmOff(true))} label={t('myAgent.on')} />
         </div>
       </div>
 
@@ -187,6 +212,16 @@ function AgentDetails({ agent, onChanged, onError }: { agent: MyAgent; onChanged
         {issued && <div className="mt-3"><IssuedToken token={issued} /></div>}
       </div>
 
+      <ConfirmDialog
+        open={confirmOff}
+        onClose={() => setConfirmOff(false)}
+        onConfirm={() => toggle.mutate(false)}
+        title={t('myAgent.offTitle')}
+        body={t('myAgent.offBody')}
+        confirmLabel={t('myAgent.off')}
+        danger
+        pending={toggle.isPending}
+      />
       <ConfirmDialog
         open={!!revoking}
         onClose={() => setRevoking(null)}
