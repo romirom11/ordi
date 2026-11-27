@@ -17,7 +17,7 @@ import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { emit } from '../../core/events';
 import { assertVersion } from '../../core/locking';
-import { assertProject, accessibleProjectIds, effectiveProjectRole } from '../../core/access';
+import { assertProject, accessibleProjectIds, effectiveProjectRole, userCanOpenProject } from '../../core/access';
 import { closeProjectTimers } from '../time/service';
 import { cancelProjectRuns } from '../agents/runs';
 import { assertCanAssignAgents } from '../agents/profiles';
@@ -663,12 +663,28 @@ export async function listTasks(actor: Actor, params: {
   return { data, nextCursor: paged.nextCursor };
 }
 
+/**
+ * A reporter is someone the task can be taken back to: an active user who can
+ * open the project (userCanOpenProject). The reporter hears the task's news,
+ * so someone the project is closed to must not be one.
+ */
+async function assertReporter(project: { id: string }, userId: string): Promise<void> {
+  const { db } = getDb();
+  const [user] = await db.select({ isActive: schema.users.isActive }).from(schema.users).where(eq(schema.users.id, userId));
+  if (!user || !user.isActive) throw err.validation('The reporter must be an active user');
+  if (!(await userCanOpenProject(userId, project.id))) {
+    throw err.validation('The reporter must be someone who can open this project – add them to it first');
+  }
+}
+
 export async function createTask(actor: Actor, input: any) {
   const project = await assertProject(actor, input.projectId, 'member');
   if (input.parentId) await assertParent(input.parentId, input.projectId);
   if (input.cycleId) await assertCycleInProject(input.cycleId, input.projectId);
   const assigneeIds: string[] = input.assigneeIds ?? [];
   if (assigneeIds.length) await assertCanAssignAgents(actor, project.id, assigneeIds, effectiveProjectRole(actor, project));
+  const reporterId: string | null = input.reporterId === undefined ? actor.userId : input.reporterId;
+  if (reporterId && reporterId !== actor.userId) await assertReporter(project, reporterId);
   const labelIds: string[] = input.labelIds ?? [];
   // Before the row exists: a rejected label must not leave a half-created task.
   await assertLabelScope(labelIds, 'task');
@@ -685,7 +701,7 @@ export async function createTask(actor: Actor, input: any) {
     dueDate: input.dueDate ?? null, startDate: input.startDate ?? null,
     estimate: input.estimate != null ? String(input.estimate) : null,
     cycleId: input.cycleId ?? null, position, customFields: input.customFields ?? {},
-    createdBy: actor.userId,
+    createdBy: actor.userId, reporterId,
   });
   if (assigneeIds.length) await db.insert(taskAssignees).values(assigneeIds.map((userId) => ({ taskId: id, userId })));
   if (labelIds.length) await db.insert(taskLabels).values(labelIds.map((labelId) => ({ taskId: id, labelId })));
@@ -755,9 +771,10 @@ export async function updateTask(actor: Actor, id: string, input: any) {
   assertVersion(before, input.version, before);
 
   const patch: Record<string, unknown> = {};
-  for (const k of ['title', 'description', 'statusId', 'typeId', 'priority', 'parentId', 'milestoneId', 'dueDate', 'startDate', 'cycleId']) {
+  for (const k of ['title', 'description', 'statusId', 'typeId', 'priority', 'parentId', 'milestoneId', 'dueDate', 'startDate', 'cycleId', 'reporterId']) {
     if (input[k] !== undefined) patch[k] = input[k];
   }
+  if (input.reporterId) await assertReporter(project, input.reporterId);
   if (input.milestoneId) await assertMilestoneInProject(input.milestoneId, before.projectId);
   if (input.customFields !== undefined) patch.customFields = mergeCustomFields(before.customFields, input.customFields);
   if (input.estimate !== undefined) patch.estimate = input.estimate != null ? String(input.estimate) : null;
@@ -789,7 +806,7 @@ export async function updateTask(actor: Actor, id: string, input: any) {
 
   const ref = await taskRef(before);
   if (input.statusId !== undefined && input.statusId !== before.statusId) {
-    await emit({ type: 'task.status_changed', aggregateType: 'task', aggregateId: id, payload: { ref, taskId: id, assigneeIds: finalAssignees, createdBy: before.createdBy, projectId: before.projectId }, actorId: actor.userId, actorType: actor.actorType });
+    await emit({ type: 'task.status_changed', aggregateType: 'task', aggregateId: id, payload: { ref, taskId: id, assigneeIds: finalAssignees, createdBy: before.createdBy, reporterId: patch.reporterId !== undefined ? patch.reporterId : before.reporterId, projectId: before.projectId }, actorId: actor.userId, actorType: actor.actorType });
   }
   if (newAssignees.length) {
     await emit({ type: 'task.assigned', aggregateType: 'task', aggregateId: id, payload: { assigneeIds: newAssignees, ref, taskId: id, projectId: before.projectId }, actorId: actor.userId, actorType: actor.actorType });
@@ -944,6 +961,14 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
   const newId = await db.transaction(async (tx) => {
     // Collect the subtree breadth-first, so a parent is always inserted first.
     const subtree = [source];
+    // A reporter the target project is closed to would keep hearing about the
+    // task there; the moved copy has none instead.
+    const reporterOk = new Map<string, boolean>();
+    const reporterFor = async (reporterId: string | null): Promise<string | null> => {
+      if (!reporterId) return null;
+      if (!reporterOk.has(reporterId)) reporterOk.set(reporterId, await userCanOpenProject(reporterId, targetProjectId));
+      return reporterOk.get(reporterId) ? reporterId : null;
+    };
     let frontier = [source.id];
     while (frontier.length) {
       const children = await tx.select().from(tasks)
@@ -974,7 +999,7 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
         parentId: t.parentId ? newIdOf.get(t.parentId) ?? null : null,
         milestoneId: null, dueDate: t.dueDate, startDate: t.startDate,
         estimate: t.estimate, cycleId: null, position: String(lastPos),
-        customFields: cf, createdBy: t.createdBy,
+        customFields: cf, createdBy: t.createdBy, reporterId: await reporterFor(t.reporterId),
       });
     }
     if (assigneeRows.length) {
@@ -1027,7 +1052,8 @@ export async function duplicateTask(actor: Actor, id: string) {
     description: source.description, statusId: source.statusId, typeId: source.typeId, priority: source.priority,
     parentId: source.parentId, dueDate: source.dueDate, startDate: source.startDate,
     estimate: source.estimate, cycleId: source.cycleId, position, customFields: source.customFields,
-    createdBy: actor.userId,
+    // A copy answers the same request, so it keeps the reporter – or the lack of one.
+    createdBy: actor.userId, reporterId: source.reporterId,
   });
   const assignees = await assigneeIdsOf(id);
   if (assignees.length) await db.insert(taskAssignees).values(assignees.map((userId) => ({ taskId: newId, userId })));
@@ -1223,7 +1249,7 @@ export async function bulkUpdateTasks(actor: Actor, input: any) {
       }
     }
     if (input.statusId !== undefined && input.statusId !== t.statusId) {
-      await emit({ type: 'task.status_changed', aggregateType: 'task', aggregateId: t.id, payload: { ref: await taskRef(t), taskId: t.id, assigneeIds: await assigneeIdsOf(t.id), createdBy: t.createdBy, projectId: t.projectId }, actorId: actor.userId, actorType: actor.actorType });
+      await emit({ type: 'task.status_changed', aggregateType: 'task', aggregateId: t.id, payload: { ref: await taskRef(t), taskId: t.id, assigneeIds: await assigneeIdsOf(t.id), createdBy: t.createdBy, reporterId: t.reporterId, projectId: t.projectId }, actorId: actor.userId, actorType: actor.actorType });
     }
     if (input.labelIds !== undefined) {
       await db.delete(taskLabels).where(eq(taskLabels.taskId, t.id));

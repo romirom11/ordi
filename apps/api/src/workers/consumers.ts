@@ -17,6 +17,7 @@ import { env } from '../env';
 import { salesWork, summarizeSalesWork } from '../domains/crm/work';
 import { queueRun, activeRunForTask } from '../domains/agents/runs';
 import { agentProfilesAmong } from '../domains/agents/profiles';
+import { userCanOpenProject } from '../core/access';
 
 export interface Consumer {
   name: string;
@@ -30,6 +31,12 @@ interface NotifyOptions {
    * own task used to notify you about your own click.
    */
   actorId?: string | null;
+  /**
+   * The project the news is about. Recipients who cannot open it now – moved
+   * out, removed, a private project – are skipped: a task title and status
+   * must not reach someone the project is closed to.
+   */
+  projectId?: string | null;
 }
 
 async function notify(
@@ -50,6 +57,7 @@ async function notify(
     // A deactivated account has no one reading it, and an agent has no bell:
     // both only added rows nobody would ever open.
     if (!user || !user.isActive || user.actorType !== 'user') continue;
+    if (options.projectId && !(await userCanOpenProject(userId, options.projectId))) continue;
     const prefs = (user?.emailNotificationPrefs as Record<string, boolean>) ?? {};
     const dedupeKey = `${eventId}:notifications:${userId}:${type}`;
     let email: QueuedEmailInput | null = null;
@@ -216,11 +224,11 @@ async function companyOwnerId(companyId: string): Promise<string | null> {
  */
 async function taskAudience(taskId: string, opts: { commenters?: boolean } = {}): Promise<string[]> {
   const { db } = getDb();
-  const [task] = await db.select({ createdBy: schema.tasks.createdBy })
+  const [task] = await db.select({ reporterId: schema.tasks.reporterId })
     .from(schema.tasks).where(eq(schema.tasks.id, taskId));
   const assignees = await db.select({ userId: schema.taskAssignees.userId })
     .from(schema.taskAssignees).where(eq(schema.taskAssignees.taskId, taskId));
-  const audience = [task?.createdBy, ...assignees.map((a) => a.userId)];
+  const audience = [task?.reporterId, ...assignees.map((a) => a.userId)];
   if (opts.commenters) {
     const commenters = await db.selectDistinct({ authorId: schema.comments.authorId })
       .from(schema.comments)
@@ -243,12 +251,13 @@ async function enrichNotifyPayload(ev: DomainEvent): Promise<Record<string, unkn
   const taskId = (p.taskId as string | undefined)
     ?? (ev.aggregateType === 'task' ? ev.aggregateId : undefined);
   if (taskId && ev.aggregateType === 'agent_run') {
-    const [task] = await db.select({ number: schema.tasks.number, createdBy: schema.tasks.createdBy, projectId: schema.tasks.projectId })
+    const [task] = await db.select({ number: schema.tasks.number, createdBy: schema.tasks.createdBy, reporterId: schema.tasks.reporterId, projectId: schema.tasks.projectId })
       .from(schema.tasks).where(eq(schema.tasks.id, taskId));
     if (task) {
       const [project] = await db.select({ key: schema.projects.key }).from(schema.projects).where(eq(schema.projects.id, task.projectId));
       if (!p.ref && project) p.ref = `${project.key}-${task.number}`;
       if (!p.createdBy) p.createdBy = task.createdBy;
+      if (!('reporterId' in p)) p.reporterId = task.reporterId;
     }
     if (ev.actorId) {
       const [agent] = await db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, ev.actorId));
@@ -310,12 +319,23 @@ async function enrichNotifyPayload(ev: DomainEvent): Promise<Record<string, unkn
   return p;
 }
 
+/**
+ * The person who set the task: its reporter. Events written before tasks had
+ * one carry only createdBy, which is what the reporter was backfilled from.
+ */
+const reporterOf = (p: { reporterId?: string | null; createdBy?: string | null }): string | null | undefined =>
+  ('reporterId' in p ? p.reporterId : p.createdBy);
+
 const notifications: Consumer = {
   name: 'notifications',
   async handle(ev) {
     const p = (await enrichNotifyPayload(ev)) as any;
-    // Nobody hears about their own action; every case below passes this on.
-    const self = { actorId: ev.actorId };
+    // Nobody hears about their own action, and nobody about a project closed
+    // to them; every case below passes this on.
+    // Only news about a project's work is gated by the project: an invoice or a
+    // leave request may name a project its finance or HR audience cannot open.
+    const aboutProjectWork = /^(task|comment|agent|git)\./.test(ev.type);
+    const self = { actorId: ev.actorId, projectId: aboutProjectWork ? (p.projectId as string | undefined) ?? null : null };
     switch (ev.type) {
       case 'task.assigned':
         await notify(ev.id, p.assigneeIds ?? [], 'task.assigned', p.ref ?? null, p, self);
@@ -340,7 +360,7 @@ const notifications: Consumer = {
         break;
       }
       case 'task.status_changed':
-        await notify(ev.id, [...(p.assigneeIds ?? []), p.createdBy], 'task.status_changed', p.ref ?? null, p, self);
+        await notify(ev.id, [...(p.assigneeIds ?? []), reporterOf(p)], 'task.status_changed', p.ref ?? null, p, self);
         break;
       case 'page.mentioned':
         await notify(ev.id, p.mentions ?? [], 'page.mentioned', p.ref ?? null, p, self);
@@ -371,14 +391,14 @@ const notifications: Consumer = {
         break;
       case 'agent.run_finished': {
         // The person who assigned or commented hears how the run ended;
-        // a task author who is not the requester gets it too.
+        // the task's reporter, if someone else, gets it too.
         if (p.status === 'succeeded' || p.status === 'failed') {
-          await notify(ev.id, [p.requestedBy, p.createdBy], 'agent.run_finished', p.ref ?? null, { ...p, outcome: p.status }, self);
+          await notify(ev.id, [p.requestedBy, reporterOf(p)], 'agent.run_finished', p.ref ?? null, { ...p, outcome: p.status }, self);
         }
         break;
       }
       case 'agent.needs_input':
-        await notify(ev.id, [p.requestedBy, p.createdBy], 'agent.needs_input', p.ref ?? null, p, self);
+        await notify(ev.id, [p.requestedBy, reporterOf(p)], 'agent.needs_input', p.ref ?? null, p, self);
         break;
       case 'sales.work_digest_due': {
         const digest = await liveSalesDigest(p.userId, p.localDate);

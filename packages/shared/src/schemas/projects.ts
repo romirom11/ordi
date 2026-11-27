@@ -168,6 +168,8 @@ export const taskInputSchema = z.object({
   cycleId: idSchema.nullable().optional(),
   assigneeIds: z.array(idSchema).default([]),
   labelIds: z.array(idSchema).default([]),
+  /** Who set the task; defaults to the caller, null files it without one. */
+  reporterId: idSchema.nullable().optional(),
   customFields: customFieldsSchema.optional(),
 });
 
@@ -185,6 +187,8 @@ export const taskUpdateSchema = z.object({
   cycleId: idSchema.nullable().optional(),
   assigneeIds: z.array(idSchema).optional(),
   labelIds: z.array(idSchema).optional(),
+  /** Who set the task; null clears it. */
+  reporterId: idSchema.nullable().optional(),
   customFields: customFieldsSchema.optional(),
   version: z.number().int().optional(),
 });

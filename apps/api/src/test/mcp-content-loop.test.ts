@@ -299,3 +299,17 @@ describe('editing the project itself', () => {
     expect(stale).toContain('get_project_status');
   });
 });
+
+describe('who set the task', () => {
+  it('files a task on someone else\'s behalf and reads the reporter back', async () => {
+    const created = out(await tool('create_task', {
+      projectId: 'CNT', title: 'Brief from the client call', reporterId: users.manager!.userId,
+    }));
+    expect(created.task.reporterId).toBe(users.manager!.userId);
+    const card = out(await tool('get_task', { taskId: created.task.id }));
+    expect(card.reporterId).toBe(users.manager!.userId);
+
+    const cleared = out(await tool('update_task', { taskId: created.task.id, reporterId: null, expectedVersion: card.version }));
+    expect(cleared.task.reporterId).toBeNull();
+  });
+});

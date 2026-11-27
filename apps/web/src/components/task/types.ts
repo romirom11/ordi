@@ -40,6 +40,8 @@ export interface TaskDetail {
   startDate: string | null;
   estimate: string | number | null;
   cycleId: string | null;
+  /** Who set the task – the person to ask what it is for. */
+  reporterId?: string | null;
   version: number;
   ref?: string;
   createdAt: string;
@@ -111,6 +113,7 @@ export interface TaskPatch {
   parentId?: string | null;
   milestoneId?: string | null;
   cycleId?: string | null;
+  reporterId?: string | null;
   customFields?: Record<string, unknown>;
 }
 
