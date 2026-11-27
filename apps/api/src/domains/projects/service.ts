@@ -14,6 +14,7 @@ import {
 } from '@ordi/shared';
 import type { Actor } from '../../context';
 import { err } from '../../lib/errors';
+import { logger } from '../../lib/logger';
 import { writeActivity } from '../../core/activity';
 import { emit, publishEvent } from '../../core/events';
 import { assertVersion } from '../../core/locking';
@@ -79,8 +80,7 @@ async function defaultStatusId(projectId: string): Promise<string> {
   return def.id;
 }
 
-async function nextTaskPosition(projectId: string): Promise<string> {
-  const { db } = getDb();
+async function nextTaskPosition(projectId: string, db: any = getDb().db): Promise<string> {
   const [row] = await db.select({ maxPos: sql<string | null>`max(${tasks.position})` })
     .from(tasks).where(eq(tasks.projectId, projectId));
   const last = row?.maxPos != null ? Number(row.maxPos) : null;
@@ -273,13 +273,8 @@ export async function updateProject(actor: Actor, id: string, input: any) {
     patch.projectTypeId = resolved.typeId;
     patch.companyId = resolved.companyId;
   }
-  // Project labels: replace the join set when labelIds is provided.
-  if (input.labelIds !== undefined) {
-    const next: string[] = input.labelIds;
-    await assertLabelScope(next, 'project');
-    await db.delete(schema.projectLabels).where(eq(schema.projectLabels.projectId, id));
-    if (next.length) await db.insert(schema.projectLabels).values(next.map((labelId) => ({ projectId: id, labelId })));
-  }
+  const nextLabels: string[] | undefined = input.labelIds;
+  if (nextLabels) await assertLabelScope(nextLabels, 'project');
   // Changing the type re-applies its behaviour: requiresClient needs the existing
   // company link; a type without a client detaches the company.
   if (input.projectTypeId !== undefined && input.projectTypeId !== before.projectTypeId) {
@@ -296,14 +291,33 @@ export async function updateProject(actor: Actor, id: string, input: any) {
     if (input.estimateUnit !== undefined) merged.estimateUnit = input.estimateUnit;
     patch.settings = merged;
   }
-  if (Object.keys(patch).length) {
-    await db.update(projects).set(patch).where(and(eq(projects.id, id), eq(projects.version, before.version)));
-  }
-  if (input.status === 'completed' && before.status !== 'completed') {
-    await emit({ type: 'project.completed', aggregateType: 'project', aggregateId: id, payload: { key: before.key, companyId: before.companyId }, actorId: actor.userId, actorType: actor.actorType });
-  }
-  const logged = input.labelIds !== undefined ? { ...patch, labelIds: input.labelIds } : patch;
-  await writeActivity(db, { entityType: 'project', entityId: id, action: 'updated', before, after: logged, actorId: actor.userId, actorType: actor.actorType });
+  // Every check above runs before the first write, and the writes, the event
+  // and the activity record share one transaction: a refused or failed edit
+  // changes nothing – the labels included – and announces nothing.
+  await db.transaction(async (tx) => {
+    // The patch was built from `before`, and the caller named the version it
+    // saw, so a change in between is a conflict.
+    // NO KEY UPDATE, the lock the UPDATE takes anyway: it does not wait for the
+    // key-share lock a task (or anything else) inserted under the project holds.
+    const [locked] = await tx.select({ version: projects.version }).from(projects)
+      .where(and(eq(projects.id, id), isNull(projects.deletedAt))).for('no key update');
+    if (!locked) throw err.notFound('Project not found');
+    if (input.version !== undefined && locked.version !== before.version) {
+      const [current] = await tx.select().from(projects).where(eq(projects.id, id));
+      throw err.conflict('The record was modified by someone else', current ?? before);
+    }
+    // Project labels: replace the join set when labelIds is provided.
+    if (nextLabels) {
+      await tx.delete(schema.projectLabels).where(eq(schema.projectLabels.projectId, id));
+      if (nextLabels.length) await tx.insert(schema.projectLabels).values(nextLabels.map((labelId) => ({ projectId: id, labelId })));
+    }
+    if (Object.keys(patch).length) await tx.update(projects).set(patch).where(eq(projects.id, id));
+    if (input.status === 'completed' && before.status !== 'completed') {
+      await publishEvent(tx, { type: 'project.completed', aggregateType: 'project', aggregateId: id, payload: { key: before.key, companyId: before.companyId }, actorId: actor.userId, actorType: actor.actorType });
+    }
+    const logged = nextLabels ? { ...patch, labelIds: nextLabels } : patch;
+    await writeActivity(tx, { entityType: 'project', entityId: id, action: 'updated', before, after: logged, actorId: actor.userId, actorType: actor.actorType });
+  });
   const [updated] = await db.select().from(projects).where(eq(projects.id, id));
   return updated;
 }
@@ -698,6 +712,22 @@ async function assertReporter(project: { id: string }, userId: string): Promise<
 }
 
 export async function createTask(actor: Actor, input: any) {
+  const write = await prepareTask(actor, input);
+  // The task, its assignees and labels, its events and the activity record
+  // share one transaction: a failure part way leaves no half-created task,
+  // and nothing is announced that did not happen.
+  const { db } = getDb();
+  const { id, ref } = await db.transaction((tx) => write(tx));
+  const task = await loadTask(id);
+  return { ...task, ref };
+}
+
+/**
+ * Run every check a new task needs, before anything is written, and return
+ * the writer that creates it inside the caller's transaction – so a task can
+ * be created together with other writes (accepting an intake item).
+ */
+async function prepareTask(actor: Actor, input: any): Promise<(tx: any) => Promise<{ id: string; ref: string }>> {
   const project = await assertProject(actor, input.projectId, 'member');
   if (input.parentId) await assertParent(input.parentId, input.projectId);
   if (input.cycleId) await assertCycleInProject(input.cycleId, input.projectId);
@@ -711,35 +741,36 @@ export async function createTask(actor: Actor, input: any) {
   const ownerOfAgent = actor.agentKind === 'personal' && reporterId === actor.ownerUserId;
   if (reporterId && !ownerOfAgent && (reporterId !== actor.userId || actor.agentKind === 'personal')) await assertReporter(project, reporterId);
   const labelIds: string[] = input.labelIds ?? [];
-  // Before the row exists: a rejected label must not leave a half-created task.
   await assertLabelScope(labelIds, 'task');
-  const { db } = getDb();
-  const id = ulid();
   if (input.statusId) await assertStatusInProject(input.statusId, input.projectId);
   const statusId = input.statusId ?? (await defaultStatusId(input.projectId));
   if (input.milestoneId) await assertMilestoneInProject(input.milestoneId, input.projectId);
-  const position = await nextTaskPosition(input.projectId);
-  await db.insert(tasks).values({
-    id, projectId: input.projectId, number: 0, title: input.title,
-    description: input.description ?? null, statusId, typeId: input.typeId ?? null,
-    priority: input.priority ?? 'none', parentId: input.parentId ?? null,
-    milestoneId: input.milestoneId ?? null,
-    dueDate: input.dueDate ?? null, startDate: input.startDate ?? null,
-    estimate: input.estimate != null ? String(input.estimate) : null,
-    cycleId: input.cycleId ?? null, position, customFields: input.customFields ?? {},
-    createdBy: actor.userId, reporterId,
-  });
-  if (assigneeIds.length) await db.insert(taskAssignees).values(assigneeIds.map((userId) => ({ taskId: id, userId })));
-  if (labelIds.length) await db.insert(taskLabels).values(labelIds.map((labelId) => ({ taskId: id, labelId })));
+  const key = await projectKey(input.projectId);
 
-  const task = await loadTask(id);
-  const ref = await taskRef(task);
-  await emit({ type: 'task.created', aggregateType: 'task', aggregateId: id, payload: { ref, taskId: id, projectId: input.projectId }, actorId: actor.userId, actorType: actor.actorType });
-  if (assigneeIds.length) {
-    await emit({ type: 'task.assigned', aggregateType: 'task', aggregateId: id, payload: { assigneeIds, ref, taskId: id, projectId: input.projectId }, actorId: actor.userId, actorType: actor.actorType });
-  }
-  await writeActivity(db, { entityType: 'task', entityId: id, action: 'created', after: input, actorId: actor.userId, actorType: actor.actorType });
-  return { ...task, ref };
+  return async (tx) => {
+    const id = ulid();
+    const position = await nextTaskPosition(input.projectId, tx);
+    const [row] = await tx.insert(tasks).values({
+      id, projectId: input.projectId, number: 0, title: input.title,
+      description: input.description ?? null, statusId, typeId: input.typeId ?? null,
+      priority: input.priority ?? 'none', parentId: input.parentId ?? null,
+      milestoneId: input.milestoneId ?? null,
+      dueDate: input.dueDate ?? null, startDate: input.startDate ?? null,
+      estimate: input.estimate != null ? String(input.estimate) : null,
+      cycleId: input.cycleId ?? null, position, customFields: input.customFields ?? {},
+      createdBy: actor.userId, reporterId,
+    }).returning({ number: tasks.number });
+    if (assigneeIds.length) await tx.insert(taskAssignees).values(assigneeIds.map((userId) => ({ taskId: id, userId })));
+    if (labelIds.length) await tx.insert(taskLabels).values(labelIds.map((labelId) => ({ taskId: id, labelId })));
+
+    const ref = refOf(key, row!.number);
+    await publishEvent(tx, { type: 'task.created', aggregateType: 'task', aggregateId: id, payload: { ref, taskId: id, projectId: input.projectId }, actorId: actor.userId, actorType: actor.actorType });
+    if (assigneeIds.length) {
+      await publishEvent(tx, { type: 'task.assigned', aggregateType: 'task', aggregateId: id, payload: { assigneeIds, ref, taskId: id, projectId: input.projectId }, actorId: actor.userId, actorType: actor.actorType });
+    }
+    await writeActivity(tx, { entityType: 'task', entityId: id, action: 'created', after: input, actorId: actor.userId, actorType: actor.actorType });
+    return { id, ref };
+  };
 }
 
 export async function getTask(actor: Actor, id: string, include: string[]) {
@@ -1021,7 +1052,8 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
     return mapped;
   };
 
-  const newId = await db.transaction(async (tx) => {
+  const targetKey = await projectKey(targetProjectId);
+  const { newId, ref } = await db.transaction(async (tx) => {
     // Collect the subtree breadth-first, so a parent is always inserted first.
     const subtree = [source];
     // A reporter the target project is closed to would keep hearing about the
@@ -1039,6 +1071,18 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
       subtree.push(...children);
       frontier = children.map((child) => child.id);
     }
+    // Lock the subtree in id order – the order a task edit and a bulk edit
+    // lock in – so a second move of the same task waits and then finds it
+    // gone, instead of copying it into a second project too.
+    // The copies are made from the rows as locked, so an edit that committed
+    // just before is carried over rather than lost.
+    const live = new Map((await tx.select().from(tasks)
+      .where(and(inArray(tasks.id, subtree.map((t) => t.id)), isNull(tasks.deletedAt)))
+      .orderBy(asc(tasks.id)).for('update')).map((r) => [r.id, r]));
+    if (!live.has(source.id)) throw err.notFound('Task not found');
+    // A subtask moved elsewhere in between went with its own subtasks.
+    const fresh = subtree.filter((t) => live.has(t.id)).map((t) => live.get(t.id)!);
+    subtree.splice(0, subtree.length, ...fresh);
     const oldIds = subtree.map((t) => t.id);
     const newIdOf = new Map(oldIds.map((oldId) => [oldId, ulid()]));
 
@@ -1051,6 +1095,17 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
       tx.select().from(taskLabels).where(inArray(taskLabels.taskId, oldIds)),
     ]);
 
+    // Agents work only where they are members: one that is not on the
+    // target project comes off the moved tasks rather than being stranded.
+    // So does one the caller may not assign there (R49): the moved tasks
+    // put that agent's work on the target project.
+    const strandedAgents = new Set((await agentAssignRefusals(
+      actor, targetProjectId, [...new Set(assigneeRows.map((r) => r.userId))], effectiveProjectRole(actor, targetProject),
+    )).map((r) => r.userId));
+    // Statuses, reporters and the agent check above are looked up before the
+    // first insert takes the target project's task-number counter, so the
+    // move does not hold it while it waits for those reads.
+    for (const t of subtree) { await targetStatusOf(t.statusId); await reporterFor(t.reporterId); }
     for (const t of subtree) {
       lastPos = appendPosition(lastPos);
       const cf = Object.fromEntries(
@@ -1065,13 +1120,6 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
         customFields: cf, createdBy: t.createdBy, reporterId: await reporterFor(t.reporterId),
       });
     }
-    // Agents work only where they are members: one that is not on the
-    // target project comes off the moved tasks rather than being stranded.
-    // So does one the caller may not assign there (R49): the moved tasks
-    // put that agent's work on the target project.
-    const strandedAgents = new Set((await agentAssignRefusals(
-      actor, targetProjectId, [...new Set(assigneeRows.map((r) => r.userId))], effectiveProjectRole(actor, targetProject),
-    )).map((r) => r.userId));
     const keptAssignees = assigneeRows.filter((row) => !strandedAgents.has(row.userId));
     if (keptAssignees.length) {
       await tx.insert(taskAssignees).values(keptAssignees.map((row) => ({
@@ -1102,13 +1150,17 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
       await tx.update(schema.activeTimers).set({ taskId: mappedId }).where(eq(schema.activeTimers.taskId, oldId));
       await tx.update(tasks).set({ redirectToTaskId: mappedId, deletedAt: new Date() }).where(eq(tasks.id, oldId));
     }
-    return newIdOf.get(source.id)!;
+    // The event and the activity record commit with the move, so a move that
+    // fails part way is not announced, and one that commits always is.
+    const movedId = newIdOf.get(source.id)!;
+    const [moved] = await tx.select({ number: tasks.number }).from(tasks).where(eq(tasks.id, movedId));
+    const movedRef = refOf(targetKey, moved!.number);
+    await publishEvent(tx, { type: 'task.created', aggregateType: 'task', aggregateId: movedId, payload: { ref: movedRef, projectId: targetProjectId, movedFrom: id }, actorId: actor.userId, actorType: actor.actorType });
+    await writeActivity(tx, { entityType: 'task', entityId: id, action: 'moved', after: { targetProjectId, newTaskId: movedId }, actorId: actor.userId, actorType: actor.actorType });
+    return { newId: movedId, ref: movedRef };
   });
 
   const task = await loadTask(newId);
-  const ref = await taskRef(task);
-  await emit({ type: 'task.created', aggregateType: 'task', aggregateId: newId, payload: { ref, projectId: targetProjectId, movedFrom: id }, actorId: actor.userId, actorType: actor.actorType });
-  await writeActivity(db, { entityType: 'task', entityId: id, action: 'moved', after: { targetProjectId, newTaskId: newId }, actorId: actor.userId, actorType: actor.actorType });
   return { ...task, ref };
 }
 
@@ -1123,22 +1175,28 @@ export async function duplicateTask(actor: Actor, id: string) {
   const sourceAssignees = await assigneeIdsOf(id);
   const refused = new Set((await agentAssignRefusals(actor, source.projectId, sourceAssignees, effectiveProjectRole(actor, project))).map((r) => r.userId));
   const assignees = sourceAssignees.filter((userId) => !refused.has(userId));
-  const position = await nextTaskPosition(source.projectId);
+  const labelIds = (await db.select({ labelId: taskLabels.labelId }).from(taskLabels).where(eq(taskLabels.taskId, id))).map((l) => l.labelId);
+  const key = await projectKey(source.projectId);
   const newId = ulid();
-  await db.insert(tasks).values({
-    id: newId, projectId: source.projectId, number: 0, title: `${source.title} (copy)`,
-    description: source.description, statusId: source.statusId, typeId: source.typeId, priority: source.priority,
-    parentId: source.parentId, dueDate: source.dueDate, startDate: source.startDate,
-    estimate: source.estimate, cycleId: source.cycleId, position, customFields: source.customFields,
-    // A copy answers the same request, so it keeps the reporter – or the lack of one.
-    createdBy: actor.userId, reporterId: source.reporterId,
+  // The copy, its assignees and labels and its event share one transaction:
+  // a failure part way leaves no half-made copy.
+  const ref = await db.transaction(async (tx) => {
+    const position = await nextTaskPosition(source.projectId, tx);
+    const [row] = await tx.insert(tasks).values({
+      id: newId, projectId: source.projectId, number: 0, title: `${source.title} (copy)`,
+      description: source.description, statusId: source.statusId, typeId: source.typeId, priority: source.priority,
+      parentId: source.parentId, dueDate: source.dueDate, startDate: source.startDate,
+      estimate: source.estimate, cycleId: source.cycleId, position, customFields: source.customFields,
+      // A copy answers the same request, so it keeps the reporter – or the lack of one.
+      createdBy: actor.userId, reporterId: source.reporterId,
+    }).returning({ number: tasks.number });
+    if (assignees.length) await tx.insert(taskAssignees).values(assignees.map((userId) => ({ taskId: newId, userId })));
+    if (labelIds.length) await tx.insert(taskLabels).values(labelIds.map((labelId) => ({ taskId: newId, labelId })));
+    const copyRef = refOf(key, row!.number);
+    await publishEvent(tx, { type: 'task.created', aggregateType: 'task', aggregateId: newId, payload: { ref: copyRef, projectId: source.projectId }, actorId: actor.userId, actorType: actor.actorType });
+    return copyRef;
   });
-  if (assignees.length) await db.insert(taskAssignees).values(assignees.map((userId) => ({ taskId: newId, userId })));
-  const labelRows = await db.select({ labelId: taskLabels.labelId }).from(taskLabels).where(eq(taskLabels.taskId, id));
-  if (labelRows.length) await db.insert(taskLabels).values(labelRows.map((l) => ({ taskId: newId, labelId: l.labelId })));
   const task = await loadTask(newId);
-  const ref = await taskRef(task);
-  await emit({ type: 'task.created', aggregateType: 'task', aggregateId: newId, payload: { ref, projectId: source.projectId }, actorId: actor.userId, actorType: actor.actorType });
   return { ...task, ref };
 }
 
@@ -1199,7 +1257,6 @@ export async function addComment(actor: Actor, taskId: string, input: any): Prom
   const task = await loadTask(taskId);
   const project = await assertProject(actor, task.projectId, 'member');
   const id = ulid();
-  await db.insert(schema.comments).values({ id, taskId, authorId: actor.userId, via: actor.agentKind === 'personal' ? actor.clientLabel ?? null : null, body: input.body ?? {} });
   // Mentions come from the explicit list plus any parsed out of the comment body,
   // so a client that only sends the tiptap doc still notifies the mentioned users.
   const mentions = [...new Set<string>([...(input.mentions ?? []), ...extractMentions(input.body).users])]
@@ -1209,25 +1266,32 @@ export async function addComment(actor: Actor, taskId: string, input: any): Prom
   // comment is posted either way – it is still a message to read – but an
   // agent the commenter may not assign is not started, and the answer says
   // why. An agent already on the task follows the thread up as an assignee.
+  // These are reads only, so they run before the comment is written.
   const { agentMentions, agentsNotStarted } = await dispatchableAgentMentions(actor, project, taskId, mentions);
-  if (mentions.length) {
-    const ref = await taskRef(task);
-    await emit({
-      type: 'comment.mentioned',
-      aggregateType: 'comment',
-      aggregateId: id,
-      payload: { mentions, ref, taskId, projectId: task.projectId, commentId: id },
-      actorId: actor.userId,
-      actorType: actor.actorType,
+  const ref = await taskRef(task);
+  // The comment, its events and the activity record commit together: no
+  // event announces a comment that was not saved, and none is missing for
+  // one that was.
+  await db.transaction(async (tx) => {
+    await tx.insert(schema.comments).values({ id, taskId, authorId: actor.userId, via: actor.agentKind === 'personal' ? actor.clientLabel ?? null : null, body: input.body ?? {} });
+    if (mentions.length) {
+      await publishEvent(tx, {
+        type: 'comment.mentioned',
+        aggregateType: 'comment',
+        aggregateId: id,
+        payload: { mentions, ref, taskId, projectId: task.projectId, commentId: id },
+        actorId: actor.userId,
+        actorType: actor.actorType,
+      });
+    }
+    // Every comment is an event: agents assigned to the task follow up on it (R30).
+    await publishEvent(tx, {
+      type: 'comment.created', aggregateType: 'comment', aggregateId: id,
+      payload: { ref, taskId, projectId: task.projectId, commentId: id, mentions, agentMentions },
+      actorId: actor.userId, actorType: actor.actorType,
     });
-  }
-  // Every comment is an event: agents assigned to the task follow up on it (R30).
-  await emit({
-    type: 'comment.created', aggregateType: 'comment', aggregateId: id,
-    payload: { ref: await taskRef(task), taskId, projectId: task.projectId, commentId: id, mentions, agentMentions },
-    actorId: actor.userId, actorType: actor.actorType,
+    await writeActivity(tx, { entityType: 'comment', entityId: id, action: 'created', actorId: actor.userId, actorType: actor.actorType });
   });
-  await writeActivity(db, { entityType: 'comment', entityId: id, action: 'created', actorId: actor.userId, actorType: actor.actorType });
   return { id, agentsNotStarted };
 }
 
@@ -1555,18 +1619,32 @@ export async function acceptIntake(actor: Actor, itemId: string, input: any) {
   await assertProject(actor, item.projectId, 'member');
   if (item.status !== 'pending') throw err.domain('Intake item already triaged');
   const description = intakeTaskDescription(item.description, (item.answers ?? []) as IntakeAnswer[]);
-  const task = await createTask(actor, {
+  const writeTask = await prepareTask(actor, {
     projectId: item.projectId, title: item.title, description,
     statusId: input.statusId, typeId: input.typeId ?? null, assigneeIds: input.assigneeIds ?? [],
   });
   const { db } = getDb();
-  await db.update(schema.intakeItems).set({ status: 'accepted', createdTaskId: task.id }).where(eq(schema.intakeItems.id, itemId));
-  // The request's files travel with it: re-bind them to the created task so
-  // they appear in the task's Files section under the task's access rules.
-  await db.update(schema.attachments).set({ entityType: 'task', entityId: task.id })
-    .where(and(eq(schema.attachments.entityType, 'intake_item'), eq(schema.attachments.entityId, itemId)));
+  // The task, the item's new status and its files move together: a failure
+  // part way leaves the item pending, with no task made from it.
+  const task = await db.transaction(async (tx) => {
+    // The row lock makes a second accept (or a decline) of the same item wait
+    // and then see it triaged, instead of making a second task.
+    const [locked] = await tx.select({ status: schema.intakeItems.status }).from(schema.intakeItems)
+      .where(eq(schema.intakeItems.id, itemId)).for('update');
+    if (!locked || locked.status !== 'pending') throw err.domain('Intake item already triaged');
+    const created = await writeTask(tx);
+    await tx.update(schema.intakeItems).set({ status: 'accepted', createdTaskId: created.id }).where(eq(schema.intakeItems.id, itemId));
+    // The request's files travel with it: re-bind them to the created task so
+    // they appear in the task's Files section under the task's access rules.
+    await tx.update(schema.attachments).set({ entityType: 'task', entityId: created.id })
+      .where(and(eq(schema.attachments.entityType, 'intake_item'), eq(schema.attachments.entityId, itemId)));
+    return created;
+  });
+  // The accept has committed: a mail server that refuses the notice does not
+  // turn it into a failed request, which a retry would answer with "triaged".
   if (item.requesterEmail) {
-    await sendIntakeMail(item.requesterEmail, 'intakeAccepted', item.title, null);
+    await sendIntakeMail(item.requesterEmail, 'intakeAccepted', item.title, null)
+      .catch((e) => logger.warn({ err: e, itemId }, 'intake accepted mail failed'));
   }
   return { taskId: task.id, ref: task.ref };
 }
@@ -1576,9 +1654,13 @@ export async function declineIntake(actor: Actor, itemId: string, input: any) {
   await assertProject(actor, item.projectId, 'member');
   if (item.status !== 'pending') throw err.domain('Intake item already triaged');
   const { db } = getDb();
-  await db.update(schema.intakeItems).set({ status: 'declined', declineReason: input.reason ?? '' }).where(eq(schema.intakeItems.id, itemId));
+  // Only a pending item: an accept that committed in between keeps its task.
+  const declined = await db.update(schema.intakeItems).set({ status: 'declined', declineReason: input.reason ?? '' })
+    .where(and(eq(schema.intakeItems.id, itemId), eq(schema.intakeItems.status, 'pending'))).returning({ id: schema.intakeItems.id });
+  if (!declined.length) throw err.domain('Intake item already triaged');
   if (input.notify && item.requesterEmail) {
-    await sendIntakeMail(item.requesterEmail, 'intakeDeclined', item.title, input.reason ?? null);
+    await sendIntakeMail(item.requesterEmail, 'intakeDeclined', item.title, input.reason ?? null)
+      .catch((e) => logger.warn({ err: e, itemId }, 'intake declined mail failed'));
   }
   return { ok: true };
 }
