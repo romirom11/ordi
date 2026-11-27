@@ -202,11 +202,13 @@ async function vetRequest(c: Context<AppEnv>, actor: Actor | undefined): Promise
   if (await anyUnvetted(decodings(c.req.url), actor, echoed)) return { refused: refuse(c) };
 
   if (c.req.method === 'GET' || c.req.method === 'HEAD' || !c.req.raw.body) return { echoed };
-  // Multipart is left to the routes that read it, which vet the fields they
-  // keep as they parsed them (an upload's filename, the intake form's JSON
-  // payload): its parts are never rewritten in place, and buffering a large
-  // upload here would come before the route's own size cap.
-  if (/multipart\/form-data/i.test(c.req.header('content-type') ?? '')) return { echoed };
+  // The upload is left to its route, which vets the filename it keeps (the
+  // file's own bytes are served as they are, never rewritten): buffering a
+  // large upload here would come before its size cap. Only that route, and
+  // only multipart – a JSON body merely labelled multipart is read as JSON by
+  // every other route, so the label alone exempts nothing.
+  if (c.req.method === 'POST' && c.req.path === '/api/v1/attachments'
+    && /multipart\/form-data/i.test(c.req.header('content-type') ?? '')) return { echoed };
   const raw = await c.req.raw.clone().arrayBuffer();
   const text = new TextDecoder().decode(raw);
   let parsed: { ok: true; value: unknown } | { ok: false } = { ok: false };

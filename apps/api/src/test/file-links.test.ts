@@ -261,6 +261,15 @@ describe('paths that reach storage or an answer some other way', () => {
     expect(new TextDecoder().decode(bytes)).not.toContain(legacyPath(id));
   });
 
+  it('reads a JSON body labelled multipart as the JSON a route will parse', async () => {
+    const { id } = await upload(owner);
+    const body = JSON.stringify({ projectId, title: 'Mislabelled', description: doc(stale(id)) });
+    const res = await app.request('/api/v1/tasks', { method: 'POST', body, headers: { cookie: users.member!.cookie, 'content-type': 'multipart/form-data; boundary=x' } });
+    expect(res.status).toBe(201);
+    const [row] = await getDb().db.select({ description: schema.tasks.description }).from(schema.tasks).where(eq(schema.tasks.id, (await json(res)).id));
+    expect(srcOf(row!.description)).toBe(`/api/v1/files/${id}/${deadFileToken(id)}`);
+  });
+
   it('vets a file path hidden in an uploaded file’s name', async () => {
     const { id } = await upload(owner);
     const fd = new FormData();
