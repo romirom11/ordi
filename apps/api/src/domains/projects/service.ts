@@ -793,10 +793,16 @@ export async function getTask(actor: Actor, id: string, include: string[]) {
     const outgoing = await db.select().from(schema.taskRelations).where(eq(schema.taskRelations.taskId, id));
     const incoming = await db.select().from(schema.taskRelations).where(eq(schema.taskRelations.relatedTaskId, id));
     const otherIds = [...new Set([...outgoing.map((r) => r.relatedTaskId), ...incoming.map((r) => r.taskId)])];
-    const refMap = await refsFor(otherIds);
+    // A relation is shown only when its other end is a task the actor can
+    // open: one into a private project they are not on would hand out that
+    // task's ref (and with it the project's key) – the relation is left out,
+    // as the task itself would be from any list.
+    const refMap = await refsFor(otherIds, new Set(await accessibleProjectIds(actor)));
     out.relations = {
-      outgoing: outgoing.map((r) => ({ ...r, relatedRef: refMap.get(r.relatedTaskId) ?? null })),
-      incoming: incoming.map((r) => ({ ...r, relatedRef: refMap.get(r.taskId) ?? null })),
+      outgoing: outgoing.filter((r) => refMap.has(r.relatedTaskId))
+        .map((r) => ({ ...r, relatedRef: refMap.get(r.relatedTaskId)! })),
+      incoming: incoming.filter((r) => refMap.has(r.taskId))
+        .map((r) => ({ ...r, relatedRef: refMap.get(r.taskId)! })),
     };
   }
   if (want.has('links')) {
@@ -811,13 +817,14 @@ export async function getTask(actor: Actor, id: string, include: string[]) {
   return out;
 }
 
-async function refsFor(taskIds: string[]): Promise<Map<string, string>> {
+/** Refs of the given tasks that sit in one of `projectIds` (tasks elsewhere are left out). */
+async function refsFor(taskIds: string[], projectIds: ReadonlySet<string>): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   if (!taskIds.length) return map;
   const { db } = getDb();
-  const rows = await db.select({ id: tasks.id, number: tasks.number, key: projects.key })
+  const rows = await db.select({ id: tasks.id, number: tasks.number, key: projects.key, projectId: tasks.projectId })
     .from(tasks).innerJoin(projects, eq(projects.id, tasks.projectId)).where(inArray(tasks.id, taskIds));
-  for (const r of rows) map.set(r.id, refOf(r.key, r.number));
+  for (const r of rows) if (projectIds.has(r.projectId)) map.set(r.id, refOf(r.key, r.number));
   return map;
 }
 

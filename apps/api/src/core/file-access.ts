@@ -14,11 +14,12 @@ import { getDb, schema, eq, and, isNull } from '@ordi/db';
 import type { Permission } from '@ordi/shared';
 import type { Actor } from '../context';
 import { assertProject } from './access';
+import { ATTACHMENT_READ_PERM } from './activity';
 import { ApiException, err } from '../lib/errors';
 import { getPage } from '../domains/kb/service';
 
-/** Which permission covers files hanging off each entity type. */
-export const READ_PERM: Record<string, Permission> = { company: 'crm.read', lead: 'crm.read', deal: 'deals.read', task: 'projects.read', project: 'projects.read', employee: 'people.read_documents', intake_item: 'projects.read' };
+/** Which permission covers files hanging off each entity type (shared with the activity feed's rule). */
+export const READ_PERM: Record<string, Permission> = ATTACHMENT_READ_PERM;
 export const WRITE_PERM: Record<string, Permission> = { company: 'crm.write', lead: 'crm.write', deal: 'deals.write', task: 'projects.read', project: 'projects.read', employee: 'people.write', intake_item: 'projects.read' };
 
 /** Entity types whose files answer to a project's membership (assertEntityAccess). */

@@ -9,7 +9,7 @@ import { rejectReadOnlyWrites } from '../../core/rbac';
 import {
   READ_PERM, WRITE_PERM, PROJECT_SCOPED, requireEntityPerm, assertEntityAccess, canReadAttachment,
 } from '../../core/file-access';
-import { writeActivity } from '../../core/activity';
+import { writeActivity, onRecord } from '../../core/activity';
 import { putObject } from '../../lib/s3';
 import { fileSrc } from '../../lib/file-tokens';
 import { vetFilePaths } from '../../core/file-links';
@@ -145,7 +145,7 @@ export function attachmentsRoutes() {
       await db.update(schema.attachments).set({ filename }).where(eq(schema.attachments.id, att.id));
       await writeActivity(db, {
         entityType: 'attachment', entityId: att.id, action: 'updated',
-        diff: { file: { from: att.filename, to: filename } },
+        diff: { file: { from: att.filename, to: filename }, ...onRecord(att) },
         actorId: actor.userId, actorType: actor.actorType,
       });
     }
@@ -163,7 +163,7 @@ export function attachmentsRoutes() {
     await db.delete(schema.attachments).where(eq(schema.attachments.id, att.id));
     await writeActivity(db, {
       entityType: 'attachment', entityId: att.id, action: 'deleted',
-      diff: { file: { from: att.filename } },
+      diff: { file: { from: att.filename }, ...onRecord(att) },
       actorId: actor.userId, actorType: actor.actorType,
     });
     return c.json({ ok: true });

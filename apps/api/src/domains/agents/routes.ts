@@ -26,6 +26,21 @@ import { startConnectorOAuth, revokeConnectorOAuth, connectorCallbackUrl } from 
 import * as runs from './runs';
 import { listWorkers } from './run-service';
 import { runtimeAdapter } from './runtime';
+import { accessibleProjectIds } from '../../core/access';
+import type { Actor } from '../../context';
+
+/**
+ * An agent's projects as the caller may know them: agents.manage runs the
+ * agents, not every project, so a private project the caller cannot open is
+ * not named (nor counted) on its agents.
+ */
+async function inReach<T extends { projectIds: string[] }>(actor: Actor, views: T[]): Promise<T[]> {
+  const reach = new Set(await accessibleProjectIds(actor));
+  return views.map((v) => ({ ...v, projectIds: v.projectIds.filter((id) => reach.has(id)) }));
+}
+async function oneInReach<T extends { projectIds: string[] }>(actor: Actor, view: T): Promise<T> {
+  return (await inReach(actor, [view]))[0]!;
+}
 
 export function agentsRoutes() {
   const app = new Hono<AppEnv>();
@@ -44,24 +59,24 @@ export function agentsRoutes() {
   });
 
   // ── Agents ──
-  app.get('/agents', guard('agents.manage'), async (c) => c.json({ data: await profiles.listAgents() }));
+  app.get('/agents', guard('agents.manage'), async (c) => c.json({ data: await inReach(currentActor(c), await profiles.listAgents()) }));
 
   app.post('/agents', guard('agents.manage'), async (c) => {
     const actor = currentActor(c);
     if (!actor.access.permissions.has('users.manage')) throw err.forbidden('Creating an agent also needs users.manage', 'users.manage');
     const body = createAgentSchema.parse(await c.req.json());
-    return c.json(await profiles.createAgent(actor, body), 201);
+    return c.json(await oneInReach(actor, await profiles.createAgent(actor, body)), 201);
   });
 
-  app.get('/agents/:id', guard('agents.manage'), async (c) => c.json(await profiles.getAgent(c.req.param('id'))));
+  app.get('/agents/:id', guard('agents.manage'), async (c) => c.json(await oneInReach(currentActor(c), await profiles.getAgent(c.req.param('id')))));
 
   app.patch('/agents/:id', guard('agents.manage'), async (c) => {
     const body = updateAgentSchema.parse(await c.req.json());
-    return c.json(await profiles.updateAgent(currentActor(c), c.req.param('id'), body));
+    return c.json(await oneInReach(currentActor(c), await profiles.updateAgent(currentActor(c), c.req.param('id'), body)));
   });
 
-  app.post('/agents/:id/disable', guard('agents.manage'), async (c) => c.json(await profiles.setAgentActive(currentActor(c), c.req.param('id'), false)));
-  app.post('/agents/:id/enable', guard('agents.manage'), async (c) => c.json(await profiles.setAgentActive(currentActor(c), c.req.param('id'), true)));
+  app.post('/agents/:id/disable', guard('agents.manage'), async (c) => c.json(await oneInReach(currentActor(c), await profiles.setAgentActive(currentActor(c), c.req.param('id'), false))));
+  app.post('/agents/:id/enable', guard('agents.manage'), async (c) => c.json(await oneInReach(currentActor(c), await profiles.setAgentActive(currentActor(c), c.req.param('id'), true))));
 
   // ── External agents: run elsewhere, connect over MCP with their own token ──
   app.get('/external-agents', guard('agents.manage'), async (c) => c.json({ data: await external.listExternalAgents(currentActor(c)) }));
