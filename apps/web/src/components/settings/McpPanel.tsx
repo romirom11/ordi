@@ -158,13 +158,13 @@ const READ_TOOLS = [
 ];
 const ACTION_TOOLS = [
   'create_task', 'update_task', 'upsert_task', 'add_task_link',
-  'update_project', 'create_milestone', 'update_milestone', 'create_cycle', 'complete_cycle',
+  'create_milestone', 'update_milestone', 'create_cycle', 'complete_cycle',
   'update_task_status', 'assign_task', 'comment_on_task', 'log_time',
   'create_invoice_from_time', 'create_invoice_from_project', 'send_invoice', 'record_payment',
   'send_payment_reminder', 'create_quote', 'create_note', 'create_company', 'create_contact',
   'create_lead', 'update_lead', 'schedule_sales_activity',
   'complete_sales_activity', 'convert_lead',
-  'create_deal', 'move_deal', 'create_custom_field', 'create_kb_page',
+  'create_deal', 'move_deal', 'create_custom_field', 'create_kb_page', 'update_project',
   'request_leave', 'approve_leave', 'create_job_opening', 'move_applicant',
 ];
 
