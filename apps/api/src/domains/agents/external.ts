@@ -14,7 +14,9 @@ import { err } from '../../lib/errors';
 import { generateToken, sha256 } from '../../lib/crypto';
 import { writeActivity } from '../../core/activity';
 import { loadRolePermissions } from '../../core/rbac';
-import { accessibleProjectIds, accessibleSpaceIds, editableSpaceIds, effectiveProjectRole } from '../../core/access';
+import {
+  accessibleProjectIds, accessibleSpaceIds, editableSpaceIds, effectiveProjectRolesIncludingDeleted,
+} from '../../core/access';
 
 const { users, roles, externalAgents, apiTokens, projectMembers, projects, spaceMembers } = schema;
 
@@ -103,13 +105,16 @@ const PROJECT_RANK: Record<string, number> = { viewer: 1, member: 2, admin: 3 };
 async function assertCanReachAgentResources(actor: Actor, agentId: string): Promise<void> {
   const { db } = getDb();
   const [projectRows, spaceRows] = await Promise.all([
+    // Deleted projects too: a token minted now still works there once the
+    // project is restored.
     db.select({ id: projects.id, key: projects.key, visibility: projects.visibility, role: projectMembers.role })
       .from(projectMembers).innerJoin(projects, eq(projects.id, projectMembers.projectId))
-      .where(and(eq(projectMembers.userId, agentId), isNull(projects.deletedAt))),
+      .where(eq(projectMembers.userId, agentId)),
     db.select({ spaceId: spaceMembers.spaceId, role: spaceMembers.role }).from(spaceMembers).where(eq(spaceMembers.userId, agentId)),
   ]);
+  const roles = await effectiveProjectRolesIncludingDeleted(actor, projectRows.map((p) => ({ id: p.id, visibility: p.visibility as 'workspace' | 'private' })));
   const shortOf = projectRows.filter((p) => {
-    const mine = effectiveProjectRole(actor, { id: p.id, visibility: p.visibility as 'workspace' | 'private' });
+    const mine = roles.get(p.id) ?? null;
     return (mine ? PROJECT_RANK[mine]! : 0) < (PROJECT_RANK[p.role] ?? 0);
   });
   if (shortOf.length) {

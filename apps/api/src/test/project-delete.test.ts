@@ -57,6 +57,83 @@ describe('project key after delete', () => {
   });
 });
 
+describe('a deleted private project', () => {
+  async function privateProject(key: string): Promise<string> {
+    const res = await owner.post('/projects', { name: `Project ${key}`, key, projectTypeId: typeId, visibility: 'private' });
+    expect(res.status).toBe(201);
+    return (await json(res)).id;
+  }
+  const ids = (body: { data: { id: string }[] }) => body.data.map((p) => p.id);
+
+  it('stays out of the trash of a workspace admin who was never on it', async () => {
+    const admin = reqAs(users.admin!.cookie);
+    const id = await privateProject('PRV');
+    // Alive, it was closed to them.
+    expect((await admin.get(`/projects/${id}`)).status).toBe(404);
+    expect((await owner.del(`/projects/${id}`)).status).toBe(200);
+
+    expect(ids(await json(admin.get('/projects/deleted')))).not.toContain(id);
+    expect((await admin.post(`/projects/${id}/restore`)).status).toBe(404);
+    const trash = await json(admin.get('/settings/trash'));
+    expect(trash.projects.map((p: { id: string }) => p.id)).not.toContain(id);
+    const { db } = getDb();
+    const [row] = await db.select({ deletedAt: schema.projects.deletedAt }).from(schema.projects).where(eq(schema.projects.id, id));
+    expect(row?.deletedAt).not.toBeNull();
+
+    // Its own admin still finds it and brings it back.
+    expect(ids(await json(owner.get('/projects/deleted')))).toContain(id);
+    expect((await json(owner.get('/settings/trash'))).projects.map((p: { id: string }) => p.id)).toContain(id);
+    expect((await owner.post(`/projects/${id}/restore`)).status).toBe(200);
+  });
+
+  it('keeps its deleted tasks out of the workspace trash, and its name out of a key clash', async () => {
+    const admin = reqAs(users.admin!.cookie);
+    const id = await privateProject('PRT');
+    const task = await json(owner.post('/tasks', { projectId: id, title: 'Confidential merger memo' }));
+    expect((await owner.del(`/tasks/${task.id}`)).status).toBeLessThan(300);
+    const titles = (body: { tasks: { title: string }[] }) => body.tasks.map((t) => t.title);
+    expect(titles(await json(admin.get('/settings/trash')))).not.toContain('Confidential merger memo');
+    expect(titles(await json(owner.get('/settings/trash')))).toContain('Confidential merger memo');
+    expect((await owner.del(`/projects/${id}`)).status).toBe(200);
+    expect(titles(await json(admin.get('/settings/trash')))).not.toContain('Confidential merger memo');
+    expect(titles(await json(owner.get('/settings/trash')))).toContain('Confidential merger memo');
+
+    // A deleted workspace project whose key a private project took since.
+    const ws = await project('CLSH');
+    expect((await owner.del(`/projects/${ws}`)).status).toBe(200);
+    const taker = await privateProject('CLSH');
+    const blocked = await admin.post(`/projects/${ws}/restore`);
+    expect(blocked.status).toBe(422);
+    expect((await json(blocked)).error.message).not.toContain('Project CLSH');
+    expect((await json(owner.post(`/projects/${ws}/restore`))).error.message).toContain('Project CLSH');
+    await owner.del(`/projects/${taker}`);
+  });
+
+  it('opens to an admin member, not to a plain member', async () => {
+    const admin = reqAs(users.admin!.cookie);
+    const asMember = await privateProject('PRM');
+    const asAdmin = await privateProject('PRA');
+    expect((await owner.post(`/projects/${asMember}/members`, { userId: users.admin!.userId, role: 'member', canWriteTasks: true })).status).toBe(201);
+    expect((await owner.post(`/projects/${asAdmin}/members`, { userId: users.admin!.userId, role: 'admin', canWriteTasks: true })).status).toBe(201);
+    expect((await owner.del(`/projects/${asMember}`)).status).toBe(200);
+    expect((await owner.del(`/projects/${asAdmin}`)).status).toBe(200);
+
+    const listed = ids(await json(admin.get('/projects/deleted')));
+    expect(listed).not.toContain(asMember);
+    expect(listed).toContain(asAdmin);
+    expect((await admin.post(`/projects/${asMember}/restore`)).status).toBe(404);
+    expect((await admin.post(`/projects/${asAdmin}/restore`)).status).toBe(200);
+  });
+
+  it('leaves a deleted workspace project to everyone who could administer it', async () => {
+    const admin = reqAs(users.admin!.cookie);
+    const id = await project('WSP');
+    expect((await owner.del(`/projects/${id}`)).status).toBe(200);
+    expect(ids(await json(admin.get('/projects/deleted')))).toContain(id);
+    expect((await admin.post(`/projects/${id}/restore`)).status).toBe(200);
+  });
+});
+
 describe('what a deleted project takes with it', () => {
   let projectId: string;
   let taskId: string;

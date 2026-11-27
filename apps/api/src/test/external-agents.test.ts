@@ -127,6 +127,19 @@ describe('handing out no more than you hold', () => {
     expect(seen.hiddenProjects).toBe(1);
   });
 
+  it('refuses a token for an agent on a deleted private project, which a restore would open again', async () => {
+    const w = await wrangler();
+    const typeId = (await json(owner().get(`/projects/${ws.projectId}`))).projectTypeId;
+    const gone = await json(owner().post('/projects', { name: 'Former client', key: 'FMR', projectTypeId: typeId, visibility: 'private' }));
+    const agent = await createAgent('Old hand');
+    await addProjectMember(users, gone.id, agent.id, 'admin');
+    expect((await owner().del(`/projects/${gone.id}`)).status).toBe(200);
+    // Used to pass: the check skipped deleted projects.
+    expect((await w.post(`/external-agents/${agent.id}/tokens`, {})).status).toBe(403);
+    // The project's own admin still can.
+    expect((await owner().post(`/external-agents/${agent.id}/tokens`, {})).status).toBe(201);
+  });
+
   it('is done by a signed-in person, never with a token', async () => {
     const [adminRole] = await getDb().db.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.key, 'admin'));
     const agent = await createAgent('Self-renewing');
