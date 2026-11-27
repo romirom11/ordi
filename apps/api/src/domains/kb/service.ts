@@ -381,9 +381,18 @@ export async function getSpace(actor: Actor, id: string): Promise<SpaceRow> {
 /**
  * Space editor, or a workspace admin holding kb.manage_spaces – the same fallback
  * deleteSpace uses, so admins can manage orphaned spaces they are not members of.
+ * The fallback stops at a project's space the admin cannot open: kb.manage_spaces
+ * is a workspace capability, and a private project's space (its name, members,
+ * and through a self-added membership its pages) is the project's to show.
  */
 async function assertSpaceEditorOrManager(actor: Actor, spaceId: string): Promise<void> {
-  if (hasPermission(actor.access, 'kb.manage_spaces')) return;
+  if (hasPermission(actor.access, 'kb.manage_spaces')) {
+    const space = await loadSpace(spaceId);
+    if (!space.projectId) return;
+    const roles = await projectRolesFor(actor, [space]);
+    if (roles.get(space.projectId)) return;
+    // A membership the actor already holds still lets them in as an editor.
+  }
   await assertSpace(actor, spaceId, 'editor');
 }
 
@@ -392,6 +401,13 @@ export async function updateSpace(actor: Actor, id: string, input: any): Promise
   await assertSpaceEditorOrManager(actor, id);
   const before = await loadSpace(id);
   assertVersion(before, input.version, before);
+  // Moving a space between projects is the projects' admins' call, as creating
+  // and deleting a project space is: it must not attach a space to, or pull one
+  // out of, a project the actor cannot run.
+  if (input.projectId !== undefined && (input.projectId ?? null) !== before.projectId) {
+    if (before.projectId) await assertProject(actor, before.projectId, 'admin');
+    if (input.projectId) await assertProject(actor, input.projectId, 'admin');
+  }
   const patch: Record<string, unknown> = {};
   for (const k of ['name', 'icon', 'visibility', 'position', 'projectId']) {
     if (input[k] !== undefined) patch[k] = input[k];

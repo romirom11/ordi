@@ -102,7 +102,13 @@ export function spaceAccessRank(
   const inheritedRank = params.inheritedProjectRole
     ? SPACE_ROLE_RANK[params.inheritedProjectRole === 'viewer' ? 'viewer' : 'editor']!
     : 0;
-  const permRank = params.visibility === 'workspace' && !(ctx.membershipOnlyProjects && params.projectLinked)
+  // A project's space is never more open than its project: workspace visibility
+  // reaches kb.read/kb.write holders only when they can open the project too
+  // (inheritedProjectRole set), so a private project's notes stay with its
+  // members. A membership-only actor (an agent) gets no workspace rank on a
+  // project space at all.
+  const permRank = params.visibility === 'workspace'
+    && !(params.projectLinked && (ctx.membershipOnlyProjects || !params.inheritedProjectRole))
     ? workspaceSpaceRank(ctx.permissions) : 0;
   return Math.min(Math.max(memberRank, inheritedRank, permRank), ctx.spaceRankCap ?? Infinity);
 }

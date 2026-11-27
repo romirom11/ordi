@@ -6,14 +6,14 @@ import type { Actor, AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { rejectReadOnlyWrites } from '../../core/rbac';
 import { assertProject } from '../../core/access';
-import { writeActivity } from '../../core/activity';
+import { writeActivity, ATTACHMENT_READ_PERM } from '../../core/activity';
 import { putObject } from '../../lib/s3';
 import { fileSrc } from '../../lib/file-tokens';
 import { err } from '../../lib/errors';
 import { appendFileResource } from '../projects/resources.routes';
 
 /** Which permission covers files hanging off each entity type. */
-const READ_PERM: Record<string, Permission> = { company: 'crm.read', lead: 'crm.read', deal: 'deals.read', task: 'projects.read', project: 'projects.read', employee: 'people.read_documents', intake_item: 'projects.read' };
+const READ_PERM = ATTACHMENT_READ_PERM;
 const WRITE_PERM: Record<string, Permission> = { company: 'crm.write', lead: 'crm.write', deal: 'deals.write', task: 'projects.read', project: 'projects.read', employee: 'people.write', intake_item: 'projects.read' };
 
 function requireEntityPerm(perms: ReadonlySet<string>, map: Record<string, Permission>, entityType: string): void {

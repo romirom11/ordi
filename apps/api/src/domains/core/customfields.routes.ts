@@ -34,6 +34,9 @@ export function customFieldsRoutes() {
   app.get('/', async (c) => {
     const entityType = c.req.query('entityType');
     const projectId = c.req.query('projectId');
+    // A project's own fields are its configuration: readable by those who can
+    // open the project, and a 404 (as for the project itself) to anyone else.
+    if (projectId) await assertProject(currentActor(c), projectId, 'viewer');
     const { db } = getDb();
     const order = [asc(schema.customFieldDefinitions.position), asc(schema.customFieldDefinitions.createdAt)];
     const scope = projectId

@@ -96,6 +96,14 @@ describe('canAccessSpace on workspace spaces', () => {
   });
   it('kb.write without kb.read grants nothing (the space is listed nowhere)', () => {
     expect(canAccessSpace(ctx(['kb.write']), { visibility: 'workspace', spaceId: 's1', minRole: 'editor' })).toBe(false);
+  });  it('a workspace-visible project space opens only to those who open the project', () => {
+    const kb = ctx(['kb.read', 'kb.write']);
+    // Cannot open the project (a private one they are not on): kb rights do not reach its space.
+    expect(canAccessSpace(kb, { visibility: 'workspace', spaceId: 's1', projectLinked: true, inheritedProjectRole: null })).toBe(false);
+    // Can open it as a viewer: kb.write still makes them an editor of a workspace space.
+    expect(canAccessSpace(kb, { visibility: 'workspace', spaceId: 's1', projectLinked: true, inheritedProjectRole: 'viewer', minRole: 'editor' })).toBe(true);
+    // An explicit space membership still counts.
+    expect(canAccessSpace(ctx(['kb.read'], [], [['s1', 'viewer']]), { visibility: 'workspace', spaceId: 's1', projectLinked: true, inheritedProjectRole: null })).toBe(true);
   });
 });
 
