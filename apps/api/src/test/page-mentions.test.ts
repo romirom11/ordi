@@ -139,4 +139,43 @@ describe('a page mention reaches readers of the page only', () => {
 
     expect(await pageMentionsFor(users.sales!.userId)).toEqual([]);
   });
+
+  it('holds a mention added by an edit to the same rule', async () => {
+    const page = await json(as('member').post('/pages', { spaceId: openSpace, title: 'Reorg draft', published: false }));
+    const res = await as('member').patch(`/pages/${page.id}`, {
+      version: page.version, body: mentioning(users.sales!.userId, users.manager!.userId),
+    });
+    expect(res.status).toBe(200);
+    await processOutboxOnce();
+
+    expect(await pageMentionsFor(users.manager!.userId)).toHaveLength(1);
+    expect(await pageMentionsFor(users.sales!.userId)).toEqual([]);
+  });
+
+  it('says nothing once the space is deleted', async () => {
+    const doomed = (await json(as('owner').post('/spaces', { name: 'Old wiki', visibility: 'workspace' }))).id;
+    await json(as('owner').post('/pages', { spaceId: doomed, title: 'Legacy', body: mentioning(users.sales!.userId) }));
+    await getDb().db.update(schema.kbSpaces).set({ deletedAt: new Date() }).where(eq(schema.kbSpaces.id, doomed));
+    await processOutboxOnce();
+
+    expect(await pageMentionsFor(users.sales!.userId)).toEqual([]);
+  });
+
+  it('keeps a draft in a project space to those who edit the project', async () => {
+    const { db } = getDb();
+    const type = await json(as('owner').post('/project-types', { name: 'Client', revenueSource: 'none' }));
+    const project = await json(as('owner').post('/projects', { name: 'Atlas', key: 'ATL', projectTypeId: type.id, visibility: 'private' }));
+    await json(as('owner').post(`/projects/${project.id}/members`, { userId: users.hr!.userId, role: 'member' }));
+    await json(as('owner').post(`/projects/${project.id}/members`, { userId: users.guest!.userId, role: 'viewer' }));
+    const spaceId = ulid();
+    await db.insert(schema.kbSpaces).values({ id: spaceId, name: 'Atlas docs', visibility: 'private', projectId: project.id });
+    const pageId = ulid();
+    await db.insert(schema.kbPages).values({ id: pageId, spaceId, title: 'Pricing (draft)', published: false, createdBy: users.owner!.userId });
+    await json(as('owner').post(`/pages/${pageId}/comments`, { body: mentioning(users.hr!.userId, users.guest!.userId) }));
+    await processOutboxOnce();
+
+    // A project member edits the project's space; a project viewer only reads it.
+    expect(await pageMentionsFor(users.hr!.userId)).toHaveLength(1);
+    expect(await pageMentionsFor(users.guest!.userId)).toEqual([]);
+  });
 });

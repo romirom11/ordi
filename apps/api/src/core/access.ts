@@ -284,19 +284,22 @@ export async function userCanOpenProject(userId: string, projectId: string): Pro
  * then the page itself by canSeePage – a draft is for the space's editors, a
  * private page for its author and the editors. Checked before telling someone
  * about a page, so a mention never carries the title of a page closed to them.
- * A deleted page, space or project, an inactive or unknown user: no.
+ * A deleted page, space or project, an inactive or unknown user: no. An agent:
+ * no as well – agents are never told about anything, and a personal agent's
+ * reach is its owner's, bounded (buildPersonalAgentAccess), which this does
+ * not model; answering from the agent's own role would be wrong either way.
  */
 export async function userCanOpenPage(userId: string, pageId: string): Promise<boolean> {
   const { db } = getDb();
   const [user] = await db.select({ id: schema.users.id, isActive: schema.users.isActive, actorType: schema.users.actorType, roleId: schema.users.roleId })
     .from(schema.users).where(eq(schema.users.id, userId));
-  if (!user || !user.isActive) return false;
+  if (!user || !user.isActive || user.actorType !== 'user') return false;
   const [page] = await db
     .select({ spaceId: schema.kbPages.spaceId, published: schema.kbPages.published, visibility: schema.kbPages.visibility, createdBy: schema.kbPages.createdBy })
     .from(schema.kbPages)
     .where(and(eq(schema.kbPages.id, pageId), isNull(schema.kbPages.deletedAt)));
   if (!page) return false;
-  const access = await buildAccessContext(user.id, await loadRolePermissions(user.roleId), false, user.actorType);
+  const access = await buildAccessContext(user.id, await loadRolePermissions(user.roleId), false);
   const found = await spaceRank(access, page.spaceId);
   if (!found || found.rank < SPACE_RANK.viewer) return false;
   return canSeePage(page, user.id, found.rank >= SPACE_RANK.editor);
