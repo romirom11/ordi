@@ -87,6 +87,12 @@ extendDict({
     'settings.openTasksCount': 'Open tasks assigned',
     'settings.handOffTo': 'Hand open tasks to',
     'settings.leaveUnassigned': 'Leave unassigned',
+    'settings.ownedAgents': 'External agents they own',
+    'settings.ownedAgentsHint': 'Their tokens are revoked. They move to the successor (someone with access then issues a new token in Settings → Agents), or are switched off when there is none or the successor is an agent.',
+    'settings.successor': 'Successor',
+    'settings.agentTag': 'agent',
+    'settings.noSuccessor': 'No one',
+    'settings.previewFailed': 'Could not load what they hold – close and try again before deactivating.',
     'settings.handedOff': 'Tasks handed over',
     'settings.roleUpdated': 'Role updated',
     'settings.inviteSent': 'Invitation created',
@@ -167,6 +173,12 @@ extendDict({
     'settings.openTasksCount': 'Відкритих задач',
     'settings.handOffTo': 'Передати відкриті задачі',
     'settings.leaveUnassigned': 'Залишити без виконавця',
+    'settings.ownedAgents': 'Зовнішні агенти, власником яких є людина',
+    'settings.ownedAgentsHint': 'Їхні токени буде відкликано. Агенти перейдуть до наступника (новий токен потім випускає той, хто має доступ, у Налаштуваннях → Агенти) або вимкнуться, якщо наступника немає чи наступник – агент.',
+    'settings.successor': 'Наступник',
+    'settings.agentTag': 'агент',
+    'settings.noSuccessor': 'Ніхто',
+    'settings.previewFailed': 'Не вдалося завантажити, що за людиною закріплено, – закрийте й спробуйте ще раз перед деактивацією.',
     'settings.handedOff': 'Задачі передано',
     'settings.roleUpdated': 'Роль оновлено',
     'settings.inviteSent': 'Запрошення створено',
@@ -612,11 +624,12 @@ function DeactivateUserDialog({ user, candidates, pending, onClose, onConfirm }:
   useEffect(() => { setReassignTo(''); }, [user?.id]);
   const open = useQuery({
     queryKey: ['user-open-tasks', user?.id],
-    queryFn: () => api.get<{ count: number; data: { id: string; ref: string; title: string }[] }>(`/users/${user!.id}/open-tasks`),
+    queryFn: () => api.get<{ count: number; data: { id: string; ref: string; title: string }[]; ownedAgents?: { id: string; name: string }[] }>(`/users/${user!.id}/open-tasks`),
     enabled: !!user,
   });
   const count = open.data?.count ?? 0;
   const sample = open.data?.data ?? [];
+  const ownedAgents = open.data?.ownedAgents ?? [];
 
   return (
     <Dialog open={!!user} onClose={onClose} title={t('settings.deactivateTitle')} width={440}>
@@ -632,11 +645,14 @@ function DeactivateUserDialog({ user, candidates, pending, onClose, onConfirm }:
 
         {open.isLoading ? (
           <Skeleton className="h-16 w-full" />
-        ) : count === 0 ? (
+        ) : open.isError ? (
+          <p className="text-[13px] text-destructive">{t('settings.previewFailed')}</p>
+        ) : count === 0 && ownedAgents.length === 0 ? (
           <p className="text-[13px] text-muted-foreground">{t('settings.openTasksNone')}</p>
         ) : (
           <>
-            <div className="rounded-md border border-border bg-muted/40 px-3 py-2">
+            {count === 0 && <p className="text-[13px] text-muted-foreground">{t('settings.openTasksNone')}</p>}
+            {count > 0 && <div className="rounded-md border border-border bg-muted/40 px-3 py-2">
               <div className="text-xs font-medium text-muted-foreground">{t('settings.openTasksCount')}: <span className="tabular-nums text-foreground">{count}</span></div>
               <ul className="mt-1 max-h-32 space-y-0.5 overflow-y-auto text-[13px]">
                 {sample.map((task) => (
@@ -644,12 +660,21 @@ function DeactivateUserDialog({ user, candidates, pending, onClose, onConfirm }:
                 ))}
                 {count > sample.length && <li className="text-xs text-faint">…</li>}
               </ul>
-            </div>
+            </div>}
+            {ownedAgents.length > 0 && (
+              <div className="rounded-md border border-border bg-muted/40 px-3 py-2">
+                <div className="text-xs font-medium text-muted-foreground">{t('settings.ownedAgents')}: <span className="text-foreground">{ownedAgents.map((a) => a.name).join(', ')}</span></div>
+                <p className="mt-1 text-xs text-muted-foreground">{t('settings.ownedAgentsHint')}</p>
+              </div>
+            )}
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">{t('settings.handOffTo')}</label>
+              <label className="text-xs font-medium text-muted-foreground">{count > 0 ? t('settings.handOffTo') : t('settings.successor')}</label>
               <Select value={reassignTo} onChange={(e) => setReassignTo(e.target.value)} className="w-full">
-                <option value="">{t('settings.leaveUnassigned')}</option>
-                {candidates.map((u) => <option key={u.id} value={u.id}>{u.name ?? u.email ?? u.id}</option>)}
+                <option value="">{count > 0 ? t('settings.leaveUnassigned') : t('settings.noSuccessor')}</option>
+                {/* Their own agents go dark with them, so they cannot take over. */}
+                {candidates.filter((u) => !ownedAgents.some((a) => a.id === u.id)).map((u) => (
+                  <option key={u.id} value={u.id}>{u.name ?? u.email ?? u.id}{u.actorType === 'agent' ? ` · ${t('settings.agentTag')}` : ''}</option>
+                ))}
               </Select>
             </div>
           </>
@@ -657,7 +682,7 @@ function DeactivateUserDialog({ user, candidates, pending, onClose, onConfirm }:
 
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="ghost" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button type="button" variant="destructive" size="sm" disabled={pending || open.isLoading} onClick={() => onConfirm(reassignTo || null)}>
+          <Button type="button" variant="destructive" size="sm" disabled={pending || open.isLoading || open.isError} onClick={() => onConfirm(reassignTo || null)}>
             {pending && <Spinner className="h-3 w-3" />} {t('settings.deactivate')}
           </Button>
         </div>
@@ -678,8 +703,9 @@ function UsersPanel() {
 
   const changeRole = useMutation({
     mutationFn: ({ id, roleId }: { id: string; roleId: string }) => api.patch(`/users/${id}/role`, { roleId }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); qc.invalidateQueries({ queryKey: ['roles'] }); toast(t('settings.roleUpdated')); },
-    onError: () => toast.error(t('settings.saveFailed')),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); qc.invalidateQueries({ queryKey: ['roles'] }); qc.invalidateQueries({ queryKey: ['external-agents'] }); toast(t('settings.roleUpdated')); },
+    // The server says why (an agent cannot be Owner, a role wider than yours).
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('settings.saveFailed')),
   });
   // Deactivation goes through a dialog (ORD-20): open tasks the person holds
   // are handed to a successor, or left unassigned, never orphaned on them.
@@ -691,11 +717,12 @@ function UsersPanel() {
       qc.invalidateQueries({ queryKey: ['users'] });
       qc.invalidateQueries({ queryKey: ['tasks'] });
       qc.invalidateQueries({ queryKey: ['me-tasks'] });
+      qc.invalidateQueries({ queryKey: ['external-agents'] });
       setDeactivating(null);
       if (v.active) toast(t('settings.userReactivated'));
       else toast(r?.handedOffTasks ? `${t('settings.userDeactivated')} · ${t('settings.handedOff')}: ${r.handedOffTasks}` : t('settings.userDeactivated'));
     },
-    onError: () => toast.error(t('settings.saveFailed')),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('settings.saveFailed')),
   });
 
   // Someone who lost their password gets a one-time link, not a password an

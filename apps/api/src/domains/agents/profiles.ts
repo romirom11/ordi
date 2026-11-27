@@ -13,6 +13,7 @@ import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { assertVersion } from '../../core/locking';
 import { loadCredentialSlots, resolveCredentialChain } from './credentials';
+import { assertCanGrantRole } from './external';
 
 const { users, roles, agentProfiles, agentConnectors, mcpConnectors, projectMembers } = schema;
 
@@ -127,6 +128,8 @@ export async function createAgent(actor: Actor, input: CreateAgentInput): Promis
   const [role] = await db.select({ id: roles.id, key: roles.key }).from(roles).where(eq(roles.id, roleId));
   if (!role) throw err.validation('Unknown role');
   if (role.key === 'owner') throw err.domain('An agent cannot hold the Owner role');
+  // Its run tokens carry this role: nobody gives an agent more than they hold.
+  await assertCanGrantRole(actor, roleId);
   const id = ulid();
   const email = input.email ?? agentEmail(id, input.name);
   await db.transaction(async (tx) => {
@@ -169,6 +172,7 @@ export async function updateAgent(actor: Actor, id: string, input: UpdateAgentIn
     const [role] = await db.select({ id: roles.id, key: roles.key }).from(roles).where(eq(roles.id, input.roleId));
     if (!role) throw err.validation('Unknown role');
     if (role.key === 'owner') throw err.domain('An agent cannot hold the Owner role');
+    await assertCanGrantRole(actor, input.roleId);
     userPatch.roleId = input.roleId;
   }
   const profilePatch: Partial<typeof agentProfiles.$inferInsert> = {};

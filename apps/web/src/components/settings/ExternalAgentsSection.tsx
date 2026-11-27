@@ -52,6 +52,7 @@ extendDict({
     'extAgents.manage': 'Manage',
     'extAgents.copied': 'Copied',
     'extAgents.hidden': '{n} more you cannot open',
+    'extAgents.ownerChangeHint': 'A new owner revokes its tokens – issue a fresh one after.',
   },
   uk: {
     'extAgents.title': 'Зовнішні агенти',
@@ -86,6 +87,7 @@ extendDict({
     'extAgents.manage': 'Керувати',
     'extAgents.copied': 'Скопійовано',
     'extAgents.hidden': 'ще {n}, недоступних вам',
+    'extAgents.ownerChangeHint': 'Новий власник – і його токени відкликаються, випустіть новий.',
   },
 });
 
@@ -254,7 +256,8 @@ function ManageDialog({ agent, onClose }: { agent: ExternalAgent; onClose: () =>
               onBlur={() => { if (name.trim() && name.trim() !== agent.name) patch.mutate({ name: name.trim() }); }} />
           </Field>
           <Field label={t('extAgents.owner')}>
-            <OwnerSelect value={agent.ownerUserId} onChange={(id) => { if (id !== agent.ownerUserId) patch.mutate({ ownerUserId: id }); }} />
+            <OwnerSelect value={agent.ownerUserId} onChange={(id) => { if (id !== agent.ownerUserId) { setIssued(null); patch.mutate({ ownerUserId: id }); } }} />
+            <span className="mt-1 block text-xs text-muted-foreground">{t('extAgents.ownerChangeHint')}</span>
           </Field>
         </div>
 
