@@ -12,7 +12,7 @@ import { generateToken, sha256 } from '../../lib/crypto';
 import { writeActivity } from '../../core/activity';
 import { emit } from '../../core/events';
 import { loadRolePermissions } from '../../core/rbac';
-import { assertProject } from '../../core/access';
+import { accessibleProjectIds, assertProject } from '../../core/access';
 import { recordRunEvent, listRunEvents } from './run-events';
 import type { RuntimeUsage } from './runtime';
 
@@ -85,6 +85,12 @@ export async function queueRun(input: QueueRunInput): Promise<string | null> {
   const { db } = getDb();
   const [profile] = await db.select().from(agentProfiles).where(eq(agentProfiles.userId, input.agentUserId));
   if (!profile) return null;
+  // An agent reaches only the projects it is a member of, so a run anywhere
+  // else would fail on its first read. Assignment already refuses a
+  // non-member; this covers an @-mention and an agent removed from the project.
+  const [membership] = await db.select({ userId: schema.projectMembers.userId }).from(schema.projectMembers)
+    .where(and(eq(schema.projectMembers.projectId, input.projectId), eq(schema.projectMembers.userId, input.agentUserId)));
+  if (!membership) return null;
   const id = ulid();
   try {
     await db.insert(agentRuns).values({
@@ -308,6 +314,10 @@ export async function listRuns(actor: Actor, filter: { taskId?: string; agentUse
     conds.push(eq(agentRuns.taskId, filter.taskId));
   } else if (!actor.access.permissions.has('agents.manage')) {
     throw err.forbidden('Listing runs across tasks needs agents.manage', 'agents.manage');
+  } else if (actor.access.membershipOnlyProjects) {
+    // An agent holding agents.manage still sees runs of its own projects only.
+    const ids = await accessibleProjectIds(actor);
+    conds.push(ids.length ? inArray(agentRuns.projectId, ids) : sql`false`);
   }
   if (filter.agentUserId) conds.push(eq(agentRuns.agentUserId, filter.agentUserId));
   if (filter.status) conds.push(eq(agentRuns.status, filter.status));
@@ -362,6 +372,10 @@ export async function retryRun(actor: Actor, id: string): Promise<RunView> {
   const run = await loadRun(id);
   await assertRunWrite(actor, run);
   if ((AGENT_RUN_ACTIVE_STATUSES as readonly string[]).includes(run.status)) throw err.domain('The run is still active');
+  const { db } = getDb();
+  const [member] = await db.select({ userId: schema.projectMembers.userId }).from(schema.projectMembers)
+    .where(and(eq(schema.projectMembers.projectId, run.projectId), eq(schema.projectMembers.userId, run.agentUserId)));
+  if (!member) throw err.domain('The agent is no longer a member of this project; add it back under project members to retry');
   const newId = await queueRun({
     agentUserId: run.agentUserId, taskId: run.taskId, projectId: run.projectId, trigger: 'retry',
     requestedBy: actor.userId, parentRunId: run.id, sessionId: run.sessionId, branch: run.branch, actorType: actor.actorType,

@@ -14,6 +14,7 @@ import { OrdiClient } from './client';
 import { absolutizeImageSrcs, decodeEntities, projectDescriptionText, relativizeImageSrcs, scrub, text, wrap } from './format';
 import { registerAttachmentTools } from './attachments';
 import { registerTaskTools } from './tasks';
+import { annotateTools } from './annotations';
 
 export { decodeEntities, scrub };
 
@@ -26,6 +27,7 @@ export { textToDoc, docToText };
 
 export function buildServer(client: OrdiClient): McpServer {
   const server = new McpServer({ name: 'ordi', version: '1.0.0' });
+  annotateTools(server);
 
   // Every write goes through one decode pass: whatever tool the text arrives
   // from, escaped entities never reach the database.
@@ -293,7 +295,7 @@ export function buildServer(client: OrdiClient): McpServer {
   server.tool('update_task_status', 'Change a task status (statusId from get_project_schema); update_task changes the status together with the rest of the card', { taskId: z.string(), statusId: z.string() },
   ({ taskId, statusId }) => wrap(() => client.patch(`/tasks/${taskId}`, { statusId })));
 
-  server.tool('assign_task', 'Assign users to a task', { taskId: z.string(), assigneeIds: z.array(z.string()) },
+  server.tool('assign_task', 'Set who a task is assigned to. assigneeIds replaces the current assignees (ids from list_users); send an empty list to unassign everyone.', { taskId: z.string(), assigneeIds: z.array(z.string()) },
   ({ taskId, assigneeIds }) => wrap(() => client.patch(`/tasks/${taskId}`, { assigneeIds })));
 
   server.tool('comment_on_task', 'Comment on a task (line breaks are preserved). To address people, pass their user ids in mentionUserIds (see list_users) and write @Their Name in the text where the mention belongs; a mentioned person the text does not name is put at the start.', {
@@ -304,7 +306,7 @@ export function buildServer(client: OrdiClient): McpServer {
     return client.post(`/tasks/${taskId}/comments`, { body: textToDoc(fromAgent(body), { mentions }), mentions: mentions.map((m) => m.id) });
   }));
 
-  server.tool('log_time', 'Log time on a task', { taskId: z.string(), durationSeconds: z.number(), note: z.string().optional(), startedAt: z.string().optional() },
+  server.tool('log_time', 'Log time spent on a task, as the token owner', { taskId: z.string(), durationSeconds: z.number(), note: z.string().optional(), startedAt: z.string().optional() },
   ({ taskId, durationSeconds, note, startedAt }) => wrap(() => client.post('/time/entries', { taskId, durationSeconds, note: note ?? '', startedAt: startedAt ?? new Date().toISOString() })));
 
   server.tool('create_invoice_from_time', 'Create a draft invoice from unbilled time', {
@@ -320,17 +322,14 @@ export function buildServer(client: OrdiClient): McpServer {
   return client.post('/invoices', { companyId: project.companyId, projectId, issueDate, dueDate, items: items ?? [] });
 }));
 
-  server.tool('send_invoice', 'Send an invoice by email', { invoiceId: z.string() },
+  server.tool('send_invoice', 'Email an invoice, with its PDF, to the client company\'s billing address. A draft becomes sent and is booked as receivable. The email cannot be recalled, so confirm with the person first. Refused for a paid or cancelled invoice.', { invoiceId: z.string() },
   ({ invoiceId }) => wrap(() => client.post(`/invoices/${invoiceId}/send`, {})));
 
-  server.tool('record_payment', 'Record a payment on an invoice', {
+  server.tool('record_payment', 'Record in ordi\'s books a payment the client has already made against an invoice. It moves no money and charges nothing.', {
   invoiceId: z.string(), amount: z.number(), currency: z.string(), date: z.string(), method: z.enum(['bank', 'card', 'cash', 'other']).optional(),
 }, ({ invoiceId, amount, currency, date, method }) => wrap(() => client.post(`/invoices/${invoiceId}/payments`, { amount, currency, date, method: method ?? 'bank' })));
 
-  server.tool('send_payment_reminder', 'Trigger the finance dashboard refresh (reminders run via workers)', { invoiceId: z.string() },
-  ({ invoiceId }) => wrap(() => client.get(`/invoices/${invoiceId}`)));
-
-  server.tool('create_quote', 'Create a quote', {
+  server.tool('create_quote', 'Create a quote for a CRM company. It is not sent to anyone.', {
   companyId: z.string(), issueDate: z.string(), items: z.array(z.object({ description: z.string(), quantity: z.number(), unitPrice: z.number() })),
 }, ({ companyId, issueDate, items }) => wrap(() => client.post('/quotes', { companyId, issueDate, items })));
 

@@ -333,7 +333,9 @@ async function deletedProjectsFor(actor: Actor, id?: string) {
     id: projects.id, name: projects.name, key: projects.key, visibility: projects.visibility, deletedAt: projects.deletedAt,
   }).from(projects).where(and(isNotNull(projects.deletedAt), id ? eq(projects.id, id) : undefined))
     .orderBy(desc(projects.deletedAt));
-  if (actor.access.permissions.has('projects.write')) return rows;
+  // projects.write is admin of every workspace project – but not for an agent,
+  // which is admin only where its membership says so.
+  if (actor.access.permissions.has('projects.write') && !actor.access.membershipOnlyProjects) return rows;
   if (!rows.length) return rows;
   const admin = await db.select({ projectId: projectMembers.projectId }).from(projectMembers).where(and(
     eq(projectMembers.userId, actor.userId), eq(projectMembers.role, 'admin'),
