@@ -78,6 +78,12 @@ export const oauthAuthCodes = pgTable('oauth_auth_codes', {
   code: text('code').notNull().unique(),
   clientId: text('client_id').notNull().references(() => oauthClients.id, { onDelete: 'cascade' }),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /**
+   * Set when the person approved the client to work as their own agent: the
+   * exchange issues the token for this agent instead of for user_id. Null =
+   * as the person themselves.
+   */
+  agentUserId: text('agent_user_id').references(() => users.id, { onDelete: 'cascade' }),
   /** base64url(sha256(verifier)) as sent by the client. */
   codeChallenge: text('code_challenge').notNull(),
   /** The exact redirect the code was issued for; the exchange must repeat it. */
@@ -150,6 +156,11 @@ export const apiTokens = pgTable('api_tokens', {
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
   /** Past this moment the token is refused, as if revoked. Null = no expiry. */
   expiresAt: timestamp('expires_at', { withTimezone: true }),
+  /**
+   * The OAuth client the token was issued to through the consent page; null
+   * for a token made by hand. A new consent for the same client replaces it.
+   */
+  oauthClientId: text('oauth_client_id').references(() => oauthClients.id, { onDelete: 'set null' }),
   ...timestamps,
 }, (t) => ({
   hashIdx: uniqueIndex('api_tokens_hash_idx').on(t.hash),

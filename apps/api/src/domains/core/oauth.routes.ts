@@ -8,13 +8,20 @@
  * the approving user's own permissions – it shows up in Settings → MCP next to
  * hand-made tokens and is revoked the same way. No refresh tokens: the access
  * token lives until revoked, exactly like a hand-made one.
+ *
+ * A person who has an agent of their own (Profile → MCP & API → My agent) can
+ * approve the client to work as that agent instead: the token is then the
+ * agent's, named after the client, scoped and bounded like the tokens the My
+ * agent card issues. Connecting the same client again for the same target
+ * replaces the earlier OAuth token instead of piling up another one.
  */
 import { Hono, type Context } from 'hono';
-import { getDb, schema, eq, sql } from '@ordi/db';
+import { getDb, schema, eq, and, isNull, inArray, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
-import type { AppEnv } from '../../context';
+import { MY_AGENT_TOKEN_DEFAULT_DAYS, PERSONAL_AGENT_PERMISSIONS } from '@ordi/shared';
+import type { AppEnv, Actor } from '../../context';
 import { authMiddleware, requireAuth, requireSession, currentActor } from '../../core/auth';
 import { effectivePermissions } from '../../core/rbac';
 import { generateToken, sha256 } from '../../lib/crypto';
@@ -82,6 +89,38 @@ function oauthError(c: Context, code: string, description: string, extra?: Recor
   return c.json({ error: code, error_description: description }, 400);
 }
 
+/** The approving person's own agent, if they have one. */
+async function personalAgentOf(ownerUserId: string): Promise<{ id: string; name: string; isActive: boolean } | null> {
+  const { db } = getDb();
+  const [row] = await db.select({ id: schema.users.id, name: schema.users.name, isActive: schema.users.isActive })
+    .from(schema.externalAgents)
+    .innerJoin(schema.users, eq(schema.users.id, schema.externalAgents.userId))
+    .where(and(eq(schema.externalAgents.ownerUserId, ownerUserId), eq(schema.externalAgents.kind, 'personal')));
+  return row ?? null;
+}
+
+/** Only a person signed in through the browser approves: never an agent, never a token. */
+function signedInPerson(actor: Actor): boolean {
+  return actor.actorType === 'user' && actor.tokenScopes === null && !actor.apiTokenId;
+}
+
+/**
+ * The live OAuth tokens a new consent replaces: the target user's tokens
+ * issued through the consent page to the same client. Clients register again
+ * on reconnect and get a new client id, so "the same client" is one of the
+ * same name that also lists the redirect this code went to (a loopback port
+ * may differ). The name alone is anyone's to claim: a look-alike registration
+ * sending codes elsewhere must not cut off the real client. Hand-made tokens
+ * record no client and are never among them.
+ */
+async function replacedOAuthTokens(tx: any, userId: string, clientName: string, redirectUri: string): Promise<string[]> {
+  const rows: { id: string; redirectUris: unknown }[] = await tx.select({ id: schema.apiTokens.id, redirectUris: schema.oauthClients.redirectUris })
+    .from(schema.apiTokens)
+    .innerJoin(schema.oauthClients, eq(schema.oauthClients.id, schema.apiTokens.oauthClientId))
+    .where(and(eq(schema.apiTokens.userId, userId), isNull(schema.apiTokens.revokedAt), eq(schema.oauthClients.name, clientName)));
+  return rows.filter((r) => redirectAllowed((r.redirectUris as string[]) ?? [], redirectUri)).map((r) => r.id);
+}
+
 export function oauthRoutes() {
   const app = new Hono<AppEnv>();
 
@@ -108,13 +147,15 @@ export function oauthRoutes() {
 
     const { db } = getDb();
     const id = `mcp_${generateToken(16)}`;
+    // A blank name is no name: the tokens and the comments it writes need one.
+    const clientName = body.client_name?.trim() || 'MCP client';
     await db.insert(schema.oauthClients).values({
-      id, name: body.client_name ?? 'MCP client', redirectUris: body.redirect_uris,
+      id, name: clientName, redirectUris: body.redirect_uris,
     });
     logger.info({ clientId: id, name: body.client_name, redirectHosts: body.redirect_uris.map((u) => { try { return new URL(u).host; } catch { return u; } }) }, 'oauth client registered');
     return c.json({
       client_id: id,
-      client_name: body.client_name ?? 'MCP client',
+      client_name: clientName,
       redirect_uris: body.redirect_uris,
       token_endpoint_auth_method: 'none',
       grant_types: ['authorization_code'],
@@ -128,12 +169,19 @@ export function oauthRoutes() {
     const [client] = await db.select().from(schema.oauthClients)
       .where(eq(schema.oauthClients.id, c.req.query('client_id') ?? ''));
     if (!client) throw err.notFound('Unknown client');
-    return c.json({ id: client.id, name: client.name, redirectUris: client.redirectUris });
+    // What the consent page offers to connect as: the person, or their own agent.
+    const actor = currentActor(c);
+    const agent = signedInPerson(actor) ? await personalAgentOf(actor.userId) : null;
+    return c.json({
+      id: client.id, name: client.name, redirectUris: client.redirectUris,
+      myAgent: agent ? { name: agent.name, isActive: agent.isActive } : null,
+    });
   });
 
   // ── The signed-in user approves; we mint the code and hand back the redirect ──
   app.post('/approve', authMiddleware, requireSession, async (c) => {
     const actor = currentActor(c);
+    if (!signedInPerson(actor)) throw err.forbidden('Only a signed-in person approves a client');
     const raw = await c.req.json();
     const parsedBody = z.object({
       clientId: z.string(),
@@ -143,6 +191,10 @@ export function oauthRoutes() {
       state: z.string().max(4096).optional(),
       codeChallenge: z.string().min(43).max(128),
       codeChallengeMethod: z.literal('S256'),
+      // Who the client works as. Omitted by consent pages from before the
+      // choice existed: as the person, as it always was. The agent is never
+      // named by the request – it is the approver's own, looked up here.
+      actAs: z.enum(['me', 'agent']).default('me'),
     }).safeParse(raw);
     if (!parsedBody.success) {
       logger.warn({ issues: parsedBody.error.flatten().fieldErrors, clientId: (raw as { clientId?: string })?.clientId }, 'oauth approve rejected: validation');
@@ -162,18 +214,27 @@ export function oauthRoutes() {
       throw err.validation('redirect_uri is not registered for this client');
     }
 
+    let agentUserId: string | null = null;
+    if (body.actAs === 'agent') {
+      const agent = await personalAgentOf(actor.userId);
+      if (!agent) throw err.notFound('You have no agent yet – create one in Profile → MCP & API');
+      if (!agent.isActive) throw err.domain('Your agent is switched off; switch it on before connecting a client');
+      agentUserId = agent.id;
+    }
+
     // Opportunistic cleanup – codes are short-lived and never read after use.
     await db.delete(schema.oauthAuthCodes).where(sql`${schema.oauthAuthCodes.expiresAt} < now()`);
 
     const code = generateToken(32);
     await db.insert(schema.oauthAuthCodes).values({
-      id: ulid(), code, clientId: client.id, userId: actor.userId!,
+      id: ulid(), code, clientId: client.id, userId: actor.userId!, agentUserId,
       codeChallenge: body.codeChallenge, redirectUri: body.redirectUri,
       expiresAt: new Date(Date.now() + CODE_TTL_MS),
     });
     await writeActivity(db, {
       entityType: 'user', entityId: actor.userId!, action: 'oauth.authorize',
-      actorId: actor.userId, actorType: actor.actorType, diff: { client: client.name },
+      actorId: actor.userId, actorType: actor.actorType,
+      diff: { client: client.name, ...(agentUserId ? { asAgent: agentUserId } : {}) },
     });
 
     const url = new URL(body.redirectUri);
@@ -210,10 +271,10 @@ export function oauthRoutes() {
     }
 
     const { db } = getDb();
-    const [row] = await db.select().from(schema.oauthAuthCodes)
-      .where(eq(schema.oauthAuthCodes.code, body.code));
-    // Single use: burn the code before validating so a race cannot redeem twice.
-    if (row) await db.delete(schema.oauthAuthCodes).where(eq(schema.oauthAuthCodes.id, row.id));
+    // Single use: the code is burnt and read in one statement, before any
+    // check, so of two exchanges racing for it only one gets the row.
+    const [row] = await db.delete(schema.oauthAuthCodes)
+      .where(eq(schema.oauthAuthCodes.code, body.code)).returning();
 
     if (!row || row.expiresAt < new Date()) {
       return oauthError(c, 'invalid_grant', 'Code is invalid or expired', { codeKnown: !!row, clientId: body.client_id });
@@ -228,20 +289,75 @@ export function oauthRoutes() {
       return oauthError(c, 'invalid_grant', 'PKCE verification failed', { clientId: row.clientId });
     }
 
-    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, row.userId));
-    if (!user || !user.isActive) return oauthError(c, 'invalid_grant', 'User is not active');
     const [client] = await db.select().from(schema.oauthClients).where(eq(schema.oauthClients.id, row.clientId));
-
-    // The access token is an ordinary API token: same auth path, same
-    // revocation UI, scope = the user's own permissions at grant time.
-    const perms = await effectivePermissions(user.roleId, null);
+    const clientName = client?.name?.trim() || 'MCP client';
     const token = `ordi_${generateToken(24)}`;
-    await db.insert(schema.apiTokens).values({
-      id: ulid(), userId: user.id, name: `${client?.name ?? 'MCP client'} (OAuth)`,
-      hash: sha256(token), prefix: token.slice(0, 12), scopes: [...perms], readOnly: false,
-    });
+    const tokenId = ulid();
 
-    logger.info({ clientId: row.clientId, client: client?.name, userId: user.id }, 'oauth token issued');
+    if (row.agentUserId) {
+      // As the person's own agent: everything the approval relied on is
+      // checked again, under the locks switching off and deactivation take –
+      // person before agent – so neither can slip in between.
+      const agentUserId = row.agentUserId;
+      const expiresAt = new Date(Date.now() + MY_AGENT_TOKEN_DEFAULT_DAYS * 86_400_000);
+      let replaced: string[] = [];
+      const refused = await db.transaction(async (tx) => {
+        const [owner] = await tx.select({ isActive: schema.users.isActive, actorType: schema.users.actorType })
+          .from(schema.users).where(eq(schema.users.id, row.userId)).for('share');
+        if (!owner?.isActive || owner.actorType !== 'user') return 'User is not active';
+        const [agent] = await tx.select({ isActive: schema.users.isActive, actorType: schema.users.actorType })
+          .from(schema.users).where(eq(schema.users.id, agentUserId)).for('update');
+        const [ext] = await tx.select({ kind: schema.externalAgents.kind, ownerUserId: schema.externalAgents.ownerUserId })
+          .from(schema.externalAgents).where(eq(schema.externalAgents.userId, agentUserId));
+        if (!agent || agent.actorType !== 'agent' || ext?.kind !== 'personal' || ext.ownerUserId !== row.userId) {
+          return 'The agent is not the approver\'s own';
+        }
+        if (!agent.isActive) return 'The agent is switched off';
+        replaced = await replacedOAuthTokens(tx, agentUserId, clientName, row.redirectUri);
+        if (replaced.length) await tx.update(schema.apiTokens).set({ revokedAt: new Date() }).where(inArray(schema.apiTokens.id, replaced));
+        await tx.insert(schema.apiTokens).values({
+          // Named after the client alone, like a token from the My agent
+          // card: the agent's comments say "via <client>".
+          id: tokenId, userId: agentUserId, name: clientName.slice(0, 120), hash: sha256(token), prefix: token.slice(0, 12),
+          // The most a personal agent may ever do; each request is narrowed
+          // further to what its owner can do at that moment.
+          scopes: [...PERSONAL_AGENT_PERMISSIONS], readOnly: false, expiresAt, oauthClientId: row.clientId,
+        });
+        return null;
+      });
+      if (refused) return oauthError(c, 'invalid_grant', refused, { clientId: row.clientId, agentUserId });
+      await writeActivity(db, {
+        entityType: 'agent', entityId: agentUserId, action: 'token_issued', actorId: row.userId, actorType: 'user',
+        diff: { tokenId, client: clientName, oauth: true, replaced: replaced.length, expiresAt: expiresAt.toISOString() },
+      });
+      logger.info({ clientId: row.clientId, client: clientName, userId: row.userId, agentUserId, replaced: replaced.length }, 'oauth token issued for personal agent');
+      return c.json({
+        access_token: token, token_type: 'bearer',
+        expires_in: MY_AGENT_TOKEN_DEFAULT_DAYS * 86_400,
+      });
+    }
+
+    const name = `${clientName} (OAuth)`;
+    let replaced: string[] = [];
+    const user = await db.transaction(async (tx) => {
+      // The person's row locked until the token is in: two exchanges for the
+      // same person queue here, so the second sees – and replaces – the first.
+      const [locked] = await tx.select().from(schema.users).where(eq(schema.users.id, row.userId)).for('update');
+      if (!locked || !locked.isActive) return null;
+      // The access token is an ordinary API token: same auth path, same
+      // revocation UI, scope = the user's own permissions at grant time.
+      const perms = await effectivePermissions(locked.roleId, null);
+      replaced = await replacedOAuthTokens(tx, locked.id, clientName, row.redirectUri);
+      if (replaced.length) await tx.update(schema.apiTokens).set({ revokedAt: new Date() }).where(inArray(schema.apiTokens.id, replaced));
+      await tx.insert(schema.apiTokens).values({
+        id: tokenId, userId: locked.id, name,
+        hash: sha256(token), prefix: token.slice(0, 12), scopes: [...perms], readOnly: false, oauthClientId: row.clientId,
+      });
+      return locked;
+    });
+    if (!user) return oauthError(c, 'invalid_grant', 'User is not active');
+
+    logger.info({ clientId: row.clientId, client: clientName, userId: user.id, replaced: replaced.length }, 'oauth token issued');
     return c.json({ access_token: token, token_type: 'bearer' });
   });
 
