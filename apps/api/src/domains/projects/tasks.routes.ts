@@ -10,7 +10,7 @@ import {
 } from '@ordi/shared';
 import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
-import { guard } from '../../core/rbac';
+import { guard, rejectReadOnlyWrites } from '../../core/rbac';
 import { err } from '../../lib/errors';
 import { idPage } from '../../lib/http';
 import { assertProject } from '../../core/access';
@@ -40,6 +40,10 @@ function nextRunFrom(frequency: string): string {
 export function tasksRoutes() {
   const app = new Hono<AppEnv>();
   app.use('*', requireAuth);
+  // Task writes are decided per project (membership or workspace visibility),
+  // not by guard(), so a read-only token is refused here rather than relying
+  // on another router mounted earlier at the same prefix.
+  app.use('*', rejectReadOnlyWrites());
 
   // ── My tasks (cross-project, PRD §8.5) ──
   app.get('/me/tasks', async (c) => c.json(await svc.myTasks(currentActor(c))));

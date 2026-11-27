@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { getDb, schema, eq } from '@ordi/db';
 import { ulid } from 'ulid';
-import { resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
+import { app, resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
 import { generateToken } from '../lib/crypto';
 import { createAgent, addProjectMember } from './agents-helpers';
 
@@ -81,6 +81,17 @@ describe('bulk edits by a person with projects.write and no membership', () => {
     expect(assignees.map((a) => a.userId)).toEqual([developer.userId]);
   });
 
+  it('assign an agent whose policy wants a project admin, as projects.write makes them one', async () => {
+    const agentId = (await createAgent(users, { name: 'Admins only', assignPolicy: 'project_admins' })).id;
+    await addProjectMember(users, open.id, agentId);
+    const res = await developer.as.post('/tasks/bulk', { taskIds: [open.taskId], assigneeIds: [developer.userId, agentId] });
+    expect(res.status).toBe(200);
+    expect((await json(res)).updated).toBe(1);
+    const assignees = await getDb().db.select({ userId: schema.taskAssignees.userId }).from(schema.taskAssignees)
+      .where(eq(schema.taskAssignees.taskId, open.taskId));
+    expect(assignees.map((a) => a.userId).sort()).toEqual([developer.userId, agentId].sort());
+  });
+
   it('leave a private project they are not on untouched', async () => {
     const res = await developer.as.post('/tasks/bulk', { taskIds: [hidden.taskId, open.taskId], priority: 'low' });
     expect((await json(res)).updated).toBe(1);
@@ -93,6 +104,44 @@ describe('bulk edits by a person with projects.write and no membership', () => {
     const res = await developer.as.post('/tasks/bulk', { taskIds: [gone.taskId], priority: 'urgent' });
     expect((await json(res)).updated).toBe(0);
     expect(await priorityOf(gone.taskId)).toBe(before);
+  });
+});
+
+describe('bulk edits over a read-only token', () => {
+  it('are refused, projects.write scope or not', async () => {
+    const minted = await json(owner.post('/auth/tokens', { name: 'ro', scopes: ['projects.read', 'projects.write'], readOnly: true }));
+    const before = await priorityOf(open.taskId);
+    const res = await app.request('/api/v1/tasks/bulk', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${minted.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ taskIds: [open.taskId], priority: before === 'none' ? 'urgent' : 'none' }),
+    });
+    expect(res.status).toBe(403);
+    expect(await priorityOf(open.taskId)).toBe(before);
+  });
+});
+
+describe('bulk edits on a private project', () => {
+  it('follow the membership row: a viewer row changes nothing, a member row edits', async () => {
+    const own = await project('PRV', 'private');
+    const outsider = await customRole('Outsider', ['projects.read']);
+    await addProjectMember(users, own.id, outsider.userId, 'viewer');
+    const before = await priorityOf(own.taskId);
+    expect((await json(outsider.as.post('/tasks/bulk', { taskIds: [own.taskId], priority: 'urgent' }))).updated).toBe(0);
+    expect(await priorityOf(own.taskId)).toBe(before);
+    await addProjectMember(users, own.id, outsider.userId, 'member');
+    const fresh = await signIn(outsider.userId);
+    expect((await json(fresh.post('/tasks/bulk', { taskIds: [own.taskId], priority: 'urgent' }))).updated).toBe(1);
+    expect(await priorityOf(own.taskId)).toBe('urgent');
+  });
+});
+
+describe('bulk edits with projects.write but not projects.read', () => {
+  it('change nothing in a workspace project, as it is not listed to them either', async () => {
+    const blind = await customRole('Blind writer', ['projects.write']);
+    const before = await priorityOf(open.taskId);
+    expect((await json(blind.as.post('/tasks/bulk', { taskIds: [open.taskId], priority: 'urgent' }))).updated).toBe(0);
+    expect(await priorityOf(open.taskId)).toBe(before);
   });
 });
 
