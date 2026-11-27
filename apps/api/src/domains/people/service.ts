@@ -1079,7 +1079,7 @@ export async function decideLeave(actor: Actor, id: string, newStatus: 'approved
   });
 
   await writeActivity(db, { entityType: 'leave_request', entityId: id, action: newStatus, before: { status: req.status }, after: { status: newStatus, comment }, actorId: actor.userId, actorType: actor.actorType });
-  await emit({ type: 'leave.decided', aggregateType: 'leave_request', aggregateId: id, payload: { decision: newStatus, employeeUserId: employee.userId }, actorId: actor.userId, actorType: actor.actorType });
+  await emit({ type: 'leave.decided', aggregateType: 'leave_request', aggregateId: id, payload: { decision: newStatus, employeeUserId: employee.userId, approverId: req.approverId }, actorId: actor.userId, actorType: actor.actorType });
   const [updated] = await db.select().from(schema.leaveRequests).where(eq(schema.leaveRequests.id, id));
   return updated;
 }

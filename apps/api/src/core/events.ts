@@ -47,6 +47,24 @@ export interface SSEMessage {
   spaceScope?: string[];
   /** user ids this message targets; empty => any authorized. */
   userScope?: string[];
+  /**
+   * Workspace news that belongs to no project (deals, finance, people): only an
+   * actor holding one of these permissions hears it – or one of involvedUsers,
+   * the people it is about.
+   */
+  permissionScope?: string[];
+  involvedUsers?: string[];
+  /**
+   * A KB page's own visibility, for page events (with spaceScope): a draft is
+   * for the space's editors, a private page for its author and the editors –
+   * canSeePage, the rule the KB read routes apply.
+   */
+  page?: { published: boolean; visibility: string; createdBy: string | null };
+  /**
+   * Meant for every signed-in actor. A message with no scope at all and without
+   * this goes nowhere: news nobody scoped must not default to everyone.
+   */
+  workspaceWide?: boolean;
 }
 
 type Subscriber = (msg: SSEMessage) => void;
