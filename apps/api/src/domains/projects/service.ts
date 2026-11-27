@@ -611,8 +611,16 @@ export async function listTasks(actor: Actor, params: {
   }
   if (!scope.length) return { data: [], nextCursor: null };
 
+  // Every project the caller can open: the fields and blockers they may know of.
+  const reachable = [...new Set([...scope, ...(await accessibleProjectIds(actor))])];
+
+  // Only workspace fields and those of projects the caller can open are known
+  // here: a private project's field key reads as unknown, exactly like a
+  // made-up one, instead of answering with its type or an empty match.
   const cf: SQL[] = [];
-  for (const f of params.cfFilters ?? []) cf.push(await buildCustomFieldFilter('tasks', f));
+  for (const f of params.cfFilters ?? []) {
+    cf.push(await buildCustomFieldFilter('tasks', f, { projectIds: reachable, projectColumn: sql`${tasks.projectId}` }));
+  }
 
   // Several labels narrow rather than widen: "linkedin" + "case study" means
   // the tasks carrying both, which is how a plan is read off a board.
@@ -657,16 +665,21 @@ export async function listTasks(actor: Actor, params: {
     : [];
 
   // A "blocks" relation is only a fact on the task page unless the lists carry
-  // it: blocked = some open task blocks this one.
+  // it: blocked = some open task blocks this one. Only blockers the caller can
+  // open count. The task page leaves out relations to a project the caller
+  // cannot open, so a flag raised by one would point at nothing they can see –
+  // and, flipping as it closes, would report a private task's progress.
   const blockedIds = new Set<string>();
   if (ids.length) {
     const inList = sql.raw('(' + ids.map((i) => `'${i.replace(/'/g, "''")}'`).join(',') + ')');
+    const blockerProjects = sql.join(reachable.map((id) => sql`${id}`), sql`, `);
     const blockedRows = await db.execute(sql`
       select distinct tr.related_task_id as id
       from task_relations tr
       join tasks b on b.id = tr.task_id and b.deleted_at is null
       join task_statuses bs on bs.id = b.status_id
       where tr.type = 'blocks' and tr.related_task_id in ${inList}
+        and b.project_id in (${blockerProjects})
         and bs.category not in ('done', 'canceled')`) as unknown as { id: string }[];
     for (const row of blockedRows) blockedIds.add(row.id);
   }
@@ -1112,6 +1125,8 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
   const task = await loadTask(newId);
   const ref = await taskRef(task);
   await emit({ type: 'task.created', aggregateType: 'task', aggregateId: newId, payload: { ref, projectId: targetProjectId, movedFrom: id }, actorId: actor.userId, actorType: actor.actorType });
+  // The left-behind task's trail names where it went; core/activity shows that
+  // part only to those who can open the destination (redactMoveDestination).
   await writeActivity(db, { entityType: 'task', entityId: id, action: 'moved', after: { targetProjectId, newTaskId: newId }, actorId: actor.userId, actorType: actor.actorType });
   return { ...task, ref };
 }

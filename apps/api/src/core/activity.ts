@@ -400,7 +400,24 @@ export async function scopeActivityToResources<T extends { entityType: string; e
       return canSeePage(meta, actor.userId, editorSpaces.has(owner));
     }
     return true;
-  });
+  }).map((r) => redactMoveDestination(r, projects));
+}
+
+/**
+ * A task moved to another project leaves a `moved` record on the task left
+ * behind, naming the destination project and the new task. Whoever could see
+ * the old task can read its trail, but only those who can open the
+ * destination learn where it went: for everyone else the record says that it
+ * moved and nothing more.
+ */
+function redactMoveDestination<T extends { entityType: string }>(row: T, projects: ReadonlySet<string>): T {
+  const r = row as T & { action?: unknown; diff?: unknown };
+  if (r.entityType !== 'task' || r.action !== 'moved' || !r.diff || typeof r.diff !== 'object') return row;
+  const { targetProjectId, newTaskId, ...rest } = r.diff as Record<string, unknown>;
+  if (targetProjectId === undefined && newTaskId === undefined) return row;
+  const to = (targetProjectId as { to?: unknown } | undefined)?.to;
+  if (typeof to === 'string' && projects.has(to)) return row;
+  return { ...row, diff: rest };
 }
 
 export interface ActivityInput {
