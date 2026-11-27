@@ -463,6 +463,11 @@ const automations: Consumer = {
     if (!rule) return;
     const [task] = await db.select().from(schema.tasks).where(eq(schema.tasks.id, p.taskId));
     if (!task || task.statusId === rule.targetStatusId) return;
+    // Only a status of the task's own project: a rule saved before that was
+    // checked, or an event about a task that has since moved, sets nothing.
+    const [target] = await db.select({ id: schema.taskStatuses.id }).from(schema.taskStatuses)
+      .where(and(eq(schema.taskStatuses.id, rule.targetStatusId), eq(schema.taskStatuses.projectId, task.projectId)));
+    if (!target) return;
     await db.update(schema.tasks).set({ statusId: rule.targetStatusId }).where(eq(schema.tasks.id, p.taskId));
     await writeActivity(db, {
       entityType: 'task', entityId: p.taskId, action: 'status_changed',
