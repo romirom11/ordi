@@ -165,6 +165,32 @@ export function effectiveProjectRole(
 }
 
 /**
+ * effectiveProjectRole for projects that may be deleted. The access context
+ * skips memberships of deleted projects, so the actor's own rows for those are
+ * read here; the role is what the actor held while the project was alive, so
+ * a deleted private project stays as closed as it was.
+ */
+export async function effectiveProjectRolesIncludingDeleted(
+  actor: Actor,
+  projects: { id: string; visibility: 'workspace' | 'private' }[],
+): Promise<Map<string, 'admin' | 'member' | 'viewer' | null>> {
+  const out = new Map<string, 'admin' | 'member' | 'viewer' | null>();
+  if (!projects.length) return out;
+  const memberships = new Map(actor.access.projectMemberships);
+  const unknown = projects.map((p) => p.id).filter((id) => !memberships.has(id));
+  if (unknown.length) {
+    const { db } = getDb();
+    const rows = await db.select({ projectId: schema.projectMembers.projectId, role: schema.projectMembers.role })
+      .from(schema.projectMembers)
+      .where(and(eq(schema.projectMembers.userId, actor.userId), inArray(schema.projectMembers.projectId, unknown)));
+    for (const r of rows) memberships.set(r.projectId, r.role as 'admin' | 'member' | 'viewer');
+  }
+  const asBefore: Actor = { ...actor, access: { ...actor.access, projectMemberships: memberships } };
+  for (const p of projects) out.set(p.id, effectiveProjectRole(asBefore, p));
+  return out;
+}
+
+/**
  * Assert the actor can access a project at minRole.
  *
  * Invisible (or absent) => 404, so existence never leaks. Visible but below

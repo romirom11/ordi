@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { getDb, schema, eq, sql } from '@ordi/db';
+import { getDb, schema, eq, and, inArray, isNotNull, sql } from '@ordi/db';
 import { workspaceSettingsUpdateSchema } from '@ordi/shared';
 import type { AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
@@ -16,6 +16,7 @@ import { integrationsConfigSchema, mailRolesSchema, mailSenderInputSchema, mailS
 import { err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { listDeletedProjects } from '../projects/service';
+import { accessibleProjectIds } from '../../core/access';
 
 /**
  * Mask a secret webhook URL for GET responses shown to non-managers: keep the
@@ -333,12 +334,19 @@ export function settingsRoutes() {
 
   // Trash (PRD §14.7): list soft-deleted across the main business entities.
   // Deleted projects follow the project trash's rule: a private one shows only
-  // to its own admins, as it did alive.
+  // to its own admins, as it did alive. Deleted tasks show only from projects
+  // the caller can open, or deleted ones they see here.
   app.get('/trash', guard('settings.manage'), async (c) => {
+    const actor = currentActor(c);
     const { db } = getDb();
+    const [deletedProjects, openProjects] = await Promise.all([listDeletedProjects(actor), accessibleProjectIds(actor)]);
+    const taskProjects = [...openProjects, ...deletedProjects.map((p) => p.id)];
     const [projects, tasks, invoices] = await Promise.all([
-      listDeletedProjects(currentActor(c)).then((rows) => rows.slice(0, 50).map((p) => ({ id: p.id, name: p.name, deleted_at: p.deletedAt }))),
-      db.execute(sql`select id, title, deleted_at from tasks where deleted_at is not null limit 50`),
+      deletedProjects.slice(0, 50).map((p) => ({ id: p.id, name: p.name, deleted_at: p.deletedAt })),
+      taskProjects.length
+        ? db.select({ id: schema.tasks.id, title: schema.tasks.title, deleted_at: schema.tasks.deletedAt }).from(schema.tasks)
+          .where(and(isNotNull(schema.tasks.deletedAt), inArray(schema.tasks.projectId, taskProjects))).limit(50)
+        : [],
       db.execute(sql`select id, number, deleted_at from invoices where deleted_at is not null limit 50`),
     ]);
     return c.json({ projects, tasks, invoices });

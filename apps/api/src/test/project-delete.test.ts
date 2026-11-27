@@ -86,6 +86,29 @@ describe('a deleted private project', () => {
     expect((await owner.post(`/projects/${id}/restore`)).status).toBe(200);
   });
 
+  it('keeps its deleted tasks out of the workspace trash, and its name out of a key clash', async () => {
+    const admin = reqAs(users.admin!.cookie);
+    const id = await privateProject('PRT');
+    const task = await json(owner.post('/tasks', { projectId: id, title: 'Confidential merger memo' }));
+    expect((await owner.del(`/tasks/${task.id}`)).status).toBeLessThan(300);
+    const titles = (body: { tasks: { title: string }[] }) => body.tasks.map((t) => t.title);
+    expect(titles(await json(admin.get('/settings/trash')))).not.toContain('Confidential merger memo');
+    expect(titles(await json(owner.get('/settings/trash')))).toContain('Confidential merger memo');
+    expect((await owner.del(`/projects/${id}`)).status).toBe(200);
+    expect(titles(await json(admin.get('/settings/trash')))).not.toContain('Confidential merger memo');
+    expect(titles(await json(owner.get('/settings/trash')))).toContain('Confidential merger memo');
+
+    // A deleted workspace project whose key a private project took since.
+    const ws = await project('CLSH');
+    expect((await owner.del(`/projects/${ws}`)).status).toBe(200);
+    const taker = await privateProject('CLSH');
+    const blocked = await admin.post(`/projects/${ws}/restore`);
+    expect(blocked.status).toBe(422);
+    expect((await json(blocked)).error.message).not.toContain('Project CLSH');
+    expect((await json(owner.post(`/projects/${ws}/restore`))).error.message).toContain('Project CLSH');
+    await owner.del(`/projects/${taker}`);
+  });
+
   it('opens to an admin member, not to a plain member', async () => {
     const admin = reqAs(users.admin!.cookie);
     const asMember = await privateProject('PRM');
