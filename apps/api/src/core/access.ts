@@ -18,7 +18,7 @@ export async function buildAccessContext(
   const { db } = getDb();
   const [pms, sms] = await Promise.all([
     // Memberships of soft-deleted projects grant nothing: code that trusts this
-    // map directly (bulk task edits, for one) must not reach a deleted project.
+    // map directly must not reach a deleted project.
     db.select({ projectId: schema.projectMembers.projectId, role: schema.projectMembers.role })
       .from(schema.projectMembers)
       .innerJoin(schema.projects, eq(schema.projects.id, schema.projectMembers.projectId))

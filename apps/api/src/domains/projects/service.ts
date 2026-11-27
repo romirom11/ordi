@@ -1228,8 +1228,22 @@ export async function bulkUpdateTasks(actor: Actor, input: any) {
   const { db } = getDb();
   if (input.labelIds !== undefined) await assertLabelScope(input.labelIds as string[], 'task');
   const rows = await db.select().from(tasks).where(and(inArray(tasks.id, input.taskIds), isNull(tasks.deletedAt)));
+  // The role on each project by the rule a single-task edit is held to
+  // (assertProject at member level): a membership row, or what a workspace
+  // project grants the role's permissions – never for an agent, which stays
+  // membership-only. Reading the membership map alone refused projects the
+  // caller edits task by task. A deleted project is absent, so it grants nothing.
+  const projectIds = [...new Set(rows.map((t) => t.projectId))];
+  const liveProjects = projectIds.length
+    ? await db.select({ id: projects.id, visibility: projects.visibility }).from(projects)
+      .where(and(inArray(projects.id, projectIds), isNull(projects.deletedAt)))
+    : [];
+  const roleOf = new Map(liveProjects.map((p) => [
+    p.id,
+    effectiveProjectRole(actor, { id: p.id, visibility: p.visibility as 'workspace' | 'private' }),
+  ]));
   const canEdit = (projectId: string) => {
-    const role = actor.access.projectMemberships.get(projectId);
+    const role = roleOf.get(projectId);
     return role === 'admin' || role === 'member';
   };
   // Before any row is written: a selection spanning projects must not land
@@ -1246,8 +1260,8 @@ export async function bulkUpdateTasks(actor: Actor, input: any) {
   }
   let updated = 0;
   for (const t of rows) {
-    const role = actor.access.projectMemberships.get(t.projectId);
-    if (role !== 'admin' && role !== 'member') continue;
+    if (!canEdit(t.projectId)) continue;
+    const role = roleOf.get(t.projectId) ?? null;
     const patch: Record<string, unknown> = {};
     if (input.statusId !== undefined) patch.statusId = input.statusId;
     if (input.cycleId !== undefined) patch.cycleId = input.cycleId;
