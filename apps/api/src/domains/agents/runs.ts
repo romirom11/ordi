@@ -315,8 +315,11 @@ export async function listRuns(actor: Actor, filter: { taskId?: string; agentUse
     conds.push(eq(agentRuns.taskId, filter.taskId));
   } else if (!actor.access.permissions.has('agents.manage')) {
     throw err.forbidden('Listing runs across tasks needs agents.manage', 'agents.manage');
-  } else if (actor.access.membershipOnlyProjects) {
-    // An agent holding agents.manage still sees runs of its own projects only.
+  } else {
+    // agents.manage runs the agents, not every project: the list holds runs of
+    // the projects the actor can open, as each run read (getRun) does – a run
+    // names its task and its project. An agent holding agents.manage reaches
+    // only its own projects through the same rule (membershipOnlyProjects).
     const ids = await accessibleProjectIds(actor);
     conds.push(ids.length ? inArray(agentRuns.projectId, ids) : sql`false`);
   }

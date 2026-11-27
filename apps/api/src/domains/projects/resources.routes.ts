@@ -25,7 +25,7 @@ import type { Actor, AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { rejectReadOnlyWrites } from '../../core/rbac';
 import { assertProject, accessibleSpaceIds, editableSpaceIds, effectiveProjectRole } from '../../core/access';
-import { writeActivity } from '../../core/activity';
+import { writeActivity, onRecord } from '../../core/activity';
 import { err } from '../../lib/errors';
 import { actorContext, deleteSecret, listSecrets, type SecretView } from '../secrets/service';
 
@@ -303,7 +303,7 @@ export function projectResourcesRoutes() {
         await db.delete(attachments).where(eq(attachments.id, att.id));
         await writeActivity(db, {
           entityType: 'attachment', entityId: att.id, action: 'deleted',
-          diff: { file: { from: att.filename } }, actorId: actor.userId, actorType: actor.actorType,
+          diff: { file: { from: att.filename }, ...onRecord(att) }, actorId: actor.userId, actorType: actor.actorType,
         });
       }
     }

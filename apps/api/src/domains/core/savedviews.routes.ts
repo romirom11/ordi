@@ -6,6 +6,7 @@ import type { Actor, AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
 import { rejectReadOnlyWrites } from '../../core/rbac';
 import { err } from '../../lib/errors';
+import { accessibleProjectIds, assertProject } from '../../core/access';
 
 /**
  * Who may delete a saved view. A personal one is its user's. A shared one
@@ -36,13 +37,18 @@ export function savedViewsRoutes() {
         or(eq(schema.savedViews.userId, actor.userId), eq(schema.savedViews.isShared, true), isNull(schema.savedViews.userId)),
       ),
     );
+    // A shared view of a project is that project's: its name and filters (which
+    // may name the project's own fields) are for those who can open it.
+    const reach = new Set(await accessibleProjectIds(actor));
+    const visible = rows.filter((v) => !v.projectId || v.userId === actor.userId || reach.has(v.projectId));
     // The answer the delete route gives, so a client never offers what it refuses.
-    return c.json({ data: rows.map((v) => ({ ...v, canDelete: canDeleteView(actor, v) })) });
+    return c.json({ data: visible.map((v) => ({ ...v, canDelete: canDeleteView(actor, v) })) });
   });
 
   app.post('/', async (c) => {
     const actor = currentActor(c);
     const body = savedViewInputSchema.parse(await c.req.json());
+    if (body.projectId) await assertProject(actor, body.projectId, 'viewer');
     const { db } = getDb();
     const id = ulid();
     await db.insert(schema.savedViews).values({
