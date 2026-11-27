@@ -2,8 +2,9 @@ import { Hono } from 'hono';
 import { getDb, schema, eq, and, or, isNull, inArray, sql, desc } from '@ordi/db';
 import { ulid } from 'ulid';
 import { dashboardInputSchema, dashboardWidgetInputSchema } from '@ordi/shared';
-import type { AppEnv } from '../../context';
+import type { Actor, AppEnv } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
+import { rejectReadOnlyWrites } from '../../core/rbac';
 import { scopeActivityToResources, visibleActivityTypes } from '../../core/activity';
 import { accessibleProjectIds } from '../../core/access';
 import { err } from '../../lib/errors';
@@ -11,6 +12,9 @@ import { err } from '../../lib/errors';
 export function dashboardRoutes() {
   const app = new Hono<AppEnv>();
   app.use('*', requireAuth);
+  // Access here is decided per record, not by guard(), so a read-only token
+  // has to be refused explicitly or it writes wherever its owner can.
+  app.use('*', rejectReadOnlyWrites());
 
   // Home dashboard (PRD §14.1): one response, widgets gated by permissions.
   app.get('/dashboard', async (c) => {
@@ -125,36 +129,46 @@ export function dashboardRoutes() {
   });
 
   app.get('/dashboards/:id', async (c) => {
+    const actor = currentActor(c);
     const { db } = getDb();
-    const id = c.req.param('id');
-    const [dash] = await db.select().from(schema.dashboards).where(eq(schema.dashboards.id, id));
-    if (!dash) throw err.notFound();
-    const widgets = await db.select().from(schema.dashboardWidgets).where(eq(schema.dashboardWidgets.dashboardId, id));
-    return c.json({ ...dash, widgets });
+    const dash = await loadDashboard(actor, c.req.param('id'), 'view');
+    const widgets = await db.select().from(schema.dashboardWidgets).where(eq(schema.dashboardWidgets.dashboardId, dash.id));
+    return c.json({ ...dash, widgets, canEdit: dash.ownerId === actor.userId });
   });
 
   app.post('/dashboards/:id/widgets', async (c) => {
+    const actor = currentActor(c);
+    const dash = await loadDashboard(actor, c.req.param('id'), 'edit');
     const body = dashboardWidgetInputSchema.parse(await c.req.json());
     const { db } = getDb();
     const id = ulid();
     await db.insert(schema.dashboardWidgets).values({
-      id, dashboardId: c.req.param('id'), widgetType: body.widgetType, source: body.source,
+      id, dashboardId: dash.id, widgetType: body.widgetType, source: body.source,
       config: body.config, layout: body.layout,
     });
     return c.json({ id }, 201);
   });
 
   app.delete('/dashboards/:id/widgets/:widgetId', async (c) => {
+    const actor = currentActor(c);
+    const dash = await loadDashboard(actor, c.req.param('id'), 'edit');
     const { db } = getDb();
-    await db.delete(schema.dashboardWidgets).where(eq(schema.dashboardWidgets.id, c.req.param('widgetId')));
+    // Scoped to the dashboard in the path: owning one dashboard is no handle
+    // on another's widgets.
+    const gone = await db.delete(schema.dashboardWidgets)
+      .where(and(eq(schema.dashboardWidgets.id, c.req.param('widgetId')), eq(schema.dashboardWidgets.dashboardId, dash.id)))
+      .returning({ id: schema.dashboardWidgets.id });
+    if (!gone.length) throw err.notFound();
     return c.json({ ok: true });
   });
 
   // Widget data – computed server-side with forced permission overlay (PRD §14.1).
   app.get('/dashboards/:id/widgets/:widgetId/data', async (c) => {
     const actor = currentActor(c);
+    const dash = await loadDashboard(actor, c.req.param('id'), 'view');
     const { db } = getDb();
-    const [widget] = await db.select().from(schema.dashboardWidgets).where(eq(schema.dashboardWidgets.id, c.req.param('widgetId')));
+    const [widget] = await db.select().from(schema.dashboardWidgets)
+      .where(and(eq(schema.dashboardWidgets.id, c.req.param('widgetId')), eq(schema.dashboardWidgets.dashboardId, dash.id)));
     if (!widget) throw err.notFound();
     const source = widget.source;
     const perms = actor.access.permissions;
@@ -171,6 +185,22 @@ export function dashboardRoutes() {
   });
 
   return app;
+}
+
+/**
+ * A dashboard as the actor may use it. Seeing one follows the list: your own,
+ * or one shared with the workspace; anything else is not found, so a private
+ * dashboard's existence never leaks. Changing its widgets is the owner's
+ * alone: sharing with the workspace shares it for reading, and there is no
+ * "shared for editing" setting to say otherwise.
+ */
+async function loadDashboard(actor: Actor, id: string, mode: 'view' | 'edit') {
+  const { db } = getDb();
+  const [dash] = await db.select().from(schema.dashboards).where(eq(schema.dashboards.id, id));
+  const own = !!dash && dash.ownerId === actor.userId;
+  if (!dash || (!own && dash.visibility !== 'workspace')) throw err.notFound();
+  if (mode === 'edit' && !own) throw err.forbidden('Only the owner can change this dashboard');
+  return dash;
 }
 
 async function computeWidget(source: string, cfg: any, actor: any): Promise<any[]> {

@@ -9,7 +9,6 @@ import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bookmark, CalendarDays, Diamond, Plus, Repeat, X } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
-import { useMe } from '../../lib/auth';
 import { Avatar, Button, IconButton, Input, PriorityIcon, Spinner, StatusIcon, Tooltip, cn } from '../ui';
 import { ConfirmDialog, Dialog, DropdownMenu, MenuLabel, MenuSeparator, toast, useMenuClose } from '../overlays';
 import { useT } from '../../lib/i18n';
@@ -107,8 +106,8 @@ function FilterChips({ filters, onFilters, statuses, labels, users, milestones, 
 
 /* ───────────────────────── Saved views menu ───────────────────────── */
 
-function SavedViewsList({ views, loading, myId, onApply, onDelete, onSave }: {
-  views: SavedView[]; loading: boolean; myId: string;
+function SavedViewsList({ views, loading, onApply, onDelete, onSave }: {
+  views: SavedView[]; loading: boolean;
   onApply: (v: SavedView) => void; onDelete: (v: SavedView) => void; onSave: () => void;
 }) {
   const t = useT();
@@ -121,7 +120,7 @@ function SavedViewsList({ views, loading, myId, onApply, onDelete, onSave }: {
         <p className="px-2 pb-1.5 text-xs text-faint">{t('tasksview.noViews')}</p>
       )}
       {views.map((v) => {
-        const canDelete = v.userId == null || v.userId === myId;
+        const canDelete = !!v.canDelete;
         return (
           <div key={v.id} className="group/sv flex items-center rounded-md transition-colors duration-150 hover:bg-muted">
             <button
@@ -176,7 +175,6 @@ export function TasksToolbar({ projectId, prefs, onPrefs, filters, onFilters, st
 }) {
   const t = useT();
   const qc = useQueryClient();
-  const me = useMe();
   const [saving, setSaving] = useState(false);
   const [saveName, setSaveName] = useState('');
   const [toDelete, setToDelete] = useState<SavedView | null>(null);
@@ -267,7 +265,6 @@ export function TasksToolbar({ projectId, prefs, onPrefs, filters, onFilters, st
               <SavedViewsList
                 views={views}
                 loading={viewsQ.isLoading}
-                myId={me.user.id}
                 onApply={applyView}
                 onDelete={setToDelete}
                 onSave={() => { setSaveName(''); setSaving(true); }}

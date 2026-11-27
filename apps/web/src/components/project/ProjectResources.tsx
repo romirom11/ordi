@@ -90,7 +90,8 @@ export interface ProjectResource {
   label: string;
   url: string | null;
   position: number;
-  file?: { id: string; filename: string; size: number; mime: string };
+  /** canChange: the server's answer to whether this user may rename or delete the file. */
+  file?: { id: string; filename: string; size: number; mime: string; canChange?: boolean };
   page?: { id: string; title: string; icon: string | null; spaceId: string; url: string };
   secret?: SecretView;
 }
@@ -360,7 +361,7 @@ export function ProjectResources({ projectId, canWrite, users = [] }: { projectI
                   <button
                     type="button"
                     onClick={(e) => activate(r, e)}
-                    onDoubleClick={canWrite && r.kind === 'file' ? () => setRenaming(r.id) : undefined}
+                    onDoubleClick={canWrite && r.kind === 'file' && r.file?.canChange ? () => setRenaming(r.id) : undefined}
                     title={r.kind === 'link' ? r.url ?? undefined : r.label}
                     className="min-w-0 flex-1 truncate text-left text-[13px] font-medium hover:underline"
                   >
@@ -396,7 +397,7 @@ export function ProjectResources({ projectId, canWrite, users = [] }: { projectI
                     </IconButton>
                   </Tooltip>
                 )}
-                {canWrite && !isRenaming && (r.kind === 'link' || r.kind === 'file') && (
+                {canWrite && !isRenaming && (r.kind === 'link' || (r.kind === 'file' && r.file?.canChange)) && (
                   <Tooltip label={r.kind === 'file' ? t('crm.renameFile') : t('projects.editResourceAction')}>
                     <IconButton
                       size="sm"
@@ -409,7 +410,7 @@ export function ProjectResources({ projectId, canWrite, users = [] }: { projectI
                   </Tooltip>
                 )}
                 {/* A secret is deleted from its panel, behind a confirmation and its own access rule. */}
-                {canWrite && !isRenaming && r.kind !== 'secret' && (
+                {canWrite && !isRenaming && r.kind !== 'secret' && (r.kind !== 'file' || r.file?.canChange) && (
                   <Tooltip label={r.kind === 'file' ? t('common.delete') : r.kind === 'kb_page' ? t('projects.unpinPage') : t('projects.removeResource')}>
                     <IconButton
                       size="sm"

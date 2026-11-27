@@ -51,6 +51,8 @@ interface Widget {
 }
 interface DashboardDetail extends DashboardSummary {
   widgets?: Widget[];
+  /** Only the owner changes a dashboard's widgets; a shared one is read-only to everyone else. */
+  canEdit?: boolean;
 }
 interface DataPoint { key?: string | null; value?: number | string | null }
 
@@ -255,6 +257,7 @@ function DashboardDetailView({ id }: { id: string }) {
   }
 
   const widgets = dash.data.widgets ?? [];
+  const canEdit = dash.data.canEdit === true;
 
   return (
     <div>
@@ -268,7 +271,7 @@ function DashboardDetailView({ id }: { id: string }) {
           </span>
         }
         subtitle={dash.data.visibility === 'workspace' ? t('dashboards.visibleToWorkspace') : t('dashboards.private')}
-        actions={<Button size="sm" onClick={() => setShowAdd(true)}><Plus size={14} /> {t('dashboards.addWidget')}</Button>}
+        actions={canEdit ? <Button size="sm" onClick={() => setShowAdd(true)}><Plus size={14} /> {t('dashboards.addWidget')}</Button> : undefined}
       />
 
       <Dialog open={showAdd} onClose={() => setShowAdd(false)} title={t('dashboards.addWidget')} width={560}>
@@ -323,8 +326,8 @@ function DashboardDetailView({ id }: { id: string }) {
           <EmptyState
             icon={<LayoutGrid size={20} />}
             title={t('dashboards.noWidgets')}
-            hint={t('dashboards.noWidgetsHint')}
-            action={<Button size="sm" onClick={() => setShowAdd(true)}><Plus size={14} /> {t('dashboards.addWidget')}</Button>}
+            hint={canEdit ? t('dashboards.noWidgetsHint') : undefined}
+            action={canEdit ? <Button size="sm" onClick={() => setShowAdd(true)}><Plus size={14} /> {t('dashboards.addWidget')}</Button> : undefined}
           />
         ) : (
           <div className="grid grid-cols-12 gap-3">
@@ -335,7 +338,7 @@ function DashboardDetailView({ id }: { id: string }) {
                 widget={w}
                 index={i}
                 deleting={deleteWidget.isPending && deleteWidget.variables === w.id}
-                onDelete={() => deleteWidget.mutate(w.id)}
+                onDelete={canEdit ? () => deleteWidget.mutate(w.id) : undefined}
               />
             ))}
           </div>
@@ -358,7 +361,7 @@ function pointLabel(t: (k: string, f?: string) => string, source: string | undef
 }
 
 function WidgetCard({ dashboardId, widget, index, deleting, onDelete }: {
-  dashboardId: string; widget: Widget; index: number; deleting: boolean; onDelete: () => void;
+  dashboardId: string; widget: Widget; index: number; deleting: boolean; onDelete?: () => void;
 }) {
   const t = useT();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -394,9 +397,11 @@ function WidgetCard({ dashboardId, widget, index, deleting, onDelete }: {
           <span className="truncate text-[13px] font-medium capitalize">{title}</span>
           <div className="flex shrink-0 items-center gap-1.5">
             <Badge className="bg-muted text-[10px] uppercase tracking-wide text-muted-foreground">{widget.widgetType}</Badge>
-            <DropdownMenu align="end" trigger={<IconButton size="sm" title={t('people.actions')}><MoreHorizontal size={14} /></IconButton>}>
-              <MenuItem icon={<Trash2 size={13} />} danger onSelect={() => setConfirmOpen(true)}>{t('dashboards.deleteWidget')}</MenuItem>
-            </DropdownMenu>
+            {onDelete && (
+              <DropdownMenu align="end" trigger={<IconButton size="sm" title={t('people.actions')}><MoreHorizontal size={14} /></IconButton>}>
+                <MenuItem icon={<Trash2 size={13} />} danger onSelect={() => setConfirmOpen(true)}>{t('dashboards.deleteWidget')}</MenuItem>
+              </DropdownMenu>
+            )}
           </div>
         </div>
         <div className="min-h-0 flex-1">
@@ -416,7 +421,7 @@ function WidgetCard({ dashboardId, widget, index, deleting, onDelete }: {
       <ConfirmDialog
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
-        onConfirm={() => { onDelete(); setConfirmOpen(false); }}
+        onConfirm={() => { onDelete?.(); setConfirmOpen(false); }}
         title={t('dashboards.deleteWidget')}
         body={t('dashboards.deleteWidgetBody')}
         confirmLabel={t('common.delete')}
