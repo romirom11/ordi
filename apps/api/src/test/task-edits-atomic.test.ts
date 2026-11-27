@@ -35,6 +35,11 @@ async function eventsFor(taskIds: string[]) {
     .where(and(inArray(schema.events.aggregateId, taskIds), inArray(schema.events.type, ['task.updated', 'task.assigned', 'task.status_changed'])));
 }
 
+async function activityFor(taskId: string) {
+  return getDb().db.select({ action: schema.activityLog.action }).from(schema.activityLog)
+    .where(and(eq(schema.activityLog.entityType, 'task'), eq(schema.activityLog.entityId, taskId)));
+}
+
 beforeAll(async () => {
   await resetDb();
   users = await seedRolesAndUsers();
@@ -51,6 +56,7 @@ describe('a single task edit that is refused', () => {
   it('saves none of its other fields, and announces nothing', async () => {
     const task = await newTask(ws.projectId, 'Keep this title');
     const before = await eventsFor([task.id]);
+    const activityBefore = await activityFor(task.id);
     const res = await member.patch(`/tasks/${task.id}`, {
       version: task.version, title: 'Changed anyway', priority: 'urgent', statusId: ws.reviewStatusId,
       assigneeIds: [users.member!.userId, adminsOnly],
@@ -63,6 +69,7 @@ describe('a single task edit that is refused', () => {
     expect(after.version).toBe(task.version);
     expect(after.assignees).toEqual([]);
     expect(await eventsFor([task.id])).toHaveLength(before.length);
+    expect(await activityFor(task.id)).toHaveLength(activityBefore.length);
 
     // Without the agent the same edit goes through, with its events.
     const ok = await member.patch(`/tasks/${task.id}`, {
@@ -70,6 +77,7 @@ describe('a single task edit that is refused', () => {
     });
     expect(ok.status).toBe(200);
     expect((await row(task.id)).title).toBe('Changed');
+    expect((await activityFor(task.id)).length).toBe(activityBefore.length + 1);
     const types = (await eventsFor([task.id])).slice(before.length).map((e) => e.type).sort();
     expect(types).toEqual(['task.assigned', 'task.status_changed', 'task.updated']);
   });
