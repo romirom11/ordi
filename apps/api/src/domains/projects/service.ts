@@ -23,7 +23,7 @@ import {
 } from '../../core/access';
 import { closeProjectTimers } from '../time/service';
 import { cancelProjectRuns } from '../agents/runs';
-import { assertCanAssignAgents } from '../agents/profiles';
+import { agentAssignRefusals, agentProfilesAmong, assertCanAssignAgents } from '../agents/profiles';
 import { assertNotPersonalAgent, personalAgentIdsOf } from '../agents/external';
 import { buildCustomFieldFilter, mergeCustomFields } from '../../core/customfields';
 import { extractMentions } from '../kb/service';
@@ -1042,7 +1042,7 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
   const { db } = getDb();
   const source = await loadTask(id);
   await assertProject(actor, source.projectId, 'admin');
-  await assertProject(actor, targetProjectId, 'admin');
+  const targetProject = await assertProject(actor, targetProjectId, 'admin');
   if (source.projectId === targetProjectId) return { ...source, ref: await taskRef(source) };
   const keepKeys = await customFieldKeysFor(targetProjectId);
   const statusFor = new Map<string, string>();
@@ -1095,9 +1095,16 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
       tx.select().from(taskLabels).where(inArray(taskLabels.taskId, oldIds)),
     ]);
 
-    // Statuses and reporters are looked up before the first insert takes the
-    // target project's task-number counter, so the move does not hold it
-    // while it waits for those reads.
+    // Agents work only where they are members: one that is not on the
+    // target project comes off the moved tasks rather than being stranded.
+    // So does one the caller may not assign there (R49): the moved tasks
+    // put that agent's work on the target project.
+    const strandedAgents = new Set((await agentAssignRefusals(
+      actor, targetProjectId, [...new Set(assigneeRows.map((r) => r.userId))], effectiveProjectRole(actor, targetProject),
+    )).map((r) => r.userId));
+    // Statuses, reporters and the agent check above are looked up before the
+    // first insert takes the target project's task-number counter, so the
+    // move does not hold it while it waits for those reads.
     for (const t of subtree) { await targetStatusOf(t.statusId); await reporterFor(t.reporterId); }
     for (const t of subtree) {
       lastPos = appendPosition(lastPos);
@@ -1113,17 +1120,6 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
         customFields: cf, createdBy: t.createdBy, reporterId: await reporterFor(t.reporterId),
       });
     }
-    // Agents work only where they are members: one that is not on the
-    // target project comes off the moved tasks rather than being stranded.
-    const agentAssignees = assigneeRows.length
-      ? await tx.select({ id: schema.users.id }).from(schema.users)
-        .where(and(inArray(schema.users.id, [...new Set(assigneeRows.map((r) => r.userId))]), eq(schema.users.actorType, 'agent')))
-      : [];
-    const agentMembers = agentAssignees.length
-      ? new Set((await tx.select({ userId: projectMembers.userId }).from(projectMembers)
-        .where(and(eq(projectMembers.projectId, targetProjectId), inArray(projectMembers.userId, agentAssignees.map((a) => a.id))))).map((m) => m.userId))
-      : new Set<string>();
-    const strandedAgents = new Set(agentAssignees.map((a) => a.id).filter((id) => !agentMembers.has(id)));
     const keptAssignees = assigneeRows.filter((row) => !strandedAgents.has(row.userId));
     if (keptAssignees.length) {
       await tx.insert(taskAssignees).values(keptAssignees.map((row) => ({
@@ -1171,8 +1167,14 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
 export async function duplicateTask(actor: Actor, id: string) {
   const { db } = getDb();
   const source = await loadTask(id);
-  await assertProject(actor, source.projectId, 'member');
-  const assignees = await assigneeIdsOf(id);
+  const project = await assertProject(actor, source.projectId, 'member');
+  // The copy puts the same work on the same agents, so each agent is held to
+  // its assign policy as if the caller assigned it (R49). One the caller may
+  // not assign – or one no longer on the project – stays off the copy, the way
+  // a move leaves off an agent the target project does not have.
+  const sourceAssignees = await assigneeIdsOf(id);
+  const refused = new Set((await agentAssignRefusals(actor, source.projectId, sourceAssignees, effectiveProjectRole(actor, project))).map((r) => r.userId));
+  const assignees = sourceAssignees.filter((userId) => !refused.has(userId));
   const labelIds = (await db.select({ labelId: taskLabels.labelId }).from(taskLabels).where(eq(taskLabels.taskId, id))).map((l) => l.labelId);
   const key = await projectKey(source.projectId);
   const newId = ulid();
@@ -1243,15 +1245,29 @@ export async function listComments(actor: Actor, taskId: string) {
   return db.select().from(schema.comments).where(and(eq(schema.comments.taskId, taskId), isNull(schema.comments.deletedAt))).orderBy(asc(schema.comments.createdAt));
 }
 
-export async function addComment(actor: Actor, taskId: string, input: any) {
+/** A mentioned agent the comment does not start, and why (shown to the commenter). */
+export interface AgentNotStarted {
+  userId: string;
+  name: string;
+  reason: string;
+}
+
+export async function addComment(actor: Actor, taskId: string, input: any): Promise<{ id: string; agentsNotStarted: AgentNotStarted[] }> {
   const { db } = getDb();
   const task = await loadTask(taskId);
-  await assertProject(actor, task.projectId, 'member');
+  const project = await assertProject(actor, task.projectId, 'member');
   const id = ulid();
   // Mentions come from the explicit list plus any parsed out of the comment body,
   // so a client that only sends the tiptap doc still notifies the mentioned users.
   const mentions = [...new Set<string>([...(input.mentions ?? []), ...extractMentions(input.body).users])]
     .filter((u) => u !== actor.userId);
+  // An @-mention of an agent ordi runs puts work on it, so the commenter must
+  // be allowed to assign that agent (R49), the same as for an assignment. The
+  // comment is posted either way – it is still a message to read – but an
+  // agent the commenter may not assign is not started, and the answer says
+  // why. An agent already on the task follows the thread up as an assignee.
+  // These are reads only, so they run before the comment is written.
+  const { agentMentions, agentsNotStarted } = await dispatchableAgentMentions(actor, project, taskId, mentions);
   const ref = await taskRef(task);
   // The comment, its events and the activity record commit together: no
   // event announces a comment that was not saved, and none is missing for
@@ -1271,12 +1287,46 @@ export async function addComment(actor: Actor, taskId: string, input: any) {
     // Every comment is an event: agents assigned to the task follow up on it (R30).
     await publishEvent(tx, {
       type: 'comment.created', aggregateType: 'comment', aggregateId: id,
-      payload: { ref, taskId, projectId: task.projectId, commentId: id, mentions },
+      payload: { ref, taskId, projectId: task.projectId, commentId: id, mentions, agentMentions },
       actorId: actor.userId, actorType: actor.actorType,
     });
     await writeActivity(tx, { entityType: 'comment', entityId: id, action: 'created', actorId: actor.userId, actorType: actor.actorType });
   });
-  return { id };
+  return { id, agentsNotStarted };
+}
+
+/**
+ * Split the agents ordi runs among `mentions` into those the comment may start
+ * (`agentMentions`, read by the dispatcher) and those it may not, with the
+ * reason. Mentioned people, and agents ordi does not run, are neither.
+ */
+async function dispatchableAgentMentions(
+  actor: Actor,
+  project: Awaited<ReturnType<typeof assertProject>>,
+  taskId: string,
+  mentions: string[],
+): Promise<{ agentMentions: string[]; agentsNotStarted: AgentNotStarted[] }> {
+  const profiles = await agentProfilesAmong(mentions);
+  if (!profiles.size) return { agentMentions: [], agentsNotStarted: [] };
+  const mentionedAgents = [...profiles.keys()];
+  const refusals = await agentAssignRefusals(actor, project.id, mentionedAgents, effectiveProjectRole(actor, project));
+  const refused = new Map<string, string>();
+  for (const r of refusals) if (!refused.has(r.userId)) refused.set(r.userId, r.error.message);
+  // The mention itself starts only an agent the commenter may assign. One on
+  // the task follows the comment up as an assignee anyway – for as long as it
+  // stays assigned, which the dispatcher reads when the event is delivered –
+  // so it is not reported as not started.
+  const agentMentions = mentionedAgents.filter((userId) => !refused.has(userId));
+  const assigned = new Set(await assigneeIdsOf(taskId));
+  for (const userId of assigned) refused.delete(userId);
+  if (!refused.size) return { agentMentions, agentsNotStarted: [] };
+  const { db } = getDb();
+  const names = new Map((await db.select({ id: schema.users.id, name: schema.users.name }).from(schema.users)
+    .where(inArray(schema.users.id, [...refused.keys()]))).map((u) => [u.id, u.name]));
+  return {
+    agentMentions,
+    agentsNotStarted: [...refused].map(([userId, reason]) => ({ userId, name: names.get(userId) ?? '', reason })),
+  };
 }
 
 /**

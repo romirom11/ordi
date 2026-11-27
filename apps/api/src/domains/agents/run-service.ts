@@ -410,7 +410,13 @@ async function finalize(runId: string, report: RunReport): Promise<void> {
 
 /** R13/R30: a human comment written during the run becomes the next run's prompt. */
 async function queueFollowUp(agentUserId: string, taskId: string, projectId: string, parentRunId: string, since: Date | null, sessionId: string | null, branch: string | null): Promise<void> {
-  const followUp = await newestHumanCommentSince(taskId, since, agentUserId);
+  // An agent on the task follows up on any human comment (R30). One that is
+  // not – a mention started it – follows up only on a comment that mentions
+  // it again and whose author may put work on it (R49), as the dispatcher would.
+  const { db } = getDb();
+  const [assigned] = await db.select({ userId: schema.taskAssignees.userId }).from(schema.taskAssignees)
+    .where(and(eq(schema.taskAssignees.taskId, taskId), eq(schema.taskAssignees.userId, agentUserId)));
+  const followUp = await newestHumanCommentSince(taskId, since, agentUserId, { startingMentionsOnly: !assigned });
   if (!followUp) return;
   await queueRun({
     agentUserId, taskId, projectId, trigger: sessionId ? 'comment' : 'assigned', requestedBy: followUp.authorId,
