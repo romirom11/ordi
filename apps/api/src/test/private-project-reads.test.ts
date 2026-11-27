@@ -9,7 +9,7 @@
  * names, its fields or its notes); the member must see what they always saw.
  */
 import { describe, it, expect, beforeAll, vi } from 'vitest';
-import { getDb, schema } from '@ordi/db';
+import { getDb, schema, eq } from '@ordi/db';
 import { ulid } from 'ulid';
 import { resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
 import { generateToken } from '../lib/crypto';
@@ -18,6 +18,7 @@ vi.mock('../lib/s3', () => import('./s3-mock'));
 
 const BROAD = [
   'projects.read', 'crm.read', 'kb.read', 'kb.write', 'kb.manage_spaces', 'agents.manage', 'settings.manage',
+  'time.read_all', 'integrations.manage',
 ];
 
 let users: Awaited<ReturnType<typeof seedRolesAndUsers>>;
@@ -255,6 +256,11 @@ describe('agent runs across tasks', () => {
     expect(runs.map((r) => r.projectId)).toEqual([openProject]);
   });
 
+  it('of one private task are a 404 for the outsider', async () => {
+    expect((await outsider.as.get(`/agent-runs?taskId=${secretTask}`)).status).toBe(404);
+    expect((await insider.as.get(`/agent-runs?taskId=${secretTask}`)).status).toBe(200);
+  });
+
   it('list both for a member of the private project', async () => {
     const runs = (await json(insider.as.get('/agent-runs'))).data as { projectId: string }[];
     expect(runs.map((r) => r.projectId).sort()).toEqual([openProject, secretProject].sort());
@@ -282,11 +288,72 @@ describe('a private project\'s custom fields', () => {
     expect(feed.some((r) => r.entityId === fieldId)).toBe(false);
   });
 
+  it('stay hidden once the field is deleted (read from its created record)', async () => {
+    const res = await owner.post('/custom-fields', { entityType: 'tasks', key: 'falcon_gone', label: 'Gone', type: 'text', projectId: secretProject });
+    const goneId = (await json(res)).id;
+    expect((await owner.del(`/custom-fields/${goneId}`)).status).toBe(200);
+    expect((await json(outsider.as.get(`/audit/entity/custom_field/${goneId}`))).data).toEqual([]);
+    expect((await json(insider.as.get(`/audit/entity/custom_field/${goneId}`))).data).toHaveLength(2);
+  });
+
   it('read as before for the member, workspace fields for everyone', async () => {
     const forMember = (await json(insider.as.get(`/custom-fields?entityType=tasks&projectId=${secretProject}`))).data as { key: string }[];
     expect(forMember.map((f) => f.key)).toContain('falcon_budget');
     expect((await json(insider.as.get(`/audit/entity/custom_field/${fieldId}`))).data).toHaveLength(1);
     expect((await outsider.as.get('/custom-fields?entityType=tasks')).status).toBe(200);
     expect((await outsider.as.get(`/custom-fields?entityType=tasks&projectId=${openProject}`)).status).toBe(200);
+  });
+});
+
+describe('time logged on a private project', () => {
+  it('does not narrate itself through time.read_all activity, before or after it is deleted', async () => {
+    const res = await owner.post('/time/entries', { taskId: secretTask, startedAt: new Date().toISOString(), durationSeconds: 600, note: 'Falcon pricing call' });
+    expect(res.status).toBe(201);
+    const entryId = (await json(res)).id;
+    const trail = async (who: typeof outsider) => (await json(who.as.get(`/audit/entity/time_entry/${entryId}`))).data as unknown[];
+    expect(await trail(outsider)).toEqual([]);
+    expect(await trail(insider)).toHaveLength(1);
+    expect((await owner.del(`/time/entries/${entryId}`)).status).toBe(200);
+    expect(await trail(outsider)).toEqual([]);
+    expect(await trail(insider)).toHaveLength(2);
+  });
+});
+
+describe('secret provider connections', () => {
+  it('name only the projects the integrations.manage holder can open, and keep the others on save', async () => {
+    const { db } = getDb();
+    const id = ulid();
+    await db.insert(schema.secretProviderConnections).values({ id, kind: 'doppler', label: 'Doppler', credentials: 'x' });
+    await db.insert(schema.projectSecretProviderLinks).values([
+      { projectId: openProject, connectionId: id }, { projectId: secretProject, connectionId: id },
+    ]);
+    const linked = async (who: typeof outsider) =>
+      ((await json(who.as.get('/secret-providers'))).data as { id: string; projectIds: string[] }[]).find((c) => c.id === id)!.projectIds.sort();
+    expect(await linked(outsider)).toEqual([openProject]);
+    expect(await linked(insider)).toEqual([openProject, secretProject].sort());
+    // The outsider saves the list it was shown, minus the open project: the hidden link stays.
+    expect((await outsider.as.put(`/secret-providers/${id}/projects`, { projectIds: [] })).status).toBe(200);
+    expect(await linked(insider)).toEqual([secretProject]);
+    // ...and a project it cannot open is one that does not exist.
+    expect((await outsider.as.put(`/secret-providers/${id}/projects`, { projectIds: [secretProject] })).status).toBe(400);
+  });
+});
+
+describe('an older trail of a file whose task moved', () => {
+  it('follows the task to where it went, even without the record named on the delete', async () => {
+    const moving = (await json(owner.post('/tasks', { projectId: openProject, title: 'Legacy move' }))).id;
+    const fd = new FormData();
+    fd.append('file', new File([new Uint8Array([1])], 'legacy.pdf', { type: 'application/pdf' }), 'legacy.pdf');
+    fd.append('entityType', 'task');
+    fd.append('entityId', moving);
+    const fileId = (await json(owner.postForm('/attachments', fd))).id;
+    expect((await owner.post(`/tasks/${moving}/move`, { targetProjectId: secretProject })).status).toBe(200);
+    // A delete written before deletes named their record: only the file name.
+    const { db } = getDb();
+    await db.delete(schema.attachments).where(eq(schema.attachments.id, fileId));
+    await db.insert(schema.activityLog).values({ id: ulid(), entityType: 'attachment', entityId: fileId, action: 'deleted', diff: { file: { from: 'falcon-legacy.pdf' } }, actorType: 'user' });
+    const trail = (await json(outsider.as.get(`/audit/entity/attachment/${fileId}`))).data;
+    expect(trail).toEqual([]);
+    expect((await json(insider.as.get(`/audit/entity/attachment/${fileId}`))).data).toHaveLength(2);
   });
 });

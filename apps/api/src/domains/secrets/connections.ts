@@ -20,6 +20,7 @@ import type {
 } from '@ordi/shared';
 import type { Actor } from '../../context';
 import { writeActivity } from '../../core/activity';
+import { accessibleProjectIds } from '../../core/access';
 import { encrypt, decrypt } from '../../lib/crypto';
 import { err } from '../../lib/errors';
 import {
@@ -133,9 +134,12 @@ export async function listConnections(actor: Actor): Promise<ConnectionView[]> {
     .where(inArray(links.connectionId, ids));
   const counts = await db.select({ connectionId: projectSecrets.providerConnectionId, n: sql<number>`count(*)::int` })
     .from(projectSecrets).where(inArray(projectSecrets.providerConnectionId, ids)).groupBy(projectSecrets.providerConnectionId);
+  // integrations.manage runs the connections, not every project: a private
+  // project the actor cannot open is neither named nor counted here.
+  const reach = new Set(await accessibleProjectIds(actor));
   return rows.map((r) => ({
     ...toView(r),
-    projectIds: linked.filter((l) => l.connectionId === r.id).map((l) => l.projectId),
+    projectIds: linked.filter((l) => l.connectionId === r.id && reach.has(l.projectId)).map((l) => l.projectId),
     secretCount: counts.find((c) => c.connectionId === r.id)?.n ?? 0,
   }));
 }
@@ -240,14 +244,19 @@ export async function setConnectionProjects(actor: Actor, id: string, projectIds
   await loadConnection(id);
   const wanted = [...new Set(projectIds)];
   const { db } = getDb();
+  // The list names only projects the actor can open (listConnections), so the
+  // set sent back is read within that reach: a project outside it cannot be
+  // linked (it "does not exist", as everywhere else), and the links to such
+  // projects are kept as they are rather than dropped for being unlisted.
+  const reach = new Set(await accessibleProjectIds(actor));
   if (wanted.length) {
     const found = await db.select({ id: projects.id }).from(projects)
       .where(and(inArray(projects.id, wanted), sql`${projects.deletedAt} is null`));
-    if (found.length !== wanted.length) throw err.validation('One of the projects does not exist');
+    if (found.length !== wanted.length || wanted.some((p) => !reach.has(p))) throw err.validation('One of the projects does not exist');
   }
   const current = (await db.select({ projectId: links.projectId }).from(links).where(eq(links.connectionId, id))).map((l) => l.projectId);
   const added = wanted.filter((p) => !current.includes(p));
-  const removed = current.filter((p) => !wanted.includes(p));
+  const removed = current.filter((p) => reach.has(p) && !wanted.includes(p));
   await db.transaction(async (tx) => {
     if (removed.length) await tx.delete(links).where(and(eq(links.connectionId, id), inArray(links.projectId, removed)));
     if (added.length) await tx.insert(links).values(added.map((projectId) => ({ projectId, connectionId: id, createdBy: actor.userId })));

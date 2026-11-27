@@ -79,7 +79,13 @@ export const PRIVATE_ACTIVITY_TYPES: readonly string[] = ['project_secret'];
 const PRIVATE_ACTIVITY = new Set(PRIVATE_ACTIVITY_TYPES);
 
 /** Where an activity record lives: entity type -> the project or space that owns it. */
-const PROJECT_SCOPED = new Set(['project', 'task', 'comment', 'cycle']);
+const PROJECT_SCOPED = new Set(['project', 'task', 'comment', 'cycle', 'time_entry', 'project_rate', 'allocation']);
+/** Project-owned rows that may be hard-deleted: their project is also read from their own trail. */
+const ROW_PROJECT: Record<string, { table: typeof schema.timeEntries | typeof schema.projectRates | typeof schema.allocations }> = {
+  time_entry: { table: schema.timeEntries },
+  project_rate: { table: schema.projectRates },
+  allocation: { table: schema.allocations },
+};
 const SPACE_SCOPED = new Set(['kb_space', 'kb_page', 'kb_page_comment']);
 
 /**
@@ -166,6 +172,7 @@ export async function activityOwners(rows: { entityType: string; entityId: strin
       : [],
   ]);
   for (const r of [...tasks, ...comments, ...cycles]) projectOf.set(r.id, r.projectId);
+  for (const type of Object.keys(ROW_PROJECT)) await rowProjects(type, idsOf(type), projectOf);
   for (const r of [...pages, ...pageComments]) {
     spaceOf.set(r.id, r.spaceId);
     pageMetaOf.set(r.id, { published: r.published, visibility: r.visibility, createdBy: r.createdBy });
@@ -173,6 +180,32 @@ export async function activityOwners(rows: { entityType: string; entityId: strin
   const attachmentParentOf = await attachmentParents(idsOf('attachment'), projectOf);
   const fieldScopeOf = await customFieldScopes(idsOf('custom_field'), projectOf);
   return { projectOf, spaceOf, pageMetaOf, attachmentParentOf, fieldScopeOf };
+}
+
+/**
+ * The project of each time entry, rate or allocation: the live row, or – once
+ * it is deleted – the newest record of its own trail that names one
+ * (`projectId: { to }` or `{ from }`). Unknown ones stay out of projectOf, so
+ * the caller fails closed.
+ */
+async function rowProjects(type: string, ids: string[], projectOf: Map<string, string>): Promise<void> {
+  if (!ids.length) return;
+  const { db } = getDb();
+  const { table } = ROW_PROJECT[type]!;
+  const live = await db.select({ id: table.id, projectId: table.projectId }).from(table).where(inArray(table.id, ids));
+  for (const r of live) projectOf.set(r.id, r.projectId);
+  const gone = ids.filter((id) => !projectOf.has(id));
+  if (!gone.length) return;
+  const trail = await db.select({ entityId: schema.activityLog.entityId, diff: schema.activityLog.diff })
+    .from(schema.activityLog)
+    .where(and(eq(schema.activityLog.entityType, type), inArray(schema.activityLog.entityId, gone)))
+    .orderBy(desc(schema.activityLog.createdAt), desc(schema.activityLog.id));
+  for (const r of trail) {
+    if (projectOf.has(r.entityId)) continue;
+    const named = ((r.diff ?? {}) as { projectId?: { to?: unknown; from?: unknown } }).projectId;
+    const projectId = typeof named?.to === 'string' ? named.to : typeof named?.from === 'string' ? named.from : null;
+    if (projectId) projectOf.set(r.entityId, projectId);
+  }
 }
 
 /** The `created` record of each of these entities, for rows that are gone (hard-deleted). */
@@ -213,6 +246,31 @@ async function customFieldScopes(ids: string[], projectOf: Map<string, string>):
 }
 
 /**
+ * The project each task is in now: a task moved to another project is left
+ * behind deleted with a redirect to its counterpart, and an old record naming
+ * the left-behind task belongs with where the work went.
+ */
+async function currentTaskProjects(taskIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const { db } = getDb();
+  let pending = new Map(taskIds.map((id) => [id, id])); // asked id -> id to look up
+  for (let hop = 0; hop < 5 && pending.size; hop++) {
+    const rows = await db.select({ id: schema.tasks.id, projectId: schema.tasks.projectId, redirect: schema.tasks.redirectToTaskId })
+      .from(schema.tasks).where(inArray(schema.tasks.id, [...new Set(pending.values())]));
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const next = new Map<string, string>();
+    for (const [asked, lookup] of pending) {
+      const row = byId.get(lookup);
+      if (!row) continue;
+      if (row.redirect) next.set(asked, row.redirect);
+      else out.set(asked, row.projectId);
+    }
+    pending = next;
+  }
+  return out;
+}
+
+/**
  * The record each attachment hangs off, and for a file on a project, a task or
  * an intake item, the project (into projectOf). A deleted file's row is gone,
  * so its parent is read from the latest record of its own trail that names
@@ -247,15 +305,13 @@ async function attachmentParents(ids: string[], projectOf: Map<string, string>):
   const taskIds = parentIds('task');
   const intakeIds = parentIds('intake_item');
   const [tasks, intake] = await Promise.all([
-    taskIds.length
-      ? db.select({ id: schema.tasks.id, projectId: schema.tasks.projectId }).from(schema.tasks).where(inArray(schema.tasks.id, taskIds))
-      : [],
+    currentTaskProjects(taskIds),
     intakeIds.length
       ? db.select({ id: schema.intakeItems.id, projectId: schema.intakeItems.projectId }).from(schema.intakeItems).where(inArray(schema.intakeItems.id, intakeIds))
       : [],
   ]);
   const projectOfParent = new Map<string, string>([
-    ...tasks.map((t) => [`task:${t.id}`, t.projectId] as [string, string]),
+    ...[...tasks].map(([id, projectId]) => [`task:${id}`, projectId] as [string, string]),
     ...intake.map((i) => [`intake_item:${i.id}`, i.projectId] as [string, string]),
   ]);
   for (const [attId, p] of out) {
