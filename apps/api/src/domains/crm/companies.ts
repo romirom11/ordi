@@ -15,6 +15,7 @@ import { pickDefined } from './common';
 import { writeActivity } from '../../core/activity';
 import { assertUpdated, assertVersion } from '../../core/locking';
 import { buildCustomFieldFilter, mergeCustomFields } from '../../core/customfields';
+import { accessibleProjectIds } from '../../core/access';
 
 type CompanyInput = z.infer<typeof companyInputSchema>;
 type CompanyUpdate = z.infer<typeof companyUpdateSchema>;
@@ -207,14 +208,20 @@ export async function companyOverview(actor: Actor, id: string) {
   const { db } = getDb();
   const company = await getCompany(id);
   const canFinance = actor.access.permissions.has('finance.read');
-  const [projects] = await db.execute(sql`
+  // Only the projects the caller can open count: a private project's tasks
+  // are not theirs to tally, and neither is the project itself.
+  const reachable = await accessibleProjectIds(actor);
+  const inReachable = sql.join(reachable.map((projectId) => sql`${projectId}`), sql`, `);
+  const [projects] = reachable.length ? await db.execute(sql`
     select count(*) filter (where status = 'active')::int as active_projects,
-           count(*)::int as total_projects from projects where company_id = ${id} and deleted_at is null`) as any[];
-  const [openTasks] = await db.execute(sql`
+           count(*)::int as total_projects from projects
+    where company_id = ${id} and deleted_at is null and id in (${inReachable})`) as any[] : [];
+  const [openTasks] = reachable.length ? await db.execute(sql`
     select count(*)::int as open_tasks from tasks t
     join projects p on p.id = t.project_id
     join task_statuses ts on ts.id = t.status_id
-    where p.company_id = ${id} and p.deleted_at is null and t.deleted_at is null and ts.category not in ('done','canceled')`) as any[];
+    where p.company_id = ${id} and p.deleted_at is null and p.id in (${inReachable})
+      and t.deleted_at is null and ts.category not in ('done','canceled')`) as any[] : [];
 
   const out: Record<string, unknown> = {
     company,

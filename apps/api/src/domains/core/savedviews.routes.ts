@@ -20,6 +20,16 @@ function canDeleteView(actor: Actor, view: { userId: string | null; createdBy: s
   return view.createdBy === actor.userId || actor.access.permissions.has('settings.manage');
 }
 
+/**
+ * The project a view belongs to: its own projectId, or – as the task toolbar
+ * saves them – the project named in its filters.
+ */
+function viewProjectId(view: { projectId?: string | null; filters?: unknown }): string | null {
+  if (view.projectId) return view.projectId;
+  const named = (view.filters as { projectId?: unknown } | null | undefined)?.projectId;
+  return typeof named === 'string' && named ? named : null;
+}
+
 export function savedViewsRoutes() {
   const app = new Hono<AppEnv>();
   app.use('*', requireAuth);
@@ -40,7 +50,10 @@ export function savedViewsRoutes() {
     // A shared view of a project is that project's: its name and filters (which
     // may name the project's own fields) are for those who can open it.
     const reach = new Set(await accessibleProjectIds(actor));
-    const visible = rows.filter((v) => !v.projectId || v.userId === actor.userId || reach.has(v.projectId));
+    const visible = rows.filter((v) => {
+      const projectId = viewProjectId(v);
+      return !projectId || v.userId === actor.userId || reach.has(projectId);
+    });
     // The answer the delete route gives, so a client never offers what it refuses.
     return c.json({ data: visible.map((v) => ({ ...v, canDelete: canDeleteView(actor, v) })) });
   });
@@ -48,7 +61,8 @@ export function savedViewsRoutes() {
   app.post('/', async (c) => {
     const actor = currentActor(c);
     const body = savedViewInputSchema.parse(await c.req.json());
-    if (body.projectId) await assertProject(actor, body.projectId, 'viewer');
+    const projectId = viewProjectId(body);
+    if (projectId) await assertProject(actor, projectId, 'viewer');
     const { db } = getDb();
     const id = ulid();
     await db.insert(schema.savedViews).values({

@@ -12,11 +12,17 @@ interface FieldDef {
   key: string;
   type: CustomFieldType;
   isSortable: boolean;
+  /** null = workspace-wide; set = the field exists only on this project's records. */
+  projectId: string | null;
 }
 
-const registryCache = new Map<string, Map<string, FieldDef>>();
+/**
+ * Every definition per key. A workspace key is unique, but projects each keep
+ * their own: two projects may hold the same key, with different types.
+ */
+const registryCache = new Map<string, Map<string, FieldDef[]>>();
 
-export async function loadRegistry(entityType: string): Promise<Map<string, FieldDef>> {
+export async function loadRegistry(entityType: string): Promise<Map<string, FieldDef[]>> {
   const cached = registryCache.get(entityType);
   if (cached) return cached;
   const { db } = getDb();
@@ -24,11 +30,25 @@ export async function loadRegistry(entityType: string): Promise<Map<string, Fiel
     .select()
     .from(schema.customFieldDefinitions)
     .where(eq(schema.customFieldDefinitions.entityType, entityType));
-  const map = new Map<string, FieldDef>(
-    rows.map((r) => [r.key, { key: r.key, type: r.type as CustomFieldType, isSortable: r.isSortable }]),
-  );
+  const map = new Map<string, FieldDef[]>();
+  for (const r of rows) {
+    const def = { key: r.key, type: r.type as CustomFieldType, isSortable: r.isSortable, projectId: r.projectId };
+    map.set(r.key, [...(map.get(r.key) ?? []), def]);
+  }
   registryCache.set(entityType, map);
   return map;
+}
+
+/**
+ * The definitions of a key the caller may know of: workspace fields, and a
+ * project's own fields only for projects in `projectIds`. A key that exists
+ * only in projects the caller cannot open comes back empty, the same as a key
+ * nobody made, so a filter cannot be used to probe for a private field.
+ */
+async function visibleDefs(entityType: string, key: string, projectIds: readonly string[] = []): Promise<FieldDef[]> {
+  const registry = await loadRegistry(entityType);
+  const reachable = new Set(projectIds);
+  return (registry.get(key) ?? []).filter((d) => d.projectId === null || reachable.has(d.projectId));
 }
 
 export function invalidateRegistry(entityType?: string): void {
@@ -76,18 +96,63 @@ function quote(s: string): string {
   return `'${s.replace(/'/g, "''")}'`;
 }
 
+export interface CustomFieldScope {
+  /** The projects whose own fields the caller may know of (those they can open). */
+  projectIds?: readonly string[];
+  /** The record's project column, so a project field's predicate holds only in projects that define it. */
+  projectColumn?: SQL;
+  column?: string;
+}
+
 export async function buildCustomFieldFilter(
   entityType: string,
   filter: CustomFieldFilter,
-  column = 'custom_fields',
+  scope: CustomFieldScope = {},
 ): Promise<SQL> {
-  const registry = await loadRegistry(entityType);
-  const def = registry.get(filter.field_key);
-  if (!def) throw err.validation(`Unknown custom field '${filter.field_key}'`);
-  const allowed = OPS_BY_TYPE[def.type];
-  if (!allowed.includes(filter.op)) {
-    throw err.validation(`Operator '${filter.op}' not valid for type '${def.type}'`);
+  const column = scope.column ?? 'custom_fields';
+  const defs = await visibleDefs(entityType, filter.field_key, scope.projectIds);
+  if (!defs.length) throw err.validation(`Unknown custom field '${filter.field_key}'`);
+  const matching = defs.filter((d) => OPS_BY_TYPE[d.type].includes(filter.op));
+  if (!matching.length) {
+    throw err.validation(`Operator '${filter.op}' not valid for type '${defs[0]!.type}'`);
   }
+  // A workspace key is the only definition of its key.
+  const workspaceDef = matching.find((d) => d.projectId === null);
+  if (workspaceDef) return fieldPredicate(column, workspaceDef, filter);
+  if (!scope.projectColumn) throw err.validation(`Unknown custom field '${filter.field_key}'`);
+  // Projects may give one key different types: each type's predicate holds in
+  // the projects that give the key that type, and a record matches any of them.
+  // CASE, not AND: a value is cast to a type only on records of the projects
+  // where it has that type, never on another project's values.
+  const byType = new Map<CustomFieldType, FieldDef[]>();
+  for (const d of matching) byType.set(d.type, [...(byType.get(d.type) ?? []), d]);
+  // A value that is no number (or no date) cannot be compared as one: Postgres
+  // casts the parameter itself, CASE or not. Such a type is left out, unless
+  // it is the only one, which then fails as it always did.
+  let types = [...byType.values()];
+  if (types.length > 1) {
+    const fitting = types.filter((sameType) => valueFits(sameType[0]!.type, filter.value));
+    if (fitting.length) types = fitting;
+  }
+  const parts = types.map((sameType) => {
+    const inProjects = sql.join(sameType.map((d) => sql`${d.projectId}`), sql`, `);
+    return sql`(case when ${scope.projectColumn} in (${inProjects}) then ${fieldPredicate(column, sameType[0]!, filter)} else false end)`;
+  });
+  return parts.length === 1 ? parts[0]! : sql`(${sql.join(parts, sql` or `)})`;
+}
+
+/** Whether a filter value (or each of a list's values) can be compared as this type. */
+function valueFits(type: CustomFieldType, value: unknown): boolean {
+  const values = Array.isArray(value) ? value : [value];
+  if (type === 'number') {
+    return values.every((x) => (typeof x === 'number' && Number.isFinite(x))
+      || (typeof x === 'string' && x.trim() !== '' && Number.isFinite(Number(x))));
+  }
+  if (type === 'date') return values.every((x) => typeof x === 'string' && /^\d{4}-\d{2}-\d{2}/.test(x));
+  return true;
+}
+
+function fieldPredicate(column: string, def: FieldDef, filter: CustomFieldFilter): SQL {
   const value = typedValue(column, def.key, def.type);
   const v = filter.value as any;
   switch (filter.op) {
@@ -115,10 +180,10 @@ export async function buildCustomFieldSort(
   entityType: string,
   key: string,
   order: 'asc' | 'desc',
-  column = 'custom_fields',
+  scope: Pick<CustomFieldScope, 'projectIds' | 'column'> = {},
 ): Promise<SQL> {
-  const registry = await loadRegistry(entityType);
-  const def = registry.get(key);
+  const column = scope.column ?? 'custom_fields';
+  const def = (await visibleDefs(entityType, key, scope.projectIds))[0];
   if (!def) throw err.validation(`Unknown custom field '${key}'`);
   if (!def.isSortable || !SORTABLE_TYPES.includes(def.type)) {
     throw err.validation(`Field '${key}' is not sortable`);
