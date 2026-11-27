@@ -158,12 +158,17 @@ export const apiTokens = pgTable('api_tokens', {
   expiresAt: timestamp('expires_at', { withTimezone: true }),
   /**
    * The OAuth client the token was issued to through the consent page; null
-   * for a token made by hand. A new consent for the same client replaces it.
+   * for any other token (made by hand, by the My agent card, for a team bot
+   * or an agent run). Only these are revoked by the scheduled clean-up when
+   * never used or long idle.
    */
   oauthClientId: text('oauth_client_id').references(() => oauthClients.id, { onDelete: 'set null' }),
   ...timestamps,
 }, (t) => ({
   hashIdx: uniqueIndex('api_tokens_hash_idx').on(t.hash),
+  /** The clean-up's candidates: live tokens issued through OAuth, and nothing else. */
+  oauthLiveIdx: index('api_tokens_oauth_live_idx').on(t.lastUsedAt, t.createdAt)
+    .where(sql`oauth_client_id is not null and revoked_at is null`),
 }));
 
 /**

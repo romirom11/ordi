@@ -16,6 +16,8 @@ import { ConfirmDialog, toast } from '../overlays';
 import { IssuedToken } from './ExternalAgentsSection';
 import { useT, extendDict } from '../../lib/i18n';
 import { myAgentView } from './myAgentView';
+import { OAuthConnectionGroup } from './OAuthConnectionGroup';
+import { groupConnections } from './oauthConnections';
 
 extendDict({
   en: {
@@ -78,7 +80,7 @@ extendDict({
   },
 });
 
-interface AgentToken { id: string; name: string; prefix: string; lastUsedAt: string | null; expiresAt: string | null; oauth?: boolean }
+interface AgentToken { id: string; name: string; prefix: string; lastUsedAt: string | null; expiresAt: string | null; createdAt?: string | null; oauth?: boolean }
 interface MyAgent { id: string; name: string; avatar: string | null; isActive: boolean; tokens: AgentToken[] }
 
 const CLIENTS = ['Claude Code', 'Codex', 'Cursor'] as const;
@@ -118,7 +120,7 @@ export function MyAgentCard() {
       ) : (
         <AgentDetails agent={q.data} onChanged={refresh} onError={apiError} />
       )}
-      <p className="mt-3 text-[11px] text-faint">{t('myAgent.asYou')}</p>
+      <p className="mt-3 text-[11px] text-faint">{t('myAgent.asYou')} {t('oauth.cleanup')}</p>
     </div>
   );
 }
@@ -132,6 +134,11 @@ function AgentDetails({ agent, onChanged, onError }: { agent: MyAgent; onChanged
   const [issued, setIssued] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<AgentToken | null>(null);
   const [confirmOff, setConfirmOff] = useState(false);
+  // A token issued through a sign-in is named after its client: those are
+  // grouped by client, tokens issued here stay one per row.
+  const { groups, others } = groupConnections(agent.tokens, (tok) => (tok.oauth ? tok.name : null));
+  const lastUsed = (tok: AgentToken) => (tok.lastUsedAt ? t('myAgent.lastUsed').replace('{when}', fmtRelative(tok.lastUsedAt)) : t('myAgent.neverUsed'));
+  const expiry = (tok: AgentToken) => (tok.expiresAt ? t('myAgent.expires').replace('{date}', fmtDate(tok.expiresAt)) : t('myAgent.never'));
   // Renamed elsewhere (another tab) or put back after a failed rename.
   useEffect(() => { setName(agent.name); }, [agent.name]);
 
@@ -179,18 +186,30 @@ function AgentDetails({ agent, onChanged, onError }: { agent: MyAgent; onChanged
         <div className="rounded-lg border border-border">
           {agent.tokens.length === 0 ? (
             <p className="px-3 py-2.5 text-[13px] text-muted-foreground">{t('myAgent.noClients')}</p>
-          ) : agent.tokens.map((tok, i) => (
-            <div key={tok.id} className={cn('flex items-center gap-3 px-3 py-2', i > 0 && 'border-t border-border')}>
-              <span className="text-[13px] font-medium">{tok.name}</span>
-              <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                {tok.oauth && <>{t('myAgent.viaSignIn')}{' · '}</>}
-                {tok.lastUsedAt ? t('myAgent.lastUsed').replace('{when}', fmtRelative(tok.lastUsedAt)) : t('myAgent.neverUsed')}
-                {' · '}
-                {tok.expiresAt ? t('myAgent.expires').replace('{date}', fmtDate(tok.expiresAt)) : t('myAgent.never')}
-              </span>
-              <Button size="xs" variant="ghost" className="text-destructive" onClick={() => setRevoking(tok)}>{t('myAgent.disconnect')}</Button>
-            </div>
-          ))}
+          ) : (
+            <>
+              {groups.map((group, i) => (
+                <div key={`client:${group.client}`} className={cn('flex items-center gap-3 px-3 py-2', i > 0 && 'border-t border-border')}>
+                  <OAuthConnectionGroup
+                    group={group}
+                    badge={<span className="truncate text-xs text-muted-foreground">· {t('myAgent.viaSignIn')}</span>}
+                    revokeLabel={t('myAgent.disconnect')}
+                    onRevoke={setRevoking}
+                    detail={(tok) => <><span className="font-mono text-[11px]">{tok.prefix}…</span>{' · '}{lastUsed(tok)}{' · '}{expiry(tok)}</>}
+                  />
+                </div>
+              ))}
+              {others.map((tok, j) => (
+                <div key={tok.id} className={cn('flex items-center gap-3 px-3 py-2', groups.length + j > 0 && 'border-t border-border')}>
+                  <span className="text-[13px] font-medium">{tok.name}</span>
+                  <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                    {lastUsed(tok)}{' · '}{expiry(tok)}
+                  </span>
+                  <Button size="xs" variant="ghost" className="text-destructive" onClick={() => setRevoking(tok)}>{t('myAgent.disconnect')}</Button>
+                </div>
+              ))}
+            </>
+          )}
         </div>
       </div>
 
@@ -230,7 +249,8 @@ function AgentDetails({ agent, onChanged, onError }: { agent: MyAgent; onChanged
         onClose={() => setRevoking(null)}
         onConfirm={() => { if (revoking) revoke.mutate(revoking.id); }}
         title={t('myAgent.disconnectTitle')}
-        body={t('myAgent.disconnectBody')}
+        // Several connections of one client look alike: name the one going.
+        body={revoking ? `${revoking.name} (${revoking.prefix}…). ${t('myAgent.disconnectBody')}` : t('myAgent.disconnectBody')}
         confirmLabel={t('myAgent.disconnect')}
         danger
         pending={revoke.isPending}
