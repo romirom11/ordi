@@ -6,12 +6,20 @@
  * assigning work to an agent.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import { getDb, schema } from '@ordi/db';
+import { getDb, schema, eq } from '@ordi/db';
 import { ulid } from 'ulid';
 import { generateToken } from '../lib/crypto';
 import { resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
 import { setupWorkspace, createAgent, addProjectMember, type Workspace } from './agents-helpers';
 import { queueRun } from '../domains/agents/runs';
+import { prepare } from '../domains/agents/run-service';
+
+/** A signed-in session for an agent user, so requests run as an actor_type = 'agent' actor. */
+async function sessionFor(userId: string): Promise<ReturnType<typeof reqAs>> {
+  const token = generateToken();
+  await getDb().db.insert(schema.sessions).values({ id: ulid(), userId, token, expiresAt: new Date(Date.now() + 3600_000) });
+  return reqAs(`ordi_session=${token}`);
+}
 
 let users: Awaited<ReturnType<typeof seedRolesAndUsers>>;
 let mine: Workspace;
@@ -26,10 +34,7 @@ beforeAll(async () => {
   other = await setupWorkspace(users, 'OTHR');
   agentId = (await createAgent(users)).id;
   await addProjectMember(users, mine.projectId, agentId);
-  // A session for the agent user, so requests run as an actor_type = 'agent' actor.
-  const token = generateToken();
-  await getDb().db.insert(schema.sessions).values({ id: ulid(), userId: agentId, token, expiresAt: new Date(Date.now() + 3600_000) });
-  agent = reqAs(`ordi_session=${token}`);
+  agent = await sessionFor(agentId);
 });
 
 describe('an agent outside its projects', () => {
@@ -63,6 +68,45 @@ describe('an agent in its own project', () => {
   it('does not get admin rights from projects.write', async () => {
     expect((await agent.patch(`/projects/${mine.projectId}`, { name: 'renamed by agent' })).status).toBe(403);
     expect((await agent.patch(`/task-statuses/${mine.todoStatusId}`, { name: 'Hijacked' })).status).toBe(403);
+  });
+});
+
+describe('an agent given the Admin role', () => {
+  it('still sees only its own projects, their runs and their trash', async () => {
+    const { db } = getDb();
+    const [adminRole] = await db.select({ id: schema.roles.id }).from(schema.roles).where(eq(schema.roles.key, 'admin'));
+    const boss = await createAgent(users, { name: 'Ops bot', roleId: adminRole!.id });
+    await addProjectMember(users, mine.projectId, boss.id, 'admin');
+    const bot = await sessionFor(boss.id);
+
+    const listed = (await json(bot.get('/projects'))).data.map((p: { id: string }) => p.id);
+    expect(listed).toEqual([mine.projectId]);
+
+    // Runs in both projects; agents.manage lists runs across tasks, but only its projects'.
+    for (const [taskId, projectId] of [[mine.taskId, mine.projectId], [other.taskId, other.projectId]] as const) {
+      await db.insert(schema.agentRuns).values({ id: ulid(), agentUserId: agentId, taskId, projectId, trigger: 'assigned', status: 'failed', runtime: 'claude_code' });
+    }
+    const runs = (await json(bot.get('/agent-runs'))).data as { projectId: string }[];
+    expect(runs.length).toBeGreaterThan(0);
+    expect(runs.every((r) => r.projectId === mine.projectId)).toBe(true);
+
+    // The trash: projects.write used to show every deleted project.
+    const gone = await setupWorkspace(users, 'GONE');
+    expect((await reqAs(users.owner!.cookie).del(`/projects/${gone.projectId}`)).status).toBe(200);
+    const trash = (await json(bot.get('/projects/deleted'))).data.map((p: { id: string }) => p.id);
+    expect(trash).not.toContain(gone.projectId);
+    expect((await bot.post(`/projects/${gone.projectId}/restore`)).status).toBe(404);
+  });
+});
+
+describe('a run queued before the agent left the project', () => {
+  it('is not prepared: no brief, no credentials, no repository', async () => {
+    const runId = ulid();
+    await getDb().db.insert(schema.agentRuns).values({
+      id: runId, agentUserId: agentId, taskId: other.taskId, projectId: other.projectId,
+      trigger: 'assigned', status: 'claimed', runtime: 'claude_code',
+    });
+    await expect(prepare(runId)).rejects.toThrow(/no longer a member/);
   });
 });
 

@@ -12,7 +12,7 @@ import { generateToken, sha256 } from '../../lib/crypto';
 import { writeActivity } from '../../core/activity';
 import { emit } from '../../core/events';
 import { loadRolePermissions } from '../../core/rbac';
-import { assertProject } from '../../core/access';
+import { accessibleProjectIds, assertProject } from '../../core/access';
 import { recordRunEvent, listRunEvents } from './run-events';
 import type { RuntimeUsage } from './runtime';
 
@@ -314,6 +314,10 @@ export async function listRuns(actor: Actor, filter: { taskId?: string; agentUse
     conds.push(eq(agentRuns.taskId, filter.taskId));
   } else if (!actor.access.permissions.has('agents.manage')) {
     throw err.forbidden('Listing runs across tasks needs agents.manage', 'agents.manage');
+  } else if (actor.access.membershipOnlyProjects) {
+    // An agent holding agents.manage still sees runs of its own projects only.
+    const ids = await accessibleProjectIds(actor);
+    conds.push(ids.length ? inArray(agentRuns.projectId, ids) : sql`false`);
   }
   if (filter.agentUserId) conds.push(eq(agentRuns.agentUserId, filter.agentUserId));
   if (filter.status) conds.push(eq(agentRuns.status, filter.status));
