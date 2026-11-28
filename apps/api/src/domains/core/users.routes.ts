@@ -282,7 +282,27 @@ export function usersRoutes() {
     // together or not at all. The person's row is locked first – owner changes
     // and token issuance lock it before any agent – so nothing slips between.
     const { handedOff, agents } = await db.transaction(async (tx) => {
-      await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, id)).for('update');
+      // The successor was checked before this transaction; a deactivation of
+      // theirs may have committed since, so they are read again under lock.
+      // A person is locked FOR KEY SHARE – what their task rows take anyway –
+      // so their own deactivation in progress is waited for and then seen.
+      // The two rows are locked in id order: two people handing work to each
+      // other at once then wait for one another instead of deadlocking, and
+      // the second is refused. An agent successor is read without a lock: a
+      // deactivation switches its leaver's agents off after it locks the
+      // tasks, so holding one here could close a cycle.
+      const lockLeaver = () => tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, id)).for('update');
+      const checkSuccessor = async (successorId: string) => {
+        const [now] = await tx.select({ isActive: schema.users.isActive, actorType: schema.users.actorType })
+          .from(schema.users).where(eq(schema.users.id, successorId));
+        const [locked] = now?.actorType === 'user'
+          ? await tx.select({ isActive: schema.users.isActive }).from(schema.users)
+            .where(eq(schema.users.id, successorId)).for('key share')
+          : [now];
+        if (!locked?.isActive) throw err.validation('Tasks cannot be handed over to a deactivated user');
+      };
+      if (reassignTo && reassignTo < id) { await checkSuccessor(reassignTo); await lockLeaver(); }
+      else { await lockLeaver(); if (reassignTo) await checkSuccessor(reassignTo); }
       const handedOff = await handOffOpenTasks(actor, id, reassignTo, tx);
       // Their external agents lose every token and move to the successor (a
       // person), or are switched off: a copied token must not outlive them.

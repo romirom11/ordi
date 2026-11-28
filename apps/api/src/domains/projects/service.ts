@@ -741,6 +741,56 @@ async function assertReporter(project: { id: string }, userId: string): Promise<
   }
 }
 
+/**
+ * The users among `userIds` who cannot be given work: deactivated ones, a
+ * person who left or an agent switched off, and ids that name no user. The
+ * web pickers hide them already; this holds an API or MCP caller (an agent
+ * holding an old user id) to the same rule.
+ *
+ * Pass the write's transaction to close the race with a deactivation: the
+ * people among them are locked FOR KEY SHARE, in id order, before the caller
+ * locks any task. A deactivation locks the person FOR UPDATE and then their
+ * open tasks, so either it commits first and this read sees them switched
+ * off, or it waits for this write and then hands the new task over too.
+ * Neither side holds a task while it waits for the other. Agents are read
+ * without a lock: a deactivation switches its leaver's agents off after it
+ * has locked the tasks, so holding one before the tasks could deadlock.
+ */
+async function inactiveUsersAmong(userIds: string[], tx?: any): Promise<Set<string>> {
+  const ids = [...new Set(userIds)];
+  if (!ids.length) return new Set();
+  const db = tx ?? getDb().db;
+  const rows: { id: string; isActive: boolean; actorType: string }[] = await db
+    .select({ id: schema.users.id, isActive: schema.users.isActive, actorType: schema.users.actorType })
+    .from(schema.users).where(inArray(schema.users.id, ids));
+  const state = new Map(rows.map((r) => [r.id, r.isActive]));
+  const people = rows.filter((r) => r.actorType === 'user').map((r) => r.id);
+  if (tx && people.length) {
+    const locked: { id: string; isActive: boolean }[] = await tx
+      .select({ id: schema.users.id, isActive: schema.users.isActive }).from(schema.users)
+      .where(inArray(schema.users.id, people)).orderBy(asc(schema.users.id)).for('key share');
+    for (const r of locked) state.set(r.id, r.isActive);
+  }
+  return new Set(ids.filter((id) => state.get(id) !== true));
+}
+
+/**
+ * Refuse giving a task to anyone in `added` who is in `inactive`. Only the
+ * newly added are passed in: an assignee already on the task (a closed task
+ * kept for history) does not block an unrelated edit. The ids are named:
+ * the user directory (/users/lookup) lists every user, deactivated ones
+ * too, to anyone signed in, so this tells the caller nothing new.
+ */
+function refuseInactiveAssignees(added: string[], inactive: ReadonlySet<string>): void {
+  const refused = [...new Set(added.filter((id) => inactive.has(id)))];
+  if (refused.length) throw err.validation('Assignees must be active users', { userIds: refused });
+}
+
+/** Every new assignee must be an active user (inactiveUsersAmong). */
+async function assertActiveAssignees(added: string[], tx?: any): Promise<void> {
+  refuseInactiveAssignees(added, await inactiveUsersAmong(added, tx));
+}
+
 export async function createTask(actor: Actor, input: any) {
   const write = await prepareTask(actor, input);
   // The task, its assignees and labels, its events and the activity record
@@ -762,6 +812,8 @@ async function prepareTask(actor: Actor, input: any): Promise<(tx: any) => Promi
   if (input.parentId) await assertParent(input.parentId, input.projectId);
   if (input.cycleId) await assertCycleInProject(input.cycleId, input.projectId);
   const assigneeIds: string[] = input.assigneeIds ?? [];
+  // Someone switched off is refused as such, before any agent rule is asked.
+  await assertActiveAssignees(assigneeIds);
   if (assigneeIds.length) await assertCanAssignAgents(actor, project.id, assigneeIds, effectiveProjectRole(actor, project));
   // A person's own agent files work for its owner: the owner set it.
   const reporterId: string | null = input.reporterId === undefined ? (actor.ownerUserId ?? actor.userId) : input.reporterId;
@@ -778,6 +830,9 @@ async function prepareTask(actor: Actor, input: any): Promise<(tx: any) => Promi
   const key = await projectKey(input.projectId);
 
   return async (tx) => {
+    // Again under lock, before the insert takes the task-number counter: a
+    // deactivation may have committed since the check above.
+    await assertActiveAssignees(assigneeIds, tx);
     const id = ulid();
     const position = await nextTaskPosition(input.projectId, tx);
     const [row] = await tx.insert(tasks).values({
@@ -887,6 +942,7 @@ export async function updateTask(actor: Actor, id: string, input: any) {
   const assertAssignable = async (added: string[]) => {
     const unchecked = added.filter((a) => !checked.has(a));
     // Agents among the new assignees: membership and assign policy (R48, R49).
+    await assertActiveAssignees(unchecked);
     if (unchecked.length) await assertCanAssignAgents(actor, project.id, unchecked, role);
     for (const a of unchecked) checked.add(a);
   };
@@ -899,6 +955,10 @@ export async function updateTask(actor: Actor, id: string, input: any) {
   const ref = await taskRef(before);
 
   await db.transaction(async (tx) => {
+    // The people this edit may add are locked before the task, the order a
+    // deactivation takes (inactiveUsersAmong); who is new is known only
+    // under the task lock, so every named assignee is read here.
+    const inactive = nextAssignees ? await inactiveUsersAmong(nextAssignees, tx) : new Set<string>();
     // The row lock serializes edits of this task (an assignee-only edit too).
     // The patch was built from `before` (custom fields merge into it), so a
     // change in between is a conflict, answered with the task as it is now.
@@ -910,6 +970,7 @@ export async function updateTask(actor: Actor, id: string, input: any) {
       .where(eq(taskAssignees.taskId, id))).map((r) => r.userId);
     const newAssignees = nextAssignees ? nextAssignees.filter((a) => !oldAssignees.includes(a)) : [];
     // Someone may have taken an assignee off since the check above.
+    refuseInactiveAssignees(newAssignees, inactive);
     await assertAssignable(newAssignees);
     const finalAssignees = nextAssignees ?? oldAssignees;
     if (Object.keys(patch).length) await tx.update(tasks).set(patch).where(eq(tasks.id, id));
@@ -1289,13 +1350,20 @@ export async function duplicateTask(actor: Actor, id: string) {
   // a move leaves off an agent the target project does not have.
   const sourceAssignees = await assigneeIdsOf(id);
   const refused = new Set((await agentAssignRefusals(actor, source.projectId, sourceAssignees, effectiveProjectRole(actor, project))).map((r) => r.userId));
-  const assignees = sourceAssignees.filter((userId) => !refused.has(userId));
+  // A copy is new work, so it goes only to people still here: a deactivated
+  // assignee of the original stays off the copy, open or closed, the way
+  // assigning them by hand is refused (inactiveUsersAmong).
+  const gone = await inactiveUsersAmong(sourceAssignees);
+  const candidates = sourceAssignees.filter((userId) => !refused.has(userId) && !gone.has(userId));
   const labelIds = (await db.select({ labelId: taskLabels.labelId }).from(taskLabels).where(eq(taskLabels.taskId, id))).map((l) => l.labelId);
   const key = await projectKey(source.projectId);
   const newId = ulid();
   // The copy, its assignees and labels and its event share one transaction:
   // a failure part way leaves no half-made copy.
   const ref = await db.transaction(async (tx) => {
+    // Read again under lock: someone may have been deactivated since.
+    const goneNow = await inactiveUsersAmong(candidates, tx);
+    const assignees = candidates.filter((userId) => !goneNow.has(userId));
     const position = await nextTaskPosition(source.projectId, tx);
     const [row] = await tx.insert(tasks).values({
       id: newId, projectId: source.projectId, number: 0, title: `${source.title} (copy)`,
@@ -1561,6 +1629,7 @@ export async function bulkUpdateTasks(actor: Actor, input: any) {
   const assertAssignable = async (t: typeof rows[number], added: string[]) => {
     const done = checked.get(t.projectId) ?? new Set<string>();
     const unchecked = added.filter((a) => !done.has(a));
+    await assertActiveAssignees(unchecked);
     if (unchecked.length) await assertCanAssignAgents(actor, t.projectId, unchecked, roleOf.get(t.projectId) ?? null);
     for (const a of unchecked) done.add(a);
     checked.set(t.projectId, done);
@@ -1581,6 +1650,8 @@ export async function bulkUpdateTasks(actor: Actor, input: any) {
 
   return db.transaction(async (tx) => {
     if (!editable.length) return { updated: 0 };
+    // People before tasks, the order a deactivation locks in (inactiveUsersAmong).
+    const inactive = nextAssignees ? await inactiveUsersAmong(nextAssignees, tx) : new Set<string>();
     // Lock the selection in one order, so overlapping edits wait instead of
     // deadlocking. A task deleted or moved to another project since it was
     // read is left alone: what was checked was its old place.
@@ -1601,6 +1672,7 @@ export async function bulkUpdateTasks(actor: Actor, input: any) {
       const oldAssignees = assigned.get(t.id) ?? [];
       const added = nextAssignees ? nextAssignees.filter((a) => !oldAssignees.includes(a)) : [];
       // Someone may have taken an assignee off since the check above.
+      refuseInactiveAssignees(added, inactive);
       await assertAssignable(t, added);
       if (Object.keys(patch).length) await tx.update(tasks).set(patch).where(eq(tasks.id, t.id));
       if (nextAssignees) {
