@@ -293,18 +293,20 @@ describe('clearing a private project\'s own target', () => {
 });
 
 describe('workspace events', () => {
-  // Deals and invoices carry no project: the workspace channel is their only target.
+  // Deals and invoices are read at delivery: with no row there is no telling
+  // whether one was tied to a private project, so nothing is posted. What a
+  // real deal or invoice posts is in slack-private-finance.test.ts.
   it.each([
     { type: 'deal.won', aggregateType: 'deal' },
     { type: 'deal.lost', aggregateType: 'deal' },
     { type: 'invoice.paid', aggregateType: 'invoice' },
-  ] as const)('$type still goes to the workspace webhook', async ({ type, aggregateType }) => {
+  ] as const)('$type for a record that does not exist posts nothing', async ({ type, aggregateType }) => {
     const { db } = getDb();
     const { publishEvent } = await import('../core/events');
     await db.transaction(async (tx) => {
       await publishEvent(tx, { type, aggregateType, aggregateId: ulid(), payload: { title: 'Big one', number: 'INV-1' }, actorId: users.owner!.userId, actorType: 'user' });
     });
     await drainOutbox();
-    expect(posts.map((p) => p.url)).toEqual([WORKSPACE_HOOK]);
+    expect(posts).toEqual([]);
   });
 });

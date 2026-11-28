@@ -12,7 +12,7 @@ import { trySendEmail } from '../../lib/email';
 import { asLocale, loadBranding, renderEmail, tr } from '../../lib/email-templates';
 import { createPasswordReset, sendPasswordResetEmail } from '../../core/password-reset';
 import { env } from '../../env';
-import { handOffOpenTasks, openTasksAssignedTo } from '../projects/service';
+import { handOffOpenTasks, openTasksPreview } from '../projects/service';
 import { withdrawQuestionsWaitingOn } from '../projects/questions';
 import { assertCanGrantRole, assertNotPersonalAgent, assertSignedInPerson, externalAgentsOwnedBy, handOverOwnedAgents } from '../agents/external';
 
@@ -243,12 +243,14 @@ export function usersRoutes() {
 
   // What deactivating this person would orphan (ORD-20): the open tasks they
   // hold, so the admin can decide who takes them over before pulling the plug.
+  // Tasks in projects the admin cannot open are only counted (ORD-39).
   app.get('/:id/open-tasks', guard('users.manage'), async (c) => {
-    const rows = await openTasksAssignedTo(c.req.param('id'));
+    const { count, hiddenCount, visible } = await openTasksPreview(currentActor(c), c.req.param('id'));
     // External agents that work for them are left behind too: shown here so
     // the admin sees their tokens will be revoked and who takes them over.
+    // Names and kinds only – nothing about the projects they work in.
     const ownedAgents = await externalAgentsOwnedBy(c.req.param('id'));
-    return c.json({ count: rows.length, data: rows.slice(0, 20), ownedAgents });
+    return c.json({ count, hiddenCount, data: visible.slice(0, 20), ownedAgents });
   });
 
   app.post('/:id/deactivate', guard('users.manage'), async (c) => {

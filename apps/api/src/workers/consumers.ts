@@ -3,7 +3,7 @@
  * outbound webhooks. All idempotent – dedup is handled by the relay via
  * processed_events, and each handler is safe to re-run.
  */
-import { getDb, schema, eq, and, desc, isNull } from '@ordi/db';
+import { getDb, schema, eq, and, desc, isNull, inArray } from '@ordi/db';
 import { ulid } from 'ulid';
 import type { DomainEvent } from '@ordi/shared';
 import { broadcaster, type SSEMessage } from '../core/events';
@@ -603,49 +603,154 @@ const webhooks: Consumer = {
  * project that no longer exists, posts nothing rather than fall back to the
  * shared channel. Delivery failures rethrow so the relay's retry/DLQ
  * machinery applies.
+ *
+ * Deals and invoices are workspace news and keep the workspace webhook – unless
+ * one is tied to a private project. Then it follows that project's rule: its
+ * own target, or nothing. See financeTarget for an invoice that spans several
+ * projects.
  */
 const SLACK_EVENTS = new Set([
   'task.created', 'task.status_changed', 'comment.mentioned',
   'deal.won', 'deal.lost', 'invoice.paid', 'project.completed',
 ]);
 
+/**
+ * What the Slack consumer reads through: one read-only, repeatable-read
+ * transaction per event, so a record, the projects it draws on and their
+ * visibility come from one snapshot – never a mix of states that did not
+ * exist together.
+ */
+type SlackReader = Parameters<Parameters<ReturnType<typeof getDb>['db']['transaction']>[0]>[0];
+
 type SlackTarget =
   | { kind: 'bot'; channel: string; token: string }
   | { kind: 'webhook'; url: string }
   | null;
 
-async function workspaceBotToken(): Promise<string | null> {
-  const { db } = getDb();
+async function workspaceBotToken(db: SlackReader): Promise<string | null> {
   const [conn] = await db.select().from(schema.slackConnections)
     .orderBy(desc(schema.slackConnections.createdAt)).limit(1);
   if (!conn) return null;
   try { return decrypt(conn.botToken as string); } catch { return null; }
 }
 
-/**
- * Where a message goes. `projectId` undefined: a workspace event (deals,
- * invoices), for the workspace webhook. Otherwise that project's event; a
- * project that no longer exists gets nothing.
- */
-async function resolveSlackTarget(projectId: string | undefined): Promise<SlackTarget> {
-  const { db } = getDb();
-  if (projectId !== undefined) {
-    const [project] = await db.select({ settings: schema.projects.settings, visibility: schema.projects.visibility })
-      .from(schema.projects).where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
-    if (!project) return null;
-    const settings = (project.settings as { slackChannelId?: string | null; slackWebhookUrl?: string | null } | null) ?? {};
-    if (settings.slackChannelId) {
-      const token = await workspaceBotToken();
-      if (token) return { kind: 'bot', channel: settings.slackChannelId, token };
-    }
-    if (settings.slackWebhookUrl) return { kind: 'webhook', url: settings.slackWebhookUrl };
-    // A private project's work stays among its members: no own target, no
-    // post. Only a project open to the workspace may use the shared channel.
-    if (project.visibility !== 'workspace') return null;
+/** Where a message about a project's work goes, and where a deal or an invoice goes. */
+type SlackScope =
+  /** No project: the workspace webhook. */
+  | { kind: 'workspace' }
+  /** A project's own work (tasks, comments, the project itself). */
+  | { kind: 'project'; projectId: string }
+  /**
+   * A deal or an invoice and the projects it draws on – null when those can
+   * no longer be told. With none of them private it is workspace news, as
+   * before; see financeTarget.
+   */
+  | { kind: 'finance'; projectIds: string[] | null };
+
+type ProjectSlackSettings = { slackChannelId?: string | null; slackWebhookUrl?: string | null } | null;
+
+/** The channel (with a usable bot token) or webhook set on the project itself, if any. */
+async function projectOwnTarget(db: SlackReader, settings: ProjectSlackSettings): Promise<SlackTarget> {
+  const s = settings ?? {};
+  if (s.slackChannelId) {
+    const token = await workspaceBotToken(db);
+    if (token) return { kind: 'bot', channel: s.slackChannelId, token };
   }
+  if (s.slackWebhookUrl) return { kind: 'webhook', url: s.slackWebhookUrl };
+  return null;
+}
+
+async function workspaceWebhook(db: SlackReader): Promise<SlackTarget> {
   const [ws] = await db.select().from(schema.workspaceSettings).where(eq(schema.workspaceSettings.id, 'workspace'));
   const url = (ws?.integrations as { slackWebhookUrl?: string | null } | undefined)?.slackWebhookUrl;
   return url ? { kind: 'webhook', url } : null;
+}
+
+/**
+ * A project's event goes to its own target; failing that, a project open to
+ * the workspace uses the shared channel and a private one posts nothing. A
+ * project that no longer exists gets nothing.
+ */
+async function projectTarget(db: SlackReader, projectId: string): Promise<SlackTarget> {
+  const [project] = await db.select({ settings: schema.projects.settings, visibility: schema.projects.visibility })
+    .from(schema.projects).where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
+  if (!project) return null;
+  const own = await projectOwnTarget(db, project.settings as ProjectSlackSettings);
+  if (own) return own;
+  // A private project's work stays among its members: no own target, no
+  // post. Only a project open to the workspace may use the shared channel.
+  if (project.visibility !== 'workspace') return null;
+  return workspaceWebhook(db);
+}
+
+/**
+ * A deal or an invoice, read with the projects it draws on as they are at
+ * delivery:
+ *   - none of them private (or none at all): the workspace webhook, as before;
+ *   - exactly one private: that project's own target, or nothing – it never
+ *     reaches the shared channel, whichever public projects are also on it;
+ *   - several private: nothing. Each is entitled only to its own channel, and
+ *     one private project's channel must not learn of another's billing.
+ * A private project that has since been deleted has no target: nothing.
+ * `projectIds` null: where the record came from can no longer be told, so it
+ * cannot be shown to be public – nothing.
+ */
+async function financeTarget(db: SlackReader, projectIds: string[] | null): Promise<SlackTarget> {
+  if (projectIds === null) return null;
+  const ids = [...new Set(projectIds)];
+  if (!ids.length) return workspaceWebhook(db);
+  const rows = await db.select({
+    id: schema.projects.id, settings: schema.projects.settings, visibility: schema.projects.visibility, deletedAt: schema.projects.deletedAt,
+  }).from(schema.projects).where(inArray(schema.projects.id, ids));
+  // A project we cannot read cannot be shown to be public.
+  if (rows.length !== ids.length) return null;
+  const closed = rows.filter((r) => r.visibility !== 'workspace');
+  if (!closed.length) return workspaceWebhook(db);
+  if (closed.length > 1) return null;
+  const only = closed[0]!;
+  if (only.deletedAt) return null;
+  return projectOwnTarget(db, only.settings as ProjectSlackSettings);
+}
+
+function resolveSlackTarget(db: SlackReader, scope: SlackScope): Promise<SlackTarget> {
+  switch (scope.kind) {
+    case 'workspace': return workspaceWebhook(db);
+    case 'project': return projectTarget(db, scope.projectId);
+    case 'finance': return financeTarget(db, scope.projectIds);
+  }
+}
+
+/**
+ * Every project an invoice bills: the one it is filed under, the project of
+ * the quote it came from, the projects its time was billed from (recorded when
+ * it was made), and the present projects of the time entries still on its
+ * lines – an entry follows its task when that moves.
+ *
+ * An invoice from time with no source recorded and no entries left on its
+ * lines (only possible for one the migration could not trace, its entries
+ * unlinked before it ran) has lost where it came from: null, and nothing is
+ * posted – whatever project it is filed under now, since that can be edited –
+ * rather than guess that it was all public.
+ */
+async function invoiceProjectIds(
+  db: SlackReader,
+  invoice: { id: string; projectId: string | null; quoteId: string | null; source: string },
+): Promise<string[] | null> {
+  const [recorded, entries] = await Promise.all([
+    db.select({ projectId: schema.invoiceSourceProjects.projectId }).from(schema.invoiceSourceProjects)
+      .where(eq(schema.invoiceSourceProjects.invoiceId, invoice.id)),
+    db.selectDistinct({ projectId: schema.timeEntries.projectId }).from(schema.timeEntries)
+      .innerJoin(schema.invoiceItems, eq(schema.invoiceItems.id, schema.timeEntries.invoiceItemId))
+      .where(eq(schema.invoiceItems.invoiceId, invoice.id)),
+  ]);
+  const ids = [...recorded, ...entries].map((r) => r.projectId);
+  if (invoice.source === 'time' && !ids.length) return null;
+  if (invoice.projectId) ids.push(invoice.projectId);
+  if (invoice.quoteId) {
+    const [quote] = await db.select({ projectId: schema.quotes.projectId }).from(schema.quotes).where(eq(schema.quotes.id, invoice.quoteId));
+    if (quote?.projectId) ids.push(quote.projectId);
+  }
+  return ids;
 }
 
 /**
@@ -653,8 +758,7 @@ async function resolveSlackTarget(projectId: string | undefined): Promise<SlackT
  * project, is gone, deleted or moved away. Slack reads the row, not the event payload: the task's
  * present project decides who may read about it.
  */
-async function liveTask(taskId: string): Promise<{ title: string; statusId: string | null; projectId: string; ref: string } | null> {
-  const { db } = getDb();
+async function liveTask(db: SlackReader, taskId: string): Promise<{ title: string; statusId: string | null; projectId: string; ref: string } | null> {
   const [row] = await db.select({
     title: schema.tasks.title, statusId: schema.tasks.statusId, projectId: schema.tasks.projectId,
     number: schema.tasks.number, key: schema.projects.key, deletedAt: schema.tasks.deletedAt,
@@ -665,11 +769,11 @@ async function liveTask(taskId: string): Promise<{ title: string; statusId: stri
 }
 
 /**
- * Build the Slack message + the project it belongs to (for target resolution),
- * or undefined for a workspace event. null: nothing to post.
+ * Build the Slack message + what decides where it goes. null: nothing to post.
+ * Deals and invoices are read as they are now, not from the payload: their
+ * project – and whether it is private – may have changed since the event.
  */
-async function buildSlackMessage(ev: DomainEvent): Promise<{ text: string; projectId: string | undefined } | null> {
-  const { db } = getDb();
+async function buildSlackMessage(db: SlackReader, ev: DomainEvent): Promise<{ text: string; scope: SlackScope } | null> {
   const p = ev.payload as any;
   const app = env.appUrl.replace(/\/$/, '');
   switch (ev.type) {
@@ -678,13 +782,13 @@ async function buildSlackMessage(ev: DomainEvent): Promise<{ text: string; proje
       const taskId = ev.aggregateId;
       // Gone or moved by now (a move leaves the old row behind, deleted, and
       // announces the copy in its new project): nothing to post.
-      const task = await liveTask(taskId);
+      const task = await liveTask(db, taskId);
       if (!task) return null;
       const link = `${app}/projects/${task.projectId}/tasks/${taskId}`;
       if (ev.type === 'task.created') {
         // A CSV import creates tasks by the dozen; one message each would bury the channel.
         if (p.source === 'import') return null;
-        return { text: `:sparkles: New task *${task.ref}* – ${task.title}\n${link}`, projectId: task.projectId };
+        return { text: `:sparkles: New task *${task.ref}* – ${task.title}\n${link}`, scope: { kind: 'project', projectId: task.projectId } };
       }
       let statusName = '';
       if (task.statusId) {
@@ -692,7 +796,7 @@ async function buildSlackMessage(ev: DomainEvent): Promise<{ text: string; proje
           .from(schema.taskStatuses).where(eq(schema.taskStatuses.id, task.statusId));
         statusName = st?.name ?? '';
       }
-      return { text: `:arrows_counterclockwise: Task *${task.ref}* → *${statusName}* – ${task.title}\n${link}`, projectId: task.projectId };
+      return { text: `:arrows_counterclockwise: Task *${task.ref}* → *${statusName}* – ${task.title}\n${link}`, scope: { kind: 'project', projectId: task.projectId } };
     }
     case 'comment.mentioned': {
       // aggregateId is the comment id. A comment follows its task on a move,
@@ -701,31 +805,49 @@ async function buildSlackMessage(ev: DomainEvent): Promise<{ text: string; proje
       const [comment] = await db.select({ taskId: schema.comments.taskId, deletedAt: schema.comments.deletedAt })
         .from(schema.comments).where(eq(schema.comments.id, ev.aggregateId));
       if (!comment || comment.deletedAt) return null;
-      const task = await liveTask(comment.taskId);
+      const task = await liveTask(db, comment.taskId);
       if (!task) return null;
       return {
         text: `:speech_balloon: You were mentioned in *${task.ref}*\n${app}/projects/${task.projectId}/tasks/${comment.taskId}`,
-        projectId: task.projectId,
+        scope: { kind: 'project', projectId: task.projectId },
       };
     }
-    case 'deal.won': {
-      const amount = p.amount ? ` (${p.currency ?? ''} ${p.amount})` : '';
-      return { text: `:tada: Deal won: *${p.title ?? ev.aggregateId}*${amount}\n${app}/deals`, projectId: undefined };
-    }
+    case 'deal.won':
     case 'deal.lost': {
-      const [deal] = await db.select({ title: schema.deals.title })
-        .from(schema.deals).where(eq(schema.deals.id, ev.aggregateId));
-      const reason = p.lostReason ? ` – ${p.lostReason}` : '';
-      return { text: `:disappointed: Deal lost: *${deal?.title ?? ev.aggregateId}*${reason}\n${app}/deals`, projectId: undefined };
+      // Gone by now: whether it was tied to a private project is unknown, so
+      // nothing is posted.
+      const [deal] = await db.select({
+        title: schema.deals.title, amount: schema.deals.amount, currency: schema.deals.currency,
+        lostReason: schema.deals.lostReason, projectId: schema.deals.projectId,
+      }).from(schema.deals).where(and(eq(schema.deals.id, ev.aggregateId), isNull(schema.deals.deletedAt)));
+      if (!deal) return null;
+      const scope: SlackScope = { kind: 'finance', projectIds: deal.projectId ? [deal.projectId] : [] };
+      if (ev.type === 'deal.won') {
+        const amount = deal.amount ? ` (${deal.currency ?? ''} ${deal.amount})` : '';
+        return { text: `:tada: Deal won: *${deal.title}*${amount}\n${app}/deals`, scope };
+      }
+      // The reason on the deal now: a reopened deal has none, and the one
+      // queued with the event may be about a project the deal has left.
+      const reason = deal.lostReason ? ` – ${deal.lostReason}` : '';
+      return { text: `:disappointed: Deal lost: *${deal.title}*${reason}\n${app}/deals`, scope };
     }
     case 'invoice.paid': {
-      return { text: `:moneybag: Invoice *${p.number ?? ev.aggregateId}* was paid\n${app}/finance/invoices/${ev.aggregateId}`, projectId: undefined };
+      const [invoice] = await db.select({
+        id: schema.invoices.id, number: schema.invoices.number, projectId: schema.invoices.projectId,
+        quoteId: schema.invoices.quoteId, source: schema.invoices.source,
+      }).from(schema.invoices).where(and(eq(schema.invoices.id, ev.aggregateId), isNull(schema.invoices.deletedAt)));
+      if (!invoice) return null;
+      const projectIds = await invoiceProjectIds(db, invoice);
+      return {
+        text: `:moneybag: Invoice *${invoice.number}* was paid\n${app}/finance/invoices/${ev.aggregateId}`,
+        scope: { kind: 'finance', projectIds },
+      };
     }
     case 'project.completed': {
       const projectId = ev.aggregateId;
       const [project] = await db.select({ name: schema.projects.name })
         .from(schema.projects).where(eq(schema.projects.id, projectId));
-      return { text: `:checkered_flag: Project *${p.key ?? project?.name ?? projectId}* completed\n${app}/projects/${projectId}`, projectId };
+      return { text: `:checkered_flag: Project *${p.key ?? project?.name ?? projectId}* completed\n${app}/projects/${projectId}`, scope: { kind: 'project', projectId } };
     }
     default:
       return null;
@@ -736,10 +858,15 @@ const slack: Consumer = {
   name: 'slack',
   async handle(ev) {
     if (!SLACK_EVENTS.has(ev.type)) return;
-    const msg = await buildSlackMessage(ev);
-    if (!msg) return;
-    const target = await resolveSlackTarget(msg.projectId);
-    if (!target) return; // not configured – skip
+    // Read in one snapshot; post after it, outside the transaction.
+    const planned = await getDb().db.transaction(async (tx) => {
+      const msg = await buildSlackMessage(tx, ev);
+      if (!msg) return null;
+      const target = await resolveSlackTarget(tx, msg.scope);
+      return target ? { msg, target } : null;
+    }, { isolationLevel: 'repeatable read', accessMode: 'read only' });
+    if (!planned) return; // nothing to post, or not configured – skip
+    const { msg, target } = planned;
     if (target.kind === 'bot') {
       await postSlackMessage(target.token, target.channel, msg.text); // throws → relay retries / DLQs
       return;
