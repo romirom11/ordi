@@ -251,6 +251,33 @@ describe('an event still queued when its task moves', () => {
   });
 });
 
+describe('delivery reads the project as it is then', () => {
+  it('a project made private before delivery posts nothing to the workspace', async () => {
+    const projectId = await project('workspace');
+    await task(projectId, 'Secret launch plan');
+    await getDb().db.update(schema.projects).set({ visibility: 'private' }).where(eq(schema.projects.id, projectId));
+    await drainOutbox();
+    expect(posts).toEqual([]);
+  });
+
+  it('a project deleted before delivery posts nothing', async () => {
+    const projectId = await project('workspace');
+    await task(projectId, 'Gone soon');
+    expect((await owner().patch(`/projects/${projectId}`, { status: 'completed' })).status).toBe(200);
+    await getDb().db.update(schema.projects).set({ deletedAt: new Date() }).where(eq(schema.projects.id, projectId));
+    await drainOutbox();
+    expect(posts).toEqual([]);
+  });
+
+  it('a task deleted before delivery posts nothing', async () => {
+    const projectId = await project('workspace');
+    const taskId = await task(projectId, 'Gone soon');
+    expect((await owner().del(`/tasks/${taskId}`)).status).toBeLessThan(300);
+    await drainOutbox();
+    expect(posts).toEqual([]);
+  });
+});
+
 describe('clearing a private project\'s own target', () => {
   it('stops its posts there, without falling back to the workspace', async () => {
     const projectId = await project('private', { slackWebhookUrl: OWN_HOOK, slackChannelId: 'C0PRIVATE' });
@@ -266,12 +293,16 @@ describe('clearing a private project\'s own target', () => {
 });
 
 describe('workspace events', () => {
-  it('a won deal still goes to the workspace webhook', async () => {
-    // deal.won carries no project: the workspace channel is its only target.
+  // Deals and invoices carry no project: the workspace channel is their only target.
+  it.each([
+    { type: 'deal.won', aggregateType: 'deal' },
+    { type: 'deal.lost', aggregateType: 'deal' },
+    { type: 'invoice.paid', aggregateType: 'invoice' },
+  ] as const)('$type still goes to the workspace webhook', async ({ type, aggregateType }) => {
     const { db } = getDb();
     const { publishEvent } = await import('../core/events');
     await db.transaction(async (tx) => {
-      await publishEvent(tx, { type: 'deal.won', aggregateType: 'deal', aggregateId: ulid(), payload: { title: 'Big one' }, actorId: users.owner!.userId, actorType: 'user' });
+      await publishEvent(tx, { type, aggregateType, aggregateId: ulid(), payload: { title: 'Big one', number: 'INV-1' }, actorId: users.owner!.userId, actorType: 'user' });
     });
     await drainOutbox();
     expect(posts.map((p) => p.url)).toEqual([WORKSPACE_HOOK]);

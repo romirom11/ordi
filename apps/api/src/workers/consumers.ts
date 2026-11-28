@@ -614,7 +614,7 @@ async function resolveSlackTarget(projectId: string | undefined): Promise<SlackT
   const { db } = getDb();
   if (projectId !== undefined) {
     const [project] = await db.select({ settings: schema.projects.settings, visibility: schema.projects.visibility })
-      .from(schema.projects).where(eq(schema.projects.id, projectId));
+      .from(schema.projects).where(and(eq(schema.projects.id, projectId), isNull(schema.projects.deletedAt)));
     if (!project) return null;
     const settings = (project.settings as { slackChannelId?: string | null; slackWebhookUrl?: string | null } | null) ?? {};
     if (settings.slackChannelId) {
@@ -622,8 +622,9 @@ async function resolveSlackTarget(projectId: string | undefined): Promise<SlackT
       if (token) return { kind: 'bot', channel: settings.slackChannelId, token };
     }
     if (settings.slackWebhookUrl) return { kind: 'webhook', url: settings.slackWebhookUrl };
-    // A private project's work stays among its members: no own target, no post.
-    if (project.visibility === 'private') return null;
+    // A private project's work stays among its members: no own target, no
+    // post. Only a project open to the workspace may use the shared channel.
+    if (project.visibility !== 'workspace') return null;
   }
   const [ws] = await db.select().from(schema.workspaceSettings).where(eq(schema.workspaceSettings.id, 'workspace'));
   const url = (ws?.integrations as { slackWebhookUrl?: string | null } | undefined)?.slackWebhookUrl;
@@ -631,8 +632,8 @@ async function resolveSlackTarget(projectId: string | undefined): Promise<SlackT
 }
 
 /**
- * A task as it is now, with its current ref – or null when it is gone, deleted
- * or moved away. Slack reads the row, not the event payload: the task's
+ * A task as it is now, with its current ref – or null when it, or its
+ * project, is gone, deleted or moved away. Slack reads the row, not the event payload: the task's
  * present project decides who may read about it.
  */
 async function liveTask(taskId: string): Promise<{ title: string; statusId: string | null; projectId: string; ref: string } | null> {
@@ -640,7 +641,7 @@ async function liveTask(taskId: string): Promise<{ title: string; statusId: stri
   const [row] = await db.select({
     title: schema.tasks.title, statusId: schema.tasks.statusId, projectId: schema.tasks.projectId,
     number: schema.tasks.number, key: schema.projects.key, deletedAt: schema.tasks.deletedAt,
-  }).from(schema.tasks).innerJoin(schema.projects, eq(schema.projects.id, schema.tasks.projectId))
+  }).from(schema.tasks).innerJoin(schema.projects, and(eq(schema.projects.id, schema.tasks.projectId), isNull(schema.projects.deletedAt)))
     .where(eq(schema.tasks.id, taskId));
   if (!row || row.deletedAt) return null;
   return { title: row.title, statusId: row.statusId, projectId: row.projectId, ref: `${row.key}-${row.number}` };
