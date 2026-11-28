@@ -26,8 +26,9 @@ extendDict({
     'extAgents.owner': 'Owner',
     'extAgents.ownerHint': 'The person behind the agent – who it works for.',
     'extAgents.noProjects': 'No projects yet – add it under a project\'s Settings → Access',
+    'extAgents.noProjectsShort': 'No projects',
     'extAgents.projects': 'Projects',
-    'extAgents.tokens': 'Tokens',
+    'extAgents.tokensCount': 'Tokens · {n}',
     'extAgents.noTokens': 'No live tokens',
     'extAgents.issue': 'New token',
     'extAgents.expires': 'Expires',
@@ -56,8 +57,9 @@ extendDict({
     'extAgents.owner': 'Власник',
     'extAgents.ownerHint': 'Людина, яка стоїть за агентом, – на кого він працює.',
     'extAgents.noProjects': 'Ще немає проєктів – додайте його в Налаштуваннях проєкту → Доступ',
+    'extAgents.noProjectsShort': 'Без проєктів',
     'extAgents.projects': 'Проєкти',
-    'extAgents.tokens': 'Токени',
+    'extAgents.tokensCount': 'Токени · {n}',
     'extAgents.noTokens': 'Немає дійсних токенів',
     'extAgents.issue': 'Новий токен',
     'extAgents.expires': 'Діє до',
@@ -107,18 +109,20 @@ export function useTeamBots() {
   });
 }
 
-/** One team bot's line in Settings → Agents: who it works for, where, and its tokens. */
+/**
+ * One team bot's line in Settings → Agents: who it works for and where, kept
+ * to one short line. How to add it to a project, and its tokens, are in Manage.
+ */
 export function TeamBotSummary({ agent }: { agent: ExternalAgent }) {
   const t = useT();
   const projects = agent.projects.length || agent.hiddenProjects
     ? [...agent.projects.map((p) => p.key), ...(agent.hiddenProjects ? [t('extAgents.hidden').replace('{n}', String(agent.hiddenProjects))] : [])].join(', ')
-    : t('extAgents.noProjects');
+    : t('extAgents.noProjectsShort');
   return (
     <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
       <span>{t('extAgents.owner')}: {agent.ownerName ?? '–'}</span>
       <span>· {agent.roleName || '–'}</span>
       <span>· {projects}</span>
-      <span>· {t('extAgents.tokens')}: {agent.tokens.length}</span>
     </div>
   );
 }
@@ -251,7 +255,7 @@ function ManageDialog({ agent, onClose }: { agent: ExternalAgent; onClose: () =>
 
         <div>
           <div className="mb-1.5 flex items-center justify-between gap-2">
-            <div className="text-xs font-medium text-muted-foreground">{t('extAgents.tokens')}</div>
+            <div className="text-xs font-medium text-muted-foreground">{t('extAgents.tokensCount').replace('{n}', String(agent.tokens.length))}</div>
             <div className="flex items-center gap-2">
               <Select value={days} onChange={(e) => setDays(e.target.value)} className="h-7 w-36 text-xs" aria-label={t('extAgents.expiresIn')}>
                 {EXTERNAL_AGENT_TOKEN_DAYS.map((d) => <option key={d} value={String(d)}>{t('extAgents.days').replace('{n}', String(d))}</option>)}

@@ -1,4 +1,4 @@
-import { useId, useState, type CSSProperties, type ReactNode } from 'react';
+import { useId, useState, type CSSProperties, type ReactNode, type Ref } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '../ui';
 
@@ -95,16 +95,20 @@ export function RowList({ children, className }: { children: ReactNode; classNam
  * secondary or state-dependent content stays behind a labelled toggle, primary
  * actions never do. Used for advanced config, fallbacks and reference lists.
  */
-export function Disclosure({ label, children, defaultOpen = false, className }: {
+export function Disclosure({ label, children, defaultOpen = false, className, open: openProp, onOpenChange, buttonRef }: {
   label: ReactNode; children: ReactNode; defaultOpen?: boolean; className?: string;
+  /** Pass to open it from elsewhere, e.g. a link in a message that points at it. */
+  open?: boolean; onOpenChange?: (open: boolean) => void; buttonRef?: Ref<HTMLButtonElement>;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [ownOpen, setOwnOpen] = useState(defaultOpen);
+  const open = openProp ?? ownOpen;
   const id = useId();
   return (
     <div className={className}>
       <button
+        ref={buttonRef}
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => { if (openProp === undefined) setOwnOpen(!open); onOpenChange?.(!open); }}
         aria-expanded={open}
         aria-controls={id}
         className="-ml-1 flex min-h-7 items-center gap-1 rounded-md px-1 text-[13px] text-muted-foreground transition-colors duration-150 hover:text-foreground"

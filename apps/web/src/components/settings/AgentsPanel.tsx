@@ -1,7 +1,7 @@
 /**
  * Settings → Agents (plan 2026-09-05-001, R1-R2, R7, R10, R21, R49, R52).
  *
- * In the order an admin needs them: the workspace Claude connection (without
+ * In the order an admin needs them: the workspace Claude and Codex access (without
  * a credential no agent in ordi can start), then every agent in one list –
  * those ordi runs and those that connect from outside under their own name –
  * and, collapsed, the technical details of the workers that run them.
@@ -32,13 +32,14 @@ import { useT, extendDict } from '../../lib/i18n';
 
 extendDict({
   en: {
-    'agents.desc': 'AI agents work like team members: assign them a task and they open a pull request for review.',
-    // Claude connection
-    'agents.connection': 'Claude connection',
-    'agents.connectionDesc': 'The Claude account the agents that run in Ordi use. A subscription token and an API key work equally well.',
-    'agents.addCredential': 'Add credential',
-    'agents.noCredentials': 'No credential yet',
-    'agents.noCredentialsHint': 'Add a Claude subscription token or an API key so the agents that run in Ordi can start.',
+    'agents.desc': 'Set up and manage the agents in your workspace.',
+    // Claude and Codex access
+    'agents.connection': 'Claude and Codex access',
+    'agents.connectionDesc': 'Agents that run in ordi use this access.',
+    'agents.addCredential': 'Add access',
+    'agents.noCredentials': 'No access set up yet',
+    'agents.noCredentialsHint': 'Add a subscription or an API key.',
+    'agents.credActions': 'Actions for {label}',
     'agents.kind.subscription': 'Subscription',
     'agents.kind.api_key': 'API key',
     'agents.slot.primary': 'Primary',
@@ -53,8 +54,8 @@ extendDict({
     'agents.neverVerified': 'Never verified',
     'agents.fromEnv': 'Provided by the ANTHROPIC_API_KEY variable of this deployment – change it there, not here.',
     'agents.verify': 'Verify',
-    'agents.verifyOk': 'The credential works',
-    'agents.verifyFailed': 'The credential was refused',
+    'agents.verifyOk': 'This access works',
+    'agents.verifyFailed': 'This access was refused',
     'agents.rotate': 'Rotate secret',
     'agents.rotateTitle': 'Rotate the secret',
     'agents.rotateHint': 'The new secret replaces the old one immediately. Running agents pick it up on their next run.',
@@ -63,9 +64,9 @@ extendDict({
     'agents.setFallback': 'Use as fallback',
     'agents.clearSlot': 'Remove from rotation',
     'agents.revoke': 'Revoke',
-    'agents.revokeTitle': 'Revoke this credential',
-    'agents.revokeBody': 'Agents using it stop running until another credential takes its place. The secret is deleted.',
-    'agents.revoked': 'Credential revoked',
+    'agents.revokeTitle': 'Revoke this access',
+    'agents.revokeBody': 'Agents using it stop running until other access takes its place. The secret is deleted.',
+    'agents.revoked': 'Access revoked',
     'agents.credLabel': 'Label',
     'agents.credLabelPlaceholder': 'e.g. Company Max plan',
     'agents.secret': 'Secret',
@@ -73,11 +74,11 @@ extendDict({
     'agents.expiresAt': 'Expires (optional)',
     'agents.slotLabel': 'Role in rotation',
     'agents.slotNone': 'Not in rotation',
-    'agents.slotTaken.primary': 'Replaces the current primary credential.',
-    'agents.slotTaken.fallback': 'Replaces the current fallback credential.',
+    'agents.slotTaken.primary': 'Replaces the current primary access.',
+    'agents.slotTaken.fallback': 'Replaces the current fallback access.',
     'agents.subscriptionHelp': 'Run “claude setup-token” on your own machine and paste the token it prints here. It is valid for a year.',
     'agents.apiKeyHelp': 'An Anthropic API key from the console. Usage is billed to that account.',
-    'agents.credentialAdded': 'Credential added',
+    'agents.credentialAdded': 'Access added',
     'agents.provider': 'Provider',
     'agents.provider.anthropic': 'Anthropic (Claude)',
     'agents.provider.openai': 'OpenAI (Codex)',
@@ -92,33 +93,28 @@ extendDict({
     'agents.listDesc': 'Each can be assigned tasks in the projects it belongs to.',
     'agents.ownAgentPrefix': 'Your own agent for Claude Code or Codex is in',
     'agents.ownAgentLink': 'Profile → MCP & API',
-    'agents.kind.ordi': 'Runs in Ordi',
+    'agents.kind.ordi': 'Runs in ordi',
     'agents.kind.outside': 'Connects from outside',
-    'agents.kindHint.ordi': 'Ordi runs it with a credential from the connection above: assign it a task and it opens a pull request for review.',
-    'agents.waitingForWorker': 'Waiting for a worker',
+    'agents.kindHint.ordi': 'Uses Claude or Codex to work on tasks and opens pull requests for review.',
+    'agents.waitingForWorker': 'Waiting to start',
     'agents.listLoadFailed': 'Some agents could not be loaded.',
     'agents.kindHint.outside': 'Works elsewhere – Claude Code, Codex, a bot on a server – and connects over MCP under its own name.',
     'agents.newKindTitle': 'Which kind of agent?',
-    'agents.actions': 'Actions',
+    'agents.manageNamed': 'Manage {name}',
     'agents.botOn': 'Switched on',
     'agents.manage': 'Manage',
     'agents.technical': 'Technical details',
-    'agents.noWorkerShort': 'Agents that run in Ordi cannot start: no worker is online. Technical details below says how to fix it.',
+    'agents.noWorkerShort': 'Agents in ordi can\'t start right now.',
     'agents.new': 'New agent',
     'agents.none': 'No agents yet',
     'agents.noneHint': 'Create one with New agent, then add it to a project to assign it work.',
     'agents.ready': 'Ready',
-    'agents.needsCredential': 'Credential required',
+    'agents.needsCredential': 'Needs access',
     'agents.stateDisabled': 'Disabled',
-    'agents.enable': 'Enable',
-    'agents.disable': 'Disable',
-    'agents.enabledToast': 'Agent enabled',
-    'agents.disabledToast': 'Agent disabled',
     'agents.projectsCount': '{n} projects',
     'agents.projectsCount.one': '{n} project',
     'agents.connectorsCount': '{n} connectors',
     'agents.connectorsCount.one': '{n} connector',
-    'agents.editTitle': 'Edit agent',
     'agents.newTitle': 'New agent',
     'agents.created': 'Agent created',
     'agents.updated': 'Agent updated',
@@ -143,10 +139,10 @@ extendDict({
     'agents.maxTurns': 'Max turns',
     'agents.maxTurnsHint': 'One turn is one model reply, including the tool calls it makes; a typical task takes 20–60.',
     'agents.maxBudget': 'Max budget, USD',
-    'agents.maxBudgetHint': 'Applies to API-key credentials only; subscription runs are capped by the plan.',
+    'agents.maxBudgetHint': 'Applies to API keys only; subscription runs are capped by the plan.',
     'agents.concurrency': 'Parallel runs',
-    'agents.credential': 'Credential',
-    'agents.fallbackCredential': 'Fallback credential',
+    'agents.credential': 'Access',
+    'agents.fallbackCredential': 'Fallback access',
     'agents.workspaceDefault': 'Workspace default',
     'agents.connectors': 'Connectors',
     'agents.connectorsHint': 'The MCP servers this agent may call during a run.',
@@ -170,13 +166,14 @@ extendDict({
     'agents.callbackUrl': 'Connector callback URL',
   },
   uk: {
-    'agents.desc': 'AI-агенти працюють як учасники команди: призначте задачу – і вони відкриють пулреквест на рев’ю.',
-    // Claude connection
-    'agents.connection': 'Доступ Claude',
-    'agents.connectionDesc': 'Обліковий запис Claude, яким користуються агенти, що працюють в Орді. Токен підписки та API-ключ однаково підходять.',
+    'agents.desc': 'Налаштовуйте агентів свого воркспейсу та керуйте ними.',
+    // Claude and Codex access
+    'agents.connection': 'Доступ до Claude і Codex',
+    'agents.connectionDesc': 'Цим доступом користуються агенти, що працюють в ordi.',
     'agents.addCredential': 'Додати доступ',
-    'agents.noCredentials': 'Доступу ще немає',
-    'agents.noCredentialsHint': 'Додайте токен підписки Claude або API-ключ, щоб агенти, що працюють в Орді, могли стартувати.',
+    'agents.noCredentials': 'Доступ ще не налаштовано',
+    'agents.noCredentialsHint': 'Додайте підписку або API-ключ.',
+    'agents.credActions': 'Дії для «{label}»',
     'agents.kind.subscription': 'Підписка',
     'agents.kind.api_key': 'API-ключ',
     'agents.slot.primary': 'Основний',
@@ -230,33 +227,28 @@ extendDict({
     'agents.listDesc': 'Кожному можна призначати задачі в проєктах, до яких його додано.',
     'agents.ownAgentPrefix': 'Ваш власний агент для Claude Code чи Codex – у',
     'agents.ownAgentLink': 'Профіль → MCP і API',
-    'agents.kind.ordi': 'Працює в Орді',
+    'agents.kind.ordi': 'Працює в ordi',
     'agents.kind.outside': 'Підключається ззовні',
-    'agents.kindHint.ordi': 'Орді запускає його з доступом, доданим вище: призначте йому задачу – і він відкриє пулреквест на рев’ю.',
-    'agents.waitingForWorker': 'Чекає на виконавця',
+    'agents.kindHint.ordi': 'Береться за задачі через Claude або Codex і відкриває пулреквести на рев’ю.',
+    'agents.waitingForWorker': 'Чекає на запуск',
     'agents.listLoadFailed': 'Не вдалося завантажити частину агентів.',
     'agents.kindHint.outside': 'Працює деінде – Claude Code, Codex, бот на сервері – і підключається через MCP під власним іменем.',
     'agents.newKindTitle': 'Який агент створити?',
-    'agents.actions': 'Дії',
+    'agents.manageNamed': 'Керувати: {name}',
     'agents.botOn': 'Увімкнений',
     'agents.manage': 'Керувати',
     'agents.technical': 'Технічні подробиці',
-    'agents.noWorkerShort': 'Агенти, що працюють в Орді, не можуть стартувати: жоден виконавець не на звʼязку. Як це виправити – у «Технічних подробицях» нижче.',
+    'agents.noWorkerShort': 'Агенти в ordi зараз не можуть стартувати.',
     'agents.new': 'Новий агент',
     'agents.none': 'Агентів ще немає',
     'agents.noneHint': 'Створіть його кнопкою «Новий агент», потім додайте до проєкту, щоб призначати йому роботу.',
     'agents.ready': 'Готовий',
     'agents.needsCredential': 'Потрібен доступ',
     'agents.stateDisabled': 'Вимкнений',
-    'agents.enable': 'Увімкнути',
-    'agents.disable': 'Вимкнути',
-    'agents.enabledToast': 'Агента увімкнено',
-    'agents.disabledToast': 'Агента вимкнено',
     'agents.projectsCount': 'проєктів: {n}',
     'agents.projectsCount.one': 'проєктів: {n}',
     'agents.connectorsCount': 'конекторів: {n}',
     'agents.connectorsCount.one': 'конекторів: {n}',
-    'agents.editTitle': 'Редагування агента',
     'agents.newTitle': 'Новий агент',
     'agents.created': 'Агента створено',
     'agents.updated': 'Агента оновлено',
@@ -366,7 +358,7 @@ function errMessage(e: unknown, fallback: string): string {
   return e instanceof ApiError ? e.message : fallback;
 }
 
-/* ────────────────────────────── Claude connection ────────────────────────────── */
+/* ────────────────────────────── Claude and Codex access ────────────────────────────── */
 
 function CredentialCard({ cred, users }: { cred: CredentialView; users: { id: string; name: string }[] }) {
   const t = useT();
@@ -442,7 +434,7 @@ function CredentialCard({ cred, users }: { cred: CredentialView; users: { id: st
             <Button size="sm" variant="outline" onClick={() => verify.mutate()} disabled={verify.isPending}>
               {verify.isPending ? <Spinner /> : <ShieldCheck size={14} />} {t('agents.verify')}
             </Button>
-            <DropdownMenu align="end" trigger={<Button variant="ghost" size="sm" className="h-7 w-7 px-0"><MoreHorizontal size={15} /></Button>}>
+            <DropdownMenu align="end" trigger={<Button variant="ghost" size="sm" className="h-7 w-7 px-0" aria-label={fill(t('agents.credActions'), { label: cred.label })}><MoreHorizontal size={15} aria-hidden /></Button>}>
               <MenuItem icon={<RotateCcw size={14} />} onSelect={() => setRotateOpen(true)}>{t('agents.rotate')}</MenuItem>
               {cred.slot !== 'primary' && (
                 <MenuItem icon={<KeyRound size={14} />} onSelect={() => patch.mutate({ slot: 'primary' })}>{t('agents.setPrimary')}</MenuItem>
@@ -661,7 +653,8 @@ function draftOf(agent: AgentLookup | null, defaultRoleId: string): AgentDraft {
     credentialId: agent?.credentialId ?? '',
     fallbackCredentialId: agent?.fallbackCredentialId ?? '',
     connectorIds: agent?.connectorIds ?? [],
-    enabled: agent?.enabled ?? true,
+    // Switched off is either flag: the list calls such an agent Disabled too.
+    enabled: agent ? agent.enabled && agent.isActive : true,
   };
 }
 
@@ -712,10 +705,15 @@ function AgentDialog({ open, onClose, agent, roles, credentials }: {
     enabled: draft.enabled,
   });
 
+  // Switching an existing agent on or off goes through its own endpoint, which
+  // also (re)activates its user, so the switch keeps meaning what the list says.
   const save = useMutation({
-    mutationFn: () => (agent
-      ? api.patch(`/agents/${agent.id}`, { ...payload(), version })
-      : api.post('/agents', payload())),
+    mutationFn: async () => {
+      if (!agent) return api.post('/agents', payload());
+      const { enabled, ...rest } = payload();
+      await api.patch(`/agents/${agent.id}`, { ...rest, version });
+      if (enabled !== (agent.enabled && agent.isActive)) await api.post(`/agents/${agent.id}/${enabled ? 'enable' : 'disable'}`, {});
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['agents'] });
       qc.invalidateQueries({ queryKey: ['users'] });
@@ -746,7 +744,7 @@ function AgentDialog({ open, onClose, agent, roles, credentials }: {
   );
 
   return (
-    <Dialog open={open} onClose={onClose} title={agent ? t('agents.editTitle') : t('agents.newTitle')} width={560}>
+    <Dialog open={open} onClose={onClose} title={agent ? agent.name : t('agents.newTitle')} width={560}>
       <form
         className="max-h-[68vh] space-y-3 overflow-y-auto p-4"
         onSubmit={(e) => { e.preventDefault(); if (draft.name.trim() && !save.isPending) save.mutate(); }}
@@ -897,16 +895,6 @@ export function AgentsPanel() {
   const [editing, setEditing] = useState<AgentLookup | null>(null);
   const [agentOpen, setAgentOpen] = useState(false);
 
-  const setActive = useMutation({
-    mutationFn: ({ id, enable }: { id: string; enable: boolean }) => api.post(`/agents/${id}/${enable ? 'enable' : 'disable'}`, {}),
-    onSuccess: (_r, v) => {
-      qc.invalidateQueries({ queryKey: ['agents'] });
-      qc.invalidateQueries({ queryKey: ['users'] });
-      toast(v.enable ? t('agents.enabledToast') : t('agents.disabledToast'));
-    },
-    onError: (e) => toast.error(errMessage(e, t('settings.saveFailed'))),
-  });
-
   const credentials = credsQ.data ?? [];
   const agents = agentsQ.data ?? [];
   const roles = rolesQ.data?.data ?? [];
@@ -931,12 +919,21 @@ export function AgentsPanel() {
   // back to it: back to New agent instead, where the keyboard user started.
   const newAgentRef = useRef<HTMLButtonElement>(null);
   const backToNewAgent = () => setTimeout(() => newAgentRef.current?.focus(), 0);
+  // The outage line links to Technical details: open it and bring it into view,
+  // with focus on its toggle so the keyboard lands where the eye does.
+  const [techOpen, setTechOpen] = useState(false);
+  const techRef = useRef<HTMLButtonElement>(null);
+  const showTechnical = () => {
+    setTechOpen(true);
+    techRef.current?.focus({ preventScroll: true });
+    techRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   return (
     <div>
       <SectionHead title={t('settings.agents')} desc={t('agents.desc')} />
 
-      {/* ── Claude connection: without it nothing ordi runs can work ── */}
+      {/* ── Claude and Codex access: without it nothing ordi runs can work ── */}
       <section aria-labelledby="agents-connection">
         <SubHead
           title={<span id="agents-connection">{t('agents.connection')}</span>}
@@ -970,7 +967,12 @@ export function AgentsPanel() {
         {noWorker && (
           <p className="mb-2 flex items-start gap-1.5 rounded-md border border-warning/40 bg-warning/5 px-2.5 py-2 text-xs">
             <TriangleAlert size={13} aria-hidden className="mt-px shrink-0 text-warning" />
-            <span>{t('agents.noWorkerShort')}</span>
+            <span>
+              {t('agents.noWorkerShort')}{' '}
+              <button type="button" onClick={showTechnical} className="rounded-sm font-medium text-foreground underline underline-offset-2 hover:no-underline">
+                {t('agents.technical')}
+              </button>
+            </span>
           </p>
         )}
 
@@ -993,49 +995,44 @@ export function AgentsPanel() {
         ) : entries.length === 0 ? null : (
           <RowList>
             <ul>
-              {entries.map((e) => e.kind === 'ordi' ? (
+              {entries.map((e) => (
                 <li key={e.id} className="anim-fade-in flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-0">
-                  <Avatar name={e.agent.name} src={e.agent.avatar} size={28} agent />
-                  <button type="button" onClick={() => openAgent(e.agent)} className="min-w-0 flex-1 rounded-md text-left">
+                  <Avatar
+                    name={e.agent.name} src={e.agent.avatar} size={28} agent
+                    className={e.kind === 'outside' && !e.agent.isActive ? 'opacity-50' : undefined}
+                  />
+                  <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="truncate text-[13px] font-medium">{e.agent.name}</span>
-                      <KindLabel kind="ordi" />
-                      <Badge>{t(`agents.runtime.${e.agent.runtime}`, e.agent.runtime)}</Badge>
+                      <KindLabel kind={e.kind} />
+                      {e.kind === 'ordi' && <Badge>{t(`agents.runtime.${e.agent.runtime}`, e.agent.runtime)}</Badge>}
                     </div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-                      <span>{e.agent.roleName || '–'}</span>
-                      <span>· {t(`agents.policy.${e.agent.assignPolicy}`, e.agent.assignPolicy)}</span>
-                      <span>· {fill(t(e.agent.connectorIds.length === 1 ? 'agents.connectorsCount.one' : 'agents.connectorsCount'), { n: e.agent.connectorIds.length })}</span>
-                      <span>· {fill(t(e.agent.projectIds.length === 1 ? 'agents.projectsCount.one' : 'agents.projectsCount'), { n: e.agent.projectIds.length })}</span>
-                      {e.agent.connectorIds.length > 0 && connectorName.size > 0 && (
-                        <span className="truncate">
-                          · {e.agent.connectorIds.map((id) => connectorName.get(id)).filter(Boolean).join(', ')}
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                  <AgentStatusChip status={agentStatus(e.agent, noWorker)} />
-                  <DropdownMenu align="end" trigger={<Button variant="ghost" size="sm" className="h-7 w-7 px-0" aria-label={`${t('agents.actions')}: ${e.agent.name}`}><MoreHorizontal size={15} aria-hidden /></Button>}>
-                    <MenuItem icon={<Bot size={14} />} onSelect={() => openAgent(e.agent)}>{t('common.edit')}</MenuItem>
-                    {e.agent.enabled && e.agent.isActive
-                      ? <MenuItem icon={<Trash2 size={14} />} danger onSelect={() => setActive.mutate({ id: e.agent.id, enable: false })}>{t('agents.disable')}</MenuItem>
-                      : <MenuItem icon={<RotateCcw size={14} />} onSelect={() => setActive.mutate({ id: e.agent.id, enable: true })}>{t('agents.enable')}</MenuItem>}
-                  </DropdownMenu>
-                </li>
-              ) : (
-                <li key={e.id} className="anim-fade-in border-b border-border last:border-0">
-                  <button type="button" onClick={() => setBotId(e.id)} className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left">
-                    <Avatar name={e.agent.name} src={e.agent.avatar} size={28} agent className={e.agent.isActive ? undefined : 'opacity-50'} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="truncate text-[13px] font-medium">{e.agent.name}</span>
-                        <KindLabel kind="outside" />
+                    {e.kind === 'ordi' ? (
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                        <span>{e.agent.roleName || '–'}</span>
+                        <span>· {t(`agents.policy.${e.agent.assignPolicy}`, e.agent.assignPolicy)}</span>
+                        <span>· {fill(t(e.agent.connectorIds.length === 1 ? 'agents.connectorsCount.one' : 'agents.connectorsCount'), { n: e.agent.connectorIds.length })}</span>
+                        <span>· {fill(t(e.agent.projectIds.length === 1 ? 'agents.projectsCount.one' : 'agents.projectsCount'), { n: e.agent.projectIds.length })}</span>
+                        {e.agent.connectorIds.length > 0 && connectorName.size > 0 && (
+                          <span className="truncate">
+                            · {e.agent.connectorIds.map((id) => connectorName.get(id)).filter(Boolean).join(', ')}
+                          </span>
+                        )}
                       </div>
-                      <TeamBotSummary agent={e.agent} />
-                    </div>
-                    <StatusChip tone={e.agent.isActive ? 'ok' : 'off'}>{e.agent.isActive ? t('agents.botOn') : t('agents.stateDisabled')}</StatusChip>
-                    <span className="shrink-0 text-xs text-muted-foreground">{t('agents.manage')}</span>
-                  </button>
+                    ) : <TeamBotSummary agent={e.agent} />}
+                  </div>
+                  {e.kind === 'ordi'
+                    ? <AgentStatusChip status={agentStatus(e.agent, noWorker)} />
+                    : <StatusChip tone={e.agent.isActive ? 'ok' : 'off'}>{e.agent.isActive ? t('agents.botOn') : t('agents.stateDisabled')}</StatusChip>}
+                  {/* One action on every row, whichever kind: everything else
+                      about the agent, switching it off included, is inside. */}
+                  <Button
+                    size="xs" variant="outline"
+                    aria-label={fill(t('agents.manageNamed'), { name: e.agent.name })}
+                    onClick={() => (e.kind === 'ordi' ? openAgent(e.agent) : setBotId(e.id))}
+                  >
+                    {t('agents.manage')}
+                  </Button>
                 </li>
               ))}
             </ul>
@@ -1044,7 +1041,7 @@ export function AgentsPanel() {
       </section>
 
       {/* ── Technical details: what runs the agents, rarely needed ── */}
-      <Disclosure label={t('agents.technical')} className="mt-10">
+      <Disclosure label={t('agents.technical')} className="mt-10" open={techOpen} onOpenChange={setTechOpen} buttonRef={techRef}>
         <div className="space-y-3 pb-1 pl-5 pt-3">
           <SubHead title={t('agents.workers')} desc={t('agents.workersDesc')} className="mb-0" />
           {overviewQ.isLoading ? (
