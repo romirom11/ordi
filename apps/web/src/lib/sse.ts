@@ -100,6 +100,8 @@ function invalidateFor(qc: QueryClient, type: string, data: any): void {
     if (data?.projectId) inv(['tasks', data.projectId]);
     inv(['me-tasks']);
     inv(['cycles']);
+    // A question opened, answered or withdrawn is a line in the task's activity.
+    if (type.startsWith('task.input_')) inv(['task-audit']);
   } else if (type.startsWith('comment.')) {
     // comments ride along with the task detail query
     if (data?.taskId) inv(['task', data.taskId]);

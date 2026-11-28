@@ -13,6 +13,7 @@ import { asLocale, loadBranding, renderEmail, tr } from '../../lib/email-templat
 import { createPasswordReset, sendPasswordResetEmail } from '../../core/password-reset';
 import { env } from '../../env';
 import { handOffOpenTasks, openTasksAssignedTo } from '../projects/service';
+import { withdrawQuestionsWaitingOn } from '../projects/questions';
 import { assertCanGrantRole, assertNotPersonalAgent, assertSignedInPerson, externalAgentsOwnedBy, handOverOwnedAgents } from '../agents/external';
 
 export function usersRoutes() {
@@ -284,6 +285,8 @@ export function usersRoutes() {
       // Their external agents lose every token and move to the successor (a
       // person), or are switched off: a copied token must not outlive them.
       const agents = await handOverOwnedAgents(tx, actor, id, reassignTo);
+      // Questions waiting on them would wait on nobody.
+      await withdrawQuestionsWaitingOn(tx, actor, id, 'deactivated');
       await tx.update(schema.users).set({ isActive: false }).where(eq(schema.users.id, id));
       await tx.delete(schema.sessions).where(eq(schema.sessions.userId, id));
       await tx.update(schema.apiTokens).set({ revokedAt: new Date() }).where(eq(schema.apiTokens.userId, id));

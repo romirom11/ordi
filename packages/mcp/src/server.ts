@@ -298,7 +298,7 @@ export function buildServer(client: OrdiClient): McpServer {
   server.tool('assign_task', 'Set who a task is assigned to. assigneeIds replaces the current assignees (ids from list_users); send an empty list to unassign everyone.', { taskId: z.string(), assigneeIds: z.array(z.string()) },
   ({ taskId, assigneeIds }) => wrap(() => client.patch(`/tasks/${taskId}`, { assigneeIds })));
 
-  server.tool('comment_on_task', 'Comment on a task (line breaks are preserved). To address people, pass their user ids in mentionUserIds (see list_users) and write @Their Name in the text where the mention belongs; a mentioned person the text does not name is put at the start.', {
+  server.tool('comment_on_task', 'Comment on a task (line breaks are preserved). To address people, pass their user ids in mentionUserIds (see list_users) and write @Their Name in the text where the mention belongs; a mentioned person the text does not name is put at the start. If you are blocked until a person answers, use ask_for_input instead: it leaves the task waiting on them and list_answered tells you when they replied.', {
     taskId: z.string(), text: z.string(),
     mentionUserIds: z.array(z.string()).optional().describe('Users to mention and notify, by id'),
   }, ({ taskId, text: body, mentionUserIds }) => wrap(async () => {
@@ -306,22 +306,26 @@ export function buildServer(client: OrdiClient): McpServer {
     return client.post(`/tasks/${taskId}/comments`, { body: textToDoc(fromAgent(body), { mentions }), mentions: mentions.map((m) => m.id) });
   }));
 
-  server.tool('ask_for_input', 'Leave a task waiting on one person\'s answer, without changing its status. Use it when you cannot go on until a person decides or tells you something – a missing requirement, a choice between options, an access or secret you need. The person gets a notification and sees the question at the top of the task and in their Inbox; their first comment on the task answers it. Then stop working on this task and pick it back up after list_answered shows the answer. For anything that does not block you – progress, a note, an FYI – use comment_on_task instead. Without addresseeId the question goes to the task\'s assignee, else its reporter, else your owner (a personal agent asks its owner on its owner\'s tasks); agents are never asked. If the task already waits on a question you asked, the new one replaces it; if it waits on someone else\'s question, the call is refused – comment instead. Returns who it went to.', {
+  server.tool('ask_for_input', 'Leave a task waiting on one person\'s answer, without changing its status. Use it when you cannot go on until a person decides or tells you something – a missing requirement, a choice between options, access you lack. Never ask anyone to paste a secret (a password, an API key) in their answer: comments are read by the whole project. Ask them to add it as a project secret, or to grant access, instead. The person gets a notification and sees the question at the top of the task; their first comment on the task answers it. Then stop working on this task and pick it back up after list_answered shows the answer. For anything that does not block you – progress, a note, an FYI – use comment_on_task instead. Without addressee the question goes to the task\'s assignee, else its reporter, else your owner (a personal agent asks its owner on its owner\'s tasks); agents are never asked. If the task already waits on a question you asked, the new one replaces it; if it waits on someone else\'s question, the call is refused – comment instead. Returns who it went to.', {
     task: z.string().describe('Task id, or its ref such as ORD-12'),
     question: z.string().describe('One clear question the person can answer in a comment'),
-    addresseeId: z.string().optional().describe('The person to ask, by user id (see list_users); must be a person who can open the project'),
-  }, ({ task, question, addresseeId }) => wrap(async () => {
+    addressee: z.string().optional().describe('The person to ask, by user id (see list_users). It must be a person who can open the project; naming anyone else is refused, not redirected'),
+  }, ({ task, question, addressee }) => wrap(async () => {
     const res = await client.post<{ id: string; taskId: string; ref: string; addressee: { id: string; name: string }; replaced: string | null }>(
-      `/tasks/${encodeURIComponent(task)}/question`, { question, ...(addresseeId ? { addresseeId } : {}) },
+      `/tasks/${encodeURIComponent(task)}/question`, { question, ...(addressee ? { addresseeId: addressee } : {}) },
     );
     return { questionId: res.id, taskId: res.taskId, ref: res.ref, waitingOn: res.addressee, replacedQuestionId: res.replaced };
   }));
 
-  server.tool('list_answered', 'Questions you asked with ask_for_input that a person has since answered: the task ref, your question and the answering comment as text. Call it when you start or resume work to know which tasks you can pick back up; pass since (the time of your last call) to see only new answers. Only your own questions are listed. An answer marked by hand rather than by a comment has answer: null – read the task\'s comments with get_task.', {
+  server.tool('list_answered', 'Questions you asked with ask_for_input that a person has since answered: the task ref, your question and the answering comment as text. Call it when you start or resume work to know which tasks you can pick back up; pass since (the time of your last call) to see only new answers. If nextCursor comes back, call again with cursor set to it (and the same since) until it is null – only then move your since forward. Only your own questions are listed. An answer marked by hand rather than by a comment has answer: null – read the task\'s comments with get_task.', {
     since: z.string().optional().describe('ISO date-time; only answers after it'),
-  }, ({ since }) => wrap(async () => {
-    const res = await client.get<{ data: Record<string, any>[] }>(`/me/questions/answered${since ? `?since=${encodeURIComponent(since)}` : ''}`);
-    return { data: res.data.map((q) => ({
+    cursor: z.string().optional().describe('nextCursor from the previous call, to read the rest of a long list'),
+  }, ({ since, cursor }) => wrap(async () => {
+    const qs = new URLSearchParams();
+    if (since) qs.set('since', since);
+    if (cursor) qs.set('cursor', cursor);
+    const res = await client.get<{ data: Record<string, any>[]; nextCursor: string | null }>(`/me/questions/answered${qs.toString() ? `?${qs}` : ''}`);
+    return { nextCursor: res.nextCursor ?? null, data: res.data.map((q) => ({
       questionId: q.id, taskId: q.taskId, ref: q.ref, title: q.title, question: q.question,
       askedAt: q.askedAt, answeredAt: q.answeredAt, answeredBy: q.answeredBy?.name ?? null,
       answer: q.answer ? { commentId: q.answer.commentId, text: toAgent(docToText(q.answer.body)) } : null,

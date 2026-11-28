@@ -293,7 +293,7 @@ function TaskPageView({ projectId, taskId }: { projectId: string; taskId: string
               />
             )}
             {/* What the task waits on – above the title, where it is read first */}
-            {task.openQuestion && <WaitingOnBanner taskId={taskId} question={task.openQuestion} />}
+            {task.openQuestion && <WaitingOnBanner taskId={taskId} question={task.openQuestion} canComment={canWriteTasks} />}
             {/* Title */}
             <textarea
               ref={titleRef}

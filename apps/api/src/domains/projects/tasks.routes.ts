@@ -4,7 +4,7 @@ import { ulid } from 'ulid';
 import {
   taskInputSchema, taskUpdateSchema, taskMoveSchema, taskRelationSchema, taskLinkSchema,
   bulkTaskUpdateSchema, commentInputSchema, commentEditSchema, reactionToggleSchema, labelInputSchema, labelPatchSchema, cycleInputSchema, cycleCompleteSchema,
-  taskTemplateInputSchema, taskQuestionInputSchema, recurringTaskInputSchema, intakeAcceptSchema, intakeDeclineSchema, intakeSettingsSchema,
+  taskTemplateInputSchema, taskQuestionInputSchema, taskQuestionCloseSchema, recurringTaskInputSchema, intakeAcceptSchema, intakeDeclineSchema, intakeSettingsSchema,
   LABEL_SCOPES, addMonthsUtc,
   type CustomFieldFilter, type LabelScope,
 } from '@ordi/shared';
@@ -106,16 +106,22 @@ export function tasksRoutes() {
     const body = taskQuestionInputSchema.parse(await c.req.json());
     return c.json(await questions.askForInput(currentActor(c), c.req.param('id'), body), 201);
   });
-  app.post('/tasks/:id/question/answered', async (c) =>
-    c.json(await questions.closeQuestion(currentActor(c), c.req.param('id'), 'answered')));
-  app.post('/tasks/:id/question/withdraw', async (c) =>
-    c.json(await questions.closeQuestion(currentActor(c), c.req.param('id'), 'withdrawn')));
+  // The body may name the question the caller is looking at (questionId):
+  // a stale page then cannot close the question that replaced it.
+  app.post('/tasks/:id/question/answered', async (c) => {
+    const body = taskQuestionCloseSchema.parse(await c.req.json().catch(() => ({})));
+    return c.json(await questions.closeQuestion(currentActor(c), c.req.param('id'), 'answered', body.questionId));
+  });
+  app.post('/tasks/:id/question/withdraw', async (c) => {
+    const body = taskQuestionCloseSchema.parse(await c.req.json().catch(() => ({})));
+    return c.json(await questions.closeQuestion(currentActor(c), c.req.param('id'), 'withdrawn', body.questionId));
+  });
   // What the caller asked and has had answered since – where an agent resumes.
   app.get('/me/questions/answered', async (c) => {
     const raw = c.req.query('since');
     const since = raw ? new Date(raw) : null;
     if (since && Number.isNaN(since.getTime())) throw err.validation('since must be an ISO date-time');
-    return c.json(await questions.listAnswered(currentActor(c), since));
+    return c.json(await questions.listAnswered(currentActor(c), { since, cursor: c.req.query('cursor') || null }));
   });
 
   // ── Relations ──

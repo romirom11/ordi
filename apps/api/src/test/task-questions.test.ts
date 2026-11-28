@@ -211,20 +211,59 @@ describe('answering', () => {
     expect(await openQuestion(t.id)).toBeUndefined();
   });
 
-  it('can be withdrawn by the asking agent\'s owner or the project lead, nobody else', async () => {
+  it('can be withdrawn by the asker or the project lead, nobody else', async () => {
     const t = await newTask({ assigneeIds: [users.member!.userId] });
     await ask(bot(), t.id, {});
-    // A colleague who can write to the project is neither.
+    // A colleague who can write to the project is neither; nor is a project
+    // admin, nor the owner of the team bot that asked.
     await addProjectMember(users, ws.projectId, users.hr!.userId, 'member');
     expect((await reqAs(users.hr!.cookie).post(`/tasks/${t.id}/question/withdraw`)).status).toBe(403);
     expect((await reqAs(users.hr!.cookie).post(`/tasks/${t.id}/question/answered`)).status).toBe(403);
-    expect((await reqAs(users.manager!.cookie).post(`/tasks/${t.id}/question/withdraw`)).status).toBe(200);
+    expect((await owner().post(`/tasks/${t.id}/question/withdraw`)).status).toBe(403);
+    expect((await reqAs(users.manager!.cookie).post(`/tasks/${t.id}/question/withdraw`)).status).toBe(403);
 
-    await ask(bot(), t.id, {});
     await owner().patch(`/projects/${ws.projectId}`, { leadId: users.hr!.userId });
     expect((await reqAs(users.hr!.cookie).post(`/tasks/${t.id}/question/withdraw`)).status).toBe(200);
     expect(await openQuestion(t.id)).toBeUndefined();
     await owner().patch(`/projects/${ws.projectId}`, { leadId: null });
+  });
+
+  it('from a personal agent, can be withdrawn by the person it acts for', async () => {
+    const t = await newTask({ assigneeIds: [users.admin!.userId] });
+    await ask(mine(), t.id, { addresseeId: users.admin!.userId });
+    expect((await member().post(`/tasks/${t.id}/question/withdraw`)).status).toBe(200);
+  });
+
+  it('can be marked answered by an addressee who may only read the project', async () => {
+    const t = await newTask({ assigneeIds: [users.member!.userId] });
+    // Sales reads workspace projects and writes none: it cannot comment.
+    await ask(owner(), t.id, { addresseeId: users.sales!.userId });
+    const sales = reqAs(users.sales!.cookie);
+    expect((await json(sales.get(`/tasks/${t.id}`))).openQuestion).toMatchObject({ canMarkAnswered: true, canWithdraw: false });
+    expect((await sales.post(`/tasks/${t.id}/question/answered`)).status).toBe(200);
+  });
+
+  it('refuses to close a question that was replaced since the page loaded', async () => {
+    const t = await newTask({ assigneeIds: [users.member!.userId] });
+    const first = await json(ask(bot(), t.id, { question: 'First?' }));
+    await ask(bot(), t.id, { question: 'Second?' });
+    const stale = await member().post(`/tasks/${t.id}/question/answered`, { questionId: first.id });
+    expect(stale.status).toBe(409);
+    expect((await openQuestion(t.id))!.question).toBe('Second?');
+  });
+});
+
+describe('refs', () => {
+  it('answer a task in a closed project exactly like a task that does not exist', async () => {
+    const type = await json(owner().post('/project-types', { name: 'Hidden type', revenueSource: 'none' }));
+    const hidden = await json(owner().post('/projects', { name: 'Hidden', key: 'HID', projectTypeId: type.id, visibility: 'private' }));
+    const t = await newTask({}, hidden.id);
+    const existing = await ask(bot(), t.ref, { addresseeId: users.owner!.userId });
+    const missing = await ask(bot(), 'NOPE-1', { addresseeId: users.owner!.userId });
+    expect(existing.status).toBe(404);
+    expect(missing.status).toBe(404);
+    expect(await json(existing)).toEqual(await json(missing));
+    expect((await ask(bot(), 'ASK-99999999999', {})).status).toBe(404);
   });
 });
 
@@ -249,6 +288,35 @@ describe('list_answered', () => {
     expect((await json(member().get('/me/questions/answered'))).data).toEqual([]);
     const later = new Date(Date.now() + 60_000).toISOString();
     expect((await json(bot().get(`/me/questions/answered?since=${encodeURIComponent(later)}`))).data).toEqual([]);
+  });
+
+  it('pages a long list with a cursor, and shows a hand-marked answer without a comment', async () => {
+    const before = new Date().toISOString();
+    const made: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const t = await newTask({ assigneeIds: [users.member!.userId] });
+      made.push((await json(ask(bot(), t.id, { question: `Q${i}?` }))).id);
+      await member().post(`/tasks/${t.id}/question/answered`);
+    }
+    const { listAnswered } = await import('../domains/projects/questions');
+    const { buildAccessContext } = await import('../core/access');
+    const { loadRolePermissions } = await import('../core/rbac');
+    const [row] = await getDb().db.select().from(schema.users).where(eq(schema.users.id, botId));
+    const actor = {
+      userId: botId, actorType: 'agent' as const, roleId: row!.roleId, roleName: 'agent', email: '', name: '', locale: 'en', timezone: 'UTC',
+      readOnly: false, tokenScopes: null, access: await buildAccessContext(botId, await loadRolePermissions(row!.roleId), false, 'agent'),
+    };
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: { data: { id: string; answer: unknown }[]; nextCursor: string | null } = await listAnswered(actor, { since: new Date(before), cursor, limit: 2 });
+      seen.push(...page.data.map((q) => q.id));
+      for (const q of page.data) expect(q.answer).toBeNull();
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(seen).toEqual(made);
+    // Over HTTP the cursor comes back when a page is full.
+    expect((await bot().get('/me/questions/answered?cursor=bogus')).status).toBe(400);
   });
 
   it('drops a task the asker can no longer open', async () => {
@@ -294,6 +362,38 @@ describe('telling the addressee', () => {
     await owner().del(`/projects/${p.id}/members/${users.member!.userId}`);
     await drainOutbox();
     expect(await notificationsOf(users.member!.userId, 'task.input_requested')).toHaveLength(0);
+  });
+});
+
+describe('when the addressee can no longer answer', () => {
+  it('tells nobody about a question a move withdrew before it was delivered', async () => {
+    const type = await json(owner().post('/project-types', { name: 'Late type', revenueSource: 'none' }));
+    const target = await json(owner().post('/projects', { name: 'Late', key: 'LTE', projectTypeId: type.id, visibility: 'private' }));
+    const t = await newTask({ assigneeIds: [users.member!.userId] });
+    await ask(owner(), t.id, { addresseeId: users.member!.userId });
+    await owner().post(`/tasks/${t.id}/move`, { targetProjectId: target.id });
+    await drainOutbox();
+    expect(await notificationsOf(users.member!.userId, 'task.input_requested')).toHaveLength(0);
+  });
+
+  it('withdraws what waits on someone removed from a private project', async () => {
+    const type = await json(owner().post('/project-types', { name: 'Removal type', revenueSource: 'none' }));
+    const p = await json(owner().post('/projects', { name: 'Removal', key: 'RMV', projectTypeId: type.id, visibility: 'private' }));
+    await addProjectMember(users, p.id, users.member!.userId, 'member');
+    const t = await newTask({}, p.id);
+    const q = await json(ask(owner(), t.id, { addresseeId: users.member!.userId }));
+    await owner().del(`/projects/${p.id}/members/${users.member!.userId}`);
+    const [row] = await getDb().db.select().from(schema.taskQuestions).where(eq(schema.taskQuestions.id, q.id));
+    expect(row!.status).toBe('withdrawn');
+  });
+
+  it('withdraws what waits on someone deactivated', async () => {
+    const t = await newTask({ assigneeIds: [users.finance!.userId] });
+    const q = await json(ask(owner(), t.id, { addresseeId: users.finance!.userId }));
+    const res = await owner().post(`/users/${users.finance!.userId}/deactivate`, {});
+    expect(res.status).toBe(200);
+    const [row] = await getDb().db.select().from(schema.taskQuestions).where(eq(schema.taskQuestions.id, q.id));
+    expect(row!.status).toBe('withdrawn');
   });
 });
 

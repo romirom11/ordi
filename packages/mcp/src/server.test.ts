@@ -716,8 +716,8 @@ describe('asking a person for input', () => {
       return { id: 'q1', taskId: 't1', ref: 'SOL-7', addressee: { id: 'u1', name: 'Olena' }, replaced: null } as T;
     };
     const client = await connect(api);
-    const res = await client.callTool({ name: 'ask_for_input', arguments: { task: 'SOL-7', question: 'Blue or green?' } });
-    expect(posts).toEqual([{ path: '/tasks/SOL-7/question', body: { question: 'Blue or green?' } }]);
+    const res = await client.callTool({ name: 'ask_for_input', arguments: { task: 'SOL-7', question: 'Blue or green?', addressee: 'u1' } });
+    expect(posts).toEqual([{ path: '/tasks/SOL-7/question', body: { question: 'Blue or green?', addresseeId: 'u1' } }]);
     expect(JSON.parse((res.content as any)[0].text)).toMatchObject({ questionId: 'q1', ref: 'SOL-7', waitingOn: { id: 'u1', name: 'Olena' } });
   });
 

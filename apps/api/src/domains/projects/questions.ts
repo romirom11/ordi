@@ -12,7 +12,7 @@
 import { getDb, schema, eq, and, inArray, isNull, gt, asc, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import type { Actor } from '../../context';
-import { err } from '../../lib/errors';
+import { ApiException, err } from '../../lib/errors';
 import { writeActivity } from '../../core/activity';
 import { publishEvent } from '../../core/events';
 import { accessibleProjectIds, assertProject, effectiveProjectRole, userCanOpenProject } from '../../core/access';
@@ -40,7 +40,7 @@ export interface OpenQuestionView {
  */
 async function loadLiveTask(idOrRef: string) {
   const { db } = getDb();
-  const ref = /^([A-Za-z][A-Za-z0-9]*)-(\d+)$/.exec(idOrRef.trim());
+  const ref = /^([A-Za-z][A-Za-z0-9]*)-(\d{1,9})$/.exec(idOrRef.trim());
   const [task] = ref
     ? await db.select({ task: tasks }).from(tasks)
       .innerJoin(projects, and(eq(projects.id, tasks.projectId), isNull(projects.deletedAt)))
@@ -63,6 +63,27 @@ async function ownerOfAgent(userId: string): Promise<string | null> {
   const [row] = await db.select({ ownerUserId: externalAgents.ownerUserId })
     .from(externalAgents).where(eq(externalAgents.userId, userId));
   return row?.ownerUserId ?? null;
+}
+
+/** The person a personal agent acts for; null for anyone else. */
+async function personalOwnerOf(userId: string): Promise<string | null> {
+  const { db } = getDb();
+  const [row] = await db.select({ ownerUserId: externalAgents.ownerUserId, kind: externalAgents.kind })
+    .from(externalAgents).where(eq(externalAgents.userId, userId));
+  return row?.kind === 'personal' ? row.ownerUserId : null;
+}
+
+/**
+ * The task's project at the given role, read as the task: someone outside a
+ * private project learns nothing from a ref, not even that the task exists.
+ */
+async function assertTaskProject(actor: Actor, task: { projectId: string }, role: 'viewer' | 'member'): Promise<void> {
+  try {
+    await assertProject(actor, task.projectId, role);
+  } catch (e) {
+    if (e instanceof ApiException && e.code === 'not_found') throw err.notFound('Task not found');
+    throw e;
+  }
 }
 
 /** An active human account: the only kind of user a question can wait on. */
@@ -139,9 +160,11 @@ export async function resolveAddressee(
 
 /**
  * Whether the actor may close the task's open question by hand. The asker –
- * or the person who owns the asking agent – the project's lead and project
- * admins may withdraw it; those and the addressee may mark it answered. Only
- * the person themselves: their own agent closes nothing on their behalf.
+ * or, for a personal agent's question, the person it acts for – and the
+ * project's lead may withdraw it; those and the addressee may mark it
+ * answered. The addressee may do so with read access alone: a viewer cannot
+ * comment, so marking is their only way to answer. Only the person
+ * themselves: their own agent closes nothing on their behalf.
  */
 async function closeRights(
   actor: Actor,
@@ -151,14 +174,16 @@ async function closeRights(
   const none = { canWithdraw: false, canMarkAnswered: false };
   const { db } = getDb();
   const [project] = await db.select({ id: projects.id, leadId: projects.leadId, visibility: projects.visibility })
-    .from(projects).where(eq(projects.id, task.projectId));
+    .from(projects).where(and(eq(projects.id, task.projectId), isNull(projects.deletedAt)));
   if (!project) return none;
   const role = effectiveProjectRole(actor, { id: project.id, visibility: project.visibility as 'workspace' | 'private' });
-  if (!role || role === 'viewer') return none;
+  if (!role) return none;
+  const addressee = q.addresseeId === actor.userId;
+  if (role === 'viewer') return { canWithdraw: false, canMarkAnswered: addressee };
   const asker = q.askedBy === actor.userId
-    || (actor.actorType === 'user' && (await ownerOfAgent(q.askedBy)) === actor.userId);
-  const canWithdraw = asker || project.leadId === actor.userId || role === 'admin';
-  return { canWithdraw, canMarkAnswered: canWithdraw || q.addresseeId === actor.userId };
+    || (actor.actorType === 'user' && (await personalOwnerOf(q.askedBy)) === actor.userId);
+  const canWithdraw = asker || project.leadId === actor.userId;
+  return { canWithdraw, canMarkAnswered: canWithdraw || addressee };
 }
 
 /** The open question on a task, or null – for the task page and get_task. */
@@ -210,7 +235,7 @@ export async function askForInput(
 ): Promise<{ id: string; taskId: string; ref: string; addressee: { id: string; name: string }; replaced: string | null }> {
   const task = await loadLiveTask(taskRef);
   const taskId = task.id;
-  await assertProject(actor, task.projectId, 'member');
+  await assertTaskProject(actor, task, 'member');
   const addresseeId = await resolveAddressee(actor, task, input.addresseeId);
   const ref = await refOfTask(task);
   const { db } = getDb();
@@ -220,20 +245,26 @@ export async function askForInput(
   const replaced = await db.transaction(async (tx) => {
     // Serialise questions on one task: two asks at once must not both pass
     // the check below and leave one of them to fail on the unique index.
-    await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, taskId)).for('update');
+    // A task moved or deleted meanwhile is gone: no question on a dead row.
+    const [live] = await tx.select({ id: tasks.id }).from(tasks)
+      .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt))).for('update');
+    if (!live) throw err.notFound('Task not found');
     const [open] = await tx.select().from(taskQuestions)
       .where(and(eq(taskQuestions.taskId, taskId), eq(taskQuestions.status, 'open')));
     if (open && open.askedBy !== actor.userId) {
       throw err.domain('This task already waits on an answer to someone else\'s question. Comment on the task instead, or wait until it is answered or withdrawn.', { openQuestionId: open.id });
     }
-    if (open) {
-      await tx.update(taskQuestions).set({ status: 'withdrawn', withdrawnAt: new Date(), withdrawnBy: actor.userId, updatedAt: new Date() })
-        .where(eq(taskQuestions.id, open.id));
-    }
+    // Only while it is still open: an answer committed in the meantime (a
+    // comment does not take the task lock) stays an answer.
+    const [withdrawn] = open
+      ? await tx.update(taskQuestions).set({ status: 'withdrawn', withdrawnAt: new Date(), withdrawnBy: actor.userId, updatedAt: new Date() })
+        .where(and(eq(taskQuestions.id, open.id), eq(taskQuestions.status, 'open')))
+        .returning({ id: taskQuestions.id })
+      : [];
     await tx.insert(taskQuestions).values({ id, taskId, addresseeId, askedBy: actor.userId, question: input.question });
     await publishEvent(tx, {
       type: 'task.input_requested', aggregateType: 'task', aggregateId: taskId,
-      payload: { ref, taskId, projectId: task.projectId, questionId: id, addresseeId, askedBy: actor.userId, question: input.question, replaced: open?.id ?? null },
+      payload: { ref, taskId, projectId: task.projectId, questionId: id, addresseeId, askedBy: actor.userId, question: input.question, replaced: withdrawn?.id ?? null },
       actorId: actor.userId, actorType: actor.actorType,
     });
     await writeActivity(tx, {
@@ -241,7 +272,7 @@ export async function askForInput(
       after: { questionId: id, addresseeId, question: input.question },
       actorId: actor.userId, actorType: actor.actorType,
     });
-    return open?.id ?? null;
+    return withdrawn?.id ?? null;
   });
   return { id, taskId, ref, addressee: { id: addresseeId, name: addressee?.name ?? '' }, replaced };
 }
@@ -275,45 +306,64 @@ export async function answerByComment(
   });
 }
 
-/** Close the open question by hand: marked answered (no comment) or withdrawn. */
-export async function closeQuestion(actor: Actor, taskRef: string, how: 'answered' | 'withdrawn'): Promise<{ ok: true; questionId: string }> {
+/**
+ * Close the open question by hand: marked answered (no comment) or withdrawn.
+ * `questionId` is the question the caller is looking at: a page left open
+ * while the question was replaced must not close the new one. The check and
+ * the write happen under the task's lock, so a move or a replacement cannot
+ * slip in between them.
+ */
+export async function closeQuestion(
+  actor: Actor,
+  taskRef: string,
+  how: 'answered' | 'withdrawn',
+  questionId?: string | null,
+): Promise<{ ok: true; questionId: string }> {
   const task = await loadLiveTask(taskRef);
   const taskId = task.id;
-  await assertProject(actor, task.projectId, 'viewer');
-  const { db } = getDb();
-  const [open] = await db.select().from(taskQuestions)
-    .where(and(eq(taskQuestions.taskId, taskId), eq(taskQuestions.status, 'open')));
-  if (!open) throw err.notFound('This task is not waiting on anyone');
-  const rights = await closeRights(actor, task, open);
-  if (how === 'answered' && !rights.canMarkAnswered) {
-    throw err.forbidden('Only the person it waits on, the one who asked, or the project lead can mark this answered');
-  }
-  if (how === 'withdrawn' && !rights.canWithdraw) {
-    throw err.forbidden('Only the one who asked or the project lead can withdraw this question');
-  }
+  await assertTaskProject(actor, task, 'viewer');
   const ref = await refOfTask(task);
-  const now = new Date();
-  await db.transaction(async (tx) => {
+  const { db } = getDb();
+  const closedId = await db.transaction(async (tx) => {
+    // A moved task's old row is deleted: its questions went with the new one.
+    const [live] = await tx.select({ id: tasks.id, projectId: tasks.projectId }).from(tasks)
+      .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt))).for('update');
+    if (!live || live.projectId !== task.projectId) throw err.notFound('Task not found');
+    const [open] = await tx.select().from(taskQuestions)
+      .where(and(eq(taskQuestions.taskId, taskId), eq(taskQuestions.status, 'open')));
+    if (!open) throw err.notFound('This task is not waiting on anyone');
+    if (questionId && open.id !== questionId) {
+      throw err.conflict('The task now waits on a different question – reload to see it', { openQuestionId: open.id });
+    }
+    const rights = await closeRights(actor, live, open);
+    if (how === 'answered' && !rights.canMarkAnswered) {
+      throw err.forbidden('Only the person it waits on, the one who asked, or the project lead can mark this answered');
+    }
+    if (how === 'withdrawn' && !rights.canWithdraw) {
+      throw err.forbidden('Only the one who asked or the project lead can withdraw this question');
+    }
+    const now = new Date();
     const set = how === 'answered'
       ? { status: 'answered', answeredAt: now, answeredBy: actor.userId, updatedAt: now }
       : { status: 'withdrawn', withdrawnAt: now, withdrawnBy: actor.userId, updatedAt: now };
     const [row] = await tx.update(taskQuestions).set(set)
       .where(and(eq(taskQuestions.id, open.id), eq(taskQuestions.status, 'open')))
       .returning({ id: taskQuestions.id });
-    // Answered or withdrawn in between: nothing left to close.
+    // Answered by a comment in between: nothing left to close.
     if (!row) throw err.notFound('This task is not waiting on anyone');
     await publishEvent(tx, {
       type: how === 'answered' ? 'task.input_answered' : 'task.input_withdrawn',
       aggregateType: 'task', aggregateId: taskId,
-      payload: { ref, taskId, projectId: task.projectId, questionId: open.id, askedBy: open.askedBy, commentId: null },
+      payload: { ref, taskId, projectId: live.projectId, questionId: open.id, askedBy: open.askedBy, commentId: null },
       actorId: actor.userId, actorType: actor.actorType,
     });
     await writeActivity(tx, {
       entityType: 'task', entityId: taskId, action: how === 'answered' ? 'input_answered' : 'input_withdrawn',
       after: { questionId: open.id }, actorId: actor.userId, actorType: actor.actorType,
     });
+    return open.id;
   });
-  return { ok: true, questionId: open.id };
+  return { ok: true, questionId: closedId };
 }
 
 /**
@@ -321,16 +371,31 @@ export async function closeQuestion(actor: Actor, taskRef: string, how: 'answere
  * when absent), oldest answer first – where an agent picks its work back up.
  * Scoped to the calling actor: a personal agent sees its own questions, not
  * its owner's; and to tasks the actor can still open.
+ *
+ * Paged: a full page carries `nextCursor`, an opaque "answered at + id" key
+ * to pass back as `cursor`, so a burst of answers is read to the end instead
+ * of being cut off at the page size.
  */
-export async function listAnswered(actor: Actor, since?: Date | null, limit = 100) {
+export async function listAnswered(actor: Actor, opts: { since?: Date | null; cursor?: string | null; limit?: number } = {}) {
+  const limit = opts.limit ?? 100;
+  const since = opts.since ?? null;
   const projectIds = await accessibleProjectIds(actor);
-  if (!projectIds.length) return { data: [] };
+  if (!projectIds.length) return { data: [], nextCursor: null };
+  let after: { at: string; id: string } | null = null;
+  if (opts.cursor) {
+    const at = opts.cursor.lastIndexOf('|');
+    if (at <= 0) throw err.validation('cursor is not one this list returned');
+    after = { at: opts.cursor.slice(0, at), id: opts.cursor.slice(at + 1) };
+    if (Number.isNaN(new Date(after.at).getTime())) throw err.validation('cursor is not one this list returned');
+  }
   const { db } = getDb();
   const rows = await db.select({
     id: taskQuestions.id, taskId: taskQuestions.taskId, question: taskQuestions.question,
     askedAt: taskQuestions.askedAt, answeredAt: taskQuestions.answeredAt, answeredBy: taskQuestions.answeredBy,
     addresseeId: taskQuestions.addresseeId, answerCommentId: taskQuestions.answerCommentId,
     projectId: tasks.projectId, number: tasks.number, title: tasks.title, key: projects.key,
+    // Full precision for the cursor: a JS Date would round the microseconds.
+    answeredAtKey: sql<string>`to_char(${taskQuestions.answeredAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
   })
     .from(taskQuestions)
     .innerJoin(tasks, eq(tasks.id, taskQuestions.taskId))
@@ -341,9 +406,14 @@ export async function listAnswered(actor: Actor, since?: Date | null, limit = 10
       isNull(tasks.deletedAt),
       inArray(tasks.projectId, projectIds),
       since ? gt(taskQuestions.answeredAt, since) : undefined,
+      after ? sql`(${taskQuestions.answeredAt}, ${taskQuestions.id}) > (${after.at}::timestamptz, ${after.id})` : undefined,
     ))
-    .orderBy(asc(taskQuestions.answeredAt))
-    .limit(limit);
+    .orderBy(asc(taskQuestions.answeredAt), asc(taskQuestions.id))
+    .limit(limit + 1);
+  const more = rows.length > limit;
+  if (more) rows.length = limit;
+  const last = rows[rows.length - 1];
+  const nextCursor = more && last ? `${last.answeredAtKey}|${last.id}` : null;
   const commentIds = rows.map((r) => r.answerCommentId).filter((id): id is string => !!id);
   const comments = commentIds.length
     ? await db.select({ id: schema.comments.id, body: schema.comments.body, authorId: schema.comments.authorId, createdAt: schema.comments.createdAt, deletedAt: schema.comments.deletedAt })
@@ -370,6 +440,7 @@ export async function listAnswered(actor: Actor, since?: Date | null, limit = 10
         answer: c ? { commentId: c.id, authorId: c.authorId, createdAt: c.createdAt, body: c.body } : null,
       };
     }),
+    nextCursor,
   };
 }
 
@@ -378,13 +449,70 @@ export async function listAnswered(actor: Actor, since?: Date | null, limit = 10
  * addressee cannot open the target project is withdrawn instead: it would
  * wait on someone who can no longer see the task.
  */
-export async function moveQuestions(tx: any, actor: Actor, oldId: string, newId: string, targetProjectId: string): Promise<void> {
+export async function moveQuestions(
+  tx: any,
+  actor: Actor,
+  oldId: string,
+  moved: { id: string; projectId: string; projectKey: string },
+): Promise<void> {
   const [open] = await tx.select().from(taskQuestions)
     .where(and(eq(taskQuestions.taskId, oldId), eq(taskQuestions.status, 'open')));
-  if (open && !(await userCanOpenProject(open.addresseeId, targetProjectId))) {
-    await tx.update(taskQuestions).set({ status: 'withdrawn', withdrawnAt: new Date(), withdrawnBy: actor.userId, updatedAt: new Date() })
-      .where(eq(taskQuestions.id, open.id));
-  }
-  await tx.update(taskQuestions).set({ taskId: newId }).where(eq(taskQuestions.taskId, oldId));
+  await tx.update(taskQuestions).set({ taskId: moved.id }).where(eq(taskQuestions.taskId, oldId));
+  if (!open || (await userCanOpenProject(open.addresseeId, moved.projectId))) return;
+  await tx.update(taskQuestions).set({ status: 'withdrawn', withdrawnAt: new Date(), withdrawnBy: actor.userId, updatedAt: new Date() })
+    .where(eq(taskQuestions.id, open.id));
+  const [row] = await tx.select({ number: tasks.number }).from(tasks).where(eq(tasks.id, moved.id));
+  await publishEvent(tx, {
+    type: 'task.input_withdrawn', aggregateType: 'task', aggregateId: moved.id,
+    payload: { ref: `${moved.projectKey}-${row?.number ?? ''}`, taskId: moved.id, projectId: moved.projectId, questionId: open.id, askedBy: open.askedBy, commentId: null, reason: 'moved' },
+    actorId: actor.userId, actorType: actor.actorType,
+  });
+  await writeActivity(tx, {
+    entityType: 'task', entityId: moved.id, action: 'input_withdrawn',
+    after: { questionId: open.id, reason: 'moved' }, actorId: actor.userId, actorType: actor.actorType,
+  });
 }
 
+
+/**
+ * Withdraw the open questions waiting on someone who can no longer answer:
+ * deactivated (every project), or taken off a project they could otherwise
+ * not open (`projectId`). Left open, the task would wait on nobody. Each
+ * withdrawal is announced and recorded like one made by hand.
+ */
+export async function withdrawQuestionsWaitingOn(
+  tx: any,
+  actor: Actor,
+  userId: string,
+  reason: 'deactivated' | 'removed',
+  projectId?: string,
+): Promise<number> {
+  const open = await tx.select({ id: taskQuestions.id, taskId: taskQuestions.taskId, askedBy: taskQuestions.askedBy, projectId: tasks.projectId, number: tasks.number, key: projects.key })
+    .from(taskQuestions)
+    .innerJoin(tasks, eq(tasks.id, taskQuestions.taskId))
+    .innerJoin(projects, eq(projects.id, tasks.projectId))
+    .where(and(
+      eq(taskQuestions.addresseeId, userId),
+      eq(taskQuestions.status, 'open'),
+      projectId ? eq(tasks.projectId, projectId) : undefined,
+    )) as { id: string; taskId: string; askedBy: string; projectId: string; number: number; key: string }[];
+  let n = 0;
+  for (const q of open) {
+    const now = new Date();
+    const [row] = await tx.update(taskQuestions).set({ status: 'withdrawn', withdrawnAt: now, withdrawnBy: actor.userId, updatedAt: now })
+      .where(and(eq(taskQuestions.id, q.id), eq(taskQuestions.status, 'open')))
+      .returning({ id: taskQuestions.id });
+    if (!row) continue;
+    n++;
+    await publishEvent(tx, {
+      type: 'task.input_withdrawn', aggregateType: 'task', aggregateId: q.taskId,
+      payload: { ref: `${q.key}-${q.number}`, taskId: q.taskId, projectId: q.projectId, questionId: q.id, askedBy: q.askedBy, commentId: null, reason },
+      actorId: actor.userId, actorType: actor.actorType,
+    });
+    await writeActivity(tx, {
+      entityType: 'task', entityId: q.taskId, action: 'input_withdrawn',
+      after: { questionId: q.id, reason }, actorId: actor.userId, actorType: actor.actorType,
+    });
+  }
+  return n;
+}
