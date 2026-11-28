@@ -279,8 +279,13 @@ export function usersRoutes() {
     // One step: tasks, their external agents and the account itself change
     // together or not at all. The person's row is locked first – owner changes
     // and token issuance lock it before any agent – so nothing slips between.
+    // NO KEY UPDATE still waits for and blocks those (they take SHARE or
+    // UPDATE), but not the key-share lock a foreign key takes: a task move
+    // holding one of their tasks must be able to copy them onto the moved task
+    // and commit, or it and this hand-over, which waits for that task, would
+    // deadlock (ORD-41). The hand-over then finds the copy.
     const { handedOff, agents } = await db.transaction(async (tx) => {
-      await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, id)).for('update');
+      await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, id)).for('no key update');
       const handedOff = await handOffOpenTasks(actor, id, reassignTo, tx);
       // Their external agents lose every token and move to the successor (a
       // person), or are switched off: a copied token must not outlive them.

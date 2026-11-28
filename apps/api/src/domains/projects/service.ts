@@ -937,14 +937,17 @@ export async function updateTask(actor: Actor, id: string, input: any) {
 /** Statuses that still mean work to do; done/canceled tasks stay with whoever closed them. */
 const OPEN_CATEGORIES = ['backlog', 'todo', 'in_progress'];
 
+export interface OpenTaskRef { id: string; projectId: string; title: string; ref: string }
+
 /**
  * Open tasks a user is assigned to, across every project. Not membership
  * gated: the caller is an admin deactivating that user (users.manage), who
  * has to see the whole picture even for projects they are not a member of.
+ * `conn` is a transaction when the answer must be read under its locks
+ * (handOffOpenTasks).
  */
-export async function openTasksAssignedTo(userId: string) {
-  const { db } = getDb();
-  const rows = await db.select({
+export async function openTasksAssignedTo(userId: string, conn: any = getDb().db): Promise<OpenTaskRef[]> {
+  const rows: { id: string; projectId: string; number: number; title: string; key: string }[] = await conn.select({
     id: tasks.id, projectId: tasks.projectId, number: tasks.number, title: tasks.title, key: projects.key,
   })
     .from(tasks)
@@ -976,14 +979,33 @@ export async function openTasksAssignedTo(userId: string) {
  * the same transaction, so nothing is announced that did not commit.
  */
 export async function handOffOpenTasks(actor: Actor, fromUserId: string, toUserId: string | null, tx: any) {
-  const open = await openTasksAssignedTo(fromUserId);
+  // Collect and lock inside the transaction, then look again (ORD-41). A move
+  // that held one of these tasks when we asked for it commits a copy with the
+  // same assignees and deletes the original; once its lock is ours, the copy
+  // is there to find. So read, lock what is new – in id order, the order a
+  // task edit locks in, so a hand-off and a concurrent edit wait for each
+  // other rather than deadlock – and read again, until a read turns up
+  // nothing we do not hold. Each round only finds copies made by moves that
+  // were already holding a task of the set; a locked task cannot be moved
+  // again, so the rounds end. (A copy's id is newer than every task already
+  // held, so the locks still go in id order across rounds.)
+  const locked = new Set<string>();
+  let open = await openTasksAssignedTo(fromUserId, tx);
+  for (;;) {
+    const fresh = open.map((t) => t.id).filter((taskId) => !locked.has(taskId));
+    if (!fresh.length) break;
+    await tx.select({ id: tasks.id }).from(tasks).where(inArray(tasks.id, fresh)).orderBy(asc(tasks.id)).for('update');
+    for (const taskId of fresh) locked.add(taskId);
+    open = await openTasksAssignedTo(fromUserId, tx);
+  }
   if (!open.length) return { count: 0, taskIds: [] as string[] };
   const ids = open.map((t) => t.id);
   // Handing work to an agent is assigning it: the agent must be a member of
   // each project, and the person handing over must meet its assign policy
   // there with the role they hold in that project – the same rule as
   // assigning it by hand. Checked before anything is written, so a refusal
-  // leaves the person active and every task as it was.
+  // leaves the person active and every task as it was – and after the tasks
+  // are held, so a task moved meanwhile is judged in the project it is in now.
   if (toUserId) {
     const projectIds = [...new Set(open.map((t) => t.projectId))];
     const rows = await tx.select({ id: projects.id, name: projects.name, visibility: projects.visibility })
@@ -1002,9 +1024,6 @@ export async function handOffOpenTasks(actor: Actor, fromUserId: string, toUserI
       }
     }
   }
-  // Tasks first, in id order – the order a task edit locks in – so a hand-off
-  // and a concurrent edit of the same task wait for each other, not deadlock.
-  await tx.select({ id: tasks.id }).from(tasks).where(inArray(tasks.id, ids)).orderBy(asc(tasks.id)).for('update');
   await tx.delete(taskAssignees).where(and(inArray(taskAssignees.taskId, ids), eq(taskAssignees.userId, fromUserId)));
   if (toUserId) {
     await tx.insert(taskAssignees).values(ids.map((taskId) => ({ taskId, userId: toUserId }))).onConflictDoNothing();
@@ -1153,6 +1172,21 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
     // first insert takes the target project's task-number counter, so the
     // move does not hold it while it waits for those reads.
     for (const t of subtree) { await targetStatusOf(t.statusId); await reporterFor(t.reporterId); }
+    // Someone deactivated does not come along onto open work (ORD-41): a
+    // deactivation takes them off every open task, and a copy must not put
+    // them back. On a closed task they stay – who did the work is history.
+    const assigneeIds = [...new Set(assigneeRows.map((r) => r.userId))];
+    const inactive = new Set(assigneeIds.length
+      ? (await tx.select({ id: schema.users.id }).from(schema.users)
+        .where(and(inArray(schema.users.id, assigneeIds), eq(schema.users.isActive, false)))).map((r) => r.id)
+      : []);
+    const openStatusIds = new Set(inactive.size
+      ? (await tx.select({ id: taskStatuses.id }).from(taskStatuses)
+        .where(and(inArray(taskStatuses.id, [...statusFor.values()]), inArray(taskStatuses.category, OPEN_CATEGORIES)))).map((r) => r.id)
+      : []);
+    const statusOfOld = new Map(subtree.map((t) => [t.id, statusFor.get(t.statusId)!]));
+    const leftOff = (row: { taskId: string; userId: string }) =>
+      strandedAgents.has(row.userId) || (inactive.has(row.userId) && openStatusIds.has(statusOfOld.get(row.taskId)!));
     // Someone timing one of these tasks whose reach ends at the target stops
     // now, the time saved; the entry then moves with the task below.
     await closeTimersOfOutsiders(tx, actor, subtree.map((t) => t.id), targetProjectId);
@@ -1170,7 +1204,7 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
         customFields: cf, createdBy: t.createdBy, reporterId: await reporterFor(t.reporterId),
       });
     }
-    const keptAssignees = assigneeRows.filter((row) => !strandedAgents.has(row.userId));
+    const keptAssignees = assigneeRows.filter((row) => !leftOff(row));
     if (keptAssignees.length) {
       await tx.insert(taskAssignees).values(keptAssignees.map((row) => ({
         taskId: newIdOf.get(row.taskId)!, userId: row.userId,
