@@ -376,7 +376,7 @@ function TokenConnect({ client, mcpUrl }: { client: McpClient; mcpUrl: string })
           </div>
           <div>
             <p className="text-[13px] text-muted-foreground">{t(setup.main.step)}</p>
-            <Snippet value={setup.main.snippet} primary className="mt-1.5" />
+            <Snippet value={setup.main.snippet} className="mt-1.5" />
           </div>
           {setup.stdio && (
             <Disclosure label={t('mcp.localServer')}>
@@ -388,7 +388,7 @@ function TokenConnect({ client, mcpUrl }: { client: McpClient; mcpUrl: string })
           )}
         </>
       ) : (
-        <p className="text-[13px] text-muted-foreground">{t('mcp.tokenFirst')}</p>
+        <p className="text-xs text-muted-foreground">{t('mcp.tokenFirst')}</p>
       )}
     </div>
   );
