@@ -5,6 +5,46 @@ writes this file from the titles of the merged PRs, and each section is also the
 body of its [GitHub release](https://github.com/romirom11/ordi/releases). The
 hand-written notes of earlier versions are in [`docs/releases`](docs/releases).
 
+## [1.47.0](https://github.com/romirom11/ordi/compare/v1.46.0...v1.47.0) (2026-11-28)
+
+
+### Features
+
+* Agents can ask a person for input on a task ([#197](https://github.com/romirom11/ordi/issues/197)) ([9dccf49](https://github.com/romirom11/ordi/commit/9dccf494bfc3642f0a23d8719f25dacadec01022))
+* Connecting Claude Code or Codex asks whether it works as you or as your agent ([#185](https://github.com/romirom11/ordi/issues/185)) ([3f80e69](https://github.com/romirom11/ordi/commit/3f80e69723ab0fc9c8341c2ba36eba07fdabed00))
+* Everyone can run their own agent on their tasks ([#181](https://github.com/romirom11/ordi/issues/181)) ([00fcfb3](https://github.com/romirom11/ordi/commit/00fcfb3a2cc1905e591b36577b6bf51164f03afa))
+* External agents connect under their own name ([#178](https://github.com/romirom11/ordi/issues/178)) ([9df26cd](https://github.com/romirom11/ordi/commit/9df26cd5e0ac9605040889ab32d4e7eaded99d34))
+* Inbox gathers what waits on you ([#198](https://github.com/romirom11/ordi/issues/198)) ([f23fe9d](https://github.com/romirom11/ordi/commit/f23fe9df765fdae7a27462769f3d3673d91ad15e))
+
+
+### Fixes
+
+* A private project posts to Slack only in its own channel ([#202](https://github.com/romirom11/ordi/issues/202)) ([0e52501](https://github.com/romirom11/ordi/commit/0e52501e30da1a6278600a5e9b7c4cc5f875dcbb))
+* A refused task edit changes nothing ([#188](https://github.com/romirom11/ordi/issues/188)) ([0407be1](https://github.com/romirom11/ordi/commit/0407be192c2051280fb8e759acd596881cfe89da))
+* A role change takes effect in every server process at once ([#190](https://github.com/romirom11/ordi/issues/190)) ([b20d057](https://github.com/romirom11/ordi/commit/b20d057a5898e8f8850671fa7ada64c4fd84e19c))
+* A task can't be assigned to someone who has been deactivated ([#207](https://github.com/romirom11/ordi/issues/207)) ([b603cf6](https://github.com/romirom11/ordi/commit/b603cf67211421643cfa0e894b3c5c91a20e09c7))
+* A task moved while its assignee is deactivated never stays with them ([#204](https://github.com/romirom11/ordi/issues/204)) ([5d16915](https://github.com/romirom11/ordi/commit/5d16915eead4701265c6c1acb2140b32a72a4af8))
+* A task's status always comes from its own project ([3f819e2](https://github.com/romirom11/ordi/commit/3f819e26bf536fd30038bc3241ca099f1a2e21e7))
+* An external agent stops when its owner leaves ([#180](https://github.com/romirom11/ordi/issues/180)) ([1cac981](https://github.com/romirom11/ordi/commit/1cac98197c45e4cfe20e6c629bf177c4e2bb921d))
+* Attachments, dashboard widgets and saved views can be changed only by whoever may ([#183](https://github.com/romirom11/ordi/issues/183)) ([f9f4ea6](https://github.com/romirom11/ordi/commit/f9f4ea60b80e93193ae92d3b94309bfd4b8260b5))
+* Bulk edit works on every project you can edit, not only ones you were added to ([#182](https://github.com/romirom11/ordi/issues/182)) ([2a011c7](https://github.com/romirom11/ordi/commit/2a011c746c00fd17e0a693c4afc6504a9e2eef04))
+* Connecting a client on a second machine keeps the first one, and unused sign-ins clean themselves up ([#192](https://github.com/romirom11/ordi/issues/192)) ([cca61f6](https://github.com/romirom11/ordi/commit/cca61f6930e3984eb6c393ad1bf91566113c6d97))
+* Creating, duplicating or moving a task never leaves it half done ([#195](https://github.com/romirom11/ordi/issues/195)) ([2b33d4c](https://github.com/romirom11/ordi/commit/2b33d4cab3eda17e9f83b38699b775fdd0ba26b7))
+* Deleted private projects show up only for their own admins ([#186](https://github.com/romirom11/ordi/issues/186)) ([e4e6131](https://github.com/romirom11/ordi/commit/e4e61317b3c27b31e98cb5fde7700facb2d96a90))
+* Duplicating a task or mentioning an agent follows the agent's assign policy ([#194](https://github.com/romirom11/ordi/issues/194)) ([3c107fc](https://github.com/romirom11/ordi/commit/3c107fc76001140310962a4a64660f937e7dc356))
+* File links expire, and a file opens only for people who can see where it lives ([#191](https://github.com/romirom11/ordi/issues/191)) ([e327f93](https://github.com/romirom11/ordi/commit/e327f9396e67d48fa1c078fbda9321125cf05a03))
+* Handing tasks to an agent or retrying its run follows the agent's assign policy ([#201](https://github.com/romirom11/ordi/issues/201)) ([f2a75fb](https://github.com/romirom11/ordi/commit/f2a75fb03390535d35694e054c81fa39d353aa68))
+* Mentions on a page notify only people who can open it ([#189](https://github.com/romirom11/ordi/issues/189)) ([adaec87](https://github.com/romirom11/ordi/commit/adaec872dc6cb02282191ad6e71b90a6d7699b58))
+* Notifications from a project you can no longer open stop showing ([#199](https://github.com/romirom11/ordi/issues/199)) ([cd93852](https://github.com/romirom11/ordi/commit/cd93852792454ac1c6f13108ae3aa0270ca4536a))
+* On upgrade, tasks sitting in another project's status move to the matching status of their own project, and git automation rules that target another project's status are deleted ([3f819e2](https://github.com/romirom11/ordi/commit/3f819e26bf536fd30038bc3241ca099f1a2e21e7))
+* ORD-38 A paid invoice from a private project isn't posted to the shared Slack channel ([#205](https://github.com/romirom11/ordi/issues/205)) ([b444166](https://github.com/romirom11/ordi/commit/b444166ed2230bd239fcf81adb2f3d46597c5eda))
+* ORD-42 Filtering tasks by a custom field with several values works ([#206](https://github.com/romirom11/ordi/issues/206)) ([90019e0](https://github.com/romirom11/ordi/commit/90019e0a2374629497e7bf4231df7ef563a3ecc3))
+* Private projects stay hidden in custom fields, task links, activity, KB spaces and agent runs ([#193](https://github.com/romirom11/ordi/issues/193)) ([b4121dc](https://github.com/romirom11/ordi/commit/b4121dc05401b5a296b9e8889d7f66822296a74f))
+* Task lists, filters, company overviews and moved tasks give away nothing about private projects ([#196](https://github.com/romirom11/ordi/issues/196)) ([c98ff7d](https://github.com/romirom11/ordi/commit/c98ff7d0691d3a8178be8a7e41cbc93af66a01d2))
+* The deactivate dialog shows only tasks you can open ([#203](https://github.com/romirom11/ordi/issues/203)) ([ab57b54](https://github.com/romirom11/ordi/commit/ab57b54f1b68bc94e31d71a54454f27bb8930e68))
+* The live update stream sends only what you can see right now ([#184](https://github.com/romirom11/ordi/issues/184)) ([d18ebb4](https://github.com/romirom11/ordi/commit/d18ebb418f985ffd61585ec0371b5a03ac5f8207))
+* Your own time entries and timer don't reveal a private project a task moved to ([#200](https://github.com/romirom11/ordi/issues/200)) ([83e9fce](https://github.com/romirom11/ordi/commit/83e9fce3ef75e2f4779e687f34b533d7fbbdd699))
+
 ## [1.46.0](https://github.com/romirom11/ordi/compare/v1.45.0...v1.46.0) (2026-11-27)
 
 
