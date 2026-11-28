@@ -115,3 +115,36 @@ export function scriptTokens(own: OwnToken[], now = Date.now()): { active: OwnTo
 export function connectionsKey(n: number, locale: string): string {
   return `oauth.connections.${new Intl.PluralRules(locale).select(n)}`;
 }
+
+/** A token just issued from "No browser? Connect with a token", shown once. */
+export interface IssuedToken {
+  id: string;
+  token: string;
+  /** The client picked when it was made, the name it got, and whom it acts as. */
+  client: string;
+  clientName: string;
+  actsAs: ActsAs;
+}
+
+/**
+ * Whether the token just issued may still be shown and put into the configs
+ * on screen. Only for exactly what it was made for – the same client, name
+ * and identity, so a token acting as the person never lands in a config the
+ * page says is for their agent – and only while it still exists: once it is
+ * disconnected, or the agent switched off, its secret leaves the screen.
+ */
+export function showIssued(
+  issued: IssuedToken | null,
+  current: { client: string; clientName: string; actsAs: ActsAs },
+  own: OwnToken[] | undefined,
+  agentTokens: AgentToken[] | undefined,
+  now = Date.now(),
+): issued is IssuedToken {
+  if (!issued) return false;
+  if (issued.client !== current.client || issued.clientName !== current.clientName || issued.actsAs !== current.actsAs) return false;
+  // Not refetched yet after issuing: trust it until the lists say otherwise.
+  const list: { id: string; revokedAt?: string | null; expiresAt?: string | null }[] | undefined = issued.actsAs === 'you' ? own : agentTokens;
+  if (!list) return true;
+  const row = list.find((t) => t.id === issued.id);
+  return !!row && live(row, now);
+}

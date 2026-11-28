@@ -45,12 +45,29 @@ describe('a client connected as you with a token', () => {
     expect(row?.expiresAt).toBe(expiresAt);
   });
 
-  it('acts as you, with what you may do', async () => {
+  it('acts as you, with exactly what your role may do', async () => {
     const { token } = await json(owner().post('/auth/tokens/client', { client: 'Zed', expiresInDays: null }));
     const me = await json(bearer(token).get('/me'));
     expect(me.id ?? me.user?.id).toBe(users.owner!.userId);
     const row = (await myTokens(owner())).find((t) => t.name === 'Zed');
     expect(row?.expiresAt).toBeNull();
+
+    // A member's client may do what a member may, and nothing more.
+    const memberToken = (await json(member().post('/auth/tokens/client', { client: 'Zed', expiresInDays: 30 }))).token;
+    const [issued] = await getDb().db.select().from(schema.apiTokens).where(eq(schema.apiTokens.hash, sha256(memberToken)));
+    const { db } = getDb();
+    const [memberUser] = await db.select().from(schema.users).where(eq(schema.users.id, users.member!.userId));
+    const memberRole = await db.select().from(schema.rolePermissions).where(eq(schema.rolePermissions.roleId, memberUser!.roleId));
+    expect([...(issued!.scopes as string[])].sort()).toEqual(memberRole.map((r) => r.permission).sort());
+    expect((await bearer(memberToken).get('/projects')).status).toBe(200);
+    expect((await bearer(memberToken).get('/roles')).status).toBe(403);
+  });
+
+  it('stops working once disconnected', async () => {
+    const { id, token } = await json(owner().post('/auth/tokens/client', { client: 'Spare', expiresInDays: 30 }));
+    expect((await bearer(token).get('/me')).status).toBe(200);
+    expect((await owner().del(`/auth/tokens/${id}`)).status).toBe(200);
+    expect((await bearer(token).get('/me')).status).toBe(401);
   });
 
   it('stops working once it expires', async () => {

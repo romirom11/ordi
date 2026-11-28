@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildConnections, connectionsKey, scriptTokens, type AgentToken, type OwnToken } from './connections';
+import { buildConnections, connectionsKey, scriptTokens, showIssued, type AgentToken, type OwnToken } from './connections';
 
 const NOW = new Date('2026-11-28T12:00:00Z').getTime();
 
@@ -70,5 +70,29 @@ describe('connectionsKey', () => {
       'oauth.connections.one', 'oauth.connections.few', 'oauth.connections.many',
       'oauth.connections.many', 'oauth.connections.one', 'oauth.connections.few',
     ]);
+  });
+});
+
+describe('showIssued', () => {
+  const issued = { id: 'zed', token: 'ordi_secret', client: 'other', clientName: 'Zed', actsAs: 'you' as const };
+  const current = { client: 'other', clientName: 'Zed', actsAs: 'you' as const };
+
+  it('shows the token only for the client, name and identity it was made for', () => {
+    expect(showIssued(issued, current, own, agent, NOW)).toBe(true);
+    expect(showIssued(issued, { ...current, actsAs: 'agent' }, own, agent, NOW)).toBe(false);
+    expect(showIssued(issued, { ...current, clientName: 'Zed 2' }, own, agent, NOW)).toBe(false);
+    expect(showIssued(issued, { ...current, client: 'cursor' }, own, agent, NOW)).toBe(false);
+  });
+
+  it('takes the secret off screen once it is disconnected or the agent is switched off', () => {
+    const revoked = own.map((t) => (t.id === 'zed' ? { ...t, revokedAt: '2026-11-28T11:00:00Z' } : t));
+    expect(showIssued(issued, current, revoked, agent, NOW)).toBe(false);
+    const forAgent = { ...issued, id: 'agent-codex', actsAs: 'agent' as const };
+    expect(showIssued(forAgent, { ...current, actsAs: 'agent' }, own, agent, NOW)).toBe(true);
+    expect(showIssued(forAgent, { ...current, actsAs: 'agent' }, own, [], NOW)).toBe(false);
+  });
+
+  it('trusts a token just made until the lists have loaded', () => {
+    expect(showIssued(issued, current, undefined, undefined, NOW)).toBe(true);
   });
 });

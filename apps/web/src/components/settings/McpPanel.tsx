@@ -18,7 +18,7 @@ import { Dialog, ConfirmDialog, toast } from '../overlays';
 import { SectionHead, SubHead, Field, RowList, Disclosure } from './primitives';
 import { useLocale, useT, extendDict } from '../../lib/i18n';
 import { MyAgentSection, useMyAgent } from './MyAgentSection';
-import { buildConnections, connectionsKey, scriptTokens, type ActsAs, type Connection, type ConnectionGroup, type OwnToken } from './connections';
+import { buildConnections, connectionsKey, scriptTokens, showIssued, type ActsAs, type Connection, type ConnectionGroup, type IssuedToken, type OwnToken } from './connections';
 import { CLIENT_NAMES, MCP_CLIENTS, signInSetup, tokenSetup, type McpClient } from './mcpClients';
 
 extendDict({
@@ -63,6 +63,9 @@ extendDict({
     'mcp.issueFailed': 'Could not create the token.',
     'mcp.tokenOnceWarning': 'Copy the token now – it will not be shown again.',
     'mcp.tokenThen': 'Then:',
+    'mcp.issuedFor': 'For {client}, works as: {whom}.',
+    'mcp.agentLoadFailed': 'Could not check your agent, so no token can be made yet.',
+    'mcp.copyFailed': 'Could not copy. Select the text and copy it yourself.',
     // 2. Connections
     'mcp.connections': 'Connections',
     'mcp.connectionsHint': 'Everything that can act for you or your agent. Disconnect anything you don’t recognise.',
@@ -149,6 +152,9 @@ extendDict({
     'mcp.issueFailed': 'Не вдалося створити токен.',
     'mcp.tokenOnceWarning': 'Скопіюйте токен зараз – він більше не показуватиметься.',
     'mcp.tokenThen': 'Далі:',
+    'mcp.issuedFor': 'Для {client}, працює як: {whom}.',
+    'mcp.agentLoadFailed': 'Не вдалося перевірити вашого агента, тож токен поки не створити.',
+    'mcp.copyFailed': 'Не вдалося скопіювати. Виділіть текст і скопіюйте його самі.',
     'mcp.connections': 'Підключення',
     'mcp.connectionsHint': 'Усе, що може діяти від вашого імені чи від імені вашого агента. Відключайте все, чого не впізнаєте.',
     'mcp.noConnections': 'Ще жодного підключеного клієнта',
@@ -201,7 +207,8 @@ extendDict({
 const TOKENS_KEY = ['apiTokens'];
 
 function useOwnTokens() {
-  return useQuery({ queryKey: TOKENS_KEY, queryFn: () => api.get<{ data: OwnToken[] }>('/auth/tokens').then((r) => r.data) });
+  // Back from signing a client in through another tab: the new connection shows up.
+  return useQuery({ queryKey: TOKENS_KEY, queryFn: () => api.get<{ data: OwnToken[] }>('/auth/tokens').then((r) => r.data), refetchOnWindowFocus: true });
 }
 
 export function McpPanel() {
@@ -228,12 +235,14 @@ function ConnectSection() {
   return (
     <section className="mb-10" aria-labelledby="mcp-connect">
       <SubHead title={<span id="mcp-connect">{t('mcp.connectTitle')}</span>} />
-      <SegmentedControl<McpClient>
-        value={client}
-        onChange={setClient}
-        className="min-h-8 w-full max-w-xl text-xs"
-        options={MCP_CLIENTS.map((key) => ({ key, label: key === 'other' ? t('mcp.clientOther') : CLIENT_NAMES[key] }))}
-      />
+      <div role="group" aria-label={t('mcp.clientPicker')}>
+        <SegmentedControl<McpClient>
+          value={client}
+          onChange={setClient}
+          className="min-h-8 w-full max-w-xl text-xs"
+          options={MCP_CLIENTS.map((key) => ({ key, label: key === 'other' ? t('mcp.clientOther') : CLIENT_NAMES[key] }))}
+        />
+      </div>
       <p className="mt-3 text-[13px] text-muted-foreground">{t(setup.step)}</p>
       <Snippet value={setup.snippet} primary className="mt-1.5" />
       <p className="mt-2 text-xs text-muted-foreground">{t('mcp.signInChoice')}</p>
@@ -253,52 +262,63 @@ function TokenConnect({ client, mcpUrl }: { client: McpClient; mcpUrl: string })
   const t = useT();
   const qc = useQueryClient();
   const agent = useMyAgent();
+  const own = useOwnTokens();
+  // Whom the token acts as is never guessed: until the agent lookup answers,
+  // nothing can be made, so a slow answer cannot turn into a token as you.
+  const agentKnown = agent.data !== undefined;
   const agentOn = !!agent.data?.isActive;
   const [picked, setPicked] = useState<ActsAs | null>(null);
   const actsAs: ActsAs = agentOn ? (picked ?? 'agent') : 'you';
   const [otherName, setOtherName] = useState('');
   const [days, setDays] = useState(String(MY_AGENT_TOKEN_DEFAULT_DAYS));
-  const [issued, setIssued] = useState<{ token: string; client: McpClient } | null>(null);
+  const [issued, setIssued] = useState<IssuedToken | null>(null);
   const clientName = client === 'other' ? otherName.trim() : CLIENT_NAMES[client];
 
   const issue = useMutation({
-    mutationFn: () => {
+    mutationFn: async (): Promise<IssuedToken> => {
       const body = { client: clientName, expiresInDays: days === 'never' ? null : Number(days) };
-      return actsAs === 'agent'
-        ? api.post<{ token: string }>('/my-agent/tokens', body)
-        : api.post<{ token: string }>('/auth/tokens/client', body);
+      const made = { client, clientName, actsAs };
+      if (actsAs === 'agent') {
+        const r = await api.post<{ token: string; tokenInfo: { id: string } }>('/my-agent/tokens', body);
+        return { ...made, id: r.tokenInfo.id, token: r.token };
+      }
+      const r = await api.post<{ id: string; token: string }>('/auth/tokens/client', body);
+      return { ...made, id: r.id, token: r.token };
     },
-    onSuccess: (r) => {
-      setIssued({ token: r.token, client });
+    onSuccess: (made) => {
+      setIssued(made);
       qc.invalidateQueries({ queryKey: TOKENS_KEY });
       qc.invalidateQueries({ queryKey: ['my-agent'] });
     },
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('mcp.issueFailed')),
   });
 
-  // The snippets follow the client picked above; a token issued for another
-  // client stays out of them, so it never lands in the wrong config.
-  const token = issued && issued.client === client ? issued.token : 'YOUR_TOKEN';
-  const setup = tokenSetup(client, mcpUrl, appOrigin(), token);
+  const shown = showIssued(issued, { client, clientName, actsAs }, own.data, agent.data?.tokens);
+  const setup = tokenSetup(client, mcpUrl, appOrigin(), shown ? issued.token : 'YOUR_TOKEN');
+  const whom = actsAs === 'agent' ? t('mcp.asAgent') : t('mcp.asYou');
 
   return (
     <div className="space-y-3 pb-1 pl-5 pt-3">
       <p className="text-xs text-muted-foreground">{t('mcp.tokenIntro')}</p>
       <div className="flex flex-wrap items-end gap-3">
-        {agentOn && (
-          <div>
-            <div className="mb-1 text-xs font-medium text-muted-foreground" id="mcp-works-as">{t('mcp.worksAs')}</div>
-            <SegmentedControl<ActsAs>
-              value={actsAs}
-              onChange={setPicked}
-              className="h-8 w-56 text-xs"
-              options={[
-                { key: 'agent', label: t('mcp.asAgent') },
-                { key: 'you', label: t('mcp.asYou') },
-              ]}
-            />
-          </div>
-        )}
+        <div>
+          <div className="mb-1 text-xs font-medium text-muted-foreground" id="mcp-works-as">{t('mcp.worksAs')}</div>
+          {agentOn ? (
+            <div role="group" aria-labelledby="mcp-works-as">
+              <SegmentedControl<ActsAs>
+                value={actsAs}
+                onChange={setPicked}
+                className="h-8 w-56 text-xs"
+                options={[
+                  { key: 'agent', label: t('mcp.asAgent') },
+                  { key: 'you', label: t('mcp.asYou') },
+                ]}
+              />
+            </div>
+          ) : (
+            <div className="flex h-8 items-center"><ActsAsLabel actsAs="you" /></div>
+          )}
+        </div>
         {client === 'other' && (
           <Field label={t('mcp.clientName')}>
             <Input value={otherName} maxLength={40} onChange={(e) => setOtherName(e.target.value)} placeholder={t('mcp.clientNamePh')} className="h-8 w-40 text-xs" />
@@ -310,15 +330,23 @@ function TokenConnect({ client, mcpUrl }: { client: McpClient; mcpUrl: string })
             <option value="never">{t('mcp.neverExpires')}</option>
           </Select>
         </Field>
-        <Button size="sm" variant="outline" className="h-8" disabled={!clientName || issue.isPending} onClick={() => issue.mutate()}>
-          {issue.isPending ? <Spinner /> : <KeyRound size={13} aria-hidden />} {clientName ? t('mcp.issueToken').replace('{client}', clientName) : t('mcp.createToken')}
+        <Button size="sm" variant="outline" className="h-8" disabled={!agentKnown || !clientName || issue.isPending} onClick={() => issue.mutate()}>
+          {issue.isPending || agent.isLoading ? <Spinner /> : <KeyRound size={13} aria-hidden />} {clientName ? t('mcp.issueToken').replace('{client}', clientName) : t('mcp.createToken')}
         </Button>
       </div>
-      {!agentOn && !agent.isLoading && <p className="text-xs text-muted-foreground">{t('mcp.asYouOnly')}</p>}
+      {agent.isError && !agentKnown ? (
+        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+          {t('mcp.agentLoadFailed')}
+          <Button size="xs" variant="ghost" onClick={() => agent.refetch()}>{t('common.retry')}</Button>
+        </p>
+      ) : agentKnown && !agentOn ? (
+        <p className="text-xs text-muted-foreground">{t('mcp.asYouOnly')}</p>
+      ) : null}
 
-      {issued && issued.client === client && (
+      {shown && (
         <div className="anim-pop-in space-y-2 rounded-lg border border-warning/40 bg-warning/5 p-3" role="status">
           <div className="flex items-center gap-1.5 text-xs font-medium text-warning"><TriangleAlert size={13} aria-hidden /> {t('mcp.tokenOnceWarning')}</div>
+          <div className="text-xs text-muted-foreground">{t('mcp.issuedFor').replace('{client}', issued.clientName).replace('{whom}', whom)}</div>
           <Snippet value={issued.token} />
           <div className="text-xs text-muted-foreground">{t('mcp.tokenThen')}</div>
         </div>
@@ -481,7 +509,10 @@ function ConnectionRow({ group, onDisconnect }: { group: ConnectionGroup; onDisc
   const t = useT();
   const locale = useLocale();
   const n = group.connections.length;
+  // Several connections of one client can share a day: the token's first
+  // characters tell them apart.
   const detail = (c: Connection) => [
+    n > 1 && c.prefix ? `${c.prefix}…` : null,
     c.createdAt ? t(c.via === 'signIn' ? 'mcp.signedIn' : 'mcp.tokenMade').replace('{date}', fmtDate(c.createdAt)) : null,
     c.lastUsedAt ? t('mcp.lastUsed').replace('{when}', fmtRelative(c.lastUsedAt)) : t('mcp.neverUsed'),
     c.expiresAt ? t('mcp.expires').replace('{date}', fmtDate(c.expiresAt)) : null,
@@ -499,7 +530,7 @@ function ConnectionRow({ group, onDisconnect }: { group: ConnectionGroup; onDisc
         <ul className="space-y-0.5">
           {group.connections.map((c) => (
             <li key={c.id} className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="min-w-0 flex-1 truncate" title={c.prefix ? `${c.prefix}…` : undefined}>{detail(c)}</span>
+              <span className="min-w-0 flex-1 break-words" title={c.prefix ? `${c.prefix}…` : undefined}>{detail(c)}</span>
               <Button
                 size="xs"
                 variant="ghost"
@@ -732,8 +763,16 @@ function Snippet({ value, primary, className }: { value: string; primary?: boole
         size="sm"
         variant={primary ? 'default' : 'outline'}
         className="shrink-0"
-        onClick={() => {
-          void navigator.clipboard?.writeText(value);
+        onClick={async () => {
+          // Plain-http installs and denied permissions have no clipboard: say so
+          // instead of a checkmark for nothing.
+          try {
+            if (!navigator.clipboard) throw new Error('no clipboard');
+            await navigator.clipboard.writeText(value);
+          } catch {
+            toast.error(t('mcp.copyFailed'));
+            return;
+          }
           setCopied(true);
           toast(t('mcp.copied'));
           setTimeout(() => setCopied(false), 1500);

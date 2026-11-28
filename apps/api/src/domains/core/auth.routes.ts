@@ -14,7 +14,7 @@ import { err } from '../../lib/errors';
 import { SESSION_COOKIE, requireSession, currentActor } from '../../core/auth';
 import { hashPassword, verifyPassword, generateToken, sha256 } from '../../lib/crypto';
 import { checkRate } from '../../lib/rate-limit';
-import { effectivePermissions } from '../../core/rbac';
+import { effectivePermissions, loadRolePermissions } from '../../core/rbac';
 import { writeActivity } from '../../core/activity';
 import {
   createPasswordReset, resolvePasswordReset, consumePasswordReset, sendPasswordResetEmail,
@@ -223,7 +223,9 @@ export function authRoutes() {
       // either comes first (and this refuses) or revokes this token too.
       const [me] = await tx.select().from(schema.users).where(eq(schema.users.id, actor.userId)).for('update');
       if (!me?.isActive || me.actorType !== 'user') throw err.forbidden('Only an active person can connect a client');
-      const perms = await effectivePermissions(me.roleId, null);
+      // Read on the transaction's own connection: another one from the pool
+      // could wait forever behind transactions like this one holding them all.
+      const perms = await loadRolePermissions(me.roleId, tx);
       await tx.insert(schema.apiTokens).values({
         id, userId: me.id, name: body.client, hash: sha256(raw), prefix: raw.slice(0, 12),
         scopes: [...perms], readOnly: false, expiresAt, forClient: true,

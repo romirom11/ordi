@@ -34,6 +34,8 @@ extendDict({
     'myAgent.namePh': 'e.g. Jarvis',
     'myAgent.create': 'Create agent',
     'myAgent.on': 'Switched on',
+    'myAgent.offState': 'Switched off',
+    'myAgent.switch': 'Agent switched on',
     'myAgent.offTitle': 'Switch your agent off?',
     'myAgent.offBody': 'Every client connected as it is disconnected for good: switching it back on needs each one connected again.',
     'myAgent.off': 'Switch off',
@@ -53,6 +55,8 @@ extendDict({
     'myAgent.namePh': 'напр. Jarvis',
     'myAgent.create': 'Створити агента',
     'myAgent.on': 'Увімкнено',
+    'myAgent.offState': 'Вимкнено',
+    'myAgent.switch': 'Агент увімкнений',
     'myAgent.offTitle': 'Вимкнути вашого агента?',
     'myAgent.offBody': 'Усі клієнти, підключені як він, буде відключено назавжди: після ввімкнення кожен доведеться підключити знову.',
     'myAgent.off': 'Вимкнути',
@@ -65,7 +69,8 @@ const KEY = ['my-agent'];
 
 /** The person's own agent, or null when they have none yet. */
 export function useMyAgent() {
-  return useQuery({ queryKey: KEY, queryFn: () => api.get<{ agent: MyAgent | null }>('/my-agent').then((r) => r.agent) });
+  // Back from signing a client in as the agent through another tab: it shows up.
+  return useQuery({ queryKey: KEY, queryFn: () => api.get<{ agent: MyAgent | null }>('/my-agent').then((r) => r.agent), refetchOnWindowFocus: true });
 }
 
 /** The catalog the MCP server serves, split by whether a tool changes anything. */
@@ -164,8 +169,8 @@ function AgentDetails({ agent, onChanged, onError }: { agent: MyAgent; onChanged
         />
         {/* The words are part of the control: the switch alone is a small target. */}
         <label className="ml-auto flex min-h-7 cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-          {t('myAgent.on')}
-          <Switch checked={agent.isActive} disabled={toggle.isPending} onChange={(v) => (v ? toggle.mutate(true) : setConfirmOff(true))} />
+          <span aria-hidden>{agent.isActive ? t('myAgent.on') : t('myAgent.offState')}</span>
+          <Switch checked={agent.isActive} disabled={toggle.isPending} onChange={(v) => (v ? toggle.mutate(true) : setConfirmOff(true))} label={t('myAgent.switch')} />
         </label>
       </div>
       <p className="mt-2 text-xs text-muted-foreground">{agent.isActive ? t('myAgent.summary') : t('myAgent.summaryOff')}</p>
