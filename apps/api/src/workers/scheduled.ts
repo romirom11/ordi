@@ -309,7 +309,7 @@ export const OAUTH_IDLE_MS = 90 * 86_400_000;
 
 /**
  * Clients repeat the OAuth sign-in (a new registration, a new consent) and
- * every consent keeps its own connection, so Profile → MCP & API would fill up
+ * every consent keeps its own connection, so Profile → Connections would fill up
  * with tokens nobody holds. Revokes tokens issued through the OAuth exchange,
  * for a person or their agent, that were never used within a day of being
  * issued or have not been used for 90 days. Every other token – made by

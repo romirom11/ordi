@@ -686,19 +686,57 @@ export function Tabs<T extends string>({ tabs, value, onChange, className }: {
 }
 
 /** Segmented control with sliding pill (transitions.dev №16, CSS-grid variant). */
-export function SegmentedControl<T extends string>({ options, value, onChange, className }: {
+/**
+ * A row of choices with a thumb that slides to the picked one. By default the
+ * segments share the width equally. With `fit` each segment is as wide as its
+ * label plus the same padding, so short and long names sit evenly spaced and
+ * the control is only as wide as they are; where the screen is narrower than
+ * that, it scrolls sideways instead of spilling out.
+ */
+export function SegmentedControl<T extends string>({ options, value, onChange, className, fit }: {
   options: { key: T; label: ReactNode; icon?: ReactNode; title?: string }[]; value: T; onChange: (v: T) => void; className?: string;
+  fit?: boolean;
 }) {
   const idx = Math.max(0, options.findIndex((o) => o.key === value));
+  const root = useRef<HTMLDivElement>(null);
+  // Segments of their own width: the thumb follows the picked one's box.
+  const [box, setBox] = useState<{ left: number; width: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!fit || !root.current) return;
+    const el = root.current;
+    const measure = () => {
+      const item = el.querySelectorAll<HTMLElement>(':scope > .ui-seg-item')[idx];
+      if (item) setBox({ left: item.offsetLeft, width: item.offsetWidth });
+    };
+    measure();
+    // Labels change width when a font loads or the language switches.
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fit, idx, options.length]);
+
+  const thumbStyle: CSSProperties | undefined = fit
+    ? (box ? { width: box.width, transform: `translateX(${box.left}px)` } : { display: 'none' })
+    : { width: `calc((100% - 4px) / ${options.length})`, transform: `translateX(calc(${idx} * 100% + 2px))` };
+
   return (
     <div
-      className={cn('ui-seg relative inline-grid select-none items-stretch rounded-md border border-border bg-muted/60 p-0.5', className)}
-      style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
+      ref={root}
+      className={cn(
+        'ui-seg relative select-none items-stretch rounded-md border border-border bg-muted/60 p-0.5',
+        fit ? 'inline-flex max-w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden' : 'inline-grid',
+        className,
+      )}
+      style={fit ? undefined : { gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
     >
       <span
         aria-hidden
-        className="ui-seg-thumb absolute bottom-0.5 top-0.5 rounded-[5px] bg-card shadow-sm ring-1 ring-border transition-transform duration-[250ms] ease-smooth-out"
-        style={{ width: `calc((100% - 4px) / ${options.length})`, transform: `translateX(calc(${idx} * 100% + 2px))` }}
+        className={cn(
+          'ui-seg-thumb absolute bottom-0.5 top-0.5 rounded-[5px] bg-card shadow-sm ring-1 ring-border transition-transform duration-[250ms] ease-smooth-out',
+          fit && 'left-0 transition-[transform,width]',
+        )}
+        style={thumbStyle}
       />
       {options.map((o) => (
         <button
@@ -707,13 +745,22 @@ export function SegmentedControl<T extends string>({ options, value, onChange, c
           title={o.title}
           aria-label={typeof o.label === 'string' ? o.label : o.title}
           aria-pressed={value === o.key}
-          onClick={() => onChange(o.key)}
+          onClick={(e) => { onChange(o.key); if (fit) e.currentTarget.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }}
           className={cn(
-            'ui-seg-item relative z-10 flex items-center justify-center gap-1 rounded px-2 py-1 text-xs transition-colors duration-150',
+            'ui-seg-item relative z-10 flex items-center justify-center gap-1 rounded py-1 text-xs transition-colors duration-150',
+            fit ? 'shrink-0 whitespace-nowrap px-3' : 'px-2',
             value === o.key ? 'font-medium text-foreground' : 'text-muted-foreground hover:text-foreground',
           )}
         >
-          {o.icon} {o.label}
+          {o.icon}{' '}
+          {fit ? (
+            // The picked label turns medium: its bold twin holds the width, so
+            // no segment shifts its neighbours when the choice changes.
+            <span className="inline-grid">
+              <span aria-hidden className="invisible col-start-1 row-start-1 font-medium">{o.label}</span>
+              <span className="col-start-1 row-start-1">{o.label}</span>
+            </span>
+          ) : o.label}
         </button>
       ))}
     </div>

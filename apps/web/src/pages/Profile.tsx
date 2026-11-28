@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../lib/api';
 import { useMe } from '../lib/auth';
@@ -38,7 +38,7 @@ extendDict({
     'profile.notifications': 'Notifications',
     'profile.notificationsDesc': 'What reaches you by email, and the sound on this device.',
     'profile.securityDesc': 'Your password and the second factor for signing in.',
-    'profile.mcp': 'MCP & API',
+    'profile.connections': 'Connections',
   },
   uk: {
     'profile.profileInfo': 'Профіль',
@@ -63,7 +63,7 @@ extendDict({
     'profile.notifications': 'Сповіщення',
     'profile.notificationsDesc': 'Що приходить вам на пошту і звук на цьому пристрої.',
     'profile.securityDesc': 'Пароль і другий фактор для входу.',
-    'profile.mcp': 'MCP і API',
+    'profile.connections': 'Підключення',
   },
 });
 
@@ -92,22 +92,32 @@ const NOTIFICATION_TYPES: { type: string; label: string }[] = [
  * column (profile, preferences, thirteen notification switches, password,
  * tokens, 2FA) – the thing you came for was always a scroll away. The nav
  * mirrors Settings, so both pages read the same; this one is only ever about
- * the signed-in person, which is why personal MCP/API access lives here.
+ * the signed-in person, which is why personal MCP/API access – Connections –
+ * lives here.
  */
 const SECTIONS = [
   { id: 'account', label: 'profile.profileInfo', icon: UserRound },
   { id: 'notifications', label: 'profile.notifications', icon: Bell },
   { id: 'security', label: 'profile.security', icon: ShieldCheck },
-  { id: 'mcp', label: 'profile.mcp', icon: Bot },
+  { id: 'connections', label: 'profile.connections', icon: Bot },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]['id'];
 
 /** The default section keeps the bare /profile url (Cmd/Ctrl+, lands there). */
 const sectionPath = (id: SectionId) => (id === 'account' ? '/profile' : `/profile/${id}`);
 
+/** Old addresses of a section that was renamed: links and bookmarks still land on it. */
+const SECTION_ALIASES: Record<string, SectionId> = { mcp: 'connections' };
+
 export function ProfilePage({ section }: { section?: string }) {
   const t = useT();
-  const active = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0];
+  const navigate = useNavigate();
+  const alias = section ? SECTION_ALIASES[section] : undefined;
+  useEffect(() => {
+    if (alias) navigate(sectionPath(alias), { replace: true });
+  }, [alias]); // eslint-disable-line react-hooks/exhaustive-deps
+  const id = alias ?? section;
+  const active = SECTIONS.find((s) => s.id === id) ?? SECTIONS[0];
   usePageTitle(active.id === 'account' ? t('profile.title') : `${t('profile.title')} · ${t(active.label)}`);
 
   return (
@@ -164,7 +174,7 @@ export function ProfilePage({ section }: { section?: string }) {
                 </div>
               </>
             )}
-            {active.id === 'mcp' && <McpPanel />}
+            {active.id === 'connections' && <McpPanel />}
           </PageBody>
         </div>
       </div>

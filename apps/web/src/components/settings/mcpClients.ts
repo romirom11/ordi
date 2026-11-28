@@ -1,5 +1,5 @@
 /**
- * Profile → MCP & API → Connect a client: what to paste into each client.
+ * Profile → Connections → Connect a client: what to paste into each client.
  * Signing in through the browser (OAuth) is the normal way and needs only
  * ordi's address; a token is the fallback for a client that cannot open a
  * browser, sent as a bearer header – or, for a client without remote MCP

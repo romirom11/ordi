@@ -92,7 +92,7 @@ extendDict({
     'agents.list': 'Agents',
     'agents.listDesc': 'Each can be assigned tasks in the projects it belongs to.',
     'agents.ownAgentPrefix': 'Your own agent for Claude Code or Codex is in',
-    'agents.ownAgentLink': 'Profile → MCP & API',
+    'agents.ownAgentLink': 'Profile → Connections',
     'agents.kind.ordi': 'Runs in ordi',
     'agents.kind.outside': 'Connects from outside',
     'agents.kindHint.ordi': 'Uses Claude or Codex to work on tasks and opens pull requests for review.',
@@ -226,7 +226,7 @@ extendDict({
     'agents.list': 'Агенти',
     'agents.listDesc': 'Кожному можна призначати задачі в проєктах, до яких його додано.',
     'agents.ownAgentPrefix': 'Ваш власний агент для Claude Code чи Codex – у',
-    'agents.ownAgentLink': 'Профіль → MCP і API',
+    'agents.ownAgentLink': 'Профіль → Підключення',
     'agents.kind.ordi': 'Працює в ordi',
     'agents.kind.outside': 'Підключається ззовні',
     'agents.kindHint.ordi': 'Береться за задачі через Claude або Codex і відкриває пулреквести на рев’ю.',
@@ -961,7 +961,7 @@ export function AgentsPanel() {
       <section className="mt-10" aria-labelledby="agents-list">
         <SubHead
           title={<span id="agents-list">{t('agents.list')}</span>}
-          desc={<>{t('agents.listDesc')} {t('agents.ownAgentPrefix')} <Link to="/profile/mcp" className="text-foreground underline underline-offset-2 hover:no-underline">{t('agents.ownAgentLink')}</Link>.</>}
+          desc={<>{t('agents.listDesc')} {t('agents.ownAgentPrefix')} <Link to="/profile/connections" className="text-foreground underline underline-offset-2 hover:no-underline">{t('agents.ownAgentLink')}</Link>.</>}
           actions={<Button ref={newAgentRef} size="sm" onClick={() => setKindOpen(true)}><Plus size={14} aria-hidden /> {t('agents.new')}</Button>}
         />
         {noWorker && (

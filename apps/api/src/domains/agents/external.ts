@@ -40,7 +40,7 @@ export interface ExternalAgentView {
   roleName: string;
   ownerUserId: string;
   ownerName: string | null;
-  /** 'team' – a shared bot; 'personal' – someone's own agent (Profile → MCP & API). */
+  /** 'team' – a shared bot; 'personal' – someone's own agent (Profile → Connections). */
   kind: 'team' | 'personal';
   projects: { id: string; key: string; name: string }[];
   /** Projects it is on that the viewer cannot open. */
@@ -427,7 +427,7 @@ export async function handOverOwnedAgents(
   return owned.map((a) => ({ id: a.id, name: a.name, outcome: moved.includes(a.id) ? 'transferred' as const : 'disabled' as const }));
 }
 
-// ── A person's own agent (Profile → MCP & API) ──
+// ── A person's own agent (Profile → Connections) ──
 
 /** The caller's own agent, or null. */
 export async function getMyAgent(actor: Actor): Promise<ExternalAgentView | null> {

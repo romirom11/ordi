@@ -321,7 +321,7 @@ const GROUPS: NavGroup[] = [
       { id: 'invoices', label: 'settings.invoices', perm: 'finance.settings', icon: Receipt },
       { id: 'email', label: 'email.title', perm: 'settings.manage', icon: Mail },
       { id: 'integrations', label: 'settings.integrations', perm: 'integrations.manage', icon: Plug },
-      // Personal MCP/API access lives on the profile (/profile/mcp): everything
+      // Personal MCP/API access lives on the profile (/profile/connections): everything
       // here configures the workspace, and a personal page among them read as
       // one more workspace-wide switch.
     ],
@@ -386,7 +386,7 @@ export function SettingsPage({ section }: { section?: string }) {
   const requested = section ?? 'workspace';
   // Old links and bookmarks to the personal MCP page land where it lives now.
   useEffect(() => {
-    if (section === 'mcp') navigate('/profile/mcp', { replace: true });
+    if (section === 'mcp') navigate('/profile/connections', { replace: true });
   }, [section]); // eslint-disable-line react-hooks/exhaustive-deps
   const active = flat.find((i) => i.id === requested) ?? flat[0];
   // PageHeader used to name the tab; the slim trail bar does it explicitly now.
