@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { timerElapsedAt, type ActiveTimer } from './timer';
+import { timerElapsedAt, timerLabel, type ActiveTimer } from './timer';
 
 const timer: ActiveTimer = { taskId: 't1', startedAt: '2026-10-30T03:16:58Z', elapsedSeconds: 0 };
 
@@ -22,5 +22,18 @@ describe('timer elapsed time', () => {
     expect(timerElapsedAt(timer, 900_000, 900_000)).toBe(0);
     expect(timerElapsedAt({ ...timer, elapsedSeconds: 30 }, 900_000, 899_000)).toBe(30);
     expect(timerElapsedAt(null, 900_000, 950_000)).toBe(0);
+  });
+});
+
+describe('timer label', () => {
+  const t = (key: string) => (key === 'time.privateProject' ? 'Private project' : key);
+
+  it('names the task by its ref', () => {
+    expect(timerLabel({ ...timer, ref: 'OPN-4', title: 'Fix' }, t)).toBe('OPN-4');
+    expect(timerLabel(timer, t)).toBeNull();
+  });
+
+  it('says only "private project" for a timer on a project closed to you', () => {
+    expect(timerLabel({ ...timer, taskId: null, ref: null, title: null, projectHidden: true }, t)).toBe('Private project');
   });
 });

@@ -60,9 +60,10 @@ extendDict({
 
 export interface TimeEntry {
   id: string;
-  taskId: string;
+  /** Null, with the project and task names, when projectHidden. */
+  taskId: string | null;
   userId: string;
-  projectId: string;
+  projectId: string | null;
   startedAt: string;
   durationSeconds: number | string;
   note?: string | null;
@@ -74,6 +75,18 @@ export interface TimeEntry {
   projectName?: string | null;
   projectKey?: string | null;
   userName?: string | null;
+  /**
+   * Your own time on a project you cannot open (a task moved into a private
+   * project, or you came off the project): the API leaves out which project
+   * and task, and the entry shows as on a private project.
+   */
+  projectHidden?: boolean;
+}
+
+/** What an entry is on: its task, or that it is on a project closed to you. */
+export function entryTitle(entry: TimeEntry, t: (key: string) => string): string {
+  if (entry.projectHidden) return t('time.privateProject');
+  return entry.taskTitle ?? entry.note ?? t('time.entry');
 }
 
 /* ───────────────────────── Helpers ───────────────────────── */
@@ -163,7 +176,7 @@ export function TimeEntryRow({ entry, onOpen, showUser, showDay, showProject = t
     timeRange(entry),
     showProject ? entry.projectName : null,
   ].filter(Boolean).join(' · ');
-  const note = entry.taskTitle ? entry.note : null;
+  const note = entry.taskTitle || entry.projectHidden ? entry.note : null;
   return (
     <button
       type="button"
@@ -174,7 +187,7 @@ export function TimeEntryRow({ entry, onOpen, showUser, showDay, showProject = t
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-baseline gap-2">
           {entry.taskRef && <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{entry.taskRef}</span>}
-          <span className="truncate text-[13px] font-medium">{entry.taskTitle ?? entry.note ?? t('time.entry')}</span>
+          <span className={cn('truncate text-[13px] font-medium', entry.projectHidden && 'text-muted-foreground')}>{entryTitle(entry, t)}</span>
         </div>
         {(note || meta) && (
           <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs">
@@ -293,7 +306,7 @@ export function TimeEntryPanel({ entry: initial, onClose }: { entry: TimeEntry |
         onClose={onClose}
         width={480}
         icon={<Clock size={16} />}
-        title={entry.taskTitle ?? t('time.entry')}
+        title={entry.projectHidden ? t('time.privateProject') : entry.taskTitle ?? t('time.entry')}
         subtitle={[entry.taskRef, entry.projectName].filter(Boolean).join(' · ')}
       >
         {q.isError && q.error instanceof ApiError && q.error.status === 404 ? (
@@ -305,15 +318,18 @@ export function TimeEntryPanel({ entry: initial, onClose }: { entry: TimeEntry |
                 <div className="font-mono text-[32px] font-semibold leading-none tabular-nums">{fmtDur(seconds)}</div>
                 <div className="mt-1.5 text-xs text-muted-foreground">{fmtLongDay(entryDay(entry))}</div>
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={(e) => { onClose(); open(`/projects/${entry.projectId}/tasks/${entry.taskId}`, e); }}
-                onAuxClick={(e) => open(`/projects/${entry.projectId}/tasks/${entry.taskId}`, e)}
-              >
-                {t('time.openTask')} <ArrowUpRight size={13} />
-              </Button>
+              {entry.projectId && entry.taskId && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={(e) => { onClose(); open(`/projects/${entry.projectId}/tasks/${entry.taskId}`, e); }}
+                  onAuxClick={(e) => open(`/projects/${entry.projectId}/tasks/${entry.taskId}`, e)}
+                >
+                  {t('time.openTask')} <ArrowUpRight size={13} />
+                </Button>
+              )}
             </div>
+            {entry.projectHidden && <p className="text-xs text-muted-foreground">{t('time.privateProjectHint')}</p>}
 
             {/* What the form below cannot change; the rest shows only to readers. */}
             {(!editable || range || !mine || invoiced) && (

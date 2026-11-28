@@ -235,7 +235,7 @@ function TimerHero() {
                   className="font-medium text-foreground underline-offset-2 hover:underline disabled:no-underline"
                 >
                   {timer.ref && <span className="font-mono text-muted-foreground">{timer.ref} </span>}
-                  {timer.title ?? timer.taskId}
+                  {timer.projectHidden ? t('time.privateProject') : timer.title ?? timer.taskId}
                 </button>
                 {timer.note && <span> · {timer.note}</span>}
               </>

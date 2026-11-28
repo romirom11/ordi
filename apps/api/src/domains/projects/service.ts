@@ -21,7 +21,7 @@ import { assertVersion } from '../../core/locking';
 import {
   assertProject, accessibleProjectIds, effectiveProjectRole, effectiveProjectRolesIncludingDeleted, userCanOpenProject,
 } from '../../core/access';
-import { closeProjectTimers } from '../time/service';
+import { closeProjectTimers, closeTimersOfOutsiders } from '../time/service';
 import { cancelProjectRuns } from '../agents/runs';
 import { agentAssignRefusals, agentProfilesAmong, assertCanAssignAgents } from '../agents/profiles';
 import { assertNotPersonalAgent, personalAgentIdsOf } from '../agents/external';
@@ -1153,6 +1153,9 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
     // first insert takes the target project's task-number counter, so the
     // move does not hold it while it waits for those reads.
     for (const t of subtree) { await targetStatusOf(t.statusId); await reporterFor(t.reporterId); }
+    // Someone timing one of these tasks whose reach ends at the target stops
+    // now, the time saved; the entry then moves with the task below.
+    await closeTimersOfOutsiders(tx, actor, subtree.map((t) => t.id), targetProjectId);
     for (const t of subtree) {
       lastPos = appendPosition(lastPos);
       const cf = Object.fromEntries(

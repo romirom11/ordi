@@ -11,6 +11,13 @@ export interface ActiveTimer {
   note?: string | null;
   ref?: string | null;
   title?: string | null;
+  /** Timing a task on a project you can no longer open: taskId, ref and title are left out. */
+  projectHidden?: boolean;
+}
+
+/** The label a running timer goes by: its task ref, or that it is on a private project. */
+export function timerLabel(timer: ActiveTimer, t: (key: string) => string): string | null {
+  return timer.projectHidden ? t('time.privateProject') : timer.ref ?? null;
 }
 
 /** Advance only from the latest server sample, never from component mount. */
@@ -59,6 +66,8 @@ export function useStopTimer() {
     mutationFn: (_timer: ActiveTimer) => api.post('/time/timer/stop'),
     onSuccess: (_result, stopped) => {
       refresh();
+      // A timer on a project closed to you cannot be started again.
+      if (!stopped.taskId) { toast(t('time.timerStopped', 'Timer stopped')); return; }
       toast.action(t('time.timerStopped', 'Timer stopped'), {
         label: t('time.resumeTimer', 'Resume timer'),
         onSelect: () => {

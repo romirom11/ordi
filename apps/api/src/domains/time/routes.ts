@@ -81,7 +81,8 @@ export function timeRoutes() {
   app.patch('/time/entries/:id', guardAny('time.track', 'time.manage'), async (c) => {
     const body = timeEntryUpdateSchema.parse(await c.req.json());
     const actor = currentActor(c);
-    return c.json(withoutCost(actor, await svc.updateEntry(actor, c.req.param('id'), body, hasPerm(actor, 'time.manage'))));
+    const entry = await svc.updateEntry(actor, c.req.param('id'), body, hasPerm(actor, 'time.manage'), hasPerm(actor, 'time.read_all'));
+    return c.json(withoutCost(actor, await svc.shownRawEntry(actor, entry, hasPerm(actor, 'time.read_all'))));
   });
 
   app.delete('/time/entries/:id', guardAny('time.track', 'time.manage'), async (c) => {
