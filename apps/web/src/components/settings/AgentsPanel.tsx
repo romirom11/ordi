@@ -1,9 +1,11 @@
 /**
  * Settings → Agents (plan 2026-09-05-001, R1-R2, R7, R10, R21, R49, R52).
  *
- * Three sections, in the order an admin needs them: the workspace Claude
- * connection (without a credential nothing can run), the agents themselves,
- * and the worker that executes them. Everything here needs `agents.manage`.
+ * In the order an admin needs them: the workspace Claude connection (without
+ * a credential no agent in ordi can start), then every agent in one list –
+ * those ordi runs and those that connect from outside under their own name –
+ * and, collapsed, the technical details of the workers that run them.
+ * Everything here needs `agents.manage`.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -12,18 +14,20 @@ import {
   EXECUTABLE_AGENT_RUNTIMES,
 } from '@ordi/shared';
 import {
-  Bot, Cpu, KeyRound, MoreHorizontal, Plus, RotateCcw, ShieldCheck, Trash2, Server,
+  Bot, ChevronRight, Cpu, KeyRound, MoreHorizontal, Plug, Plus, RotateCcw, ShieldCheck, Trash2, Server, TriangleAlert,
 } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { useCan } from '../../lib/auth';
 import { useAgents, useMcpConnectors, useUsersLookup, type AgentLookup } from '../../lib/queries';
 import {
-  Avatar, Badge, Button, Card, Checkbox, EmptyState, Input, SegmentedControl, Select, Skeleton,
+  Avatar, Badge, Button, Card, Checkbox, Input, SegmentedControl, Select, Skeleton,
   Spinner, Switch, Textarea, cn, fmtDate, fmtRelative,
 } from '../ui';
 import { Dialog, ConfirmDialog, DropdownMenu, MenuItem, toast } from '../overlays';
-import { SectionHead, Field, RowList, AnimatedRow, StatusChip } from './primitives';
-import { ExternalAgentsSection } from './ExternalAgentsSection';
+import { SectionHead, SubHead, Field, RowList, StatusChip, Disclosure } from './primitives';
+import { CreateTeamBotDialog, TeamBotDialog, TeamBotSummary, useTeamBots } from './ExternalAgentsSection';
+import { mergeAgents, noWorkerOnline, type AgentKind } from './agentList';
+import { Link } from '../../lib/router';
 import { useT, extendDict } from '../../lib/i18n';
 
 extendDict({
@@ -31,10 +35,10 @@ extendDict({
     'agents.desc': 'AI agents work like team members: assign them a task and they open a pull request for review.',
     // Claude connection
     'agents.connection': 'Claude connection',
-    'agents.connectionDesc': 'The credential every agent runs on. A subscription token and an API key are equal choices.',
+    'agents.connectionDesc': 'The Claude account the agents that run in Ordi use. A subscription token and an API key work equally well.',
     'agents.addCredential': 'Add credential',
     'agents.noCredentials': 'No credential yet',
-    'agents.noCredentialsHint': 'Add a Claude subscription token or an API key so agents can run.',
+    'agents.noCredentialsHint': 'Add a Claude subscription token or an API key so the agents that run in Ordi can start.',
     'agents.kind.subscription': 'Subscription',
     'agents.kind.api_key': 'API key',
     'agents.slot.primary': 'Primary',
@@ -85,10 +89,22 @@ extendDict({
     'agents.openaiApiKeyHelp': 'An OpenAI API key from platform.openai.com. For a custom gateway, add its Base URL below.',
     // Agents
     'agents.list': 'Agents',
-    'agents.listDesc': 'Each agent is a workspace member with a role, a project list and its own limits.',
+    'agents.listDesc': 'Each can be assigned tasks in the projects it belongs to.',
+    'agents.ownAgentPrefix': 'Your own agent for Claude Code or Codex is in',
+    'agents.ownAgentLink': 'Profile → MCP & API',
+    'agents.kind.ordi': 'Runs in Ordi',
+    'agents.kind.outside': 'Connects from outside',
+    'agents.kindHint.ordi': 'Works on the Claude connection above: assign it a task and it opens a pull request for review.',
+    'agents.kindHint.outside': 'Works elsewhere – Claude Code, Codex, a bot on a server – and connects over MCP under its own name.',
+    'agents.newKindTitle': 'Which kind of agent?',
+    'agents.actions': 'Actions',
+    'agents.botOn': 'Switched on',
+    'agents.manage': 'Manage',
+    'agents.technical': 'Technical details',
+    'agents.noWorkerShort': 'Agents that run in Ordi cannot start: no worker is online. Technical details below says how to fix it.',
     'agents.new': 'New agent',
     'agents.none': 'No agents yet',
-    'agents.noneHint': 'Create an agent and add it to a project to assign it work.',
+    'agents.noneHint': 'Create one with New agent, then add it to a project to assign it work.',
     'agents.ready': 'Ready',
     'agents.needsCredential': 'Credential required',
     'agents.stateDisabled': 'Disabled',
@@ -97,7 +113,9 @@ extendDict({
     'agents.enabledToast': 'Agent enabled',
     'agents.disabledToast': 'Agent disabled',
     'agents.projectsCount': '{n} projects',
+    'agents.projectsCount.one': '{n} project',
     'agents.connectorsCount': '{n} connectors',
+    'agents.connectorsCount.one': '{n} connector',
     'agents.editTitle': 'Edit agent',
     'agents.newTitle': 'New agent',
     'agents.created': 'Agent created',
@@ -153,10 +171,10 @@ extendDict({
     'agents.desc': 'AI-агенти працюють як учасники команди: призначте задачу – і вони відкриють пулреквест на рев’ю.',
     // Claude connection
     'agents.connection': 'Доступ Claude',
-    'agents.connectionDesc': 'Обліковий доступ, на якому працюють агенти. Токен підписки та API-ключ – рівноцінні варіанти.',
+    'agents.connectionDesc': 'Обліковий запис Claude, яким користуються агенти, що працюють в Орді. Токен підписки та API-ключ однаково підходять.',
     'agents.addCredential': 'Додати доступ',
     'agents.noCredentials': 'Доступу ще немає',
-    'agents.noCredentialsHint': 'Додайте токен підписки Claude або API-ключ, щоб агенти могли працювати.',
+    'agents.noCredentialsHint': 'Додайте токен підписки Claude або API-ключ, щоб агенти, що працюють в Орді, могли стартувати.',
     'agents.kind.subscription': 'Підписка',
     'agents.kind.api_key': 'API-ключ',
     'agents.slot.primary': 'Основний',
@@ -207,10 +225,22 @@ extendDict({
     'agents.openaiApiKeyHelp': 'API-ключ OpenAI з platform.openai.com. Для кастомного гейтвею додайте Base URL нижче.',
     // Agents
     'agents.list': 'Агенти',
-    'agents.listDesc': 'Кожен агент – це учасник воркспейсу з роллю, переліком проєктів і власними лімітами.',
+    'agents.listDesc': 'Кожному можна призначати задачі в проєктах, до яких його додано.',
+    'agents.ownAgentPrefix': 'Ваш власний агент для Claude Code чи Codex – у',
+    'agents.ownAgentLink': 'Профіль → MCP і API',
+    'agents.kind.ordi': 'Працює в Орді',
+    'agents.kind.outside': 'Підключається ззовні',
+    'agents.kindHint.ordi': 'Працює на доступі Claude вище: призначте йому задачу – і він відкриє пулреквест на рев’ю.',
+    'agents.kindHint.outside': 'Працює деінде – Claude Code, Codex, бот на сервері – і підключається через MCP під власним іменем.',
+    'agents.newKindTitle': 'Який агент створити?',
+    'agents.actions': 'Дії',
+    'agents.botOn': 'Увімкнений',
+    'agents.manage': 'Керувати',
+    'agents.technical': 'Технічні подробиці',
+    'agents.noWorkerShort': 'Агенти, що працюють в Орді, не можуть стартувати: жоден виконавець не на звʼязку. Як це виправити – у «Технічних подробицях» нижче.',
     'agents.new': 'Новий агент',
     'agents.none': 'Агентів ще немає',
-    'agents.noneHint': 'Створіть агента й додайте його до проєкту, щоб призначати йому роботу.',
+    'agents.noneHint': 'Створіть його кнопкою «Новий агент», потім додайте до проєкту, щоб призначати йому роботу.',
     'agents.ready': 'Готовий',
     'agents.needsCredential': 'Потрібен доступ',
     'agents.stateDisabled': 'Вимкнений',
@@ -219,7 +249,9 @@ extendDict({
     'agents.enabledToast': 'Агента увімкнено',
     'agents.disabledToast': 'Агента вимкнено',
     'agents.projectsCount': 'проєктів: {n}',
+    'agents.projectsCount.one': 'проєктів: {n}',
     'agents.connectorsCount': 'конекторів: {n}',
+    'agents.connectorsCount.one': 'конекторів: {n}',
     'agents.editTitle': 'Редагування агента',
     'agents.newTitle': 'Новий агент',
     'agents.created': 'Агента створено',
@@ -883,146 +915,186 @@ export function AgentsPanel() {
   );
 
   const openAgent = (agent: AgentLookup | null) => { setEditing(agent); setAgentOpen(true); };
+  const botsQ = useTeamBots();
+  const [kindOpen, setKindOpen] = useState(false);
+  const [creatingBot, setCreatingBot] = useState(false);
+  const [botId, setBotId] = useState<string | null>(null);
+  const entries = mergeAgents(agents, botsQ.data ?? []);
+  const listLoading = agentsQ.isLoading || botsQ.isLoading;
+  const noWorker = noWorkerOnline(overview);
 
   return (
     <div>
       <SectionHead title={t('settings.agents')} desc={t('agents.desc')} />
 
-      {/* ── Claude connection ── */}
-      <div className="mb-2 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">{t('agents.connection')}</div>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t('agents.connectionDesc')}</p>
-        </div>
-        <Button size="sm" variant="outline" onClick={() => setCredOpen(true)}><Plus size={14} /> {t('agents.addCredential')}</Button>
-      </div>
-
-      {credsQ.isLoading ? (
-        <div className="space-y-2">{[0, 1].map((i) => <Skeleton key={i} className="h-20 w-full" />)}</div>
-      ) : credentials.length === 0 ? (
-        <RowList><EmptyState icon={<KeyRound size={18} />} title={t('agents.noCredentials')} hint={t('agents.noCredentialsHint')} /></RowList>
-      ) : (
-        <div className="space-y-2">
-          {credentials.map((c) => <CredentialCard key={c.id} cred={c} users={users} />)}
-        </div>
-      )}
-
-      {/* ── Agents ── */}
-      <div className="mb-2 mt-8 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">{t('agents.list')}</div>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t('agents.listDesc')}</p>
-        </div>
-        <Button size="sm" onClick={() => openAgent(null)}><Plus size={14} /> {t('agents.new')}</Button>
-      </div>
-
-      {agentsQ.isLoading ? (
-        <div className="space-y-2">{[0, 1].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
-      ) : agents.length === 0 ? (
-        <RowList><EmptyState icon={<Bot size={18} />} title={t('agents.none')} hint={t('agents.noneHint')} /></RowList>
-      ) : (
-        <RowList>
-          {agents.map((a, i) => (
-            <AnimatedRow key={a.id} index={i} className="flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-0">
-              <Avatar name={a.name} src={a.avatar} size={28} agent />
-              <button
-                type="button"
-                onClick={() => openAgent(a)}
-                className="min-w-0 flex-1 text-left"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-[13px] font-medium">{a.name}</span>
-                  <Badge>{t(`agents.runtime.${a.runtime}`, a.runtime)}</Badge>
-                </div>
-                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-faint">
-                  <span>{a.roleName || '–'}</span>
-                  <span>· {t(`agents.policy.${a.assignPolicy}`, a.assignPolicy)}</span>
-                  <span>· {fill(t('agents.connectorsCount'), { n: a.connectorIds.length })}</span>
-                  <span>· {fill(t('agents.projectsCount'), { n: a.projectIds.length })}</span>
-                  {a.connectorIds.length > 0 && connectorName.size > 0 && (
-                    <span className="truncate">
-                      · {a.connectorIds.map((id) => connectorName.get(id)).filter(Boolean).join(', ')}
-                    </span>
-                  )}
-                </div>
-              </button>
-              <StatusChip tone={!a.enabled || !a.isActive ? 'off' : a.dispatchable ? 'ok' : 'muted'}>
-                {!a.enabled || !a.isActive ? t('agents.stateDisabled') : a.dispatchable ? t('agents.ready') : t('agents.needsCredential')}
-              </StatusChip>
-              <DropdownMenu align="end" trigger={<Button variant="ghost" size="sm" className="h-7 w-7 px-0"><MoreHorizontal size={15} /></Button>}>
-                <MenuItem icon={<Bot size={14} />} onSelect={() => openAgent(a)}>{t('common.edit')}</MenuItem>
-                {a.enabled && a.isActive
-                  ? <MenuItem icon={<Trash2 size={14} />} danger onSelect={() => setActive.mutate({ id: a.id, enable: false })}>{t('agents.disable')}</MenuItem>
-                  : <MenuItem icon={<RotateCcw size={14} />} onSelect={() => setActive.mutate({ id: a.id, enable: true })}>{t('agents.enable')}</MenuItem>}
-              </DropdownMenu>
-            </AnimatedRow>
-          ))}
-        </RowList>
-      )}
-
-      {/* ── External agents: run elsewhere, connect over MCP ── */}
-      <ExternalAgentsSection />
-
-      {/* ── Workers ── */}
-      <div className="mb-2 mt-8">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">{t('agents.workers')}</div>
-        <p className="mt-0.5 text-xs text-muted-foreground">{t('agents.workersDesc')}</p>
-      </div>
-
-      {overviewQ.isLoading ? (
-        <Skeleton className="h-24 w-full" />
-      ) : overview ? (
-        <Card className="p-4">
-          {/* The api's own worker being off is the normal shape of a deployment
-              with a separate agent-worker container; it is only a problem when
-              no worker at all is online. */}
-          {!overview.workerEnabled && !overview.workers.some((w) => w.online) && (
-            <p className="mb-3 rounded-md border border-warning/40 bg-warning/5 p-2.5 text-xs text-warning">{t('agents.workerDisabled')}</p>
-          )}
-          <div className="flex flex-wrap gap-2">
-            {overview.runtimes.map((r) => (
-              <span key={r.key} className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs">
-                <Cpu size={13} className="text-muted-foreground" />
-                {t(`agents.runtime.${r.key}`, r.key)}
-                {r.available
-                  ? <Badge className={r.installed ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'}>
-                      {r.installed ? t('agents.runtimeInstalled') : t('agents.runtimeMissing')}
-                    </Badge>
-                  : <Badge>{t('agents.comingSoon')}</Badge>}
-              </span>
-            ))}
+      {/* ── Claude connection: without it nothing ordi runs can work ── */}
+      <section aria-labelledby="agents-connection">
+        <SubHead
+          title={<span id="agents-connection">{t('agents.connection')}</span>}
+          desc={t('agents.connectionDesc')}
+          actions={<Button size="sm" variant="outline" onClick={() => setCredOpen(true)}><Plus size={14} aria-hidden /> {t('agents.addCredential')}</Button>}
+        />
+        {credsQ.isLoading ? (
+          <Skeleton className="h-16 w-full" />
+        ) : credentials.length === 0 ? (
+          <RowList className="flex items-start gap-3 px-3 py-3">
+            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground"><KeyRound size={15} aria-hidden /></div>
+            <div className="min-w-0">
+              <p className="text-[13px] font-medium">{t('agents.noCredentials')}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{t('agents.noCredentialsHint')}</p>
+            </div>
+          </RowList>
+        ) : (
+          <div className="space-y-2">
+            {credentials.map((c) => <CredentialCard key={c.id} cred={c} users={users} />)}
           </div>
+        )}
+      </section>
 
-          {overview.workers.length === 0 ? (
-            <p className="mt-3 text-xs text-muted-foreground">{t('agents.noWorkers')}</p>
-          ) : (
-            <RowList className="mt-3">
-              {overview.workers.map((w) => (
-                <div key={w.id} className="flex items-center gap-3 border-b border-border px-3 py-2 last:border-0">
-                  <Server size={14} className="shrink-0 text-muted-foreground" />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-mono text-[11px]">{w.id}</div>
-                    <div className="text-[11px] text-faint">
-                      {fill(t('agents.workerRunning'), { running: w.running, concurrency: w.concurrency })}
-                      {w.version ? ` · v${w.version}` : ''}
-                      {' · '}{fill(t('agents.workerSeen'), { when: fmtRelative(w.lastSeenAt) })}
+      {/* ── One list: the agents ordi runs and the ones that connect from outside ── */}
+      <section className="mt-10" aria-labelledby="agents-list">
+        <SubHead
+          title={<span id="agents-list">{t('agents.list')}</span>}
+          desc={<>{t('agents.listDesc')} {t('agents.ownAgentPrefix')} <Link to="/profile/mcp" className="text-foreground underline underline-offset-2 hover:no-underline">{t('agents.ownAgentLink')}</Link>.</>}
+          actions={<Button size="sm" onClick={() => setKindOpen(true)}><Plus size={14} aria-hidden /> {t('agents.new')}</Button>}
+        />
+        {noWorker && (
+          <p className="mb-2 flex items-start gap-1.5 rounded-md border border-warning/40 bg-warning/5 px-2.5 py-2 text-xs">
+            <TriangleAlert size={13} aria-hidden className="mt-px shrink-0 text-warning" />
+            <span>{t('agents.noWorkerShort')}</span>
+          </p>
+        )}
+
+        {listLoading ? (
+          <div className="space-y-2">{[0, 1].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+        ) : entries.length === 0 ? (
+          <RowList className="flex items-start gap-3 px-3 py-3">
+            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground"><Bot size={15} aria-hidden /></div>
+            <div className="min-w-0">
+              <p className="text-[13px] font-medium">{t('agents.none')}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{t('agents.noneHint')}</p>
+            </div>
+          </RowList>
+        ) : (
+          <RowList>
+            <ul>
+              {entries.map((e) => e.kind === 'ordi' ? (
+                <li key={e.id} className="anim-fade-in flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-0">
+                  <Avatar name={e.agent.name} src={e.agent.avatar} size={28} agent />
+                  <button type="button" onClick={() => openAgent(e.agent)} className="min-w-0 flex-1 rounded-md text-left">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-[13px] font-medium">{e.agent.name}</span>
+                      <KindLabel kind="ordi" />
+                      <Badge>{t(`agents.runtime.${e.agent.runtime}`, e.agent.runtime)}</Badge>
                     </div>
-                  </div>
-                  <StatusChip tone={w.online ? 'ok' : 'off'}>{w.online ? t('agents.workerOnline') : t('agents.workerOffline')}</StatusChip>
-                </div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                      <span>{e.agent.roleName || '–'}</span>
+                      <span>· {t(`agents.policy.${e.agent.assignPolicy}`, e.agent.assignPolicy)}</span>
+                      <span>· {fill(t(e.agent.connectorIds.length === 1 ? 'agents.connectorsCount.one' : 'agents.connectorsCount'), { n: e.agent.connectorIds.length })}</span>
+                      <span>· {fill(t(e.agent.projectIds.length === 1 ? 'agents.projectsCount.one' : 'agents.projectsCount'), { n: e.agent.projectIds.length })}</span>
+                      {e.agent.connectorIds.length > 0 && connectorName.size > 0 && (
+                        <span className="truncate">
+                          · {e.agent.connectorIds.map((id) => connectorName.get(id)).filter(Boolean).join(', ')}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                  <StatusChip tone={!e.agent.enabled || !e.agent.isActive ? 'off' : e.agent.dispatchable ? 'ok' : 'muted'}>
+                    {!e.agent.enabled || !e.agent.isActive ? t('agents.stateDisabled') : e.agent.dispatchable ? t('agents.ready') : t('agents.needsCredential')}
+                  </StatusChip>
+                  <DropdownMenu align="end" trigger={<Button variant="ghost" size="sm" className="h-7 w-7 px-0" aria-label={`${t('agents.actions')}: ${e.agent.name}`}><MoreHorizontal size={15} aria-hidden /></Button>}>
+                    <MenuItem icon={<Bot size={14} />} onSelect={() => openAgent(e.agent)}>{t('common.edit')}</MenuItem>
+                    {e.agent.enabled && e.agent.isActive
+                      ? <MenuItem icon={<Trash2 size={14} />} danger onSelect={() => setActive.mutate({ id: e.agent.id, enable: false })}>{t('agents.disable')}</MenuItem>
+                      : <MenuItem icon={<RotateCcw size={14} />} onSelect={() => setActive.mutate({ id: e.agent.id, enable: true })}>{t('agents.enable')}</MenuItem>}
+                  </DropdownMenu>
+                </li>
+              ) : (
+                <li key={e.id} className="anim-fade-in border-b border-border last:border-0">
+                  <button type="button" onClick={() => setBotId(e.id)} className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left">
+                    <Avatar name={e.agent.name} src={e.agent.avatar} size={28} agent className={e.agent.isActive ? undefined : 'opacity-50'} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="truncate text-[13px] font-medium">{e.agent.name}</span>
+                        <KindLabel kind="outside" />
+                      </div>
+                      <TeamBotSummary agent={e.agent} />
+                    </div>
+                    <StatusChip tone={e.agent.isActive ? 'ok' : 'off'}>{e.agent.isActive ? t('agents.botOn') : t('agents.stateDisabled')}</StatusChip>
+                    <span className="shrink-0 text-xs text-muted-foreground">{t('agents.manage')}</span>
+                  </button>
+                </li>
               ))}
-            </RowList>
-          )}
+            </ul>
+          </RowList>
+        )}
+      </section>
 
-          {overview.connectorCallbackUrl && (
-            <p className="mt-3 truncate text-[11px] text-faint">
-              {t('agents.callbackUrl')}: <span className="font-mono">{overview.connectorCallbackUrl}</span>
-            </p>
-          )}
-        </Card>
-      ) : null}
+      {/* ── Technical details: what runs the agents, rarely needed ── */}
+      <Disclosure label={t('agents.technical')} className="mt-10">
+        <div className="space-y-3 pb-1 pl-5 pt-3">
+          <SubHead title={t('agents.workers')} desc={t('agents.workersDesc')} className="mb-0" />
+          {overviewQ.isLoading ? (
+            <Skeleton className="h-24 w-full" />
+          ) : overview ? (
+            <Card className="p-4">
+              {/* The api's own worker being off is the normal shape of a deployment
+                  with a separate agent-worker container; it is only a problem when
+                  no worker at all is online. */}
+              {noWorker && (
+                <p className="mb-3 rounded-md border border-warning/40 bg-warning/5 p-2.5 text-xs text-warning">{t('agents.workerDisabled')}</p>
+              )}
+              <div className="flex flex-wrap gap-2">
+                {overview.runtimes.map((r) => (
+                  <span key={r.key} className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs">
+                    <Cpu size={13} aria-hidden className="text-muted-foreground" />
+                    {t(`agents.runtime.${r.key}`, r.key)}
+                    {r.available
+                      ? <Badge className={r.installed ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'}>
+                          {r.installed ? t('agents.runtimeInstalled') : t('agents.runtimeMissing')}
+                        </Badge>
+                      : <Badge>{t('agents.comingSoon')}</Badge>}
+                  </span>
+                ))}
+              </div>
+
+              {overview.workers.length === 0 ? (
+                <p className="mt-3 text-xs text-muted-foreground">{t('agents.noWorkers')}</p>
+              ) : (
+                <RowList className="mt-3">
+                  {overview.workers.map((w) => (
+                    <div key={w.id} className="flex items-center gap-3 border-b border-border px-3 py-2 last:border-0">
+                      <Server size={14} aria-hidden className="shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-mono text-[11px]">{w.id}</div>
+                        <div className="text-[11px] text-faint">
+                          {fill(t('agents.workerRunning'), { running: w.running, concurrency: w.concurrency })}
+                          {w.version ? ` · v${w.version}` : ''}
+                          {' · '}{fill(t('agents.workerSeen'), { when: fmtRelative(w.lastSeenAt) })}
+                        </div>
+                      </div>
+                      <StatusChip tone={w.online ? 'ok' : 'off'}>{w.online ? t('agents.workerOnline') : t('agents.workerOffline')}</StatusChip>
+                    </div>
+                  ))}
+                </RowList>
+              )}
+
+              {overview.connectorCallbackUrl && (
+                <p className="mt-3 break-all text-[11px] text-faint">
+                  {t('agents.callbackUrl')}: <span className="font-mono">{overview.connectorCallbackUrl}</span>
+                </p>
+              )}
+            </Card>
+          ) : null}
+        </div>
+      </Disclosure>
 
       <AddCredentialDialog open={credOpen} onClose={() => setCredOpen(false)} credentials={credentials} />
+      <NewAgentKindDialog
+        open={kindOpen}
+        onClose={() => setKindOpen(false)}
+        onPick={(kind) => { setKindOpen(false); if (kind === 'ordi') openAgent(null); else setCreatingBot(true); }}
+      />
       <AgentDialog
         open={agentOpen}
         onClose={() => setAgentOpen(false)}
@@ -1030,6 +1102,49 @@ export function AgentsPanel() {
         roles={roles}
         credentials={credentials}
       />
+      <CreateTeamBotDialog open={creatingBot} onClose={() => setCreatingBot(false)} onCreated={(id) => { setCreatingBot(false); setBotId(id); }} />
+      <TeamBotDialog id={botId} onClose={() => setBotId(null)} />
     </div>
+  );
+}
+
+/** Which kind an agent is, in words: the list holds both. */
+function KindLabel({ kind }: { kind: AgentKind }) {
+  const t = useT();
+  return (
+    <Badge className="shrink-0">
+      {kind === 'ordi' ? <Bot size={12} aria-hidden /> : <Plug size={12} aria-hidden />}
+      {kind === 'ordi' ? t('agents.kind.ordi') : t('agents.kind.outside')}
+    </Badge>
+  );
+}
+
+/**
+ * "New agent" asks first which kind, in one line each, then hands over to
+ * that kind's own create flow.
+ */
+function NewAgentKindDialog({ open, onClose, onPick }: { open: boolean; onClose: () => void; onPick: (kind: AgentKind) => void }) {
+  const t = useT();
+  const option = (kind: AgentKind, icon: React.ReactNode) => (
+    <button
+      type="button"
+      onClick={() => onPick(kind)}
+      className="flex w-full items-start gap-3 rounded-lg border border-border bg-card px-3 py-3 text-left transition-colors duration-150 hover:border-border-strong hover:bg-muted"
+    >
+      <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">{icon}</div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] font-medium">{t(`agents.kind.${kind}`)}</div>
+        <div className="mt-0.5 text-xs text-muted-foreground">{t(`agents.kindHint.${kind}`)}</div>
+      </div>
+      <ChevronRight size={15} aria-hidden className="mt-2 shrink-0 text-muted-foreground" />
+    </button>
+  );
+  return (
+    <Dialog open={open} onClose={onClose} title={t('agents.newKindTitle')} width={460}>
+      <div className="space-y-2 px-4 pb-4 pt-1">
+        {option('ordi', <Bot size={15} aria-hidden />)}
+        {option('outside', <Plug size={15} aria-hidden />)}
+      </div>
+    </Dialog>
   );
 }

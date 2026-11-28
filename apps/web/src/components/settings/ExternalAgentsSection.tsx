@@ -1,30 +1,28 @@
 /**
- * Settings → Agents → External agents: agents that run outside ordi (Claude
- * Code, Codex, a script on a server) and connect over MCP under a name of
- * their own instead of a person's token. Each gets an owner – the person
+ * Settings → Agents, the agents that connect from outside: they run outside
+ * ordi (Claude Code, Codex, a script on a server) and connect over MCP under
+ * a name of their own instead of a person's token. They sit in the one
+ * Agents list next to the agents ordi runs; this file holds their row, their
+ * create dialog and the dialog that manages one. Each gets an owner – the person
  * behind it – and tokens that are shown once and revoked one by one. Which
  * projects it reaches is its project memberships, set in each project's
  * Access settings like anyone else's.
  */
 import { useEffect, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Copy, KeyRound, Plug, Plus, TriangleAlert } from 'lucide-react';
+import { Check, Copy, KeyRound, TriangleAlert } from 'lucide-react';
 import { EXTERNAL_AGENT_TOKEN_DAYS } from '@ordi/shared';
 import { api, ApiError, appOrigin } from '../../lib/api';
 import { activeUsers, useUsersLookup } from '../../lib/queries';
 import { useMe } from '../../lib/auth';
-import { Avatar, Badge, Button, EmptyState, Input, Select, Skeleton, Spinner, Switch, cn, fmtDate, fmtRelative } from '../ui';
+import { Button, Input, Select, Spinner, Switch, cn, fmtDate, fmtRelative } from '../ui';
 import { ConfirmDialog, Dialog, toast } from '../overlays';
-import { AnimatedRow, Field, RowList } from './primitives';
+import { Field } from './primitives';
 import { useT, extendDict } from '../../lib/i18n';
 
 extendDict({
   en: {
-    'extAgents.title': 'Team bots',
-    'extAgents.desc': 'Shared bots that belong to the team rather than one person – a triage bot, a bot on a server. They connect over MCP under their own name, work only in the projects they are added to, and can be assigned tasks. Everyone\'s own agent lives in their Profile → MCP & API.',
-    'extAgents.new': 'New team bot',
-    'extAgents.none': 'No team bots yet',
-    'extAgents.noneHint': 'Create one for a bot the whole team relies on. For your own Claude Code or Codex, use My agent in your Profile.',
+    'extAgents.new': 'New agent that connects from outside',
     'extAgents.owner': 'Owner',
     'extAgents.ownerHint': 'The person behind the agent – who it works for.',
     'extAgents.noProjects': 'No projects yet – add it under a project\'s Settings → Access',
@@ -49,17 +47,12 @@ extendDict({
     'extAgents.connect': 'Connect',
     'extAgents.claudeCode': 'Claude Code',
     'extAgents.otherClients': 'Other MCP clients (JSON)',
-    'extAgents.manage': 'Manage',
     'extAgents.copied': 'Copied',
     'extAgents.hidden': '{n} more you cannot open',
     'extAgents.ownerChangeHint': 'A new owner revokes its tokens – issue a fresh one after.',
   },
   uk: {
-    'extAgents.title': 'Боти команди',
-    'extAgents.desc': 'Спільні боти, які належать команді, а не одній людині, – бот розбору помилок, бот на сервері. Вони підключаються через MCP під власним іменем, працюють лише в проєктах, куди їх додано, і на них можна призначати задачі. Свій агент у кожного – в Профілі → MCP & API.',
-    'extAgents.new': 'Новий бот команди',
-    'extAgents.none': 'Ботів команди ще немає',
-    'extAgents.noneHint': 'Створіть бота, на якого покладається вся команда. Для власного Claude Code чи Codex – «Мій агент» у Профілі.',
+    'extAgents.new': 'Новий агент, що підключається ззовні',
     'extAgents.owner': 'Власник',
     'extAgents.ownerHint': 'Людина, яка стоїть за агентом, – на кого він працює.',
     'extAgents.noProjects': 'Ще немає проєктів – додайте його в Налаштуваннях проєкту → Доступ',
@@ -84,7 +77,6 @@ extendDict({
     'extAgents.connect': 'Підключення',
     'extAgents.claudeCode': 'Claude Code',
     'extAgents.otherClients': 'Інші MCP-клієнти (JSON)',
-    'extAgents.manage': 'Керувати',
     'extAgents.copied': 'Скопійовано',
     'extAgents.hidden': 'ще {n}, недоступних вам',
     'extAgents.ownerChangeHint': 'Новий власник – і його токени відкликаються, випустіть новий.',
@@ -92,7 +84,7 @@ extendDict({
 });
 
 interface ExternalAgentToken { id: string; name: string; prefix: string; lastUsedAt: string | null; expiresAt: string | null; createdAt: string }
-interface ExternalAgent {
+export interface ExternalAgent {
   kind?: 'team' | 'personal';
   id: string; name: string; avatar: string | null; isActive: boolean; roleName: string;
   ownerUserId: string; ownerName: string | null;
@@ -103,61 +95,39 @@ interface ExternalAgent {
 
 const KEY = ['external-agents'];
 
-export function ExternalAgentsSection() {
-  const t = useT();
-  const agentsQ = useQuery<ExternalAgent[]>({
+/**
+ * The team's bots: agents that connect from outside under a name of their
+ * own. People's own agents live in their Profiles and are left out here.
+ */
+export function useTeamBots() {
+  return useQuery<ExternalAgent[], Error, ExternalAgent[]>({
     queryKey: KEY,
     queryFn: () => api.get<{ data: ExternalAgent[] }>('/external-agents').then((r) => r.data),
+    select: (all) => all.filter((a) => a.kind !== 'personal'),
   });
-  // People's own agents live in their Profiles; this is the team's bots.
-  const agents = (agentsQ.data ?? []).filter((a) => a.kind !== 'personal');
-  const [creating, setCreating] = useState(false);
-  const [openId, setOpenId] = useState<string | null>(null);
-  const open = agents.find((a) => a.id === openId) ?? null;
+}
 
+/** One team bot's line in Settings → Agents: who it works for, where, and its tokens. */
+export function TeamBotSummary({ agent }: { agent: ExternalAgent }) {
+  const t = useT();
+  const projects = agent.projects.length || agent.hiddenProjects
+    ? [...agent.projects.map((p) => p.key), ...(agent.hiddenProjects ? [t('extAgents.hidden').replace('{n}', String(agent.hiddenProjects))] : [])].join(', ')
+    : t('extAgents.noProjects');
   return (
-    <div>
-      <div className="mb-2 mt-8 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">{t('extAgents.title')}</div>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t('extAgents.desc')}</p>
-        </div>
-        <Button size="sm" variant="outline" onClick={() => setCreating(true)}><Plus size={14} /> {t('extAgents.new')}</Button>
-      </div>
-
-      {agentsQ.isLoading ? (
-        <div className="space-y-2">{[0, 1].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
-      ) : agents.length === 0 ? (
-        <RowList><EmptyState icon={<Plug size={18} />} title={t('extAgents.none')} hint={t('extAgents.noneHint')} /></RowList>
-      ) : (
-        <RowList>
-          {agents.map((a, i) => (
-            <AnimatedRow key={a.id} index={i} className="border-b border-border last:border-0">
-              <button type="button" onClick={() => setOpenId(a.id)} className="flex w-full items-center gap-3 px-3 py-2.5 text-left">
-                <Avatar name={a.name} src={a.avatar} size={28} agent className={a.isActive ? undefined : 'opacity-50'} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-[13px] font-medium">{a.name}</span>
-                    {!a.isActive && <Badge>{t('extAgents.off')}</Badge>}
-                  </div>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-faint">
-                    <span>{t('extAgents.owner')}: {a.ownerName ?? '–'}</span>
-                    <span>· {a.roleName || '–'}</span>
-                    <span>· {a.projects.length || a.hiddenProjects ? [...a.projects.map((p) => p.key), ...(a.hiddenProjects ? [t('extAgents.hidden').replace('{n}', String(a.hiddenProjects))] : [])].join(', ') : t('extAgents.noProjects')}</span>
-                    <span>· {t('extAgents.tokens')}: {a.tokens.length}</span>
-                  </div>
-                </div>
-                <span className="shrink-0 text-xs text-muted-foreground">{t('extAgents.manage')}</span>
-              </button>
-            </AnimatedRow>
-          ))}
-        </RowList>
-      )}
-
-      <CreateDialog open={creating} onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); setOpenId(id); }} />
-      {open && <ManageDialog agent={open} onClose={() => setOpenId(null)} />}
+    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+      <span>{t('extAgents.owner')}: {agent.ownerName ?? '–'}</span>
+      <span>· {agent.roleName || '–'}</span>
+      <span>· {projects}</span>
+      <span>· {t('extAgents.tokens')}: {agent.tokens.length}</span>
     </div>
   );
+}
+
+/** Opens the bot that was just created or picked from the list, by id, so it follows refetches. */
+export function TeamBotDialog({ id, onClose }: { id: string | null; onClose: () => void }) {
+  const bots = useTeamBots();
+  const agent = (bots.data ?? []).find((a) => a.id === id) ?? null;
+  return agent ? <ManageDialog agent={agent} onClose={onClose} /> : null;
 }
 
 function OwnerSelect({ value, onChange }: { value: string; onChange: (id: string) => void }) {
@@ -175,7 +145,7 @@ function OwnerSelect({ value, onChange }: { value: string; onChange: (id: string
   );
 }
 
-function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (id: string) => void }) {
+export function CreateTeamBotDialog({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (id: string) => void }) {
   const t = useT();
   const qc = useQueryClient();
   const me = useMe();
