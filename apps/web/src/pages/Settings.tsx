@@ -94,6 +94,7 @@ extendDict({
     'settings.agentTag': 'agent',
     'settings.noSuccessor': 'No one',
     'settings.previewFailed': 'Could not load what they hold – close and try again before deactivating.',
+    'settings.deactivateRefused': 'Nothing was changed: they are still active and their tasks are where they were.',
     'settings.handedOff': 'Tasks handed over',
     'settings.roleUpdated': 'Role updated',
     'settings.inviteSent': 'Invitation created',
@@ -181,6 +182,7 @@ extendDict({
     'settings.agentTag': 'агент',
     'settings.noSuccessor': 'Ніхто',
     'settings.previewFailed': 'Не вдалося завантажити, що за людиною закріплено, – закрийте й спробуйте ще раз перед деактивацією.',
+    'settings.deactivateRefused': 'Нічого не змінено: користувач досі активний, а його задачі залишилися там, де були.',
     'settings.handedOff': 'Задачі передано',
     'settings.roleUpdated': 'Роль оновлено',
     'settings.inviteSent': 'Запрошення створено',
@@ -617,9 +619,17 @@ interface Role { id: string; key?: string; name: string; isSystem?: boolean; per
  * tasks they still hold and offers a successor; the admin can also leave
  * them unassigned, but never keep them on someone who cannot sign in.
  */
-function DeactivateUserDialog({ user, candidates, pending, onClose, onConfirm }: {
+function DeactivateUserDialog({ user, candidates, pending, error, onClose, onConfirm, onChangeSuccessor }: {
   user: UserRow | null; candidates: UserRow[]; pending: boolean;
+  /**
+   * Why the last attempt failed. `nothingChanged` only when the API itself
+   * refused (a 4xx such as an agent successor's assign policy): a dropped
+   * connection may have come after the deactivation committed.
+   */
+  error: { message: string; nothingChanged: boolean } | null;
   onClose: () => void; onConfirm: (reassignTo: string | null) => void;
+  /** A new successor makes the last refusal stale. */
+  onChangeSuccessor: () => void;
 }) {
   const t = useT();
   const [reassignTo, setReassignTo] = useState('');
@@ -637,7 +647,9 @@ function DeactivateUserDialog({ user, candidates, pending, onClose, onConfirm }:
   const ownAgent = ownedAgents.find((a) => a.kind === 'personal');
 
   return (
-    <Dialog open={!!user} onClose={onClose} title={t('settings.deactivateTitle')} width={440}>
+    // Held open while the request is out, so its answer lands under the
+    // person and successor it was sent for.
+    <Dialog open={!!user} onClose={() => { if (!pending) onClose(); }} title={t('settings.deactivateTitle')} width={440}>
       <div className="space-y-3 px-4 pb-4 pt-1">
         <div className="flex items-center gap-2">
           <Avatar name={user?.name} src={user?.avatar} size={24} />
@@ -681,7 +693,7 @@ function DeactivateUserDialog({ user, candidates, pending, onClose, onConfirm }:
             )}
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">{count > 0 ? t('settings.handOffTo') : t('settings.successor')}</label>
-              <Select value={reassignTo} onChange={(e) => setReassignTo(e.target.value)} className="w-full">
+              <Select value={reassignTo} disabled={pending} onChange={(e) => { setReassignTo(e.target.value); onChangeSuccessor(); }} className="w-full">
                 <option value="">{count > 0 ? t('settings.leaveUnassigned') : t('settings.noSuccessor')}</option>
                 {/* Their own agents go dark with them, so they cannot take over. */}
                 {candidates.filter((u) => !ownedAgents.some((a) => a.id === u.id)).map((u) => (
@@ -692,8 +704,15 @@ function DeactivateUserDialog({ user, candidates, pending, onClose, onConfirm }:
           </>
         )}
 
+        {error && (
+          <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-[13px] text-destructive">
+            {error.message}
+            {error.nothingChanged && <span className="mt-1 block text-xs text-muted-foreground">{t('settings.deactivateRefused')}</span>}
+          </p>
+        )}
+
         <div className="flex justify-end gap-2 pt-1">
-          <Button type="button" variant="ghost" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={pending}>{t('common.cancel')}</Button>
           <Button type="button" variant="destructive" size="sm" disabled={pending || open.isLoading || open.isError} onClick={() => onConfirm(reassignTo || null)}>
             {pending && <Spinner className="h-3 w-3" />} {t('settings.deactivate')}
           </Button>
@@ -722,6 +741,9 @@ function UsersPanel() {
   // Deactivation goes through a dialog (ORD-20): open tasks the person holds
   // are handed to a successor, or left unassigned, never orphaned on them.
   const [deactivating, setDeactivating] = useState<UserRow | null>(null);
+  // A refused deactivation stays in the dialog, next to the successor picked,
+  // rather than in a toast that is gone before it is read.
+  const [deactivateError, setDeactivateError] = useState<{ userId: string; message: string; nothingChanged: boolean } | null>(null);
   const setActive = useMutation({
     mutationFn: ({ id, active, reassignTo }: { id: string; active: boolean; reassignTo?: string | null }) =>
       api.post<{ handedOffTasks?: number }>(`/users/${id}/${active ? 'reactivate' : 'deactivate'}`, active ? undefined : { reassignTo: reassignTo ?? null }),
@@ -731,10 +753,15 @@ function UsersPanel() {
       qc.invalidateQueries({ queryKey: ['me-tasks'] });
       qc.invalidateQueries({ queryKey: ['external-agents'] });
       setDeactivating(null);
+      setDeactivateError(null);
       if (v.active) toast(t('settings.userReactivated'));
       else toast(r?.handedOffTasks ? `${t('settings.userDeactivated')} · ${t('settings.handedOff')}: ${r.handedOffTasks}` : t('settings.userDeactivated'));
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('settings.saveFailed')),
+    onError: (e, v) => {
+      const message = e instanceof ApiError ? e.message : t('settings.saveFailed');
+      if (v.active) toast.error(message);
+      else setDeactivateError({ userId: v.id, message, nothingChanged: e instanceof ApiError && e.status >= 400 && e.status < 500 });
+    },
   });
 
   // Someone who lost their password gets a one-time link, not a password an
@@ -833,7 +860,7 @@ function UsersPanel() {
                     {u.actorType !== 'agent' && (
                       <MenuItem icon={<KeyRound size={14} />} onSelect={() => resetPassword.mutate(u)}>{t('settings.resetPassword')}</MenuItem>
                     )}
-                    <MenuItem icon={<Trash2 size={14} />} danger onSelect={() => setDeactivating(u)}>{t('settings.deactivate')}</MenuItem>
+                    <MenuItem icon={<Trash2 size={14} />} danger onSelect={() => { setDeactivateError(null); setDeactivating(u); }}>{t('settings.deactivate')}</MenuItem>
                   </>
                 )}
               </DropdownMenu>
@@ -847,8 +874,10 @@ function UsersPanel() {
         user={deactivating}
         candidates={rows.filter((u) => u.isActive !== false && u.id !== deactivating?.id)}
         pending={setActive.isPending}
-        onClose={() => setDeactivating(null)}
-        onConfirm={(reassignTo) => deactivating && setActive.mutate({ id: deactivating.id, active: false, reassignTo })}
+        error={deactivateError && deactivateError.userId === deactivating?.id ? deactivateError : null}
+        onClose={() => { setDeactivating(null); setDeactivateError(null); }}
+        onConfirm={(reassignTo) => { if (!deactivating) return; setDeactivateError(null); setActive.mutate({ id: deactivating.id, active: false, reassignTo }); }}
+        onChangeSuccessor={() => setDeactivateError(null)}
       />
 
       <Dialog open={!!resetLink} onClose={() => setResetLink(null)} title={t('settings.resetPassword')} width={420}>

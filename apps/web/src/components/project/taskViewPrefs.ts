@@ -24,6 +24,7 @@ extendDict({
     'tasksview.dueToday': 'Due today',
     'tasksview.dueWeek': 'Due this week',
     'tasksview.dueNone': 'No due date',
+    'tasksview.waitingOnMe': 'Waiting on me',
     'tasksview.pUrgent': 'Urgent',
     'tasksview.pHigh': 'High',
     'tasksview.pMedium': 'Medium',
@@ -74,6 +75,7 @@ extendDict({
     'tasksview.dueToday': 'На сьогодні',
     'tasksview.dueWeek': 'На цьому тижні',
     'tasksview.dueNone': 'Без терміну',
+    'tasksview.waitingOnMe': 'Чекає на мене',
     'tasksview.pUrgent': 'Терміново',
     'tasksview.pHigh': 'Високий',
     'tasksview.pMedium': 'Середній',
@@ -204,13 +206,15 @@ export interface TaskFilters {
   milestoneIds: string[];
   cycleIds: string[];
   due: DuePreset | null;
+  /** Only tasks with an open question waiting on the signed-in person. */
+  waitingOnMe: boolean;
 }
 
-export const EMPTY_FILTERS: TaskFilters = { statusIds: [], priorities: [], assigneeIds: [], labelIds: [], milestoneIds: [], cycleIds: [], due: null };
+export const EMPTY_FILTERS: TaskFilters = { statusIds: [], priorities: [], assigneeIds: [], labelIds: [], milestoneIds: [], cycleIds: [], due: null, waitingOnMe: false };
 
 export function countFilters(f: TaskFilters): number {
   return f.statusIds.length + f.priorities.length + f.assigneeIds.length + f.labelIds.length
-    + f.milestoneIds.length + f.cycleIds.length + (f.due ? 1 : 0);
+    + f.milestoneIds.length + f.cycleIds.length + (f.due ? 1 : 0) + (f.waitingOnMe ? 1 : 0);
 }
 
 export function sanitizeFilters(raw: unknown): TaskFilters {
@@ -225,6 +229,7 @@ export function sanitizeFilters(raw: unknown): TaskFilters {
     milestoneIds: arr(o.milestoneIds),
     cycleIds: arr(o.cycleIds),
     due: due === 'overdue' || due === 'today' || due === 'week' || due === 'none' ? due : null,
+    waitingOnMe: o.waitingOnMe === true,
   };
 }
 
@@ -236,6 +241,8 @@ interface FilterableTask {
   labelIds?: string[];
   milestoneId?: string | null;
   cycleId?: string | null;
+  /** Whom the task's open question waits on, if anyone. */
+  waitingOnUserId?: string | null;
 }
 
 function startOfDay(d: Date): number {
@@ -259,6 +266,8 @@ export function dueMatches(preset: DuePreset, dueDate: string | null | undefined
 
 export function applyFilters<T extends FilterableTask>(
   tasks: T[], f: TaskFilters, categoryOf: (statusId: string) => string | undefined,
+  /** The signed-in person, for "waiting on me". */
+  meId?: string,
 ): T[] {
   if (countFilters(f) === 0) return tasks;
   return tasks.filter((t) => {
@@ -269,6 +278,7 @@ export function applyFilters<T extends FilterableTask>(
     if (f.milestoneIds.length && !f.milestoneIds.includes(t.milestoneId ?? 'none')) return false;
     if (f.cycleIds.length && !f.cycleIds.includes(t.cycleId ?? 'none')) return false;
     if (f.due && !dueMatches(f.due, t.dueDate, categoryOf(t.statusId))) return false;
+    if (f.waitingOnMe && (!meId || t.waitingOnUserId !== meId)) return false;
     return true;
   });
 }

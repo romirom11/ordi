@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { api, qs, getAllPages, ApiError } from '../lib/api';
 import { Link, useNavigate, useOpen, useSearchParams, type OpenIntent } from '../lib/router';
-import { useCan, useProjectRole } from '../lib/auth';
+import { useCan, useMe, useProjectRole } from '../lib/auth';
 import { usePageTitle } from '../lib/tabs';
 import {
   Button, IconButton, Input, Card, Badge, Skeleton, EmptyState, Spinner, Avatar, AvatarGroup,
@@ -36,6 +36,7 @@ import { TasksToolbar } from '../components/project/TasksToolbar';
 import type { CycleLite, LabelLite } from '../components/project/FilterPopover';
 import { useLabels, useTaskStatuses } from '../lib/queries';
 import { TaskStatusPicker } from '../components/task/StatusPicker';
+import { WaitingOnMark } from '../components/task/WaitingOn';
 import {
   EMPTY_FILTERS, PRIORITIES, PRIORITY_LABEL_KEY, applyFilters, loadPrefs, orderTasks, sanitizeFilters, savePrefs,
   type Grouping, type TaskFilters, type TaskViewPrefs,
@@ -142,6 +143,8 @@ interface Task {
   dueDate?: string | null; startDate?: string | null; estimate?: number | string | null; version?: number;
   parentId?: string | null; milestoneId?: string | null; cycleId?: string | null; assigneeIds?: string[]; labelIds?: string[];
   createdAt?: string; position?: string | number | null; blocked?: boolean;
+  /** Whom the task's open question waits on, if anyone. */
+  waitingOnUserId?: string | null;
 }
 interface Cycle {
   id: string; name: string; startDate?: string; endDate?: string; status?: string; goal?: string;
@@ -496,6 +499,7 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, canWrite, 
 }) {
   const t = useT();
   const qc = useQueryClient();
+  const meId = useMe().user.id;
 
   const [prefs, setPrefsState] = useState<TaskViewPrefs>(() => loadPrefs(id));
   // Filters persist per project, like the display prefs above them – leaving
@@ -560,10 +564,10 @@ function TasksTab({ id, statuses, statusesLoading, projectKey, users, canWrite, 
   }, [allTasks, statusById]);
 
   const visibleTasks = useMemo(() => {
-    let list = applyFilters(allTasks, filters, (sid) => statusById.get(sid)?.category);
+    let list = applyFilters(allTasks, filters, (sid) => statusById.get(sid)?.category, meId);
     if (!prefs.showSubtasks) list = list.filter((x) => !x.parentId);
     return list;
-  }, [allTasks, filters, prefs.showSubtasks, statusById]);
+  }, [allTasks, filters, prefs.showSubtasks, statusById, meId]);
 
   const addTask = useMutation({
     mutationFn: (vars: { title: string; seed?: Record<string, unknown> }) =>
@@ -886,6 +890,7 @@ function ListView({ projectId, projectKey, statuses, groups, prefs, canWrite, re
                           {task.blocked && (
                             <span title={t('projects.blocked')} className="shrink-0 text-warning"><Ban size={13} /></span>
                           )}
+                          {task.waitingOnUserId && <WaitingOnMark userId={task.waitingOnUserId} />}
                           <a href={`/projects/${projectId}/tasks/${task.id}`} onClick={(e) => { e.stopPropagation(); onOpen(task.id, e); }} onAuxClick={(e) => { e.stopPropagation(); onOpen(task.id, e); }} className="truncate text-[13px] font-medium">{task.title}</a>
                           {parent && (
                             <span className="hidden min-w-0 max-w-44 truncate text-xs text-faint lg:block">› {parent.title}</span>
@@ -1076,6 +1081,7 @@ function BoardView({ projectId, projectKey, statuses, groups, prefs, canWrite, r
                         {task.blocked && (
                           <span title={t('projects.blocked')} className="mt-0.5 shrink-0 text-warning"><Ban size={13} /></span>
                         )}
+                        {task.waitingOnUserId && <WaitingOnMark userId={task.waitingOnUserId} className="mt-0.5 shrink-0 text-warning" />}
                         <span className="flex-1 text-[13px] font-medium leading-snug">{task.title}</span>
                         {props.progress && stats && <ProgressPill stats={stats} />}
                       </div>

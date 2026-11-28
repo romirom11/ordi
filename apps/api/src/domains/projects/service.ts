@@ -13,7 +13,7 @@ import {
   type CustomFieldFilter, type IntakeAnswer, type LabelScope,
 } from '@ordi/shared';
 import type { Actor } from '../../context';
-import { err } from '../../lib/errors';
+import { ApiException, err } from '../../lib/errors';
 import { logger } from '../../lib/logger';
 import { writeActivity } from '../../core/activity';
 import { emit, publishEvent } from '../../core/events';
@@ -32,6 +32,7 @@ import { sendEmailNow } from '../../lib/email';
 import { asLocale, loadBranding, renderEmail, tr } from '../../lib/email-templates';
 import { pageById } from '../../lib/http';
 import { intakeTaskDescription } from './intake';
+import { answerByComment, moveQuestions, openQuestionView, tasksWaitingOn, waitingOnFor, withdrawQuestionsWaitingOn } from './questions';
 import { isStorageConfigured } from '../../lib/s3';
 
 const { tasks, projects, taskStatuses, taskAssignees, taskLabels, projectMembers, cycles } = schema;
@@ -404,6 +405,11 @@ export async function removeMember(actor: Actor, projectId: string, userId: stri
   const { db } = getDb();
   await db.delete(projectMembers).where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId)));
   await writeActivity(db, { entityType: 'project', entityId: projectId, action: 'member_removed', after: { userId }, actorId: actor.userId, actorType: actor.actorType });
+  // A question waiting on them here would wait on someone who cannot see it
+  // – unless the project is open to them anyway (a workspace project).
+  if (!(await userCanOpenProject(userId, projectId))) {
+    await db.transaction((tx) => withdrawQuestionsWaitingOn(tx, actor, userId, 'removed', projectId));
+  }
 }
 
 // ── Task statuses (PRD §8.2) ──
@@ -613,6 +619,8 @@ async function assertCycleInProject(cycleId: string, projectId: string): Promise
 export async function listTasks(actor: Actor, params: {
   projectId?: string; status?: string; priority?: string; assignee?: string; cycleId?: string;
   type?: string; parentId?: string; milestoneId?: string; labels?: string[]; q?: string; dueFrom?: string; dueTo?: string;
+  /** Only tasks with an open question waiting on this user ("me" is the caller). */
+  waitingOn?: string;
   cfFilters?: CustomFieldFilter[]; cursor?: { id?: string } | null; limit: number;
 }) {
   const { db } = getDb();
@@ -659,6 +667,7 @@ export async function listTasks(actor: Actor, params: {
     params.dueFrom ? sql`${tasks.dueDate} >= ${params.dueFrom}` : undefined,
     params.dueTo ? sql`${tasks.dueDate} <= ${params.dueTo}` : undefined,
     params.assignee ? inArray(tasks.id, db.select({ id: taskAssignees.taskId }).from(taskAssignees).where(eq(taskAssignees.userId, params.assignee))) : undefined,
+    params.waitingOn ? inArray(tasks.id, tasksWaitingOn(params.waitingOn === 'me' ? actor.ownerUserId ?? actor.userId : params.waitingOn)) : undefined,
     // Inclusive: `pageById` mints the cursor from the first row of the next page.
     params.cursor?.id ? lte(tasks.id, params.cursor.id) : undefined,
     ...byLabel,
@@ -700,12 +709,16 @@ export async function listTasks(actor: Actor, params: {
     for (const row of blockedRows) blockedIds.add(row.id);
   }
 
+  // Who each task waits on, if anyone: a small mark on the list and board.
+  const waitingOn = await waitingOnFor(ids);
+
   const data = paged.data.map((t) => ({
     ...t,
     ref: refOf(keyMap.get(t.projectId) ?? '', t.number),
     assigneeIds: assignRows.filter((a) => a.taskId === t.id).map((a) => a.userId),
     labelIds: labelRows.filter((l) => l.taskId === t.id).map((l) => l.labelId),
     blocked: blockedIds.has(t.id),
+    waitingOnUserId: waitingOn.get(t.id) ?? null,
   }));
   return { data, nextCursor: paged.nextCursor };
 }
@@ -793,7 +806,9 @@ export async function getTask(actor: Actor, id: string, include: string[]) {
   const task = await loadTask(id);
   await assertProject(actor, task.projectId, 'viewer');
   const ref = await taskRef(task);
-  const out: Record<string, unknown> = { ...task, ref };
+  // The open question is part of the card, like its status: it is what the
+  // task waits on.
+  const out: Record<string, unknown> = { ...task, ref, openQuestion: await openQuestionView(actor, task) };
   const want = new Set(include);
 
   if (want.has('assignees')) {
@@ -964,11 +979,28 @@ export async function handOffOpenTasks(actor: Actor, fromUserId: string, toUserI
   const open = await openTasksAssignedTo(fromUserId);
   if (!open.length) return { count: 0, taskIds: [] as string[] };
   const ids = open.map((t) => t.id);
-  // An agent successor works only where it is a member – the same rule as
-  // assigning it by hand – so hand-over refuses rather than strand it.
+  // Handing work to an agent is assigning it: the agent must be a member of
+  // each project, and the person handing over must meet its assign policy
+  // there with the role they hold in that project – the same rule as
+  // assigning it by hand. Checked before anything is written, so a refusal
+  // leaves the person active and every task as it was.
   if (toUserId) {
     const projectIds = [...new Set(open.map((t) => t.projectId))];
-    for (const projectId of projectIds) await assertCanAssignAgents(actor, projectId, [toUserId], null, { policy: false });
+    const rows = await tx.select({ id: projects.id, name: projects.name, visibility: projects.visibility })
+      .from(projects).where(inArray(projects.id, projectIds)).orderBy(asc(projects.name));
+    for (const project of rows) {
+      const role = effectiveProjectRole(actor, { id: project.id, visibility: project.visibility as 'workspace' | 'private' });
+      const [refusal] = await agentAssignRefusals(actor, project.id, [toUserId], role);
+      if (refusal) {
+        // A project the actor cannot open (a private one, say) is not named to them.
+        const where = role ? project.name : 'a project you cannot open';
+        throw new ApiException(
+          refusal.error.code,
+          `Open tasks in ${where} cannot be handed to this agent: ${refusal.error.message}`,
+          refusal.error.details,
+        );
+      }
+    }
   }
   // Tasks first, in id order – the order a task edit locks in – so a hand-off
   // and a concurrent edit of the same task wait for each other, not deadlock.
@@ -1154,6 +1186,7 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
     // keeping authors, timestamps and invoice links exactly as they were.
     for (const [oldId, mappedId] of newIdOf) {
       await tx.update(schema.comments).set({ taskId: mappedId }).where(eq(schema.comments.taskId, oldId));
+      await moveQuestions(tx, actor, oldId, { id: mappedId, projectId: targetProjectId, projectKey: targetKey });
       await tx.update(schema.taskRelations).set({ taskId: mappedId }).where(eq(schema.taskRelations.taskId, oldId));
       await tx.update(schema.taskRelations).set({ relatedTaskId: mappedId }).where(eq(schema.taskRelations.relatedTaskId, oldId));
       await tx.update(schema.taskLinks).set({ taskId: mappedId }).where(eq(schema.taskLinks.taskId, oldId));
@@ -1294,6 +1327,8 @@ export async function addComment(actor: Actor, taskId: string, input: any): Prom
   // one that was.
   await db.transaction(async (tx) => {
     await tx.insert(schema.comments).values({ id, taskId, authorId: actor.userId, via: actor.agentKind === 'personal' ? actor.clientLabel ?? null : null, body: input.body ?? {} });
+    // The addressee's first comment after a question answers it.
+    await answerByComment(tx, actor, task, ref, id);
     if (mentions.length) {
       await publishEvent(tx, {
         type: 'comment.mentioned',
@@ -1808,7 +1843,9 @@ export async function myTasks(actor: Actor) {
       and ts.category not in ('done','canceled') and t.project_id in ${inList}
     order by t.due_date nulls last`) as any[];
 
-  const withRef = (r: any) => ({ ...r, ref: refOf(r.key, r.number) });
+  // Whom each task's open question waits on: the mark on the row.
+  const waiting = await waitingOnFor([...(assigned as any[]), ...(created as any[])].map((r) => r.id));
+  const withRef = (r: any) => ({ ...r, ref: refOf(r.key, r.number), waiting_on_user_id: waiting.get(r.id) ?? null });
   const rows = (assigned as any[]).map(withRef);
   return {
     overdue: rows.filter((t) => t.due_date && t.due_date < today),

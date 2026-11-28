@@ -14,7 +14,7 @@ const task = { projectId: 'p1', taskId: 't1' };
 
 describe('notifLink', () => {
   it('opens the task a task notification is about', () => {
-    for (const type of ['task.assigned', 'task.status_changed', 'comment.created', 'comment.mentioned', 'git.pr_merged', 'agent.needs_input']) {
+    for (const type of ['task.assigned', 'task.status_changed', 'task.input_requested', 'comment.created', 'comment.mentioned', 'git.pr_merged', 'agent.needs_input']) {
       expect(notifLink({ type, entityRef: null, payload: task })).toBe('/projects/p1/tasks/t1');
     }
   });

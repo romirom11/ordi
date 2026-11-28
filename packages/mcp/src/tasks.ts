@@ -841,6 +841,13 @@ export function registerTaskTools(server: McpServer, client: OrdiClient): void {
         createdAt: c.createdAt, editedAt: c.editedAt, text: toAgent(docToText(c.body)),
         reactions: c.reactions ?? {},
       })),
+      // The open question the task waits on (ask_for_input), if any.
+      waitingOn: task.openQuestion
+        ? (() => {
+          const q = task.openQuestion as Row;
+          return { questionId: q.id, question: q.question, askedAt: q.askedAt, addressee: q.addressee, askedBy: q.askedBy ? { id: (q.askedBy as Row).id, name: (q.askedBy as Row).name } : null };
+        })()
+        : null,
       createdAt: task.createdAt,
     };
   }, VERSIONED));
