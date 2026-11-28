@@ -32,6 +32,7 @@ import { sendEmailNow } from '../../lib/email';
 import { asLocale, loadBranding, renderEmail, tr } from '../../lib/email-templates';
 import { pageById } from '../../lib/http';
 import { intakeTaskDescription } from './intake';
+import { answerByComment, moveQuestions, openQuestionView, tasksWaitingOn, waitingOnFor } from './questions';
 import { isStorageConfigured } from '../../lib/s3';
 
 const { tasks, projects, taskStatuses, taskAssignees, taskLabels, projectMembers, cycles } = schema;
@@ -613,6 +614,8 @@ async function assertCycleInProject(cycleId: string, projectId: string): Promise
 export async function listTasks(actor: Actor, params: {
   projectId?: string; status?: string; priority?: string; assignee?: string; cycleId?: string;
   type?: string; parentId?: string; milestoneId?: string; labels?: string[]; q?: string; dueFrom?: string; dueTo?: string;
+  /** Only tasks with an open question waiting on this user ("me" is the caller). */
+  waitingOn?: string;
   cfFilters?: CustomFieldFilter[]; cursor?: { id?: string } | null; limit: number;
 }) {
   const { db } = getDb();
@@ -659,6 +662,7 @@ export async function listTasks(actor: Actor, params: {
     params.dueFrom ? sql`${tasks.dueDate} >= ${params.dueFrom}` : undefined,
     params.dueTo ? sql`${tasks.dueDate} <= ${params.dueTo}` : undefined,
     params.assignee ? inArray(tasks.id, db.select({ id: taskAssignees.taskId }).from(taskAssignees).where(eq(taskAssignees.userId, params.assignee))) : undefined,
+    params.waitingOn ? inArray(tasks.id, tasksWaitingOn(params.waitingOn === 'me' ? actor.ownerUserId ?? actor.userId : params.waitingOn)) : undefined,
     // Inclusive: `pageById` mints the cursor from the first row of the next page.
     params.cursor?.id ? lte(tasks.id, params.cursor.id) : undefined,
     ...byLabel,
@@ -700,12 +704,16 @@ export async function listTasks(actor: Actor, params: {
     for (const row of blockedRows) blockedIds.add(row.id);
   }
 
+  // Who each task waits on, if anyone: a small mark on the list and board.
+  const waitingOn = await waitingOnFor(ids);
+
   const data = paged.data.map((t) => ({
     ...t,
     ref: refOf(keyMap.get(t.projectId) ?? '', t.number),
     assigneeIds: assignRows.filter((a) => a.taskId === t.id).map((a) => a.userId),
     labelIds: labelRows.filter((l) => l.taskId === t.id).map((l) => l.labelId),
     blocked: blockedIds.has(t.id),
+    waitingOnUserId: waitingOn.get(t.id) ?? null,
   }));
   return { data, nextCursor: paged.nextCursor };
 }
@@ -793,7 +801,9 @@ export async function getTask(actor: Actor, id: string, include: string[]) {
   const task = await loadTask(id);
   await assertProject(actor, task.projectId, 'viewer');
   const ref = await taskRef(task);
-  const out: Record<string, unknown> = { ...task, ref };
+  // The open question is part of the card, like its status: it is what the
+  // task waits on.
+  const out: Record<string, unknown> = { ...task, ref, openQuestion: await openQuestionView(actor, task) };
   const want = new Set(include);
 
   if (want.has('assignees')) {
@@ -1151,6 +1161,7 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
     // keeping authors, timestamps and invoice links exactly as they were.
     for (const [oldId, mappedId] of newIdOf) {
       await tx.update(schema.comments).set({ taskId: mappedId }).where(eq(schema.comments.taskId, oldId));
+      await moveQuestions(tx, actor, oldId, mappedId, targetProjectId);
       await tx.update(schema.taskRelations).set({ taskId: mappedId }).where(eq(schema.taskRelations.taskId, oldId));
       await tx.update(schema.taskRelations).set({ relatedTaskId: mappedId }).where(eq(schema.taskRelations.relatedTaskId, oldId));
       await tx.update(schema.taskLinks).set({ taskId: mappedId }).where(eq(schema.taskLinks.taskId, oldId));
@@ -1291,6 +1302,8 @@ export async function addComment(actor: Actor, taskId: string, input: any): Prom
   // one that was.
   await db.transaction(async (tx) => {
     await tx.insert(schema.comments).values({ id, taskId, authorId: actor.userId, via: actor.agentKind === 'personal' ? actor.clientLabel ?? null : null, body: input.body ?? {} });
+    // The addressee's first comment after a question answers it.
+    await answerByComment(tx, actor, task, ref, id);
     if (mentions.length) {
       await publishEvent(tx, {
         type: 'comment.mentioned',

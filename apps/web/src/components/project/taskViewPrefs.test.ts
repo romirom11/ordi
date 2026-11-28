@@ -6,7 +6,7 @@
  * the tasks were written in, and must invert cleanly.
  */
 import { describe, expect, it } from 'vitest';
-import { orderTasks } from './taskViewPrefs';
+import { EMPTY_FILTERS, applyFilters, countFilters, orderTasks, sanitizeFilters } from './taskViewPrefs';
 
 interface T {
   title: string;
@@ -96,5 +96,33 @@ describe('orderTasks', () => {
     const tasks = [step(3), step(1), step(2)];
     orderTasks(tasks, 'priority');
     expect(titles(tasks)).toEqual(['Step 3', 'Step 1', 'Step 2']);
+  });
+});
+
+/**
+ * "Waiting on me" narrows the list to tasks whose open question waits on the
+ * signed-in person; it counts as a filter and survives the round trip through
+ * storage, and without knowing who "me" is it matches nothing rather than
+ * everything.
+ */
+describe('waiting on me', () => {
+  const tasks = [
+    { id: 'a', statusId: 's', waitingOnUserId: 'me' },
+    { id: 'b', statusId: 's', waitingOnUserId: 'someone-else' },
+    { id: 'c', statusId: 's', waitingOnUserId: null },
+  ];
+  const on = { ...EMPTY_FILTERS, waitingOnMe: true };
+
+  it('keeps only what waits on me', () => {
+    expect(applyFilters(tasks, on, () => undefined, 'me').map((x) => x.id)).toEqual(['a']);
+    expect(applyFilters(tasks, on, () => undefined).map((x) => x.id)).toEqual([]);
+    expect(applyFilters(tasks, EMPTY_FILTERS, () => undefined, 'me')).toHaveLength(3);
+  });
+
+  it('counts and persists', () => {
+    expect(countFilters(on)).toBe(1);
+    expect(sanitizeFilters(JSON.parse(JSON.stringify(on))).waitingOnMe).toBe(true);
+    expect(sanitizeFilters({}).waitingOnMe).toBe(false);
+    expect(sanitizeFilters({ waitingOnMe: 'yes' }).waitingOnMe).toBe(false);
   });
 });

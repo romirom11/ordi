@@ -27,6 +27,7 @@ import { CustomFieldsSection } from '../components/crm/CustomFieldsSection';
 import { SubtaskList } from '../components/task/SubtaskList';
 import { ActivityFeed } from '../components/task/CommentThread';
 import { AgentRunsBlock } from '../components/task/AgentRunsBlock';
+import { WaitingOnBanner } from '../components/task/WaitingOn';
 import type { TaskDetail, TaskPatch, UserLite } from '../components/task/types';
 import { useT, extendDict } from '../lib/i18n';
 import '../components/task/task.css';
@@ -291,6 +292,8 @@ function TaskPageView({ projectId, taskId }: { projectId: string; taskId: string
                 )}
               />
             )}
+            {/* What the task waits on – above the title, where it is read first */}
+            {task.openQuestion && <WaitingOnBanner taskId={taskId} question={task.openQuestion} />}
             {/* Title */}
             <textarea
               ref={titleRef}

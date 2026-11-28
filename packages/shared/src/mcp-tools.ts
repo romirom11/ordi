@@ -66,6 +66,8 @@ export const MCP_TOOLS = {
   assign_task: { title: 'Set a task\'s assignees', kind: 'write', idempotent: true },
   add_task_link: { title: 'Add a link to a task', kind: 'write', idempotent: true },
   comment_on_task: { title: 'Comment on a task', kind: 'write' },
+  ask_for_input: { title: 'Ask a person for input on a task', kind: 'write' },
+  list_answered: { title: 'List answers to my questions', kind: 'read' },
   log_time: { title: 'Log time', kind: 'write' },
   upload_attachment: { title: 'Upload a file', kind: 'write', openWorld: true },
   rename_attachment: { title: 'Rename a file', kind: 'write', idempotent: true },

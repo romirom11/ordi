@@ -27,6 +27,17 @@ export interface TaskComment {
   reactions?: Record<string, string[]>;
 }
 
+/** The open question a task waits on ("waiting on"), as GET /tasks/:id returns it. */
+export interface TaskOpenQuestion {
+  id: string;
+  question: string;
+  askedAt: string;
+  addressee: { id: string; name: string };
+  askedBy: { id: string; name: string; actorType: string };
+  canMarkAnswered: boolean;
+  canWithdraw: boolean;
+}
+
 export interface TaskDetail {
   id: string;
   projectId: string;
@@ -53,6 +64,7 @@ export interface TaskDetail {
   comments: TaskComment[];
   gitLinks?: TaskGitLink[];
   customFields?: Record<string, unknown>;
+  openQuestion?: TaskOpenQuestion | null;
 }
 
 export interface TaskGitLink {

@@ -230,6 +230,16 @@ export const commentInputSchema = z.object({
 });
 
 /**
+ * A question put to one person on a task (the "waiting on" flag). Without an
+ * addressee the server picks one: the task's human assignee, its reporter, or
+ * the asking agent's owner (see resolveAddressee in the projects service).
+ */
+export const taskQuestionInputSchema = z.object({
+  question: z.string().trim().min(1).max(4000),
+  addresseeId: idSchema.optional(),
+});
+
+/**
  * A comment rewrite replaces the whole body, so the body has to say something:
  * rich text is `z.any()`, which alone would let a bodyless PATCH – or one with
  * `null`, or an empty document – validate and blank the comment it was meant

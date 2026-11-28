@@ -706,3 +706,36 @@ describe('an owner can be assigned on create', () => {
     ]);
   });
 });
+
+describe('asking a person for input', () => {
+  it('ask_for_input posts the question to the task, by id or ref, and says who it went to', async () => {
+    const posts: Array<{ path: string; body: unknown }> = [];
+    const api = fakeApi({}, posts);
+    api.post = async <T>(path: string, body?: unknown): Promise<T> => {
+      posts.push({ path, body });
+      return { id: 'q1', taskId: 't1', ref: 'SOL-7', addressee: { id: 'u1', name: 'Olena' }, replaced: null } as T;
+    };
+    const client = await connect(api);
+    const res = await client.callTool({ name: 'ask_for_input', arguments: { task: 'SOL-7', question: 'Blue or green?' } });
+    expect(posts).toEqual([{ path: '/tasks/SOL-7/question', body: { question: 'Blue or green?' } }]);
+    expect(JSON.parse((res.content as any)[0].text)).toMatchObject({ questionId: 'q1', ref: 'SOL-7', waitingOn: { id: 'u1', name: 'Olena' } });
+  });
+
+  it('list_answered passes since and returns the answer as text', async () => {
+    const seen: string[] = [];
+    const api = fakeApi({});
+    api.get = async <T>(path: string): Promise<T> => {
+      seen.push(path);
+      return { data: [{
+        id: 'q1', taskId: 't1', ref: 'SOL-7', title: 'Button', question: 'Blue or green?',
+        askedAt: 'a', answeredAt: 'b', answeredBy: { id: 'u1', name: 'Olena' },
+        answer: { commentId: 'c1', body: textToDoc('Blue, please') },
+      }] } as T;
+    };
+    const client = await connect(api);
+    const res = await client.callTool({ name: 'list_answered', arguments: { since: '2026-11-01T00:00:00Z' } });
+    expect(seen).toEqual(['/me/questions/answered?since=2026-11-01T00%3A00%3A00Z']);
+    const body = JSON.parse((res.content as any)[0].text);
+    expect(body.data[0]).toMatchObject({ ref: 'SOL-7', question: 'Blue or green?', answeredBy: 'Olena', answer: { commentId: 'c1', text: 'Blue, please' } });
+  });
+});
