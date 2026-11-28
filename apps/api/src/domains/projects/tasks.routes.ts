@@ -14,13 +14,12 @@ import { guard, rejectReadOnlyWrites } from '../../core/rbac';
 import { err } from '../../lib/errors';
 import { idPage } from '../../lib/http';
 import { assertProject } from '../../core/access';
+import { parseCustomFieldFilters } from '../../core/customfields';
 import * as svc from './service';
 import * as questions from './questions';
 
 function parseCfFilters(c: any): CustomFieldFilter[] {
-  const raw = c.req.query('cf');
-  if (!raw) return [];
-  try { return JSON.parse(raw); } catch { return []; }
+  return parseCustomFieldFilters(c.req.query('cf'));
 }
 
 function requireSettingsManage(c: any) {

@@ -19,11 +19,10 @@ import { idPage, pageById } from '../../lib/http';
 import * as svc from './service';
 import * as playbooks from './playbooks';
 import { assertSalesWrite } from './sales-access';
+import { parseCustomFieldFilters } from '../../core/customfields';
 
 function parseCfFilters(c: any): CustomFieldFilter[] {
-  const raw = c.req.query('cf');
-  if (!raw) return [];
-  try { return JSON.parse(raw); } catch { return []; }
+  return parseCustomFieldFilters(c.req.query('cf'));
 }
 
 export function crmRoutes() {

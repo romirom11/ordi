@@ -4,9 +4,22 @@
  * against the registry, and builds a parameterized JSONB predicate. Sorting
  * projects the value to a typed expression.
  */
+import { z } from 'zod';
 import { getDb, schema, eq, and, sql, type SQL } from '@ordi/db';
-import type { CustomFieldFilter, CustomFieldType } from '@ordi/shared';
+import { customFieldFilterSchema, type CustomFieldFilter, type CustomFieldType } from '@ordi/shared';
 import { err } from '../lib/errors';
+
+/**
+ * The `cf` query parameter: a JSON list of filters. Malformed JSON or a list
+ * that is not one of filters is a 400 – dropping it silently answered with an
+ * unfiltered list, and an object in place of the list crashed the loop over it.
+ */
+export function parseCustomFieldFilters(raw: string | undefined): CustomFieldFilter[] {
+  if (raw === undefined) return [];
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { throw err.validation('cf must be a JSON list of custom-field filters'); }
+  return z.array(customFieldFilterSchema).parse(parsed);
+}
 
 interface FieldDef {
   key: string;
@@ -71,29 +84,42 @@ export function mergeCustomFields(before: unknown, incoming: unknown): Record<st
   return { ...base, ...patch };
 }
 
+/**
+ * `in` is "any of these values": every type with a value to compare takes it,
+ * since MCP's list_tasks sends any array as `in` whatever the field's type. A
+ * checkbox has two values, so `eq` is all it needs.
+ */
 const OPS_BY_TYPE: Record<CustomFieldType, string[]> = {
-  number: ['eq', 'gt', 'lt', 'between'],
-  date: ['before', 'after', 'between', 'eq'],
+  number: ['eq', 'gt', 'lt', 'between', 'in'],
+  date: ['before', 'after', 'between', 'eq', 'in'],
   select: ['in', 'eq'],
   multiselect: ['in'],
-  text: ['contains', 'eq'],
-  url: ['contains', 'eq'],
+  text: ['contains', 'eq', 'in'],
+  url: ['contains', 'eq', 'in'],
   checkbox: ['eq'],
   user: ['eq', 'in'],
 };
 
+/** An `in` list is one bound parameter per value; this keeps it well inside Postgres's limit. */
+const MAX_IN_VALUES = 500;
+
 const SORTABLE_TYPES: CustomFieldType[] = ['number', 'date', 'select', 'text'];
 
-/** Column expression for the JSONB value cast to the field's type. */
-function typedValue(column: string, key: string, type: CustomFieldType): SQL {
-  const path = sql.raw(`(${column}->>${quote(key)})`);
-  if (type === 'number') return sql`${path}::numeric`;
-  if (type === 'date') return sql`${path}::date`;
-  return sql`${path}`;
+/** The field's JSON value, `->`, or its text, `->>`. The key is a bound parameter too. */
+function jsonPath(column: string, key: string, asText: boolean): SQL {
+  return asText ? sql`(${sql.raw(column)}->>${key}::text)` : sql`(${sql.raw(column)}->${key}::text)`;
 }
 
-function quote(s: string): string {
-  return `'${s.replace(/'/g, "''")}'`;
+/**
+ * Column expression for the JSONB value cast to the field's type. Values are
+ * stored as sent – nothing checks them against the field's type – so a value
+ * that is no number (or no date) reads as null rather than abort the query.
+ */
+function typedValue(column: string, key: string, type: CustomFieldType): SQL {
+  const path = jsonPath(column, key, true);
+  if (type === 'number') return sql`(case when pg_input_is_valid(${path}, 'numeric') then ${path}::numeric end)`;
+  if (type === 'date') return sql`(case when pg_input_is_valid(${path}, 'date') then ${path}::date end)`;
+  return path;
 }
 
 export interface CustomFieldScope {
@@ -128,15 +154,21 @@ export async function buildCustomFieldFilter(
   for (const d of matching) byType.set(d.type, [...(byType.get(d.type) ?? []), d]);
   // A value that is no number (or no date) cannot be compared as one: Postgres
   // casts the parameter itself, CASE or not. Such a type is left out, unless
-  // it is the only one, which then fails as it always did.
-  let types = [...byType.values()];
-  if (types.length > 1) {
-    const fitting = types.filter((sameType) => valueFits(sameType[0]!.type, filter.value));
-    if (fitting.length) types = fitting;
+  // it is the only one, which then fails with a 400. For `in`, each type takes
+  // the values it can compare: ["small", "1"] looks for "1" where the key is a
+  // number and for both where it is text.
+  let branches = [...byType.values()].map((sameType) => ({ def: sameType[0]!, defs: sameType, filter }));
+  if (branches.length > 1) {
+    const fitting = branches.flatMap((b) => {
+      if (filter.op !== 'in' || !Array.isArray(filter.value)) return valueFits(b.def.type, filter.value) ? [b] : [];
+      const values = filter.value.filter((x) => valueFits(b.def.type, x));
+      return values.length ? [{ ...b, filter: { ...filter, value: values } }] : [];
+    });
+    if (fitting.length) branches = fitting;
   }
-  const parts = types.map((sameType) => {
+  const parts = branches.map(({ def, defs: sameType, filter: f }) => {
     const inProjects = sql.join(sameType.map((d) => sql`${d.projectId}`), sql`, `);
-    return sql`(case when ${scope.projectColumn} in (${inProjects}) then ${fieldPredicate(column, sameType[0]!, filter)} else false end)`;
+    return sql`(case when ${scope.projectColumn} in (${inProjects}) then ${fieldPredicate(column, def, f)} else false end)`;
   });
   return parts.length === 1 ? parts[0]! : sql`(${sql.join(parts, sql` or `)})`;
 }
@@ -144,32 +176,99 @@ export async function buildCustomFieldFilter(
 /** Whether a filter value (or each of a list's values) can be compared as this type. */
 function valueFits(type: CustomFieldType, value: unknown): boolean {
   const values = Array.isArray(value) ? value : [value];
-  if (type === 'number') {
-    return values.every((x) => (typeof x === 'number' && Number.isFinite(x))
-      || (typeof x === 'string' && x.trim() !== '' && Number.isFinite(Number(x))));
-  }
-  if (type === 'date') return values.every((x) => typeof x === 'string' && /^\d{4}-\d{2}-\d{2}/.test(x));
+  if (type === 'number') return values.every((x) => numericText(x) !== null);
+  if (type === 'date') return values.every((x) => dateText(x) !== null);
   return true;
+}
+
+/**
+ * A number as the text Postgres reads as numeric, or null. Stricter than
+ * JavaScript's Number(): that also takes " 3", " 3", "0x10" or
+ * "Infinity", which Postgres refuses.
+ */
+function numericText(x: unknown): string | null {
+  if (typeof x === 'number') return Number.isFinite(x) ? String(x) : null;
+  if (typeof x === 'string' && /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d{1,4})?$/.test(x)) return x;
+  return null;
+}
+
+/**
+ * The calendar date a value starts with, as YYYY-MM-DD, or null: a date or
+ * an ISO timestamp, on a day that exists (no 2026-02-30) in a year Postgres
+ * takes (no year 0000).
+ */
+function dateText(x: unknown): string | null {
+  if (typeof x !== 'string') return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})(T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/.exec(x);
+  if (!m || m[1] === '0000') return null;
+  const day = x.slice(0, 10);
+  const d = new Date(`${day}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === day ? day : null;
+}
+
+/**
+ * One operand of a filter as a bound parameter of the field's type. A value
+ * the type cannot compare is the caller's mistake: a 400, never SQL that
+ * fails to run. Lists and objects are never an operand – bound as one value
+ * they would spread into several parameters.
+ */
+function operand(def: FieldDef, op: string, x: unknown): SQL {
+  if (def.type === 'number') {
+    const n = numericText(x);
+    if (n === null) throw err.validation(`'${op}' on '${def.key}' needs numbers`);
+    return sql`${n}::numeric`;
+  }
+  if (def.type === 'date') {
+    const d = dateText(x);
+    if (d === null) throw err.validation(`'${op}' on '${def.key}' needs dates as YYYY-MM-DD`);
+    return sql`${d}::date`;
+  }
+  // Text, url, select, multiselect and user values are compared as text; a
+  // number is taken as the text it reads as.
+  if (typeof x === 'string') return sql`${x}::text`;
+  if (typeof x === 'number' && Number.isFinite(x)) return sql`${String(x)}::text`;
+  throw err.validation(`'${op}' on '${def.key}' needs text values`);
+}
+
+/** The values of an `in` filter: a non-empty list, short enough to bind one parameter each. */
+function inValues(def: FieldDef, v: unknown): SQL[] {
+  if (!Array.isArray(v) || !v.length) throw err.validation(`'in' on '${def.key}' needs a non-empty list of values`);
+  if (v.length > MAX_IN_VALUES) throw err.validation(`'in' on '${def.key}' takes at most ${MAX_IN_VALUES} values`);
+  return v.map((x) => operand(def, 'in', x));
 }
 
 function fieldPredicate(column: string, def: FieldDef, filter: CustomFieldFilter): SQL {
   const value = typedValue(column, def.key, def.type);
-  const v = filter.value as any;
+  const v = filter.value as unknown;
   switch (filter.op) {
     case 'eq':
-      return def.type === 'checkbox' ? sql`${value} = ${String(!!v)}` : sql`${value} = ${v}`;
-    case 'gt': return sql`${value} > ${v}`;
-    case 'lt': return sql`${value} < ${v}`;
-    case 'before': return sql`${value} < ${v}::date`;
-    case 'after': return sql`${value} > ${v}::date`;
+      if (def.type === 'checkbox') {
+        if (typeof v === 'object' && v !== null) throw err.validation(`'eq' on '${def.key}' needs a single value`);
+        return sql`${value} = ${String(!!v)}::text`;
+      }
+      return sql`${value} = ${operand(def, 'eq', v)}`;
+    case 'gt': return sql`${value} > ${operand(def, 'gt', v)}`;
+    case 'lt': return sql`${value} < ${operand(def, 'lt', v)}`;
+    case 'before': return sql`${value} < ${operand(def, 'before', v)}`;
+    case 'after': return sql`${value} > ${operand(def, 'after', v)}`;
     case 'between': {
       if (!Array.isArray(v) || v.length !== 2) throw err.validation('between needs [min,max]');
-      return sql`${value} between ${v[0]} and ${v[1]}`;
+      return sql`${value} between ${operand(def, 'between', v[0])} and ${operand(def, 'between', v[1])}`;
     }
-    case 'contains': return sql`${value} ilike ${'%' + String(v) + '%'}`;
+    case 'contains': {
+      if (typeof v !== 'string' && typeof v !== 'number') throw err.validation(`'contains' on '${def.key}' needs text`);
+      return sql`${value} ilike ${'%' + String(v) + '%'}`;
+    }
     case 'in': {
-      if (!Array.isArray(v)) throw err.validation('in needs an array');
-      return sql`${value} = any(${v})`;
+      const values = sql.join(inValues(def, v), sql`, `);
+      if (def.type === 'multiselect') {
+        // The value is a JSON list: it matches when it holds any of the
+        // values. `?|` also reads an object's keys, so only a list (or a lone
+        // string) is looked into.
+        const path = jsonPath(column, def.key, false);
+        return sql`(jsonb_typeof(${path}) in ('array', 'string') and ${path} ?| array[${values}])`;
+      }
+      return sql`${value} in (${values})`;
     }
     default:
       throw err.validation(`Unsupported op '${filter.op}'`);
