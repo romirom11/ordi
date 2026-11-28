@@ -10,7 +10,7 @@ import { useCan } from '../../lib/auth';
 import { Button, Spinner, cn } from '../ui';
 import { toast } from '../overlays';
 import { useT, extendDict } from '../../lib/i18n';
-import { useActiveTimer, useStopTimer, useTimerElapsed } from '../../lib/timer';
+import { timerLabel, useActiveTimer, useStopTimer, useTimerElapsed } from '../../lib/timer';
 
 extendDict({
   en: {
@@ -94,7 +94,7 @@ export function TaskTimer({ taskId }: { taskId: string }) {
       {timerQ.isError && <button type="button" className="mt-1 text-xs text-destructive" onClick={() => void timerQ.refetch()}>{t('time.timerUnavailable', 'Could not check the timer. Retry')}</button>}
       {timer && (
         <p className="mt-1 text-center text-[11px] text-faint">
-          {t('task.timerRunningElsewhere')}{timer.ref ? ` (${timer.ref})` : ''}
+          {t('task.timerRunningElsewhere')}{timerLabel(timer, t) ? ` (${timerLabel(timer, t)})` : ''}
         </p>
       )}
     </div>

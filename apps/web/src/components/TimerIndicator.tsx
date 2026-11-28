@@ -1,7 +1,7 @@
 import { Square } from 'lucide-react';
 import { useCan } from '../lib/auth';
 import { useT } from '../lib/i18n';
-import { useActiveTimer, useStopTimer, useTimerElapsed } from '../lib/timer';
+import { timerLabel, useActiveTimer, useStopTimer, useTimerElapsed } from '../lib/timer';
 import { IconButton, Spinner } from './ui';
 
 function fmt(sec: number): string {
@@ -26,7 +26,7 @@ export function TimerIndicator() {
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-md bg-primary/10 px-2 py-1 text-xs">
       <span className="font-mono">{fmt(elapsed)}</span>
-      <span className="truncate text-muted-foreground" title={timer.title ?? undefined}>{timer.ref ?? 'timer'}</span>
+      <span className="truncate text-muted-foreground" title={timer.title ?? undefined}>{timerLabel(timer, t) ?? 'timer'}</span>
       <IconButton type="button" onClick={() => stop.mutate(timer)} disabled={stop.isPending} className="ml-auto text-destructive" aria-label={t('time.stopTimer', 'Stop timer')} title={t('time.stopTimer', 'Stop timer')}>
         {stop.isPending ? <Spinner /> : <Square size={12} />}
       </IconButton>

@@ -81,7 +81,8 @@ export function timeRoutes() {
   app.patch('/time/entries/:id', guardAny('time.track', 'time.manage'), async (c) => {
     const body = timeEntryUpdateSchema.parse(await c.req.json());
     const actor = currentActor(c);
-    return c.json(withoutCost(actor, await svc.updateEntry(actor, c.req.param('id'), body, hasPerm(actor, 'time.manage'))));
+    const entry = await svc.updateEntry(actor, c.req.param('id'), body, hasPerm(actor, 'time.manage'));
+    return c.json(withoutCost(actor, await svc.shownRawEntry(actor, entry, hasPerm(actor, 'time.read_all'))));
   });
 
   app.delete('/time/entries/:id', guardAny('time.track', 'time.manage'), async (c) => {
@@ -99,8 +100,10 @@ export function timeRoutes() {
   app.post('/time/timer/stop', guard('time.track'), async (c) =>
     c.json(await svc.stopTimer(currentActor(c))));
 
-  app.get('/time/timer', guard('time.track'), async (c) =>
-    c.json(await svc.getTimer(currentActor(c))));
+  app.get('/time/timer', guard('time.track'), async (c) => {
+    const actor = currentActor(c);
+    return c.json(await svc.getTimer(actor, hasPerm(actor, 'time.read_all')));
+  });
 
   // ── Rates ──
   app.get('/time/rates', guardProjectAdminOr('time.read_all'), async (c) => {
@@ -140,7 +143,7 @@ export function timeRoutes() {
     const weekStart = c.req.query('weekStart');
     if (!weekStart || !/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) throw err.validation('weekStart (YYYY-MM-DD) required');
     const actor = currentActor(c);
-    const week = await svc.myWeek(actor, weekStart, { from: c.req.query('from'), to: c.req.query('to') });
+    const week = await svc.myWeek(actor, weekStart, { from: c.req.query('from'), to: c.req.query('to') }, hasPerm(actor, 'time.read_all'));
     return c.json({ ...week, days: week.days.map((d) => ({ ...d, entries: d.entries.map((e) => withoutCost(actor, e)) })) });
   });
 
