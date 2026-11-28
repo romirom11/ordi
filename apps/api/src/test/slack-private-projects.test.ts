@@ -94,7 +94,9 @@ const EVENTS: { name: string; setup: (projectId: string) => Promise<unknown>; fi
   },
   {
     name: 'task.created by a move into the project',
-    setup: async () => task(await project('workspace', { slackWebhookUrl: 'https://hooks.slack.com/services/T000/B000/source' }), 'Secret launch plan'),
+    // The source is public with no target of its own: anything it still
+    // sent after the move would land on the workspace webhook, and be seen.
+    setup: async () => task(await project('workspace'), 'Secret launch plan'),
     fire: async (projectId, taskId: string) => {
       expect((await owner().post(`/tasks/${taskId}/move`, { targetProjectId: projectId })).status).toBe(200);
     },
@@ -122,8 +124,7 @@ const EVENTS: { name: string; setup: (projectId: string) => Promise<unknown>; fi
   },
 ];
 
-/** Only the posts that came from the fire step, minus a moved task's old project. */
-const sent = () => posts.filter((p) => !p.url.endsWith('/source'));
+const sent = () => posts;
 
 beforeAll(async () => {
   await resetDb();
@@ -219,6 +220,48 @@ describe('a public project with a channel but no bot token', () => {
     await task(projectId, 'Open plan');
     await drainOutbox();
     expect(posts.map((p) => p.url)).toEqual([WORKSPACE_HOOK]);
+  });
+});
+
+describe('an event still queued when its task moves', () => {
+  it('posts nothing for a task moved into a private project before delivery', async () => {
+    const source = await project('workspace');
+    const target = await project('private');
+    const taskId = await task(source, 'Secret launch plan');
+    expect((await owner().patch(`/tasks/${taskId}`, { statusId: await doneStatusId(source) })).status).toBe(200);
+    // task.created and task.status_changed are still in the outbox.
+    expect((await owner().post(`/tasks/${taskId}/move`, { targetProjectId: target })).status).toBe(200);
+    await drainOutbox();
+    expect(posts).toEqual([]);
+  });
+
+  it('a mention made in a private project and delivered after a move to a public one shows the new ref only', async () => {
+    const source = await project('private');
+    const target = await project('workspace');
+    const taskId = await task(source, 'Secret launch plan');
+    await settle();
+    const [sourceProject] = await getDb().db.select({ key: schema.projects.key }).from(schema.projects).where(eq(schema.projects.id, source));
+    expect((await owner().post(`/tasks/${taskId}/comments`, { body: mentioning(users.member!.userId, 'have a look') })).status).toBe(201);
+    const moved = await json(owner().post(`/tasks/${taskId}/move`, { targetProjectId: target }));
+    await drainOutbox();
+    const mention = posts.find((p) => p.body.text?.includes('mentioned'));
+    expect(mention?.url).toBe(WORKSPACE_HOOK);
+    expect(mention!.body.text).toContain(moved.ref);
+    expect(posts.every((p) => !p.body.text?.includes(`${sourceProject!.key}-`))).toBe(true);
+  });
+});
+
+describe('clearing a private project\'s own target', () => {
+  it('stops its posts there, without falling back to the workspace', async () => {
+    const projectId = await project('private', { slackWebhookUrl: OWN_HOOK, slackChannelId: 'C0PRIVATE' });
+    // What the settings page sends: the current settings, with the target nulled.
+    const [current] = await getDb().db.select({ settings: schema.projects.settings }).from(schema.projects).where(eq(schema.projects.id, projectId));
+    const res = await owner().patch(`/projects/${projectId}`, { settings: { ...(current!.settings as object), slackWebhookUrl: null, slackChannelId: null } });
+    expect(res.status).toBe(200);
+    await settle();
+    await task(projectId, 'Secret launch plan');
+    await drainOutbox();
+    expect(posts).toEqual([]);
   });
 });
 

@@ -439,7 +439,9 @@ function AdvancedWebhook({ projectId, settings, version }: {
 
   const save = useMutation({
     mutationFn: () => api.patch(`/projects/${projectId}`, {
-      settings: { ...settings, slackWebhookUrl: url.trim() || undefined },
+      // null, not undefined: JSON drops an undefined key, and the API merges
+      // settings, so the old webhook would stay and keep receiving posts.
+      settings: { ...settings, slackWebhookUrl: url.trim() || null },
       version,
     }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['project', projectId] }); toast(t('projects.slackSaved')); },
@@ -504,7 +506,8 @@ function SlackSection({ projectId, settings, version, canManage, visibility }: {
 
   const save = useMutation({
     mutationFn: (channelId: string | undefined) => api.patch(`/projects/${projectId}`, {
-      settings: { ...settings, slackChannelId: channelId },
+      // null clears it; an undefined key would be dropped and the channel kept.
+      settings: { ...settings, slackChannelId: channelId ?? null },
       version,
     }),
     onSuccess: (_d, channelId) => {

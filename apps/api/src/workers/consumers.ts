@@ -582,9 +582,9 @@ const webhooks: Consumer = {
  *      private project, whose task titles, refs and status changes are for its
  *      members: it posts only to a channel or webhook set on the project
  *   4. skip silently
- * An event about a project that cannot be resolved (the task or comment is
- * gone, the project no longer exists) posts nothing rather than fall back to
- * the shared channel. Delivery failures rethrow so the relay's retry/DLQ
+ * An event about a task or comment that is gone, deleted or moved away, or a
+ * project that no longer exists, posts nothing rather than fall back to the
+ * shared channel. Delivery failures rethrow so the relay's retry/DLQ
  * machinery applies.
  */
 const SLACK_EVENTS = new Set([
@@ -607,12 +607,11 @@ async function workspaceBotToken(): Promise<string | null> {
 
 /**
  * Where a message goes. `projectId` undefined: a workspace event (deals,
- * invoices), for the workspace webhook. A string: that project's event. null:
- * a project event whose project could not be found – nothing is posted.
+ * invoices), for the workspace webhook. Otherwise that project's event; a
+ * project that no longer exists gets nothing.
  */
-async function resolveSlackTarget(projectId: string | null | undefined): Promise<SlackTarget> {
+async function resolveSlackTarget(projectId: string | undefined): Promise<SlackTarget> {
   const { db } = getDb();
-  if (projectId === null) return null;
   if (projectId !== undefined) {
     const [project] = await db.select({ settings: schema.projects.settings, visibility: schema.projects.visibility })
       .from(schema.projects).where(eq(schema.projects.id, projectId));
@@ -632,11 +631,26 @@ async function resolveSlackTarget(projectId: string | null | undefined): Promise
 }
 
 /**
- * Build the Slack message + the project it belongs to (for target resolution):
- * a project id, null for a project event whose project is unknown, or
- * undefined for a workspace event.
+ * A task as it is now, with its current ref – or null when it is gone, deleted
+ * or moved away. Slack reads the row, not the event payload: the task's
+ * present project decides who may read about it.
  */
-async function buildSlackMessage(ev: DomainEvent): Promise<{ text: string; projectId: string | null | undefined } | null> {
+async function liveTask(taskId: string): Promise<{ title: string; statusId: string | null; projectId: string; ref: string } | null> {
+  const { db } = getDb();
+  const [row] = await db.select({
+    title: schema.tasks.title, statusId: schema.tasks.statusId, projectId: schema.tasks.projectId,
+    number: schema.tasks.number, key: schema.projects.key, deletedAt: schema.tasks.deletedAt,
+  }).from(schema.tasks).innerJoin(schema.projects, eq(schema.projects.id, schema.tasks.projectId))
+    .where(eq(schema.tasks.id, taskId));
+  if (!row || row.deletedAt) return null;
+  return { title: row.title, statusId: row.statusId, projectId: row.projectId, ref: `${row.key}-${row.number}` };
+}
+
+/**
+ * Build the Slack message + the project it belongs to (for target resolution),
+ * or undefined for a workspace event. null: nothing to post.
+ */
+async function buildSlackMessage(ev: DomainEvent): Promise<{ text: string; projectId: string | undefined } | null> {
   const { db } = getDb();
   const p = ev.payload as any;
   const app = env.appUrl.replace(/\/$/, '');
@@ -644,42 +658,37 @@ async function buildSlackMessage(ev: DomainEvent): Promise<{ text: string; proje
     case 'task.created':
     case 'task.status_changed': {
       const taskId = ev.aggregateId;
-      const [task] = await db.select({ title: schema.tasks.title, statusId: schema.tasks.statusId, projectId: schema.tasks.projectId })
-        .from(schema.tasks).where(eq(schema.tasks.id, taskId));
-      // The task's own project decides who may read about it; the payload's
-      // is the fallback for a task that is gone by now.
-      const projectId: string | null = task?.projectId ?? p.projectId ?? null;
-      const title = task?.title ?? '';
-      const link = projectId ? `${app}/projects/${projectId}/tasks/${taskId}` : `${app}/my-tasks`;
+      // Gone or moved by now (a move leaves the old row behind, deleted, and
+      // announces the copy in its new project): nothing to post.
+      const task = await liveTask(taskId);
+      if (!task) return null;
+      const link = `${app}/projects/${task.projectId}/tasks/${taskId}`;
       if (ev.type === 'task.created') {
         // A CSV import creates tasks by the dozen; one message each would bury the channel.
         if (p.source === 'import') return null;
-        return { text: `:sparkles: New task *${p.ref ?? taskId}* – ${title}\n${link}`, projectId };
+        return { text: `:sparkles: New task *${task.ref}* – ${task.title}\n${link}`, projectId: task.projectId };
       }
       let statusName = '';
-      if (task?.statusId) {
+      if (task.statusId) {
         const [st] = await db.select({ name: schema.taskStatuses.name })
           .from(schema.taskStatuses).where(eq(schema.taskStatuses.id, task.statusId));
         statusName = st?.name ?? '';
       }
-      return { text: `:arrows_counterclockwise: Task *${p.ref ?? taskId}* → *${statusName}* – ${title}\n${link}`, projectId };
+      return { text: `:arrows_counterclockwise: Task *${task.ref}* → *${statusName}* – ${task.title}\n${link}`, projectId: task.projectId };
     }
     case 'comment.mentioned': {
-      // aggregateId is the comment id; derive the task/project for the deep link.
-      const [comment] = await db.select({ taskId: schema.comments.taskId })
+      // aggregateId is the comment id. A comment follows its task on a move,
+      // so the task it sits on now decides both the target and the ref shown
+      // – the payload's ref may name the project it was moved out of.
+      const [comment] = await db.select({ taskId: schema.comments.taskId, deletedAt: schema.comments.deletedAt })
         .from(schema.comments).where(eq(schema.comments.id, ev.aggregateId));
-      // A comment always sits on a task, so this is always a project event:
-      // one whose task cannot be found posts nothing (projectId null).
-      const taskId: string | null = comment?.taskId ?? p.taskId ?? null;
-      let projectId: string | null = null;
-      let link = app;
-      if (taskId) {
-        const [task] = await db.select({ projectId: schema.tasks.projectId })
-          .from(schema.tasks).where(eq(schema.tasks.id, taskId));
-        projectId = task?.projectId ?? p.projectId ?? null;
-        link = projectId ? `${app}/projects/${projectId}/tasks/${taskId}` : app;
-      }
-      return { text: `:speech_balloon: You were mentioned in *${p.ref ?? 'a comment'}*\n${link}`, projectId };
+      if (!comment || comment.deletedAt) return null;
+      const task = await liveTask(comment.taskId);
+      if (!task) return null;
+      return {
+        text: `:speech_balloon: You were mentioned in *${task.ref}*\n${app}/projects/${task.projectId}/tasks/${comment.taskId}`,
+        projectId: task.projectId,
+      };
     }
     case 'deal.won': {
       const amount = p.amount ? ` (${p.currency ?? ''} ${p.amount})` : '';
