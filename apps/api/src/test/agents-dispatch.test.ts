@@ -160,8 +160,8 @@ describe('dispatch', () => {
     await owner.post(`/agents/${sleepy.id}/disable`);
     const other = await newTask('Disabled agent');
     const t = await json(owner.get(`/tasks/${other.id}`));
-    // Inactive users are refused as assignees by the picker; going through the API the run must still not appear.
-    await owner.patch(`/tasks/${other.id}`, { version: t.version, assigneeIds: [sleepy.id] });
+    // Inactive users are refused as assignees, by the picker and the API alike; no run appears.
+    expect((await owner.patch(`/tasks/${other.id}`, { version: t.version, assigneeIds: [sleepy.id] })).status).toBe(400);
     await drainOutbox();
     expect(await runsForTask(other.id)).toHaveLength(0);
   });

@@ -60,8 +60,9 @@ beforeAll(async () => {
 describe('creating a task', () => {
   it('that fails after the row is written leaves no task and announces nothing', async () => {
     const createdBefore = await eventCount('task.created');
-    // A person who does not exist: the assignee row fails after the task row.
-    const res = await owner.post('/tasks', { projectId: ws.projectId, title: 'Half made', assigneeIds: [ulid()] });
+    // The assignee row fails after the task row. (A person who does not exist
+    // is now refused before anything is written, so the failure is injected.)
+    const res = await failingOn('task_assignees', 'true', () => owner.post('/tasks', { projectId: ws.projectId, title: 'Half made', assigneeIds: [users.member!.userId] }));
     expect(res.status).toBeGreaterThanOrEqual(400);
     expect(await tasksTitled('Half made')).toHaveLength(0);
     expect(await eventCount('task.created')).toBe(createdBefore);
