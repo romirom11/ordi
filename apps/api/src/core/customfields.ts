@@ -4,9 +4,22 @@
  * against the registry, and builds a parameterized JSONB predicate. Sorting
  * projects the value to a typed expression.
  */
+import { z } from 'zod';
 import { getDb, schema, eq, and, sql, type SQL } from '@ordi/db';
-import type { CustomFieldFilter, CustomFieldType } from '@ordi/shared';
+import { customFieldFilterSchema, type CustomFieldFilter, type CustomFieldType } from '@ordi/shared';
 import { err } from '../lib/errors';
+
+/**
+ * The `cf` query parameter: a JSON list of filters. Malformed JSON or a list
+ * that is not one of filters is a 400 – dropping it silently answered with an
+ * unfiltered list, and an object in place of the list crashed the loop over it.
+ */
+export function parseCustomFieldFilters(raw: string | undefined): CustomFieldFilter[] {
+  if (!raw) return [];
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { throw err.validation('cf must be a JSON list of custom-field filters'); }
+  return z.array(customFieldFilterSchema).parse(parsed);
+}
 
 interface FieldDef {
   key: string;
@@ -71,16 +84,24 @@ export function mergeCustomFields(before: unknown, incoming: unknown): Record<st
   return { ...base, ...patch };
 }
 
+/**
+ * `in` is "any of these values": every type with a value to compare takes it,
+ * since MCP's list_tasks sends any array as `in` whatever the field's type. A
+ * checkbox has two values, so `eq` is all it needs.
+ */
 const OPS_BY_TYPE: Record<CustomFieldType, string[]> = {
-  number: ['eq', 'gt', 'lt', 'between'],
-  date: ['before', 'after', 'between', 'eq'],
+  number: ['eq', 'gt', 'lt', 'between', 'in'],
+  date: ['before', 'after', 'between', 'eq', 'in'],
   select: ['in', 'eq'],
   multiselect: ['in'],
-  text: ['contains', 'eq'],
-  url: ['contains', 'eq'],
+  text: ['contains', 'eq', 'in'],
+  url: ['contains', 'eq', 'in'],
   checkbox: ['eq'],
   user: ['eq', 'in'],
 };
+
+/** An `in` list is one bound parameter per value; this keeps it well inside Postgres's limit. */
+const MAX_IN_VALUES = 500;
 
 const SORTABLE_TYPES: CustomFieldType[] = ['number', 'date', 'select', 'text'];
 
@@ -144,17 +165,59 @@ export async function buildCustomFieldFilter(
 /** Whether a filter value (or each of a list's values) can be compared as this type. */
 function valueFits(type: CustomFieldType, value: unknown): boolean {
   const values = Array.isArray(value) ? value : [value];
-  if (type === 'number') {
-    return values.every((x) => (typeof x === 'number' && Number.isFinite(x))
-      || (typeof x === 'string' && x.trim() !== '' && Number.isFinite(Number(x))));
-  }
-  if (type === 'date') return values.every((x) => typeof x === 'string' && /^\d{4}-\d{2}-\d{2}/.test(x));
+  if (type === 'number') return values.every(isNumeric);
+  if (type === 'date') return values.every(isDate);
   return true;
+}
+
+function isNumeric(x: unknown): boolean {
+  return (typeof x === 'number' && Number.isFinite(x))
+    || (typeof x === 'string' && x.trim() !== '' && Number.isFinite(Number(x)));
+}
+
+/** A calendar date as YYYY-MM-DD that exists: 2026-02-30 would fail the cast. */
+function isDate(x: unknown): boolean {
+  if (typeof x !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(x)) return false;
+  const d = new Date(`${x}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === x;
+}
+
+/**
+ * The values of an `in` filter, each a bound parameter cast to the field's
+ * type. A list that is empty, too long, or holds a value the type cannot
+ * compare is the caller's mistake: a 400, never SQL that fails to run.
+ */
+function inValues(def: FieldDef, v: unknown): SQL[] {
+  if (!Array.isArray(v) || !v.length) throw err.validation(`'in' on '${def.key}' needs a non-empty list of values`);
+  if (v.length > MAX_IN_VALUES) throw err.validation(`'in' on '${def.key}' takes at most ${MAX_IN_VALUES} values`);
+  return v.map((x) => {
+    if (def.type === 'number') {
+      if (!isNumeric(x)) throw err.validation(`'in' on '${def.key}' needs numbers`);
+      return sql`${String(x)}::numeric`;
+    }
+    if (def.type === 'date') {
+      if (!isDate(x)) throw err.validation(`'in' on '${def.key}' needs dates as YYYY-MM-DD`);
+      return sql`${x}::date`;
+    }
+    // Text, url, select, multiselect and user values are compared as text; a
+    // number is taken as the text it reads as.
+    if (typeof x === 'string') return sql`${x}::text`;
+    if (typeof x === 'number' && Number.isFinite(x)) return sql`${String(x)}::text`;
+    throw err.validation(`'in' on '${def.key}' needs text values`);
+  });
+}
+
+/** Lists and objects bound as one value expand into several parameters: not a value to compare. */
+function assertScalar(def: FieldDef, op: string, v: unknown): void {
+  if (v === null || v === undefined || typeof v === 'object') {
+    throw err.validation(`'${op}' on '${def.key}' needs a single value`);
+  }
 }
 
 function fieldPredicate(column: string, def: FieldDef, filter: CustomFieldFilter): SQL {
   const value = typedValue(column, def.key, def.type);
   const v = filter.value as any;
+  if (['eq', 'gt', 'lt', 'before', 'after'].includes(filter.op)) assertScalar(def, filter.op, v);
   switch (filter.op) {
     case 'eq':
       return def.type === 'checkbox' ? sql`${value} = ${String(!!v)}` : sql`${value} = ${v}`;
@@ -168,8 +231,13 @@ function fieldPredicate(column: string, def: FieldDef, filter: CustomFieldFilter
     }
     case 'contains': return sql`${value} ilike ${'%' + String(v) + '%'}`;
     case 'in': {
-      if (!Array.isArray(v)) throw err.validation('in needs an array');
-      return sql`${value} = any(${v})`;
+      const values = sql.join(inValues(def, v), sql`, `);
+      if (def.type === 'multiselect') {
+        // The value is a JSON list: it matches when it holds any of the values.
+        const path = sql.raw(`(${column}->${quote(def.key)})`);
+        return sql`${path} ?| array[${values}]`;
+      }
+      return sql`${value} in (${values})`;
     }
     default:
       throw err.validation(`Unsupported op '${filter.op}'`);
