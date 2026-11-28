@@ -5,7 +5,7 @@ import { ulid } from 'ulid';
 import { z } from 'zod';
 import * as OTPAuth from 'otpauth';
 import {
-  loginSchema, acceptInviteSchema, createApiTokenSchema, validateTokenScope,
+  loginSchema, acceptInviteSchema, createApiTokenSchema, createClientTokenSchema, validateTokenScope,
   forgotPasswordSchema, resetPasswordSchema,
 } from '@ordi/shared';
 import type { AppEnv } from '../../context';
@@ -191,14 +191,45 @@ export function authRoutes() {
       id: schema.apiTokens.id, name: schema.apiTokens.name, prefix: schema.apiTokens.prefix,
       scopes: schema.apiTokens.scopes, readOnly: schema.apiTokens.readOnly,
       lastUsedAt: schema.apiTokens.lastUsedAt, revokedAt: schema.apiTokens.revokedAt,
-      createdAt: schema.apiTokens.createdAt,
-      // The client a sign-in connected, so the panel can group its
-      // connections; null for a token made by hand.
-      client: schema.oauthClients.name,
+      expiresAt: schema.apiTokens.expiresAt, createdAt: schema.apiTokens.createdAt,
+      oauthClient: schema.oauthClients.name, forClient: schema.apiTokens.forClient,
     }).from(schema.apiTokens)
       .leftJoin(schema.oauthClients, eq(schema.oauthClients.id, schema.apiTokens.oauthClientId))
       .where(eq(schema.apiTokens.userId, actor.userId));
-    return c.json({ data: rows });
+    return c.json({
+      data: rows.map(({ oauthClient, forClient, ...row }) => ({
+        ...row,
+        // The client this token connects – signed in through the browser
+        // (oauth) or given a token by hand – so the profile lists it with the
+        // person's connections; null for a token for scripts.
+        client: oauthClient ?? (forClient ? row.name : null),
+        oauth: oauthClient !== null,
+      })),
+    });
+  });
+
+  // A client that cannot sign in through the browser, connected as the
+  // person by hand. It may do whatever they may (as a sign-in "as me" does),
+  // and it is listed with their connections rather than their script tokens.
+  tokens.post('/client', async (c) => {
+    const actor = currentActor(c);
+    const body = createClientTokenSchema.parse(await c.req.json());
+    const raw = `ordi_${generateToken(24)}`;
+    const id = ulid();
+    const expiresAt = body.expiresInDays === null ? null : new Date(Date.now() + body.expiresInDays * 86_400_000);
+    const { db } = getDb();
+    await db.transaction(async (tx) => {
+      // Locked like a sign-in: a deactivation running at the same time
+      // either comes first (and this refuses) or revokes this token too.
+      const [me] = await tx.select().from(schema.users).where(eq(schema.users.id, actor.userId)).for('update');
+      if (!me?.isActive || me.actorType !== 'user') throw err.forbidden('Only an active person can connect a client');
+      const perms = await effectivePermissions(me.roleId, null);
+      await tx.insert(schema.apiTokens).values({
+        id, userId: me.id, name: body.client, hash: sha256(raw), prefix: raw.slice(0, 12),
+        scopes: [...perms], readOnly: false, expiresAt, forClient: true,
+      });
+    });
+    return c.json({ id, token: raw, expiresAt: expiresAt?.toISOString() ?? null }, 201); // shown once
   });
 
   tokens.post('/', async (c) => {
