@@ -10,6 +10,7 @@ extendDict({
   en: {
     'notif.task.assigned': 'Task assigned to you',
     'notif.task.status_changed': 'Task status changed',
+    'notif.task.input_requested': 'A task is waiting on you',
     'notif.comment.mentioned': 'You were mentioned',
     'notif.comment.created': 'New comment on your task',
     'notif.page.mentioned': 'You were mentioned on a page',
@@ -32,6 +33,7 @@ extendDict({
   uk: {
     'notif.task.assigned': 'Вам призначено задачу',
     'notif.task.status_changed': 'Змінено статус задачі',
+    'notif.task.input_requested': 'Задача чекає на вас',
     'notif.comment.mentioned': 'Вас згадали',
     'notif.comment.created': 'Новий коментар у вашій задачі',
     'notif.page.mentioned': 'Вас згадали на сторінці',

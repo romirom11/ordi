@@ -265,6 +265,39 @@ export const comments = pgTable('comments', {
   taskIdx: index('comments_task_idx').on(t.taskId),
 }));
 
+/**
+ * A question put to one person on a task – "waiting on" – without touching
+ * the task's status: the work stays where it is on the board while someone
+ * answers. One row per question, kept after it closes, so an agent can ask
+ * what was answered since it last looked (list_answered). A task has at most
+ * one open question (task_questions_one_open_idx).
+ *
+ * status: open | answered | withdrawn. An answer is the addressee's first
+ * comment after the question, or an explicit "mark answered" (no comment).
+ */
+export const taskQuestions = pgTable('task_questions', {
+  id: pk(),
+  taskId: text('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  /** The person it waits on: always a human user, never an agent. */
+  addresseeId: text('addressee_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /** Who asked: a person or an agent (a personal agent asks under its own id). */
+  askedBy: text('asked_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  question: text('question').notNull(),
+  status: text('status').notNull().default('open'),
+  askedAt: timestamp('asked_at', { withTimezone: true }).notNull().defaultNow(),
+  answeredAt: timestamp('answered_at', { withTimezone: true }),
+  /** The comment that answered it; null when it was marked answered by hand. */
+  answerCommentId: text('answer_comment_id').references(() => comments.id, { onDelete: 'set null' }),
+  answeredBy: text('answered_by').references(() => users.id, { onDelete: 'set null' }),
+  withdrawnAt: timestamp('withdrawn_at', { withTimezone: true }),
+  withdrawnBy: text('withdrawn_by').references(() => users.id, { onDelete: 'set null' }),
+  ...timestamps,
+}, (t) => ({
+  oneOpenIdx: uniqueIndex('task_questions_one_open_idx').on(t.taskId).where(sql`status = 'open'`),
+  addresseeIdx: index('task_questions_addressee_idx').on(t.addresseeId, t.status),
+  askerIdx: index('task_questions_asker_idx').on(t.askedBy, t.answeredAt),
+}));
+
 export const taskDrafts = pgTable('task_drafts', {
   id: pk(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),

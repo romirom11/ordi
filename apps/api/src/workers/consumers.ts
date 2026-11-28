@@ -54,9 +54,10 @@ interface NotifyOptions {
 
 /**
  * Types that reach a personal agent's owner even though the agent caused
- * them: a question put to them, on a task or on a knowledge-base page.
+ * them: a question put to them – an @-mention on a task or a knowledge-base
+ * page, or a task left waiting on them (ask_for_input).
  */
-const REACHES_OWNER = new Set(['comment.mentioned', 'page.mentioned']);
+const REACHES_OWNER = new Set(['comment.mentioned', 'page.mentioned', 'task.input_requested']);
 
 async function notify(
   eventId: string,
@@ -101,6 +102,7 @@ async function notify(
         noNextAction: Number(payload.noNextAction ?? 0),
         outcome: (payload.outcome as string) ?? '',
         summary: (payload.summary as string) ?? '',
+        question: String(payload.question ?? '').slice(0, 500),
         label: (payload.label as string) ?? '',
         expiresAt: (payload.expiresAt as string) ?? '',
         workspace: branding.workspaceName,
@@ -156,7 +158,7 @@ async function notify(
  * back to `generic`, which says "there is an update" and nothing more.
  */
 const NOTIFY_KEYS = new Set([
-  'task.assigned', 'comment.mentioned', 'comment.created', 'task.status_changed',
+  'task.assigned', 'comment.mentioned', 'comment.created', 'task.status_changed', 'task.input_requested',
   'invoice.paid', 'payment.recorded', 'quote.accepted', 'quote.declined',
   'leave.requested', 'leave.decided',
   'sales.work_digest', 'agent.run_finished', 'agent.needs_input',
@@ -371,6 +373,21 @@ const notifications: Consumer = {
       case 'comment.mentioned':
         await notify(ev.id, p.mentions ?? [], 'comment.mentioned', p.ref ?? null, p, self);
         break;
+      // The one person a question waits on. The asker hears nothing back:
+      // an agent reads the answers with list_answered.
+      case 'task.input_requested': {
+        // Read at delivery: a question answered, withdrawn or carried off by a
+        // move before the worker got here is not news, and a moved task is
+        // gated by the project it is in now, not the one it was asked in.
+        if (!p.questionId) break;
+        const [q] = await getDb().db.select({ status: schema.taskQuestions.status, taskId: schema.taskQuestions.taskId, projectId: schema.tasks.projectId })
+          .from(schema.taskQuestions)
+          .innerJoin(schema.tasks, and(eq(schema.tasks.id, schema.taskQuestions.taskId), isNull(schema.tasks.deletedAt)))
+          .where(eq(schema.taskQuestions.id, p.questionId));
+        if (!q || q.status !== 'open') break;
+        await notify(ev.id, [p.addresseeId], 'task.input_requested', p.ref ?? null, { ...p, taskId: q.taskId, projectId: q.projectId }, { ...self, projectId: q.projectId });
+        break;
+      }
       case 'comment.created': {
         if (!p.taskId) break;
         // An ordi agent's comments are announced by its run events instead

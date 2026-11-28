@@ -4,7 +4,7 @@ import { ulid } from 'ulid';
 import {
   taskInputSchema, taskUpdateSchema, taskMoveSchema, taskRelationSchema, taskLinkSchema,
   bulkTaskUpdateSchema, commentInputSchema, commentEditSchema, reactionToggleSchema, labelInputSchema, labelPatchSchema, cycleInputSchema, cycleCompleteSchema,
-  taskTemplateInputSchema, recurringTaskInputSchema, intakeAcceptSchema, intakeDeclineSchema, intakeSettingsSchema,
+  taskTemplateInputSchema, taskQuestionInputSchema, taskQuestionCloseSchema, recurringTaskInputSchema, intakeAcceptSchema, intakeDeclineSchema, intakeSettingsSchema,
   LABEL_SCOPES, addMonthsUtc,
   type CustomFieldFilter, type LabelScope,
 } from '@ordi/shared';
@@ -15,6 +15,7 @@ import { err } from '../../lib/errors';
 import { idPage } from '../../lib/http';
 import { assertProject } from '../../core/access';
 import * as svc from './service';
+import * as questions from './questions';
 
 function parseCfFilters(c: any): CustomFieldFilter[] {
   const raw = c.req.query('cf');
@@ -60,6 +61,7 @@ export function tasksRoutes() {
       // `label` takes one id or a comma-separated set; a set means all of them.
       labels: (c.req.query('label') ?? '').split(',').map((s) => s.trim()).filter(Boolean),
       q: c.req.query('q'), dueFrom: c.req.query('dueFrom'), dueTo: c.req.query('dueTo'),
+      waitingOn: c.req.query('waitingOn') || undefined,
       cfFilters: parseCfFilters(c), cursor, limit,
     }));
   });
@@ -98,6 +100,29 @@ export function tasksRoutes() {
   app.post('/tasks/:id/duplicate', async (c) => c.json(await svc.duplicateTask(currentActor(c), c.req.param('id')), 201));
 
   app.get('/tasks/:id/branch-name', async (c) => c.json(await svc.branchName(currentActor(c), c.req.param('id'))));
+
+  // ── Waiting on: a question put to one person (questions.ts) ──
+  app.post('/tasks/:id/question', async (c) => {
+    const body = taskQuestionInputSchema.parse(await c.req.json());
+    return c.json(await questions.askForInput(currentActor(c), c.req.param('id'), body), 201);
+  });
+  // The body may name the question the caller is looking at (questionId):
+  // a stale page then cannot close the question that replaced it.
+  app.post('/tasks/:id/question/answered', async (c) => {
+    const body = taskQuestionCloseSchema.parse(await c.req.json().catch(() => ({})));
+    return c.json(await questions.closeQuestion(currentActor(c), c.req.param('id'), 'answered', body.questionId));
+  });
+  app.post('/tasks/:id/question/withdraw', async (c) => {
+    const body = taskQuestionCloseSchema.parse(await c.req.json().catch(() => ({})));
+    return c.json(await questions.closeQuestion(currentActor(c), c.req.param('id'), 'withdrawn', body.questionId));
+  });
+  // What the caller asked and has had answered since – where an agent resumes.
+  app.get('/me/questions/answered', async (c) => {
+    const raw = c.req.query('since');
+    const since = raw ? new Date(raw) : null;
+    if (since && Number.isNaN(since.getTime())) throw err.validation('since must be an ISO date-time');
+    return c.json(await questions.listAnswered(currentActor(c), { since, cursor: c.req.query('cursor') || null }));
+  });
 
   // ── Relations ──
   app.post('/tasks/:id/relations', async (c) => {

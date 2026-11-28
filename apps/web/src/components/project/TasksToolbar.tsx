@@ -7,7 +7,7 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bookmark, CalendarDays, Diamond, Plus, Repeat, X } from 'lucide-react';
+import { Bookmark, CalendarDays, Diamond, MessageCircleQuestion, Plus, Repeat, X } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { Avatar, Button, IconButton, Input, PriorityIcon, Spinner, StatusIcon, Tooltip, cn } from '../ui';
 import { ConfirmDialog, Dialog, DropdownMenu, MenuLabel, MenuSeparator, toast, useMenuClose } from '../overlays';
@@ -81,6 +81,10 @@ function FilterChips({ filters, onFilters, statuses, labels, users, milestones, 
     if (!name) continue;
     chips.push(<Chip key={`c-${cid}`} icon={<Repeat size={12} className="text-muted-foreground" />} label={name}
       onRemove={() => onFilters({ ...filters, cycleIds: filters.cycleIds.filter((x) => x !== cid) })} />);
+  }
+  if (filters.waitingOnMe) {
+    chips.push(<Chip key="waiting" icon={<MessageCircleQuestion size={12} className="text-warning" />} label={t('tasksview.waitingOnMe')}
+      onRemove={() => onFilters({ ...filters, waitingOnMe: false })} />);
   }
   if (filters.due) {
     chips.push(<Chip key="due" icon={<CalendarDays size={12} className="text-muted-foreground" />} label={t(DUE_LABEL_KEY[filters.due])}

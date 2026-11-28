@@ -366,3 +366,37 @@ request and the task in review.
   separate-container split exists and is recommended for production: with the
   worker in its own container the residual is that container and those two
   scoped tokens, not the API's secrets.
+
+## 13. "Waiting on" is a flag, not a status
+
+An agent working a task sometimes needs a person to decide or tell it
+something. That used to mean a comment, or moving the task to a status such as
+"Blocked" or "Awaiting input". A status was the wrong tool for it:
+
+- **Status is the project's workflow, not the agent's.** Each project defines
+  its own statuses; a "waiting" column would have to exist in every one of
+  them, and moving a task there loses where the work actually is – in
+  progress, in review – which is exactly what the board is for. When the
+  answer comes back, something would have to remember which status to return
+  to.
+- **It has an addressee, which a status does not.** "Waiting" means waiting on
+  someone. A status cannot say who, so nobody's list would fill up and nothing
+  would tell the person. The flag records the addressee, who asked, the
+  question and when, and the addressee is notified and sees it on the task
+  and on the lists ("waiting on me").
+- **It closes on its own.** The addressee's first comment after the question
+  answers it; nobody has to remember to move the task back. A status change
+  would need a person or the agent to undo it.
+- **Agents need to know where to resume.** `list_answered` reads the closed
+  questions an agent asked; a status history could not say which answer
+  belonged to which question.
+
+So a task carries at most one open question (`task_questions`, a partial
+unique index on `status = 'open'`), kept with its history. The status, the
+assignees and the board stay untouched. Asking needs write access to the
+project; the addressee must be a person who can open it, never an agent – a
+personal agent acts for its owner, so on its owner's task it asks its owner.
+The asker, the owner of the asking agent, the project's lead or a project
+admin may withdraw it; those and the addressee may mark it answered without a
+comment. A task that moves to another project takes its questions along; an
+open one whose addressee cannot open the target project is withdrawn.

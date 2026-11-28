@@ -29,6 +29,7 @@ at v1.43.0.
 |---|---|
 | Time module, round two: entries open in a panel to view, edit and delete; reports have a period, totals and a drill-down by task and person; a task shows the time spent on it against its estimate | `feature/time-entries-open-and-task-time-spent` |
 | Project secrets from Doppler: connect a service token, link projects, add secrets by name; values fetched on reveal and run start, never stored (plan 2026-11-05-001, U5) | `feature/project-secrets-doppler` |
+| Waiting on: an agent asks one person for input on a task without changing its status (MCP `ask_for_input` / `list_answered`, a badge on the task, a mark and a "waiting on me" filter on the lists; migration `0055`) | `feature/agents-ask-for-input` |
 
 ## Shipped
 

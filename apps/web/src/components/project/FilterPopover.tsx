@@ -5,7 +5,7 @@
  * to its option list; options multi-select without closing the popover.
  */
 import { useMemo, useState, type ReactNode } from 'react';
-import { CalendarDays, Check, ChevronLeft, ChevronRight, Diamond, Filter, Repeat, Search, Tag, UserCircle2 } from 'lucide-react';
+import { CalendarDays, Check, ChevronLeft, ChevronRight, Diamond, Filter, MessageCircleQuestion, Repeat, Search, Tag, UserCircle2 } from 'lucide-react';
 import { Avatar, IconButton, PriorityIcon, StatusIcon, Tooltip, cn } from '../ui';
 import { DropdownMenu } from '../overlays';
 import { useT } from '../../lib/i18n';
@@ -185,6 +185,15 @@ function FilterPanel({ statuses, labels, users, milestones, cycles, filters, onC
           : options.map((o) => (
             <OptionRow key={o.key} icon={o.icon} label={o.label} selected={o.selected} onToggle={o.toggle} />
           ))}
+        {/* A switch, not a dimension: it has one value. */}
+        {dim === null && match(t('tasksview.waitingOnMe')) && (
+          <OptionRow
+            icon={<MessageCircleQuestion size={14} />}
+            label={t('tasksview.waitingOnMe')}
+            selected={filters.waitingOnMe}
+            onToggle={() => onChange({ ...filters, waitingOnMe: !filters.waitingOnMe })}
+          />
+        )}
         {dim !== null && options.length === 0 && (
           <p className="px-2 py-3 text-center text-xs text-faint">{t('common.nothingYet')}</p>
         )}

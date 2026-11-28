@@ -21,6 +21,7 @@ import {
 } from '../components/ui';
 import { toast } from '../components/overlays';
 import { TaskStatusPicker } from '../components/task/StatusPicker';
+import { WaitingOnMark } from '../components/task/WaitingOn';
 import { useT, extendDict } from '../lib/i18n';
 import { usePersistedState, oneOfPref } from '../lib/prefs';
 import type { TaskStatusLookup } from '../lib/queries';
@@ -68,6 +69,8 @@ interface MeTask {
   ref: string;
   /** created tab only */
   has_assignee?: boolean;
+  /** Whom the task's open question waits on, if anyone. */
+  waiting_on_user_id?: string | null;
 }
 
 interface MeTasksResponse {
@@ -140,6 +143,7 @@ function TaskRow({ task, index, overdue, onPickStatus }: {
         canWrite={role === 'admin' || role === 'member'}
         onPick={(status) => onPickStatus(task, status)}
       />
+      {task.waiting_on_user_id && <WaitingOnMark userId={task.waiting_on_user_id} />}
       <a href={href} className="min-w-0 flex-1 truncate text-[13px]" onClick={(e) => { e.stopPropagation(); open(href, e); }} onAuxClick={(e) => { e.stopPropagation(); open(href, e); }}>{task.title}</a>
       <Badge>{task.key}</Badge>
       <span

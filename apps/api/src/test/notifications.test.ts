@@ -332,7 +332,7 @@ describe('notification delivery', () => {
    */
   it('points the email at the same place as the bell', () => {
     const task = { projectId: 'p1', taskId: 't1' };
-    for (const type of ['task.assigned', 'task.status_changed', 'comment.created', 'comment.mentioned', 'git.pr_merged', 'agent.needs_input']) {
+    for (const type of ['task.assigned', 'task.status_changed', 'task.input_requested', 'comment.created', 'comment.mentioned', 'git.pr_merged', 'agent.needs_input']) {
       expect(notificationPath(type, task)).toBe('/projects/p1/tasks/t1');
     }
     expect(notificationPath('task.assigned', {})).toBe('/my-tasks');
