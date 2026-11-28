@@ -24,11 +24,11 @@ test('profile sections each have their own url', async ({ page }) => {
 
   await nav.getByRole('link', { name: 'MCP & API' }).click();
   await expect(page).toHaveURL(/\/profile\/mcp$/);
-  await expect(page.getByText('Connect a client')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Connect a client' })).toBeVisible();
 
   // A reload lands on the same section.
   await page.reload();
-  await expect(page.getByText('Connect a client')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Connect a client' })).toBeVisible();
 });
 
 test('personal MCP moved out of workspace settings', async ({ page }) => {
@@ -40,10 +40,12 @@ test('personal MCP moved out of workspace settings', async ({ page }) => {
   await page.goto('/settings/mcp');
   await expect(page).toHaveURL(/\/profile\/mcp$/);
 
-  // An API token is created from the access list, without opening the stdio fallback.
+  // A token for scripts is made under its own collapsed section, apart from
+  // connecting a client.
   const name = `e2e-token-${Date.now()}`;
-  await page.getByRole('button', { name: 'Create token' }).first().click();
-  await page.getByPlaceholder('e.g. claude-desktop').fill(name);
+  await page.getByRole('button', { name: /^Tokens for scripts/ }).click();
+  await page.getByRole('button', { name: 'Create token', exact: true }).click();
+  await page.getByPlaceholder('e.g. CI deploy').fill(name);
   await page.getByRole('button', { name: 'Select all' }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Create', exact: true }).click();
   await expect(page.getByText('Copy the token now')).toBeVisible();

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { idSchema } from './common';
 import { PERMISSIONS } from '../permissions';
 import { DATE_FORMATS, type DateFormat } from '../constants';
+import { MY_AGENT_TOKEN_DEFAULT_DAYS } from './agents';
 
 export const loginSchema = z.object({
   email: z.string().email(),
@@ -48,6 +49,16 @@ export const createApiTokenSchema = z.object({
   name: z.string().min(1),
   scopes: z.array(z.enum(PERMISSIONS)),
   readOnly: z.boolean().default(false),
+});
+
+/**
+ * A token for an MCP client that cannot sign in through the browser, acting
+ * as the person: named after the client, with every permission they hold and
+ * the same lifetimes a token for their own agent offers.
+ */
+export const createClientTokenSchema = z.object({
+  client: z.string().trim().min(1).max(40),
+  expiresInDays: z.number().int().min(1).max(3650).nullable().default(MY_AGENT_TOKEN_DEFAULT_DAYS),
 });
 
 export const changeRoleSchema = z.object({

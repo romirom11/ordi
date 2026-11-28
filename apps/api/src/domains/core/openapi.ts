@@ -136,6 +136,7 @@ const ROWS: Row[] = [
   ['/auth/reset-password', 'post', 'Set a new password with a reset token', null, 'free', 'core'],
   ['/auth/tokens', 'get', 'List my API tokens', null, undefined, 'core'],
   ['/auth/tokens', 'post', 'Create API token (shown once)', null, 'free', 'core'],
+  ['/auth/tokens/client', 'post', 'Connect an MCP client as me with a token (shown once)', null, 'free', 'core'],
   ['/auth/tokens/{id}', 'delete', 'Revoke API token', null, undefined, 'core'],
   ['/auth/totp', 'get', 'TOTP status for the current user', null, undefined, 'core'],
   ['/auth/totp/setup', 'post', 'Generate a new TOTP secret (pending confirmation)', null, undefined, 'core'],

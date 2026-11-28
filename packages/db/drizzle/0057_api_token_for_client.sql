@@ -1,0 +1,1 @@
+ALTER TABLE "api_tokens" ADD COLUMN "for_client" boolean DEFAULT false NOT NULL;
