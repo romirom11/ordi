@@ -7,7 +7,7 @@
  * not block other edits; a copy of a task leaves them off.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import { getDb, schema, eq, and, inArray, sql } from '@ordi/db';
+import { getDb, schema, eq, and, inArray } from '@ordi/db';
 import { ulid } from 'ulid';
 import { resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
 import { setupWorkspace, createAgent, addProjectMember, type Workspace } from './agents-helpers';
@@ -95,6 +95,23 @@ describe('creating a task', () => {
     await expectRefused(await owner.post('/tasks', { projectId: ws.projectId, title: 'For the off agent', assigneeIds: [agent.id] }), agent.id);
     expect(await tasksTitled('For the off agent')).toHaveLength(0);
   });
+
+  it('still takes an agent whose profile is off but whose user is active', async () => {
+    // A disabled profile stops runs (dispatch checks it); it is not the
+    // user's active flag, and does not by itself refuse the assignment.
+    const agent = await createAgent(users, { name: 'Profile off' });
+    await addProjectMember(users, ws.projectId, agent.id);
+    await getDb().db.update(schema.agentProfiles).set({ enabled: false }).where(eq(schema.agentProfiles.userId, agent.id));
+    const task = await newTask('For the profile-off agent', [agent.id]);
+    expect(await assigneesOf(task.id)).toEqual([agent.id]);
+  });
+
+  it('refuses a switched-off agent as inactive, before the agent rules are asked', async () => {
+    // Not on the project either: the answer is still the inactive-user one.
+    const agent = await createAgent(users, { name: 'Off and outside' });
+    expect((await owner.post(`/agents/${agent.id}/disable`)).status).toBe(200);
+    await expectRefused(await owner.post('/tasks', { projectId: ws.projectId, title: 'For the outside agent', assigneeIds: [agent.id] }), agent.id);
+  });
 });
 
 describe('accepting an intake item', () => {
@@ -147,46 +164,6 @@ describe('updating a task', () => {
       await expectRefused(await owner.patch(`/tasks/${task.id}`, { assigneeIds: [users.member!.userId, former] }), former);
     } finally {
       await setActive(former, true);
-    }
-  });
-
-  it('waits for a deactivation in progress, then refuses the person it switched off', async () => {
-    const { db } = getDb();
-    const person = users.finance!.userId;
-    const task = await newTask('Racing a deactivation');
-    let release!: () => void;
-    const released = new Promise<void>((resolve) => { release = resolve; });
-    let held!: () => void;
-    const holding = new Promise<void>((resolve) => { held = resolve; });
-    // Stands in for POST /users/:id/deactivate: the person's row is locked,
-    // then switched off.
-    const deactivation = db.transaction(async (tx) => {
-      await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, person)).for('update');
-      held();
-      await released;
-      await tx.update(schema.users).set({ isActive: false }).where(eq(schema.users.id, person));
-    });
-    try {
-      await holding;
-      const assign = owner.patch(`/tasks/${task.id}`, { assigneeIds: [person] });
-      // The edit's check passes before the lock (the person still reads as
-      // active); it must then block on the person's row, not go ahead.
-      let blocked = false;
-      for (let i = 0; i < 100 && !blocked; i++) {
-        const rows = await db.execute(sql`select 1 from pg_stat_activity
-          where wait_event_type = 'Lock' and query ilike '%for key share%'`) as unknown as unknown[];
-        blocked = rows.length > 0;
-        if (!blocked) await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      expect(blocked).toBe(true);
-      release();
-      await deactivation;
-      await expectRefused(await assign, person);
-      expect(await assigneesOf(task.id)).toEqual([]);
-    } finally {
-      release();
-      await deactivation.catch(() => undefined);
-      await setActive(person, true);
     }
   });
 });

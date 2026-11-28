@@ -812,8 +812,9 @@ async function prepareTask(actor: Actor, input: any): Promise<(tx: any) => Promi
   if (input.parentId) await assertParent(input.parentId, input.projectId);
   if (input.cycleId) await assertCycleInProject(input.cycleId, input.projectId);
   const assigneeIds: string[] = input.assigneeIds ?? [];
-  if (assigneeIds.length) await assertCanAssignAgents(actor, project.id, assigneeIds, effectiveProjectRole(actor, project));
+  // Someone switched off is refused as such, before any agent rule is asked.
   await assertActiveAssignees(assigneeIds);
+  if (assigneeIds.length) await assertCanAssignAgents(actor, project.id, assigneeIds, effectiveProjectRole(actor, project));
   // A person's own agent files work for its owner: the owner set it.
   const reporterId: string | null = input.reporterId === undefined ? (actor.ownerUserId ?? actor.userId) : input.reporterId;
   // A personal agent naming itself is checked too: it may not be the reporter.
@@ -941,8 +942,8 @@ export async function updateTask(actor: Actor, id: string, input: any) {
   const assertAssignable = async (added: string[]) => {
     const unchecked = added.filter((a) => !checked.has(a));
     // Agents among the new assignees: membership and assign policy (R48, R49).
-    if (unchecked.length) await assertCanAssignAgents(actor, project.id, unchecked, role);
     await assertActiveAssignees(unchecked);
+    if (unchecked.length) await assertCanAssignAgents(actor, project.id, unchecked, role);
     for (const a of unchecked) checked.add(a);
   };
   if (nextAssignees) {
@@ -969,8 +970,8 @@ export async function updateTask(actor: Actor, id: string, input: any) {
       .where(eq(taskAssignees.taskId, id))).map((r) => r.userId);
     const newAssignees = nextAssignees ? nextAssignees.filter((a) => !oldAssignees.includes(a)) : [];
     // Someone may have taken an assignee off since the check above.
-    await assertAssignable(newAssignees);
     refuseInactiveAssignees(newAssignees, inactive);
+    await assertAssignable(newAssignees);
     const finalAssignees = nextAssignees ?? oldAssignees;
     if (Object.keys(patch).length) await tx.update(tasks).set(patch).where(eq(tasks.id, id));
     if (nextAssignees) {
@@ -1628,8 +1629,8 @@ export async function bulkUpdateTasks(actor: Actor, input: any) {
   const assertAssignable = async (t: typeof rows[number], added: string[]) => {
     const done = checked.get(t.projectId) ?? new Set<string>();
     const unchecked = added.filter((a) => !done.has(a));
-    if (unchecked.length) await assertCanAssignAgents(actor, t.projectId, unchecked, roleOf.get(t.projectId) ?? null);
     await assertActiveAssignees(unchecked);
+    if (unchecked.length) await assertCanAssignAgents(actor, t.projectId, unchecked, roleOf.get(t.projectId) ?? null);
     for (const a of unchecked) done.add(a);
     checked.set(t.projectId, done);
   };
@@ -1671,8 +1672,8 @@ export async function bulkUpdateTasks(actor: Actor, input: any) {
       const oldAssignees = assigned.get(t.id) ?? [];
       const added = nextAssignees ? nextAssignees.filter((a) => !oldAssignees.includes(a)) : [];
       // Someone may have taken an assignee off since the check above.
-      await assertAssignable(t, added);
       refuseInactiveAssignees(added, inactive);
+      await assertAssignable(t, added);
       if (Object.keys(patch).length) await tx.update(tasks).set(patch).where(eq(tasks.id, t.id));
       if (nextAssignees) {
         await tx.delete(taskAssignees).where(eq(taskAssignees.taskId, t.id));
