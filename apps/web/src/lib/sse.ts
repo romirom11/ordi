@@ -100,8 +100,9 @@ function invalidateFor(qc: QueryClient, type: string, data: any): void {
     if (data?.projectId) inv(['tasks', data.projectId]);
     inv(['me-tasks']);
     inv(['cycles']);
-    // A question opened, answered or withdrawn is a line in the task's activity.
-    if (type.startsWith('task.input_')) inv(['task-audit']);
+    // A question opened, answered or withdrawn changes what waits on whom,
+    // and is a line in the task's activity.
+    if (type.startsWith('task.input_')) { inv(['inbox']); inv(['task-audit']); }
   } else if (type.startsWith('comment.')) {
     // comments ride along with the task detail query
     if (data?.taskId) inv(['task', data.taskId]);
@@ -124,6 +125,7 @@ function invalidateFor(qc: QueryClient, type: string, data: any): void {
     inv(['employees']);
     inv(['leave-requests']);
     inv(['people']);
+    if (type.startsWith('leave.')) inv(['inbox']);
   } else if (type.startsWith('time.')) {
     inv(['time']);
     inv(['timer']);
@@ -137,6 +139,7 @@ function invalidateFor(qc: QueryClient, type: string, data: any): void {
     if (data?.runId) appendRunEvent(qc, data);
     if (data?.eventType === 'status' || data?.eventType === 'result' || data?.eventType === 'error') {
       inv(['agent-runs']); // prefix-matches ['agent-runs', taskId]
+      inv(['inbox']); // parked for a quota, or failed: "Agent stopped"
     }
     return; // a log line is never a notification – skip the refetch below
   } else if (type.startsWith('agent.')) {
@@ -146,6 +149,7 @@ function invalidateFor(qc: QueryClient, type: string, data: any): void {
     if (data?.taskId) inv(['task', data.taskId]);
     inv(['tasks']);
     inv(['me-tasks']);
+    inv(['inbox']); // a run that stopped, or one that started again
   } else if (type === 'role.updated') {
     inv(['me']);
   }
@@ -238,6 +242,8 @@ export function useRealtime(): { reconnecting: boolean } {
       try { data = JSON.parse(raw); } catch { /* ignore */ }
       if (type === 'notification.created') {
         qc.invalidateQueries({ queryKey: ['notifications'] });
+        // A mention or a question put to me: the Inbox has news too.
+        qc.invalidateQueries({ queryKey: ['inbox'] });
         personalPing(data, tRef.current, (to) => navigateRef.current(to));
         return;
       }

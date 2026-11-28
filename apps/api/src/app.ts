@@ -23,6 +23,7 @@ import { customFieldsRoutes } from './domains/core/customfields.routes';
 import { fieldGroupsRoutes } from './domains/core/fieldgroups.routes';
 import { searchRoutes } from './domains/core/search.routes';
 import { notificationsRoutes } from './domains/core/notifications.routes';
+import { inboxRoutes } from './domains/core/inbox.routes';
 import { savedViewsRoutes } from './domains/core/savedviews.routes';
 import { attachmentsRoutes } from './domains/core/attachments.routes';
 import { auditRoutes } from './domains/core/audit.routes';
@@ -148,6 +149,7 @@ export function createApp() {
   api.route('/custom-field-groups', fieldGroupsRoutes());
   api.route('/search', searchRoutes());
   api.route('/notifications', notificationsRoutes());
+  api.route('/inbox', inboxRoutes());
   api.route('/saved-views', savedViewsRoutes());
   api.route('/attachments', attachmentsRoutes());
   api.route('/audit', auditRoutes());

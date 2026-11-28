@@ -43,6 +43,7 @@ interface SearchResult { id: string; title: string; kind: string; url: string }
 const NAV_COMMANDS: { labelKey: string; to: string; module?: ModuleKey }[] = [
   { labelKey: 'nav.dashboard', to: '/' },
   { labelKey: 'nav.myTasks', to: '/my-tasks' },
+  { labelKey: 'nav.inbox', to: '/inbox' },
   { labelKey: 'nav.projects', to: '/projects' },
   { labelKey: 'nav.crm', to: '/crm', module: 'crm' },
   { labelKey: 'nav.knowledge', to: '/kb', module: 'kb' },

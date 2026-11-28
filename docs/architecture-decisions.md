@@ -382,8 +382,8 @@ something. That used to mean a comment, or moving the task to a status such as
 - **It has an addressee, which a status does not.** "Waiting" means waiting on
   someone. A status cannot say who, so nobody's list would fill up and nothing
   would tell the person. The flag records the addressee, who asked, the
-  question and when, and the addressee is notified and sees it on the task
-  and on the lists ("waiting on me").
+  question and when, and the addressee is notified and sees it on the task,
+  on the lists ("waiting on me") and in one place, the Inbox.
 - **It closes on its own.** The addressee's first comment after the question
   answers it; nobody has to remember to move the task back. A status change
   would need a person or the agent to undo it.

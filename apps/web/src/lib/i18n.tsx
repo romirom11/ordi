@@ -16,6 +16,7 @@ const en: Dict = {
   // shell / nav
   'nav.dashboard': 'Dashboard',
   'nav.myTasks': 'My tasks',
+  'nav.inbox': 'Inbox',
   'nav.clients': 'Clients',
   'nav.deals': 'Deals',
   'nav.projects': 'Projects',
@@ -595,6 +596,7 @@ const uk: Dict = {
   'profile.notificationSound': 'Звук сповіщень на цьому пристрої',
   'nav.dashboard': 'Дашборд',
   'nav.myTasks': 'Мої задачі',
+  'nav.inbox': 'Вхідні',
   'nav.clients': 'Клієнти',
   'nav.deals': 'Угоди',
   'nav.projects': 'Проєкти',
