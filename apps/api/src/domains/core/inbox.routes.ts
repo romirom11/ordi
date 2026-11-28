@@ -17,16 +17,20 @@ import { Hono } from 'hono';
 import { getDb, schema, eq, and, inArray, isNull, gt, desc, sql } from '@ordi/db';
 import type { AppEnv, Actor } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
-import { accessibleProjectIds, userCanOpenPage } from '../../core/access';
+import { accessibleProjectIds, accessibleSpaceIds, editableSpaceIds } from '../../core/access';
 import { moduleEnabled } from '../../core/modules';
 import { err } from '../../lib/errors';
-import { listLeaveRequests } from '../people/service';
+import { canSeePage } from '@ordi/shared';
+import { employeeOfUser, listLeaveRequests } from '../people/service';
 
 const { taskQuestions, tasks, projects, users, agentRuns, taskAssignees, externalAgents, notifications } = schema;
 
-/** How far back the Inbox looks for stopped runs and mentions. */
+/** How far back the Inbox looks for mentions: they are news, not open work. */
 const RECENT_DAYS = 30;
-const LIMIT = 50;
+/** Rows per section. Open work (questions, approvals) is counted in full. */
+const LIMIT = 100;
+/** Mentions read before the access filter, so a run of closed ones cannot empty the section. */
+const MENTION_SCAN = 300;
 
 function recent(): Date {
   return new Date(Date.now() - RECENT_DAYS * 86_400_000);
@@ -70,15 +74,16 @@ async function agentStopped(actor: Actor, projectIds: string[]) {
   const { db } = getDb();
   const me = actor.userId;
   const inProjects = sql.join(projectIds.map((id) => sql`${id}`), sql`, `);
-  // The latest run per task and agent: a failure a retry has since fixed is
-  // not news any more.
+  // The latest run per task and agent, however old: a failure a retry has
+  // since fixed is not news any more, and one still parked or failed is open
+  // work whenever it started.
   const rows = await db.execute(sql`
     select r.id, r.status, r.error, r.task_id, r.project_id, r.agent_user_id, r.updated_at, r.next_attempt_at,
       t.number, t.title, p.key, a.name as agent_name
     from (
       select distinct on (task_id, agent_user_id) *
       from ${agentRuns}
-      where created_at > ${recent().toISOString()}::timestamptz and project_id in (${inProjects})
+      where project_id in (${inProjects})
       order by task_id, agent_user_id, created_at desc, id desc
     ) r
     join ${tasks} t on t.id = r.task_id and t.deleted_at is null
@@ -115,20 +120,50 @@ async function mentions(actor: Actor, projectIds: Set<string>) {
       gt(notifications.createdAt, recent()),
     ))
     .orderBy(desc(notifications.createdAt))
-    .limit(LIMIT);
-  // The bell row was gated when it was delivered; access may have changed since.
-  const taskIds = [...new Set(rows.map((r) => (r.payload as Record<string, unknown>).taskId).filter((id): id is string => typeof id === 'string'))];
+    .limit(MENTION_SCAN);
+  const payloadOf = (r: typeof rows[number]) => r.payload as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === 'string' ? v : null);
+  // The bell row was gated when it was delivered; access may have changed
+  // since. Everything is read for this request's own access – a token scoped
+  // narrower than its owner's role sees no more than it may open.
+  const taskIds = [...new Set(rows.map((r) => str(payloadOf(r).taskId)).filter((id): id is string => !!id))];
   const liveTasks = new Map(taskIds.length
     ? (await db.select({ id: tasks.id, projectId: tasks.projectId }).from(tasks)
       .where(and(inArray(tasks.id, taskIds), isNull(tasks.deletedAt)))).map((t) => [t.id, t.projectId])
     : []);
+  const pageIds = [...new Set(rows.map((r) => str(payloadOf(r).pageId)).filter((id): id is string => !!id))];
+  const kbOn = pageIds.length > 0 && (await moduleEnabled('kb'));
+  const pages = new Map(kbOn
+    ? (await db.select({
+      id: schema.kbPages.id, spaceId: schema.kbPages.spaceId, published: schema.kbPages.published,
+      visibility: schema.kbPages.visibility, createdBy: schema.kbPages.createdBy,
+    }).from(schema.kbPages).where(and(inArray(schema.kbPages.id, pageIds), isNull(schema.kbPages.deletedAt)))).map((p) => [p.id, p])
+    : []);
+  const viewerSpaces = new Set<string>(kbOn ? await accessibleSpaceIds(actor) : []);
+  const editorSpaces = new Set<string>(kbOn ? await editableSpaceIds(actor) : []);
+  // A mention in a comment that has since been deleted points at nothing.
+  const commentIds = rows.map((r) => str(payloadOf(r).commentId)).filter((id): id is string => !!id);
+  const liveComments = new Set<string>();
+  if (commentIds.length) {
+    for (const c of await db.select({ id: schema.comments.id }).from(schema.comments)
+      .where(and(inArray(schema.comments.id, commentIds), isNull(schema.comments.deletedAt)))) liveComments.add(c.id);
+    for (const c of await db.select({ id: schema.kbPageComments.id }).from(schema.kbPageComments)
+      .where(and(inArray(schema.kbPageComments.id, commentIds), isNull(schema.kbPageComments.deletedAt)))) liveComments.add(c.id);
+  }
+
   const out = [];
   for (const r of rows) {
-    const p = r.payload as Record<string, unknown>;
-    if (typeof p.pageId === 'string') {
-      if (!(await userCanOpenPage(actor.userId, p.pageId))) continue;
+    if (out.length >= LIMIT) break;
+    const p = payloadOf(r);
+    const commentId = str(p.commentId);
+    if (commentId && !liveComments.has(commentId)) continue;
+    const pageId = str(p.pageId);
+    if (pageId) {
+      const page = pages.get(pageId);
+      if (!page || !viewerSpaces.has(page.spaceId) || !canSeePage(page, actor.userId, editorSpaces.has(page.spaceId))) continue;
     } else {
-      const projectId = typeof p.taskId === 'string' ? liveTasks.get(p.taskId) : undefined;
+      const taskId = str(p.taskId);
+      const projectId = taskId ? liveTasks.get(taskId) : undefined;
       if (!projectId || !projectIds.has(projectId)) continue;
     }
     out.push({
@@ -136,21 +171,37 @@ async function mentions(actor: Actor, projectIds: Set<string>) {
       type: r.type,
       at: r.createdAt,
       readAt: r.readAt,
-      ref: r.entityRef ?? (p.ref as string | undefined) ?? null,
-      title: (p.title as string | undefined) ?? null,
-      actorName: (p.actorName as string | undefined) ?? null,
-      payload: {
-        taskId: p.taskId ?? null, projectId: p.projectId ?? null, pageId: p.pageId ?? null, spaceId: p.spaceId ?? null,
-      },
+      ref: r.entityRef ?? str(p.ref),
+      title: str(p.title),
+      actorName: str(p.actorName),
+      payload: { taskId: str(p.taskId), projectId: str(p.projectId), pageId, spaceId: str(p.spaceId) },
     });
   }
   return out;
 }
 
+/**
+ * Leave waiting on this person's decision: requests addressed to them that
+ * they can still decide – the rule decideLeave applies: the employee's
+ * current manager, or someone with people.approve_leave. A manager the
+ * employee has since moved away from no longer sees their dates.
+ */
 async function approvals(actor: Actor) {
   if (!(await moduleEnabled('people'))) return [];
   const rows = await listLeaveRequests({ approverId: actor.userId, status: 'pending' });
-  return rows.map((r) => ({
+  if (!rows.length) return [];
+  let decidable = rows;
+  if (!actor.access.permissions.has('people.approve_leave')) {
+    const { db } = getDb();
+    const employeeIds = [...new Set(rows.map((r) => r.employeeId))];
+    const lines = await db.select({ id: schema.employees.id, managerUserId: sql<string | null>`m.user_id` })
+      .from(schema.employees)
+      .leftJoin(sql`employees m`, sql`m.id = ${schema.employees.managerId}`)
+      .where(inArray(schema.employees.id, employeeIds));
+    const managedByMe = new Set(lines.filter((l) => l.managerUserId === actor.userId).map((l) => l.id));
+    decidable = rows.filter((r) => managedByMe.has(r.employeeId));
+  }
+  return decidable.map((r) => ({
     kind: 'leave' as const,
     id: r.id,
     at: r.createdAt,
@@ -164,18 +215,22 @@ async function approvals(actor: Actor) {
 
 export async function inbox(actor: Actor) {
   const projectIds = await accessibleProjectIds(actor);
-  const [w, s, m, a] = await Promise.all([
+  const [w, s, m, a, waitingTotal] = await Promise.all([
     waitingOnYou(actor, projectIds),
     agentStopped(actor, projectIds),
     mentions(actor, new Set(projectIds)),
     approvals(actor),
+    countWaiting(actor, projectIds),
   ]);
-  return { waitingOnYou: w, agentStopped: s, mentions: m, approvals: a };
+  // Approvals are decided on the approver's own employee card (its leave
+  // card lists them with Approve / Reject); without one, on People → Leave.
+  const me = a.length ? await employeeOfUser(actor.userId) : null;
+  // The list shows the newest LIMIT; the header counts them all.
+  return { waitingOnYou: w, agentStopped: s, mentions: m, approvals: a, approverEmployeeId: me?.id ?? null, totals: { waitingOnYou: waitingTotal } };
 }
 
-/** The nav badge: what needs the person to act – questions and approvals. */
-export async function inboxCount(actor: Actor) {
-  const projectIds = await accessibleProjectIds(actor);
+/** Open questions waiting on the person, in projects they can open now. */
+async function countWaiting(actor: Actor, projectIds: string[]): Promise<number> {
   const { db } = getDb();
   const [q] = projectIds.length
     ? await db.select({ n: sql<number>`count(*)::int` }).from(taskQuestions)
@@ -185,8 +240,16 @@ export async function inboxCount(actor: Actor) {
         isNull(tasks.deletedAt), inArray(tasks.projectId, projectIds),
       ))
     : [{ n: 0 }];
-  const approvalsCount = (await approvals(actor)).length;
-  const waiting = Number(q?.n ?? 0);
+  return Number(q?.n ?? 0);
+}
+
+/** The nav badge: what needs the person to act – questions and approvals. */
+export async function inboxCount(actor: Actor) {
+  const projectIds = await accessibleProjectIds(actor);
+  const [waiting, approvalsCount] = await Promise.all([
+    countWaiting(actor, projectIds),
+    approvals(actor).then((a) => a.length),
+  ]);
   return { waitingOnYou: waiting, approvals: approvalsCount, total: waiting + approvalsCount };
 }
 

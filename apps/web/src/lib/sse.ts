@@ -139,6 +139,7 @@ function invalidateFor(qc: QueryClient, type: string, data: any): void {
     if (data?.runId) appendRunEvent(qc, data);
     if (data?.eventType === 'status' || data?.eventType === 'result' || data?.eventType === 'error') {
       inv(['agent-runs']); // prefix-matches ['agent-runs', taskId]
+      inv(['inbox']); // parked for a quota, or failed: "Agent stopped"
     }
     return; // a log line is never a notification – skip the refetch below
   } else if (type.startsWith('agent.')) {

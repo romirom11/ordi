@@ -20,7 +20,8 @@ describe('inbox links', () => {
     expect(mentionLink(mention({ pageId: 'pg1', spaceId: 'sp1' }, 'page.mentioned'))).toBe('/kb/sp1/pg1');
   });
 
-  it('sends a leave approval to the People page', () => {
-    expect(approvalLink({ kind: 'leave', id: 'l1', at: 'x', employeeName: 'A', leaveTypeName: null, fromDate: 'a', toDate: 'b', halfDay: false })).toBe('/people');
+  it('sends a leave approval to where it is decided', () => {
+    expect(approvalLink('e1')).toBe('/people/e1');
+    expect(approvalLink(null)).toBe('/people?tab=leave');
   });
 });

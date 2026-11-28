@@ -54,6 +54,10 @@ export interface InboxData {
   agentStopped: InboxStoppedRun[];
   mentions: InboxMention[];
   approvals: InboxApproval[];
+  /** The approver's own employee card, where leave is decided; null without one. */
+  approverEmployeeId: string | null;
+  /** Full counts where a section shows only the newest rows. */
+  totals: { waitingOnYou: number };
 }
 
 export interface InboxCount { waitingOnYou: number; approvals: number; total: number }
@@ -66,13 +70,21 @@ export function mentionLink(m: InboxMention): string {
   return notifLink({ type: m.type, entityRef: m.ref, payload }) ?? '/';
 }
 
-/** Leave decisions are made on the People page, as the leave notification has it. */
-export const approvalLink = (_a: InboxApproval): string => '/people';
+/**
+ * Where leave is decided: the approver's own employee card, whose leave card
+ * lists the requests waiting on them with Approve / Reject. Someone with no
+ * employee card decides on People → Leave (people.approve_leave holders).
+ */
+export const approvalLink = (approverEmployeeId: string | null): string =>
+  (approverEmployeeId ? `/people/${approverEmployeeId}` : '/people?tab=leave');
 
 export function useInbox() {
   return useQuery({
     queryKey: ['inbox', 'items'],
     queryFn: () => api.get<InboxData>('/inbox'),
+    // The stream does not carry everything that changes the page – losing a
+    // project, a manager change – so it also refreshes on its own.
+    refetchInterval: 60_000,
   });
 }
 

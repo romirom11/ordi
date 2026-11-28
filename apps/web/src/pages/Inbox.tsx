@@ -159,10 +159,10 @@ function MentionRow({ m }: { m: InboxMention }) {
   );
 }
 
-function ApprovalRow({ a }: { a: InboxApproval }) {
+function ApprovalRow({ a, to }: { a: InboxApproval; to: string }) {
   const t = useT();
   return (
-    <Row to={approvalLink(a)}>
+    <Row to={to}>
       <CalendarCheck size={15} className="mt-0.5 shrink-0 text-muted-foreground" aria-hidden />
       <div className="min-w-0 flex-1">
         <span className="truncate font-medium">{a.employeeName}</span>
@@ -195,11 +195,11 @@ export function InboxPage() {
         <EmptyState icon={<Inbox size={20} />} title={t('inbox.allClear')} hint={t('inbox.allClearHint')} />
       ) : (
         <div className="pb-10">
-          <Section icon={<MessageCircleQuestion size={13} />} title={t('inbox.waitingOnYou')} count={d.waitingOnYou.length} empty={t('inbox.emptyWaiting')}>
+          <Section icon={<MessageCircleQuestion size={13} />} title={t('inbox.waitingOnYou')} count={Math.max(d.totals?.waitingOnYou ?? 0, d.waitingOnYou.length)} empty={t('inbox.emptyWaiting')}>
             {d.waitingOnYou.map((x) => <QuestionRow key={x.id} q={x} />)}
           </Section>
           <Section icon={<CalendarCheck size={13} />} title={t('inbox.approvals')} count={d.approvals.length} empty={t('inbox.emptyApprovals')}>
-            {d.approvals.map((x) => <ApprovalRow key={x.id} a={x} />)}
+            {d.approvals.map((x) => <ApprovalRow key={x.id} a={x} to={approvalLink(d.approverEmployeeId)} />)}
           </Section>
           <Section icon={<Bot size={13} />} title={t('inbox.agentStopped')} count={d.agentStopped.length} empty={t('inbox.emptyStopped')}>
             {d.agentStopped.map((x) => <StoppedRow key={x.id} r={x} />)}

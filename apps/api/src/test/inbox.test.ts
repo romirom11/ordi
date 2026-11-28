@@ -4,7 +4,7 @@
  * above all, nothing from a project they cannot open now.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import { getDb, schema } from '@ordi/db';
+import { getDb, schema, eq } from '@ordi/db';
 import { ulid } from 'ulid';
 import { resetDb, seedRolesAndUsers, reqAs, json, app } from './helpers';
 import { setupWorkspace, addProjectMember, createAgent, drainOutbox, type Workspace } from './agents-helpers';
@@ -89,6 +89,13 @@ describe('agent stopped', () => {
     expect(box.agentStopped.find((r: { id: string }) => r.id === failedRun)).toMatchObject({ status: 'failed', error: 'It broke', agent: { id: agentId } });
   });
 
+  it('keeps a run that is still stopped, however long ago it started', async () => {
+    const t = await newTask(ws.projectId, { assigneeIds: [users.member!.userId] });
+    const old = await insertRun(t.id, ws.projectId, 'waiting_quota', new Date(Date.now() - 60 * 86_400_000));
+    const box = await inboxOf(users.member!.cookie);
+    expect(box.agentStopped.map((r: { id: string }) => r.id)).toContain(old);
+  });
+
   it('shows the runs of an agent I own', async () => {
     const created = await json(owner().post('/external-agents', { name: 'Owned bot', ownerUserId: users.manager!.userId }));
     const t = await newTask(ws.projectId, { reporterId: users.owner!.userId });
@@ -111,14 +118,26 @@ describe('mentions', () => {
       type: 'comment.mentioned', ref: t.ref, actorName: 'Owner',
     });
   });
+
+  it('drops a mention whose comment was deleted', async () => {
+    const t = await newTask(ws.projectId);
+    const c = await json(owner().post(`/tasks/${t.id}/comments`, { body: mentionDoc(users.member!.userId, ' never mind') }));
+    await drainOutbox();
+    const has = async () => (await inboxOf(users.member!.cookie)).mentions.some((m: { payload: { taskId: string } }) => m.payload.taskId === t.id);
+    expect(await has()).toBe(true);
+    await owner().del(`/comments/${c.id}`);
+    expect(await has()).toBe(false);
+  });
 });
 
 describe('approvals', () => {
   it('lists leave waiting on my decision and counts it', async () => {
     const { db } = getDb();
     const employeeId = ulid();
+    const managerEmployeeId = ulid();
     const typeId = ulid();
-    await db.insert(schema.employees).values({ id: employeeId, userId: users.member!.userId, firstName: 'Mykola', lastName: 'Member' });
+    await db.insert(schema.employees).values({ id: managerEmployeeId, userId: users.manager!.userId, firstName: 'Marta', lastName: 'Manager' });
+    await db.insert(schema.employees).values({ id: employeeId, userId: users.member!.userId, firstName: 'Mykola', lastName: 'Member', managerId: managerEmployeeId });
     await db.insert(schema.leaveTypes).values({ id: typeId, name: 'Vacation' });
     const leaveId = ulid();
     await db.insert(schema.leaveRequests).values({
@@ -126,9 +145,17 @@ describe('approvals', () => {
     });
     const box = await inboxOf(users.manager!.cookie);
     expect(box.approvals).toEqual([expect.objectContaining({ kind: 'leave', id: leaveId, employeeName: 'Mykola Member', leaveTypeName: 'Vacation' })]);
+    // Decided on the approver's own card, where the leave card lists it.
+    expect(box.approverEmployeeId).toBe(managerEmployeeId);
     expect((await countOf(users.manager!.cookie)).approvals).toBe(1);
     // Someone else's approvals are not mine.
     expect((await inboxOf(users.hr!.cookie)).approvals).toEqual([]);
+
+    // Moved to another manager: the old one can no longer decide, so it leaves
+    // their Inbox, dates and all.
+    await db.update(schema.employees).set({ managerId: null }).where(eq(schema.employees.id, employeeId));
+    expect((await inboxOf(users.manager!.cookie)).approvals).toEqual([]);
+    expect((await countOf(users.manager!.cookie)).approvals).toBe(0);
   });
 });
 
