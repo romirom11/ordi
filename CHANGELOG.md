@@ -5,6 +5,14 @@ writes this file from the titles of the merged PRs, and each section is also the
 body of its [GitHub release](https://github.com/romirom11/ordi/releases). The
 hand-written notes of earlier versions are in [`docs/releases`](docs/releases).
 
+## [1.48.0](https://github.com/romirom11/ordi/compare/v1.47.0...v1.48.0) (2026-11-28)
+
+
+### Features
+
+* All agents sit in one list in settings ([#208](https://github.com/romirom11/ordi/issues/208)) ([4144af3](https://github.com/romirom11/ordi/commit/4144af32c6cfbfd0e3c5f01ce779c19bfa78f884))
+* Connecting a client to ordi takes one clear step ([#209](https://github.com/romirom11/ordi/issues/209)) ([37fc77e](https://github.com/romirom11/ordi/commit/37fc77ee2d2e3c1b5dfc0f0da59cfba7e018b26a))
+
 ## [1.47.0](https://github.com/romirom11/ordi/compare/v1.46.0...v1.47.0) (2026-11-28)
 
 
