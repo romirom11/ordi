@@ -1,4 +1,4 @@
-import { pgTable, text, boolean, integer, numeric, timestamp, jsonb, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, text, boolean, integer, numeric, timestamp, jsonb, index, uniqueIndex, primaryKey } from 'drizzle-orm/pg-core';
 import { pk, timestamps, createdBy, version, deletedAt, customFields, money, position } from './_shared';
 import { users } from './core';
 import { companies } from './crm';
@@ -107,6 +107,22 @@ export const invoices = pgTable('invoices', {
   companyIdx: index('invoices_company_idx').on(t.companyId),
   statusIdx: index('invoices_status_idx').on(t.status),
   dueIdx: index('invoices_due_idx').on(t.dueDate),
+}));
+
+/**
+ * The projects an invoice's time was billed from, recorded when it is made. An
+ * invoice from time across several projects is filed under none, and its time
+ * entries can let go of it (cancelling unlinks them, editing the lines
+ * replaces them): this is what still tells whose work it bills – which decides,
+ * for one, whether its payment may be announced in the shared Slack channel.
+ * Kept out of the invoice row so no invoice read hands out the ids of projects
+ * the reader cannot open. No FK on the project: a record outlives it.
+ */
+export const invoiceSourceProjects = pgTable('invoice_source_projects', {
+  invoiceId: text('invoice_id').notNull().references(() => invoices.id, { onDelete: 'cascade' }),
+  projectId: text('project_id').notNull(),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.invoiceId, t.projectId] }),
 }));
 
 export const invoiceItems = pgTable('invoice_items', {
