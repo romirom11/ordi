@@ -977,9 +977,11 @@ export async function handOffOpenTasks(actor: Actor, fromUserId: string, toUserI
       const role = effectiveProjectRole(actor, { id: project.id, visibility: project.visibility as 'workspace' | 'private' });
       const [refusal] = await agentAssignRefusals(actor, project.id, [toUserId], role);
       if (refusal) {
+        // A project the actor cannot open (a private one, say) is not named to them.
+        const where = role ? project.name : 'a project you cannot open';
         throw new ApiException(
           refusal.error.code,
-          `Open tasks in ${project.name} cannot be handed to this agent: ${refusal.error.message}`,
+          `Open tasks in ${where} cannot be handed to this agent: ${refusal.error.message}`,
           refusal.error.details,
         );
       }

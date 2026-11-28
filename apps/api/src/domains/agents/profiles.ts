@@ -289,7 +289,9 @@ export async function agentAssignRefusals(
         error: err.forbidden(
           profile.assignPolicy === 'agents_managers'
             ? 'Only people with agents.manage may assign work to this agent'
-            : 'Only project admins may assign work to this agent',
+            : profile.assignPolicy === 'project_admins'
+              ? 'Only project admins may assign work to this agent'
+              : 'Only project members may assign work to this agent',
           'agents.manage',
         ),
       });

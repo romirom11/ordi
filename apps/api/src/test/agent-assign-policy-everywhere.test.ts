@@ -212,21 +212,25 @@ describe('retrying a run', () => {
   });
 
   it('a project admin retries a run of an agent with a project_admins policy', async () => {
-    await makeProjectAdmin(ws.users.manager!.userId);
+    // Sales reads projects but writes none: only the project admin membership
+    // gives them the role this policy asks for.
+    const sales = reqAs(ws.users.sales!.cookie);
     const { runId } = await failedRunOf(guarded, 'Assigned retry by a project admin');
-    expect((await reqAs(ws.users.manager!.cookie).post(`/agent-runs/${runId}/retry`)).status).toBe(201);
+    expect((await sales.post(`/agent-runs/${runId}/retry`)).status).toBe(403);
+    await makeProjectAdmin(ws.users.sales!.userId);
+    expect((await sales.post(`/agent-runs/${runId}/retry`)).status).toBe(201);
   });
 
   it('a run of an agent on the task with an agents_managers policy is retried only with agents.manage', async () => {
     const locked = (await createAgent(ws.users, { name: 'Locked', assignPolicy: 'agents_managers' })).id;
     await addProjectMember(ws.users, ws.projectId, locked);
-    await makeProjectAdmin(ws.users.manager!.userId);
+    await makeProjectAdmin(ws.users.sales!.userId);
     const { runId } = await failedRunOf(locked, 'Assigned retry, managers only');
     const member = await reqAs(ws.users.member!.cookie).post(`/agent-runs/${runId}/retry`);
     expect(member.status).toBe(403);
     expect((await json(member)).error.message).toMatch(/agents\.manage/);
     // Project admin is not enough for this policy.
-    expect((await reqAs(ws.users.manager!.cookie).post(`/agent-runs/${runId}/retry`)).status).toBe(403);
+    expect((await reqAs(ws.users.sales!.cookie).post(`/agent-runs/${runId}/retry`)).status).toBe(403);
     expect((await reqAs(ws.users.admin!.cookie).post(`/agent-runs/${runId}/retry`)).status).toBe(201);
   });
 

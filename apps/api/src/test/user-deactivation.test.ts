@@ -198,6 +198,44 @@ describe('deactivate with hand-off to an agent', () => {
     expect(await assigneesOf(open.id)).toEqual([agentId]);
   });
 
+  it('judges each project by the role held there, and refuses the whole hand-over if one fails', async () => {
+    const agentId = await agentOnProject('project_admins');
+    const actor = await peopleAdmin();
+    await addProjectMember(users, project.id, actor.userId, 'admin');
+    // A second project where the agent works but the actor only reads.
+    const typeId = ulid();
+    await getDb().db.insert(schema.projectTypes).values({ id: typeId, name: 'Other' });
+    const second = await json(reqAs(users.owner!.cookie).post('/projects', { name: 'Elsewhere', key: 'ELS', projectTypeId: typeId }));
+    await addProjectMember(users, second.id, agentId);
+    const here = await createTask('Here', { assigneeIds: [users.member!.userId] });
+    const there = await json(reqAs(users.owner!.cookie).post('/tasks', { projectId: second.id, title: 'There', assigneeIds: [users.member!.userId] }));
+
+    const res = await reqAs(actor.cookie).post(`/users/${users.member!.userId}/deactivate`, { reassignTo: agentId });
+    expect(res.status).toBe(403);
+    expect((await json(res)).error.message).toContain('Elsewhere');
+    expect(await isActive(users.member!.userId)).toBe(true);
+    expect(await assigneesOf(here.id)).toEqual([users.member!.userId]);
+    expect(await assigneesOf(there.id)).toEqual([users.member!.userId]);
+  });
+
+  it('does not name a private project the actor cannot open', async () => {
+    const agentId = await agentOnProject('project_members');
+    const actor = await peopleAdmin();
+    const typeId = ulid();
+    await getDb().db.insert(schema.projectTypes).values({ id: typeId, name: 'Hidden' });
+    const hidden = await json(reqAs(users.owner!.cookie).post('/projects', { name: 'Codename Falcon', key: 'FAL', projectTypeId: typeId, visibility: 'private' }));
+    await addProjectMember(users, hidden.id, agentId);
+    await addProjectMember(users, hidden.id, users.member!.userId);
+    await json(reqAs(users.owner!.cookie).post('/tasks', { projectId: hidden.id, title: 'Hidden work', assigneeIds: [users.member!.userId] }));
+
+    const res = await reqAs(actor.cookie).post(`/users/${users.member!.userId}/deactivate`, { reassignTo: agentId });
+    expect(res.status).toBe(403);
+    const message = (await json(res)).error.message as string;
+    expect(message).not.toContain('Falcon');
+    expect(message).toMatch(/project members/);
+    expect(await isActive(users.member!.userId)).toBe(true);
+  });
+
   it('still hands tasks to a person without any agent check', async () => {
     const actor = await peopleAdmin();
     const open = await createTask('Still to do', { assigneeIds: [users.member!.userId] });
