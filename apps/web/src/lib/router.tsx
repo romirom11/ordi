@@ -1,6 +1,6 @@
 import {
   createContext, useCallback, useContext, useEffect, useState,
-  type ReactNode, type MouseEvent, type AnchorHTMLAttributes,
+  type ReactNode, type MouseEvent, type AnchorHTMLAttributes, type Ref,
 } from 'react';
 
 interface RouterState {
@@ -10,14 +10,42 @@ interface RouterState {
 
 const RouterContext = createContext<RouterState | null>(null);
 
+/**
+ * Old addresses of pages that moved or were renamed. They are resolved here,
+ * before anything renders, so links and bookmarks keep working while neither
+ * the page nor a tab's history ever holds the old address – a redirect from
+ * the page itself left an entry that Back walked into and bounced off again.
+ */
+const REDIRECTS: Record<string, string> = {
+  '/settings/mcp': '/profile/connections',
+  '/profile/mcp': '/profile/connections',
+};
+
+/** The address a path really lives at, its query kept. */
+export function canonicalPath(to: string): string {
+  const q = to.indexOf('?');
+  const [pathname, search] = q < 0 ? [to, ''] : [to.slice(0, q), to.slice(q)];
+  const moved = REDIRECTS[pathname];
+  return moved ? moved + search : to;
+}
+
+/** The browser's current address, rewritten in place if it is an old one. */
+function currentCanonical(): string {
+  const here = window.location.pathname + window.location.search;
+  const to = canonicalPath(here);
+  if (to !== here) window.history.replaceState({}, '', to);
+  return to;
+}
+
 export function RouterProvider({ children }: { children: ReactNode }) {
-  const [path, setPath] = useState(() => window.location.pathname + window.location.search);
+  const [path, setPath] = useState(currentCanonical);
   useEffect(() => {
-    const onPop = () => setPath(window.location.pathname + window.location.search);
+    const onPop = () => setPath(currentCanonical());
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
-  const navigate = (to: string, opts?: { replace?: boolean }) => {
+  const navigate = (target: string, opts?: { replace?: boolean }) => {
+    const to = canonicalPath(target);
     if (opts?.replace) window.history.replaceState({}, '', to);
     else window.history.pushState({}, '', to);
     setPath(to);
@@ -93,7 +121,7 @@ export function useOpen(): (to: string, e?: OpenIntent) => void {
   }, [navigate, openInNewTab]);
 }
 
-export function Link({ to, children, onClick, onAuxClick, ...props }: Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'href'> & { to: string; children: ReactNode }) {
+export function Link({ to, children, onClick, onAuxClick, ...props }: Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'href'> & { to: string; children: ReactNode; ref?: Ref<HTMLAnchorElement> }) {
   const open = useOpen();
   const handle = (e: MouseEvent<HTMLAnchorElement>) => {
     onClick?.(e);

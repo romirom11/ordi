@@ -212,6 +212,9 @@ function AgentDetails({ agent, onChanged, onError }: { agent: MyAgent; onChanged
 function RenameForm({ agent, onDone, onError }: { agent: MyAgent; onDone: (saved: boolean) => void; onError: (e: unknown) => void }) {
   const t = useT();
   const qc = useQueryClient();
+  // The name as it was when editing began: a refetch bringing a rename from
+  // another tab must not turn an untouched draft into a change.
+  const [initial] = useState(agent.name);
   const [draft, setDraft] = useState(agent.name);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => { input.current?.select(); }, []);
@@ -224,10 +227,16 @@ function RenameForm({ agent, onDone, onError }: { agent: MyAgent; onDone: (saved
       toast(t('myAgent.renamed'));
       onDone(true);
     },
-    // The draft stays, so a failed save can be retried or cancelled.
-    onError: (e) => { onError(e); input.current?.focus(); },
+    // The draft stays, so a failed save can be retried or cancelled. Enter
+    // keeps focus in the field (read-only while saving, never disabled);
+    // clicking Save, which is disabled while saving, drops it, so it comes
+    // back to the field – unless the person has moved on meanwhile.
+    onError: (e) => {
+      onError(e);
+      if (!document.activeElement || document.activeElement === document.body) input.current?.focus();
+    },
   });
-  const outcome = renameOutcome(draft, agent.name);
+  const outcome = renameOutcome(draft, initial);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -245,18 +254,20 @@ function RenameForm({ agent, onDone, onError }: { agent: MyAgent; onDone: (saved
   };
 
   return (
-    <form className="flex min-w-0 flex-1 flex-wrap items-center gap-2" onSubmit={submit} onKeyDown={onKeyDown}>
+    // Narrow, the field and its buttons take a line of their own and the switch moves under them.
+    <form className="flex min-w-0 flex-1 basis-full items-center gap-2 sm:basis-auto" onSubmit={submit} onKeyDown={onKeyDown}>
       <Input
         ref={input}
         autoFocus
         value={draft}
         maxLength={60}
         aria-label={t('myAgent.name')}
-        disabled={rename.isPending}
-        className="h-8 w-auto min-w-0 max-w-xs flex-1 basis-40"
+        readOnly={rename.isPending}
+        aria-busy={rename.isPending}
+        className="h-8 w-auto min-w-0 max-w-xs flex-1"
         onChange={(e) => setDraft(e.target.value)}
       />
-      <div className="flex items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1">
         <Button type="submit" size="sm" className="h-8" disabled={outcome.kind === 'invalid' || rename.isPending}>
           {rename.isPending && <Spinner />} {t('common.save')}
         </Button>

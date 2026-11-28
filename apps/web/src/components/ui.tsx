@@ -701,24 +701,40 @@ export function SegmentedControl<T extends string>({ options, value, onChange, c
   const root = useRef<HTMLDivElement>(null);
   // Segments of their own width: the thumb follows the picked one's box.
   const [box, setBox] = useState<{ left: number; width: number } | null>(null);
+  // Scrolled sideways, the side with more segments beyond it fades out, so
+  // a cut-off label reads as "more this way" rather than as a broken control.
+  const [edges, setEdges] = useState({ start: false, end: false });
+  const measureEdges = () => {
+    const el = root.current;
+    if (!el) return;
+    const next = { start: el.scrollLeft > 1, end: el.scrollLeft + el.clientWidth < el.scrollWidth - 1 };
+    setEdges((e) => (e.start === next.start && e.end === next.end ? e : next));
+  };
   useLayoutEffect(() => {
     if (!fit || !root.current) return;
     const el = root.current;
+    const items = [...el.querySelectorAll<HTMLElement>(':scope > .ui-seg-item')];
     const measure = () => {
-      const item = el.querySelectorAll<HTMLElement>(':scope > .ui-seg-item')[idx];
+      const item = items[idx];
       if (item) setBox({ left: item.offsetLeft, width: item.offsetWidth });
+      measureEdges();
     };
     measure();
-    // Labels change width when a font loads or the language switches.
+    // Labels change width when a font loads or the language switches, and
+    // the control itself when the screen does: each of them is watched.
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(measure);
     ro.observe(el);
+    items.forEach((i) => ro.observe(i));
     return () => ro.disconnect();
-  }, [fit, idx, options.length]);
+  }, [fit, idx, options.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const thumbStyle: CSSProperties | undefined = fit
     ? (box ? { width: box.width, transform: `translateX(${box.left}px)` } : { display: 'none' })
     : { width: `calc((100% - 4px) / ${options.length})`, transform: `translateX(calc(${idx} * 100% + 2px))` };
+  const fade = fit && (edges.start || edges.end)
+    ? `linear-gradient(to right, ${edges.start ? 'transparent' : '#000'}, #000 28px, #000 calc(100% - 28px), ${edges.end ? 'transparent' : '#000'})`
+    : undefined;
 
   return (
     <div
@@ -728,7 +744,8 @@ export function SegmentedControl<T extends string>({ options, value, onChange, c
         fit ? 'inline-flex max-w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden' : 'inline-grid',
         className,
       )}
-      style={fit ? undefined : { gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
+      style={fit ? (fade ? { maskImage: fade, WebkitMaskImage: fade } : undefined) : { gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
+      onScroll={fit ? measureEdges : undefined}
     >
       <span
         aria-hidden

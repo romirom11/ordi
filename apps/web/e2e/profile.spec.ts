@@ -35,10 +35,13 @@ test('profile sections each have their own url', async ({ page }) => {
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Connect a client' })).toBeVisible();
 
-  // The old address still leads there.
+  // The old address still leads there, and Back does not bounce off it.
+  await page.goto('/profile/security');
   await page.goto('/profile/mcp');
   await expect(page).toHaveURL(/\/profile\/connections$/);
   await expect(page.getByRole('heading', { name: 'Connect a client' })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/profile\/security$/);
 });
 
 test('your agent is renamed in place', async ({ page }) => {

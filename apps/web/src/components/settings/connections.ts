@@ -115,26 +115,33 @@ export interface ConnectionRow {
 const PREFIX_HEAD = /^ordi_/;
 const SUFFIX_MIN = 4;
 
-/**
- * The shortest tails of the prefixes, at least four characters, that tell
- * every connection of one group apart. Tokens are random, so four nearly
- * always do; two that happen to end alike get as many more as it takes.
- */
-function suffixes(prefixes: (string | null)[]): (string | null)[] {
-  const bodies = prefixes.map((p) => (p ? p.replace(PREFIX_HEAD, '') : null));
-  const longest = Math.max(SUFFIX_MIN, ...bodies.map((b) => b?.length ?? 0));
+/** The shortest tails, at least four characters, that are all different; null when none are. */
+function distinctTails(sources: string[]): string[] | null {
+  const longest = Math.max(SUFFIX_MIN, ...sources.map((x) => x.length));
   for (let n = SUFFIX_MIN; n <= longest; n++) {
-    const tails = bodies.map((b) => (b ? b.slice(-n) : null));
-    const known = tails.filter((x): x is string => x !== null);
-    if (new Set(known).size === known.length) return tails;
+    const tails = sources.map((x) => x.slice(-n));
+    if (new Set(tails).size === tails.length) return tails;
   }
-  return bodies;
+  return null;
+}
+
+/**
+ * Suffixes that tell every connection of one group apart: the end of each
+ * token's prefix, which is the part people can match against a config.
+ * Tokens are random, so four characters nearly always do; two that happen
+ * to end alike get as many more as it takes. Where prefixes cannot do it –
+ * one is missing, or two are the same – the connections' ids do instead.
+ */
+function suffixes(connections: Connection[]): string[] {
+  const prefixes = connections.map((c) => c.prefix?.replace(PREFIX_HEAD, '') ?? '');
+  const byPrefix = prefixes.every(Boolean) ? distinctTails(prefixes) : null;
+  return byPrefix ?? distinctTails(connections.map((c) => c.id.replace(/-/g, ''))) ?? connections.map((c) => c.id);
 }
 
 /** The connections flattened into rows, in the groups' order, each a line of its own. */
 export function connectionRows(groups: ConnectionGroup[]): ConnectionRow[] {
   return groups.flatMap((g) => {
-    const tails = g.connections.length > 1 ? suffixes(g.connections.map((c) => c.prefix)) : g.connections.map(() => null);
+    const tails = g.connections.length > 1 ? suffixes(g.connections) : [];
     return g.connections.map((connection, i) => ({ client: g.client, actsAs: g.actsAs, suffix: tails[i] ?? null, connection }));
   });
 }

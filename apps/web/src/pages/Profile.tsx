@@ -106,18 +106,13 @@ type SectionId = (typeof SECTIONS)[number]['id'];
 /** The default section keeps the bare /profile url (Cmd/Ctrl+, lands there). */
 const sectionPath = (id: SectionId) => (id === 'account' ? '/profile' : `/profile/${id}`);
 
-/** Old addresses of a section that was renamed: links and bookmarks still land on it. */
-const SECTION_ALIASES: Record<string, SectionId> = { mcp: 'connections' };
-
 export function ProfilePage({ section }: { section?: string }) {
   const t = useT();
-  const navigate = useNavigate();
-  const alias = section ? SECTION_ALIASES[section] : undefined;
-  useEffect(() => {
-    if (alias) navigate(sectionPath(alias), { replace: true });
-  }, [alias]); // eslint-disable-line react-hooks/exhaustive-deps
-  const id = alias ?? section;
-  const active = SECTIONS.find((s) => s.id === id) ?? SECTIONS[0];
+  // The old /profile/mcp is sent to /profile/connections by the router (REDIRECTS).
+  const active = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0];
+  // On a phone the sections are a row that scrolls sideways: keep the current one in sight.
+  const activeLink = useRef<HTMLAnchorElement>(null);
+  useEffect(() => { activeLink.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }, [active.id]);
   usePageTitle(active.id === 'account' ? t('profile.title') : `${t('profile.title')} · ${t(active.label)}`);
 
   return (
@@ -134,6 +129,7 @@ export function ProfilePage({ section }: { section?: string }) {
               return (
                 <Link
                   key={s.id}
+                  ref={isActive ? activeLink : undefined}
                   to={sectionPath(s.id)}
                   aria-current={isActive ? 'page' : undefined}
                   className={cn(

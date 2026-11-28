@@ -97,6 +97,16 @@ describe('connectionRows', () => {
     ]);
   });
 
+  it('falls back to the ids where prefixes cannot tell connections apart', () => {
+    const rows = connectionRows(buildConnections([
+      tok('11111111-aaaa', 'ordi_Same123'), tok('22222222-bbbb', 'ordi_Same123'),
+      tok('33333333-cccc', null, 'Cursor'), tok('44444444-dddd', 'ordi_Xy12345', 'Cursor'),
+    ], [], NOW));
+    expect(rows.map((r) => [r.client, r.suffix])).toEqual([
+      ['Claude Code', 'aaaa'], ['Claude Code', 'bbbb'], ['Cursor', 'cccc'], ['Cursor', 'dddd'],
+    ]);
+  });
+
   it('takes longer tails when two prefixes end alike', () => {
     const rows = connectionRows(buildConnections([tok('a', 'ordi_A1b2c3d'), tok('b', 'ordi_Z9b2c3d')], [], NOW));
     expect(rows.map((r) => r.suffix).sort()).toEqual(['1b2c3d', '9b2c3d']);

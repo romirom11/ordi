@@ -479,7 +479,8 @@ function ConnectionsSection() {
     onError: () => { setTarget(null); toast.error(t('mcp.disconnectFailed')); },
   });
 
-  const what = target ? `${target.client}${target.connection.prefix ? ` (${target.connection.prefix}…)` : ''}` : '';
+  // The same identifier as on its line, so the dialog names the row that was clicked.
+  const what = target ? `${target.client}${target.suffix ? ` …${target.suffix}` : ''}` : '';
 
   return (
     <section className="mb-10" aria-labelledby="mcp-connections">
@@ -544,7 +545,11 @@ function ConnectionLine({ row, onDisconnect }: { row: Row; onDisconnect: () => v
           {row.suffix && <span className="shrink-0 font-mono text-[11px] text-faint">…{row.suffix}</span>}
         </span>
         <ActsAsLabel actsAs={row.actsAs} />
-        <span className="text-xs text-muted-foreground">{meta.join(' · ')}</span>
+        <span className="text-xs text-muted-foreground">
+          {meta.join(' · ')}
+          {/* The tooltip's details, for screen readers too: a hover is not the only way in. */}
+          {tooltip && <span className="sr-only"> · {tooltip}</span>}
+        </span>
       </div>
       <Button
         size="xs"
