@@ -380,15 +380,11 @@ export async function retryRun(actor: Actor, id: string): Promise<RunView> {
   const [member] = await db.select({ userId: schema.projectMembers.userId }).from(schema.projectMembers)
     .where(and(eq(schema.projectMembers.projectId, run.projectId), eq(schema.projectMembers.userId, run.agentUserId)));
   if (!member) throw err.domain('The agent is no longer a member of this project; add it back under project members to retry');
-  // An agent on the task is driven by anyone who may write there (R30, R50).
-  // One that is not – a mention started it – is held to its assign policy,
-  // as a new mention would be (R49).
-  const [assigned] = await db.select({ userId: schema.taskAssignees.userId }).from(schema.taskAssignees)
-    .where(and(eq(schema.taskAssignees.taskId, run.taskId), eq(schema.taskAssignees.userId, run.agentUserId)));
-  if (!assigned) {
-    const project = await assertProject(actor, run.projectId, 'viewer');
-    await assertCanAssignAgents(actor, run.projectId, [run.agentUserId], effectiveProjectRole(actor, project));
-  }
+  // A retry spends another run, so it is held to the agent's assign policy
+  // (R49) whether or not the agent is on the task – the same rule as
+  // assigning or mentioning it. Cancelling stays open to project writers.
+  const project = await assertProject(actor, run.projectId, 'viewer');
+  await assertCanAssignAgents(actor, run.projectId, [run.agentUserId], effectiveProjectRole(actor, project));
   const newId = await queueRun({
     agentUserId: run.agentUserId, taskId: run.taskId, projectId: run.projectId, trigger: 'retry',
     requestedBy: actor.userId, parentRunId: run.id, sessionId: run.sessionId, branch: run.branch, actorType: actor.actorType,

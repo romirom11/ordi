@@ -51,6 +51,8 @@ extendDict({
     'projects.settingsIntegrations': 'Settings → Integrations',
     'projects.advanced': 'Advanced',
     'projects.slackWebhookAdvanced': 'Post to an Incoming Webhook URL instead of a workspace channel.',
+    'projects.slackPrivateOnly': 'This project is private, so it posts only to the channel or webhook set here. Without one, nothing goes to Slack.',
+    'projects.slackPrivateNote': 'Private projects post only to a channel or webhook set here; other projects fall back to the workspace webhook.',
   },
   uk: {
     'projects.integrations': 'Інтеграції',
@@ -90,6 +92,8 @@ extendDict({
     'projects.settingsIntegrations': 'Settings → Integrations',
     'projects.advanced': 'Додатково',
     'projects.slackWebhookAdvanced': 'Постити на URL Incoming Webhook замість каналу робочого простору.',
+    'projects.slackPrivateOnly': 'Проєкт приватний, тому постить лише в канал або вебхук, вказаний тут. Без них у Slack нічого не надходить.',
+    'projects.slackPrivateNote': 'Приватні проєкти постять лише в канал або вебхук, вказаний тут; інші проєкти без них використовують вебхук робочого простору.',
   },
 });
 
@@ -435,7 +439,9 @@ function AdvancedWebhook({ projectId, settings, version }: {
 
   const save = useMutation({
     mutationFn: () => api.patch(`/projects/${projectId}`, {
-      settings: { ...settings, slackWebhookUrl: url.trim() || undefined },
+      // null, not undefined: JSON drops an undefined key, and the API merges
+      // settings, so the old webhook would stay and keep receiving posts.
+      settings: { ...settings, slackWebhookUrl: url.trim() || null },
       version,
     }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['project', projectId] }); toast(t('projects.slackSaved')); },
@@ -472,8 +478,9 @@ function AdvancedWebhook({ projectId, settings, version }: {
   );
 }
 
-function SlackSection({ projectId, settings, version, canManage }: {
+function SlackSection({ projectId, settings, version, canManage, visibility }: {
   projectId: string; settings: Record<string, unknown>; version?: number; canManage: boolean;
+  visibility?: 'workspace' | 'private';
 }) {
   const t = useT();
   const qc = useQueryClient();
@@ -499,7 +506,8 @@ function SlackSection({ projectId, settings, version, canManage }: {
 
   const save = useMutation({
     mutationFn: (channelId: string | undefined) => api.patch(`/projects/${projectId}`, {
-      settings: { ...settings, slackChannelId: channelId },
+      // null clears it; an undefined key would be dropped and the channel kept.
+      settings: { ...settings, slackChannelId: channelId ?? null },
       version,
     }),
     onSuccess: (_d, channelId) => {
@@ -550,6 +558,12 @@ function SlackSection({ projectId, settings, version, canManage }: {
         )}
 
         <AdvancedWebhook projectId={projectId} settings={settings} version={version} />
+
+        {/* The API never falls back to the workspace webhook for a private project. */}
+        <p className="mt-3 flex items-start gap-1.5 border-t border-border pt-2.5 text-xs text-faint">
+          {visibility === 'private' && <Lock size={12} className="mt-0.5 shrink-0" />}
+          <span>{t(visibility === 'private' ? 'projects.slackPrivateOnly' : 'projects.slackPrivateNote')}</span>
+        </p>
       </div>
     </div>
   );
@@ -557,8 +571,10 @@ function SlackSection({ projectId, settings, version, canManage }: {
 
 /* ───────────────────────────── Section wrapper ───────────────────────────── */
 
-export function ProjectIntegrations({ projectId, settings, version, canManage }: {
+export function ProjectIntegrations({ projectId, settings, version, canManage, visibility }: {
   projectId: string; settings?: Record<string, unknown>; version?: number; canManage: boolean;
+  /** Who the project is open to: a private one posts only to its own Slack target. */
+  visibility?: 'workspace' | 'private';
 }) {
   const t = useT();
   return (
@@ -567,7 +583,7 @@ export function ProjectIntegrations({ projectId, settings, version, canManage }:
       <div className="space-y-6">
         <GitSection projectId={projectId} canManage={canManage} />
         {canManage && (
-          <SlackSection projectId={projectId} settings={settings ?? {}} version={version} canManage={canManage} />
+          <SlackSection projectId={projectId} settings={settings ?? {}} version={version} canManage={canManage} visibility={visibility} />
         )}
       </div>
     </section>
