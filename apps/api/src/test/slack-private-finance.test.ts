@@ -8,7 +8,7 @@
  * nothing.
  */
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
-import { getDb, schema, eq } from '@ordi/db';
+import { getDb, schema, eq, and, inArray } from '@ordi/db';
 import { ulid } from 'ulid';
 import { resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
 import { drainOutbox } from './agents-helpers';
@@ -110,6 +110,21 @@ async function move(dealId: string, stageId: string) {
   expect(res.status).toBe(200);
 }
 
+/**
+ * Deliver what is queued, and check that Slack handled every deal and invoice
+ * event without throwing: a handler that failed posts nothing too, but leaves
+ * the event for a retry instead of deciding to stay quiet.
+ */
+async function deliver() {
+  await drainOutbox();
+  const { db } = getDb();
+  const events = await db.select({ id: schema.events.id }).from(schema.events)
+    .where(inArray(schema.events.type, ['invoice.paid', 'deal.won', 'deal.lost']));
+  const handled = await db.select({ eventId: schema.processedEvents.eventId }).from(schema.processedEvents)
+    .where(and(eq(schema.processedEvents.consumer, 'slack'), inArray(schema.processedEvents.eventId, events.map((e) => e.id))));
+  expect(handled.length).toBe(events.length);
+}
+
 /** Run what is queued, then forget what it posted: the next step's posts are the ones asserted. */
 async function settle() {
   await drainOutbox();
@@ -162,7 +177,7 @@ describe('invoice.paid for an invoice filed under one project', () => {
     const id = await invoice(await project('private'));
     await settle();
     await pay(id);
-    await drainOutbox();
+    await deliver();
     expect(posts).toEqual([]);
   });
 
@@ -170,7 +185,7 @@ describe('invoice.paid for an invoice filed under one project', () => {
     const id = await invoice(await project('private', { slackWebhookUrl: OWN_HOOK }));
     await settle();
     await pay(id);
-    await drainOutbox();
+    await deliver();
     expect(urls()).toEqual([OWN_HOOK]);
     expect(posts[0]!.body.text).toContain('was paid');
   });
@@ -180,7 +195,7 @@ describe('invoice.paid for an invoice filed under one project', () => {
     const id = await invoice(await project('private', { slackChannelId: 'C0PRIVATE' }));
     await settle();
     await pay(id);
-    await drainOutbox();
+    await deliver();
     expect(urls()).toEqual([CHAT_POST]);
     expect(posts[0]!.body.channel).toBe('C0PRIVATE');
   });
@@ -189,7 +204,7 @@ describe('invoice.paid for an invoice filed under one project', () => {
     const id = await invoice(await project('private', { slackChannelId: 'C0PRIVATE' }));
     await settle();
     await pay(id);
-    await drainOutbox();
+    await deliver();
     expect(posts).toEqual([]);
   });
 
@@ -197,7 +212,7 @@ describe('invoice.paid for an invoice filed under one project', () => {
     const id = await invoice(await project('workspace'));
     await settle();
     await pay(id);
-    await drainOutbox();
+    await deliver();
     expect(urls()).toEqual([WORKSPACE_HOOK]);
   });
 
@@ -205,7 +220,7 @@ describe('invoice.paid for an invoice filed under one project', () => {
     const id = await invoice(await project('workspace', { slackWebhookUrl: OWN_HOOK }));
     await settle();
     await pay(id);
-    await drainOutbox();
+    await deliver();
     expect(urls()).toEqual([WORKSPACE_HOOK]);
   });
 
@@ -213,7 +228,7 @@ describe('invoice.paid for an invoice filed under one project', () => {
     const id = await invoice(null);
     await settle();
     await pay(id);
-    await drainOutbox();
+    await deliver();
     expect(urls()).toEqual([WORKSPACE_HOOK]);
   });
 
@@ -222,7 +237,7 @@ describe('invoice.paid for an invoice filed under one project', () => {
     await settle();
     const res = await owner().post(`/invoices/${id}/credit-notes`, { amount: 100, reason: 'goodwill', date: '2026-10-02' });
     expect(res.status).toBe(201);
-    await drainOutbox();
+    await deliver();
     expect(posts).toEqual([]);
   });
 });
@@ -234,7 +249,7 @@ describe('invoice.paid reads the invoice and its project at delivery', () => {
     await settle();
     await pay(id);
     await getDb().db.update(schema.projects).set({ visibility: 'private' }).where(eq(schema.projects.id, projectId));
-    await drainOutbox();
+    await deliver();
     expect(posts).toEqual([]);
   });
 
@@ -244,7 +259,7 @@ describe('invoice.paid reads the invoice and its project at delivery', () => {
     await pay(id);
     const privateId = await project('private');
     await getDb().db.update(schema.invoices).set({ projectId: privateId }).where(eq(schema.invoices.id, id));
-    await drainOutbox();
+    await deliver();
     expect(posts).toEqual([]);
   });
 
@@ -253,7 +268,7 @@ describe('invoice.paid reads the invoice and its project at delivery', () => {
     await settle();
     await pay(id);
     await getDb().db.update(schema.invoices).set({ deletedAt: new Date() }).where(eq(schema.invoices.id, id));
-    await drainOutbox();
+    await deliver();
     expect(posts).toEqual([]);
   });
 
@@ -263,7 +278,7 @@ describe('invoice.paid reads the invoice and its project at delivery', () => {
     await settle();
     await pay(id);
     await getDb().db.update(schema.projects).set({ deletedAt: new Date() }).where(eq(schema.projects.id, projectId));
-    await drainOutbox();
+    await deliver();
     expect(posts).toEqual([]);
   });
 
@@ -274,7 +289,7 @@ describe('invoice.paid reads the invoice and its project at delivery', () => {
     await pay(id);
     const privateId = await project('private');
     expect((await owner().post(`/tasks/${taskIds[0]}/move`, { targetProjectId: privateId })).status).toBe(200);
-    await drainOutbox();
+    await deliver();
     expect(posts.filter((p) => p.body.text?.includes('was paid'))).toEqual([]);
     // The move itself announces the task in the private project: nowhere, it has no target.
     expect(urls()).not.toContain(WORKSPACE_HOOK);
@@ -286,7 +301,7 @@ describe('invoice.paid for an invoice from time across several projects', () => 
     const { id } = await invoiceFromTime([await project('workspace'), await project('workspace')]);
     await settle();
     await pay(id);
-    await drainOutbox();
+    await deliver();
     expect(urls()).toEqual([WORKSPACE_HOOK]);
   });
 
@@ -294,7 +309,7 @@ describe('invoice.paid for an invoice from time across several projects', () => 
     const { id } = await invoiceFromTime([await project('workspace'), await project('private')]);
     await settle();
     await pay(id);
-    await drainOutbox();
+    await deliver();
     expect(posts).toEqual([]);
   });
 
@@ -305,7 +320,7 @@ describe('invoice.paid for an invoice from time across several projects', () => 
     ]);
     await settle();
     await pay(id);
-    await drainOutbox();
+    await deliver();
     expect(urls()).toEqual([OWN_HOOK]);
   });
 
@@ -316,7 +331,7 @@ describe('invoice.paid for an invoice from time across several projects', () => 
     ]);
     await settle();
     await pay(id);
-    await drainOutbox();
+    await deliver();
     expect(posts).toEqual([]);
   });
 });
@@ -329,7 +344,7 @@ describe.each([
     const id = await deal(await project('private'));
     await settle();
     await move(id, stage());
-    await drainOutbox();
+    await deliver();
     expect(posts).toEqual([]);
   });
 
@@ -337,7 +352,7 @@ describe.each([
     const id = await deal(await project('private', { slackWebhookUrl: OWN_HOOK }));
     await settle();
     await move(id, stage());
-    await drainOutbox();
+    await deliver();
     expect(urls()).toEqual([OWN_HOOK]);
     expect(posts[0]!.body.text).toContain(text);
   });
@@ -346,7 +361,7 @@ describe.each([
     const id = await deal(await project('workspace'));
     await settle();
     await move(id, stage());
-    await drainOutbox();
+    await deliver();
     expect(urls()).toEqual([WORKSPACE_HOOK]);
   });
 
@@ -354,7 +369,7 @@ describe.each([
     const id = await deal(null);
     await settle();
     await move(id, stage());
-    await drainOutbox();
+    await deliver();
     expect(urls()).toEqual([WORKSPACE_HOOK]);
     expect(posts[0]!.body.text).toContain('Secret retainer');
   });
@@ -365,7 +380,7 @@ describe.each([
     await move(id, stage());
     const privateId = await project('private');
     await getDb().db.update(schema.deals).set({ projectId: privateId }).where(eq(schema.deals.id, id));
-    await drainOutbox();
+    await deliver();
     expect(posts).toEqual([]);
   });
 
@@ -374,7 +389,97 @@ describe.each([
     await settle();
     await move(id, stage());
     await getDb().db.update(schema.deals).set({ deletedAt: new Date() }).where(eq(schema.deals.id, id));
-    await drainOutbox();
+    await deliver();
     expect(posts).toEqual([]);
+  });
+});
+
+describe('invoice.paid for an invoice from a quote', () => {
+  async function fromQuote(projectId: string): Promise<string> {
+    const quote = await owner().post('/quotes', {
+      companyId, projectId, issueDate: '2026-10-01', language: 'en', currency: 'USD',
+      items: [{ description: 'Work', quantity: 1, unitPrice: 100 }],
+    });
+    expect(quote.status).toBe(201);
+    // Linked to the quote, but filed under no project.
+    const res = await owner().post('/invoices', {
+      companyId, quoteId: (await json(quote)).id, issueDate: '2026-10-01', dueDate: '2026-10-31', language: 'en',
+      items: [{ description: 'Work', quantity: 1, unitPrice: 100 }],
+    });
+    expect(res.status).toBe(201);
+    return (await json(res)).id;
+  }
+
+  it('of a private project with no target of its own posts nothing', async () => {
+    const id = await fromQuote(await project('private'));
+    await settle();
+    await pay(id);
+    await deliver();
+    expect(posts).toEqual([]);
+  });
+
+  it('of a private project with its own webhook posts there', async () => {
+    const id = await fromQuote(await project('private', { slackWebhookUrl: OWN_HOOK }));
+    await settle();
+    await pay(id);
+    await deliver();
+    expect(urls()).toEqual([OWN_HOOK]);
+  });
+
+  it('of a public project uses the workspace webhook', async () => {
+    const id = await fromQuote(await project('workspace'));
+    await settle();
+    await pay(id);
+    await deliver();
+    expect(urls()).toEqual([WORKSPACE_HOOK]);
+  });
+});
+
+describe('an invoice from time across projects whose time is no longer linked', () => {
+  it('cancelled, then settled by a credit note, posts nothing', async () => {
+    const { id } = await invoiceFromTime([await project('workspace'), await project('private')]);
+    expect((await owner().post(`/invoices/${id}/cancel`)).status).toBe(200);
+    await settle();
+    const res = await owner().post(`/invoices/${id}/credit-notes`, { amount: 100, reason: 'write-off', date: '2026-10-02' });
+    expect(res.status).toBe(201);
+    await deliver();
+    expect(posts).toEqual([]);
+  });
+
+  it('with its lines edited, posts nothing even when every project was public', async () => {
+    const { id } = await invoiceFromTime([await project('workspace'), await project('workspace')]);
+    const inv = await json(owner().get(`/invoices/${id}`));
+    const edit = await owner().patch(`/invoices/${id}`, { version: inv.version, items: [{ description: 'All the time', quantity: 2, unitPrice: 50 }] });
+    expect(edit.status).toBe(200);
+    await settle();
+    await pay(id);
+    await deliver();
+    expect(posts).toEqual([]);
+  });
+
+  it('filed under one project, keeps that project when its lines are edited', async () => {
+    const { id } = await invoiceFromTime([await project('workspace')]);
+    const inv = await json(owner().get(`/invoices/${id}`));
+    const edit = await owner().patch(`/invoices/${id}`, { version: inv.version, items: [{ description: 'All the time', quantity: 1, unitPrice: 50 }] });
+    expect(edit.status).toBe(200);
+    await settle();
+    await pay(id);
+    await deliver();
+    expect(urls()).toEqual([WORKSPACE_HOOK]);
+  });
+});
+
+describe('a deal.lost still queued when the deal is reopened', () => {
+  it('shows the reason on the deal now, not the one queued with the event', async () => {
+    const id = await deal(await project('private'));
+    await settle();
+    await move(id, lostStageId);
+    // Reopened (which clears the reason) and moved to a public project before delivery.
+    await move(id, openStageId);
+    await getDb().db.update(schema.deals).set({ projectId: await project('workspace') }).where(eq(schema.deals.id, id));
+    await deliver();
+    const lost = posts.find((p) => p.body.text?.includes('Deal lost'));
+    expect(lost?.url).toBe(WORKSPACE_HOOK);
+    expect(lost!.body.text).not.toContain('Budget');
   });
 });
