@@ -33,8 +33,11 @@ const anyOf = (col: SQL, ids: string[]): SQL => (ids.length ? sql`${col} = any($
  * of their own) follows canSeePage: a space the caller reads, and then a
  * published page that is not private to its author, unless they edit the
  * space.
+ *
+ * The Inbox's Mentions section reads the bell through this same rule
+ * (inbox.routes.ts), so the two never disagree on what a person may open.
  */
-async function visibleToCaller(actor: Actor): Promise<SQL> {
+export async function visibleToCaller(actor: Actor): Promise<SQL> {
   const [projectIds, spaces] = await Promise.all([accessibleProjectIds(actor), spaceAccessSets(actor)]);
   const n = schema.notifications;
   const projectOf = sql`coalesce(${n.payload}->>'projectId',

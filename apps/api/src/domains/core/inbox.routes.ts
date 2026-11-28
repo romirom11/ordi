@@ -17,11 +17,11 @@ import { Hono } from 'hono';
 import { getDb, schema, eq, and, inArray, isNull, gt, desc, sql } from '@ordi/db';
 import type { AppEnv, Actor } from '../../context';
 import { requireAuth, currentActor } from '../../core/auth';
-import { accessibleProjectIds, accessibleSpaceIds, editableSpaceIds } from '../../core/access';
+import { accessibleProjectIds } from '../../core/access';
 import { moduleEnabled } from '../../core/modules';
 import { err } from '../../lib/errors';
-import { canSeePage } from '@ordi/shared';
 import { employeeOfUser, listLeaveRequests } from '../people/service';
+import { visibleToCaller } from './notifications.routes';
 
 const { taskQuestions, tasks, projects, users, agentRuns, taskAssignees, externalAgents, notifications } = schema;
 
@@ -29,8 +29,6 @@ const { taskQuestions, tasks, projects, users, agentRuns, taskAssignees, externa
 const RECENT_DAYS = 30;
 /** Rows per section. Open work (questions, approvals) is counted in full. */
 const LIMIT = 100;
-/** Mentions read before the access filter, so a run of closed ones cannot empty the section. */
-const MENTION_SCAN = 300;
 
 function recent(): Date {
   return new Date(Date.now() - RECENT_DAYS * 86_400_000);
@@ -111,62 +109,44 @@ async function agentStopped(actor: Actor, projectIds: string[]) {
   }));
 }
 
-async function mentions(actor: Actor, projectIds: Set<string>) {
+/**
+ * Recent @-mentions from the person's bell. What the bell may show is one
+ * rule, visibleToCaller (notifications.routes.ts): the project or page as the
+ * caller can open it now, for this request's own access. On top of it the
+ * Inbox keeps only what still points at something: a task mention needs its
+ * task live and in a project the caller can open (where it is now, not where
+ * it was when the bell row was written), a mention in a deleted comment
+ * points at nothing, and page mentions need the KB module on. All in SQL, so
+ * the limit counts only rows that are shown.
+ */
+async function mentions(actor: Actor, projectIds: string[]) {
   const { db } = getDb();
-  const rows = await db.select().from(notifications)
+  const n = notifications;
+  const pageId = sql`${n.payload}->>'pageId'`;
+  const taskId = sql`${n.payload}->>'taskId'`;
+  const commentId = sql`${n.payload}->>'commentId'`;
+  const kbOn = await moduleEnabled('kb');
+  const taskOk = projectIds.length
+    ? sql`exists (select 1 from ${tasks} t where t.id = ${taskId} and t.deleted_at is null
+        and t.project_id = any(${sql.param(projectIds)}::text[]))`
+    : sql`false`;
+  const rows = await db.select().from(n)
     .where(and(
-      eq(notifications.userId, actor.userId),
-      inArray(notifications.type, ['comment.mentioned', 'page.mentioned']),
-      gt(notifications.createdAt, recent()),
+      eq(n.userId, actor.userId),
+      inArray(n.type, ['comment.mentioned', 'page.mentioned']),
+      gt(n.createdAt, recent()),
+      await visibleToCaller(actor),
+      kbOn ? sql`(${pageId} is not null or ${taskOk})` : sql`(${pageId} is null and ${taskOk})`,
+      sql`(${commentId} is null
+        or exists (select 1 from ${schema.comments} c where c.id = ${commentId} and c.deleted_at is null)
+        or exists (select 1 from ${schema.kbPageComments} pc where pc.id = ${commentId} and pc.deleted_at is null))`,
     ))
-    .orderBy(desc(notifications.createdAt))
-    .limit(MENTION_SCAN);
-  const payloadOf = (r: typeof rows[number]) => r.payload as Record<string, unknown>;
+    .orderBy(desc(n.createdAt))
+    .limit(LIMIT);
   const str = (v: unknown) => (typeof v === 'string' ? v : null);
-  // The bell row was gated when it was delivered; access may have changed
-  // since. Everything is read for this request's own access – a token scoped
-  // narrower than its owner's role sees no more than it may open.
-  const taskIds = [...new Set(rows.map((r) => str(payloadOf(r).taskId)).filter((id): id is string => !!id))];
-  const liveTasks = new Map(taskIds.length
-    ? (await db.select({ id: tasks.id, projectId: tasks.projectId }).from(tasks)
-      .where(and(inArray(tasks.id, taskIds), isNull(tasks.deletedAt)))).map((t) => [t.id, t.projectId])
-    : []);
-  const pageIds = [...new Set(rows.map((r) => str(payloadOf(r).pageId)).filter((id): id is string => !!id))];
-  const kbOn = pageIds.length > 0 && (await moduleEnabled('kb'));
-  const pages = new Map(kbOn
-    ? (await db.select({
-      id: schema.kbPages.id, spaceId: schema.kbPages.spaceId, published: schema.kbPages.published,
-      visibility: schema.kbPages.visibility, createdBy: schema.kbPages.createdBy,
-    }).from(schema.kbPages).where(and(inArray(schema.kbPages.id, pageIds), isNull(schema.kbPages.deletedAt)))).map((p) => [p.id, p])
-    : []);
-  const viewerSpaces = new Set<string>(kbOn ? await accessibleSpaceIds(actor) : []);
-  const editorSpaces = new Set<string>(kbOn ? await editableSpaceIds(actor) : []);
-  // A mention in a comment that has since been deleted points at nothing.
-  const commentIds = rows.map((r) => str(payloadOf(r).commentId)).filter((id): id is string => !!id);
-  const liveComments = new Set<string>();
-  if (commentIds.length) {
-    for (const c of await db.select({ id: schema.comments.id }).from(schema.comments)
-      .where(and(inArray(schema.comments.id, commentIds), isNull(schema.comments.deletedAt)))) liveComments.add(c.id);
-    for (const c of await db.select({ id: schema.kbPageComments.id }).from(schema.kbPageComments)
-      .where(and(inArray(schema.kbPageComments.id, commentIds), isNull(schema.kbPageComments.deletedAt)))) liveComments.add(c.id);
-  }
-
-  const out = [];
-  for (const r of rows) {
-    if (out.length >= LIMIT) break;
-    const p = payloadOf(r);
-    const commentId = str(p.commentId);
-    if (commentId && !liveComments.has(commentId)) continue;
-    const pageId = str(p.pageId);
-    if (pageId) {
-      const page = pages.get(pageId);
-      if (!page || !viewerSpaces.has(page.spaceId) || !canSeePage(page, actor.userId, editorSpaces.has(page.spaceId))) continue;
-    } else {
-      const taskId = str(p.taskId);
-      const projectId = taskId ? liveTasks.get(taskId) : undefined;
-      if (!projectId || !projectIds.has(projectId)) continue;
-    }
-    out.push({
+  return rows.map((r) => {
+    const p = r.payload as Record<string, unknown>;
+    return {
       id: r.id,
       type: r.type,
       at: r.createdAt,
@@ -174,10 +154,9 @@ async function mentions(actor: Actor, projectIds: Set<string>) {
       ref: r.entityRef ?? str(p.ref),
       title: str(p.title),
       actorName: str(p.actorName),
-      payload: { taskId: str(p.taskId), projectId: str(p.projectId), pageId, spaceId: str(p.spaceId) },
-    });
-  }
-  return out;
+      payload: { taskId: str(p.taskId), projectId: str(p.projectId), pageId: str(p.pageId), spaceId: str(p.spaceId) },
+    };
+  });
 }
 
 /**
@@ -218,7 +197,7 @@ export async function inbox(actor: Actor) {
   const [w, s, m, a, waitingTotal] = await Promise.all([
     waitingOnYou(actor, projectIds),
     agentStopped(actor, projectIds),
-    mentions(actor, new Set(projectIds)),
+    mentions(actor, projectIds),
     approvals(actor),
     countWaiting(actor, projectIds),
   ]);
