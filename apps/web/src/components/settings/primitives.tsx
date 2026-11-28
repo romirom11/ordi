@@ -1,4 +1,4 @@
-import { useId, useState, type CSSProperties, type ReactNode } from 'react';
+import { useId, useState, type CSSProperties, type ReactNode, type Ref } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '../ui';
 
@@ -95,16 +95,20 @@ export function RowList({ children, className }: { children: ReactNode; classNam
  * secondary or state-dependent content stays behind a labelled toggle, primary
  * actions never do. Used for advanced config, fallbacks and reference lists.
  */
-export function Disclosure({ label, children, defaultOpen = false, className }: {
+export function Disclosure({ label, children, defaultOpen = false, className, open: openProp, onOpenChange, buttonRef }: {
   label: ReactNode; children: ReactNode; defaultOpen?: boolean; className?: string;
+  /** Pass to open it from elsewhere, e.g. a link in a message that points at it. */
+  open?: boolean; onOpenChange?: (open: boolean) => void; buttonRef?: Ref<HTMLButtonElement>;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [ownOpen, setOwnOpen] = useState(defaultOpen);
+  const open = openProp ?? ownOpen;
   const id = useId();
   return (
     <div className={className}>
       <button
+        ref={buttonRef}
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => { if (openProp === undefined) setOwnOpen(!open); onOpenChange?.(!open); }}
         aria-expanded={open}
         aria-controls={id}
         className="-ml-1 flex min-h-7 items-center gap-1 rounded-md px-1 text-[13px] text-muted-foreground transition-colors duration-150 hover:text-foreground"
@@ -122,10 +126,10 @@ export function Disclosure({ label, children, defaultOpen = false, className }: 
 }
 
 /** Tiny state chip for integration card headers: a dot plus a word. */
-export function StatusChip({ tone, children }: { tone: 'ok' | 'muted' | 'off'; children: ReactNode }) {
+export function StatusChip({ tone, children }: { tone: 'ok' | 'muted' | 'warn' | 'off'; children: ReactNode }) {
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
-      <span className={cn('h-1.5 w-1.5 rounded-full', tone === 'ok' ? 'bg-success' : tone === 'muted' ? 'bg-primary' : 'bg-faint')} />
+      <span aria-hidden className={cn('h-1.5 w-1.5 rounded-full', tone === 'ok' ? 'bg-success' : tone === 'muted' ? 'bg-primary' : tone === 'warn' ? 'bg-warning' : 'bg-faint')} />
       {children}
     </span>
   );
