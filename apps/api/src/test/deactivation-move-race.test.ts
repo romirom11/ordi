@@ -71,20 +71,33 @@ async function holdPark(): Promise<{ release: () => Promise<void> }> {
   return { release: async () => { release(); await tx; } };
 }
 
-/** Wait until some backend of this database waits on `waitEvent` (e.g. a row lock or the park). */
-async function waitUntilBlocked(waitEvent: 'transactionid' | 'tuple' | 'advisory', minBackends = 1): Promise<void> {
+/**
+ * Wait until a backend of this database (each test worker has its own) is
+ * blocked on a lock of the given kind while running a statement like
+ * `queryLike` – so the park is released only once the very request we mean
+ * is waiting, not on some unrelated wait.
+ */
+async function waitUntilBlocked(kind: 'advisory' | 'row', ...queryLike: string[]): Promise<void> {
   const { db } = getDb();
-  const events = waitEvent === 'advisory' ? ['advisory'] : ['transactionid', 'tuple'];
-  for (let i = 0; i < 200; i++) {
-    const rows = await db.execute(sql.raw(`
+  const events = kind === 'advisory' ? `'advisory'` : `'transactionid', 'tuple'`;
+  for (let i = 0; i < 400; i++) {
+    const rows = await db.execute(sql`
       SELECT count(*)::int AS n FROM pg_stat_activity
       WHERE datname = current_database() AND pid <> pg_backend_pid()
-        AND wait_event_type = 'Lock' AND wait_event IN (${events.map((e) => `'${e}'`).join(', ')})`));
-    const n = Number((rows as unknown as { n: number }[])[0]?.n ?? 0);
-    if (n >= minBackends) return;
+        AND wait_event_type = 'Lock' AND wait_event IN (${sql.raw(events)})
+        AND query ILIKE ANY (${sql.raw(`ARRAY[${queryLike.map((q) => `'${q.replace(/'/g, "''")}'`).join(', ')}]`)})`);
+    if (Number((rows as unknown as { n: number }[])[0]?.n ?? 0) > 0) return;
     await new Promise((r) => setTimeout(r, 25));
   }
-  throw new Error(`no backend blocked on ${waitEvent}`);
+  throw new Error(`no backend blocked on a ${kind} lock in ${queryLike.join(' or ')}`);
+}
+
+/** Requests a test started, all settled before its trigger is dropped. */
+let inFlight: Promise<unknown>[] = [];
+function start<T>(request: T | Promise<T>): Promise<T> {
+  const pending = Promise.resolve(request);
+  inFlight.push(pending.catch(() => undefined));
+  return pending;
 }
 
 async function parkOn(table: string, when: string) {
@@ -95,10 +108,12 @@ async function parkOn(table: string, when: string) {
 }
 
 async function unpark(table: string) {
+  await Promise.allSettled(inFlight);
   await getDb().db.execute(sql.raw(`DROP TRIGGER IF EXISTS test_park ON ${table}; DROP FUNCTION IF EXISTS test_park();`));
 }
 
 beforeEach(async () => {
+  inFlight = [];
   await resetDb();
   users = await seedRolesAndUsers();
   source = await newProject('Source', 'SRC');
@@ -109,17 +124,17 @@ describe('a move and a deactivation of the same task, in either order', () => {
   it('the move commits first: the deactivation takes the person off the moved copy', async () => {
     const leaver = users.member!.userId;
     const task = await createTask(source.id, 'Moving work', { assigneeIds: [leaver] });
-    // The move parks once it has locked the original and is copying the
-    // leaver onto the new task: not committed yet.
+    // The move parks once it holds the leaver and the original and is
+    // copying the leaver onto the new task: not committed yet.
     await parkOn('task_assignees', `NEW.task_id <> '${task.id}' AND NEW.user_id = '${leaver}'`);
     const park = await holdPark();
     try {
-      const move = reqAs(users.owner!.cookie).post(`/tasks/${task.id}/move`, { targetProjectId: target.id });
-      await waitUntilBlocked('advisory');
-      // The deactivation now sees the original as the leaver's open task and
-      // waits for the move's lock on it.
-      const deactivate = reqAs(users.admin!.cookie).post(`/users/${leaver}/deactivate`, { reassignTo: users.hr!.userId });
-      await waitUntilBlocked('transactionid');
+      const move = start(reqAs(users.owner!.cookie).post(`/tasks/${task.id}/move`, { targetProjectId: target.id }));
+      await waitUntilBlocked('advisory', '%insert into "task_assignees"%');
+      // The deactivation waits for the move's hold on the person. (Before
+      // ORD-41 it took the person, waited for the task, and the two deadlocked.)
+      const deactivate = start(reqAs(users.admin!.cookie).post(`/users/${leaver}/deactivate`, { reassignTo: users.hr!.userId }));
+      await waitUntilBlocked('row', '%for update%');
       await park.release();
       const moved = await move;
       expect(moved.status).toBe(200);
@@ -149,16 +164,50 @@ describe('a move and a deactivation of the same task, in either order', () => {
     await parkOn('users', `NEW.id = '${leaver}' AND NEW.is_active = false`);
     const park = await holdPark();
     try {
-      const deactivate = reqAs(users.admin!.cookie).post(`/users/${leaver}/deactivate`);
-      await waitUntilBlocked('advisory');
-      const move = reqAs(users.owner!.cookie).post(`/tasks/${task.id}/move`, { targetProjectId: target.id });
-      await waitUntilBlocked('transactionid');
+      const deactivate = start(reqAs(users.admin!.cookie).post(`/users/${leaver}/deactivate`));
+      await waitUntilBlocked('advisory', '%update "users"%');
+      const move = start(reqAs(users.owner!.cookie).post(`/tasks/${task.id}/move`, { targetProjectId: target.id }));
+      await waitUntilBlocked('row', '%for key share%', '%for update%');
       await park.release();
       expect((await deactivate).status).toBe(200);
       const moved = await move;
       expect(moved.status).toBe(200);
       expect(await assigneesOf((await json(moved)).id)).toEqual([]);
       expect(await liveTasksOf(leaver)).toEqual([]);
+    } finally {
+      await park.release();
+      await unpark('users');
+    }
+  });
+
+  it('a closed task that lands in an open status: the move waits and leaves the person off', async () => {
+    const leaver = users.member!.userId;
+    const { db } = getDb();
+    const srcStatuses = await json(reqAs(users.owner!.cookie).get(`/projects/${source.id}/task-statuses`));
+    const done = srcStatuses.data.find((s: { category: string }) => s.category === 'done');
+    // In the target, a status of that name means work still to do.
+    await db.update(schema.taskStatuses).set({ name: 'Shipped' })
+      .where(and(eq(schema.taskStatuses.projectId, target.id), eq(schema.taskStatuses.name, done.name)));
+    const reopenId = ulid();
+    await db.insert(schema.taskStatuses).values({ id: reopenId, projectId: target.id, name: done.name, category: 'todo', position: 99 });
+    const task = await createTask(source.id, 'Finished here, open there', { assigneeIds: [leaver] });
+    await reqAs(users.owner!.cookie).patch(`/tasks/${task.id}`, { statusId: done.id });
+
+    // The hand-over leaves this closed task alone and does not lock it.
+    await parkOn('users', `NEW.id = '${leaver}' AND NEW.is_active = false`);
+    const park = await holdPark();
+    try {
+      const deactivate = start(reqAs(users.admin!.cookie).post(`/users/${leaver}/deactivate`));
+      await waitUntilBlocked('advisory', '%update "users"%');
+      const move = start(reqAs(users.owner!.cookie).post(`/tasks/${task.id}/move`, { targetProjectId: target.id }));
+      await waitUntilBlocked('row', '%for key share%', '%for update%');
+      await park.release();
+      expect((await deactivate).status).toBe(200);
+      const moved = await move;
+      expect(moved.status).toBe(200);
+      const copy = await json(moved);
+      expect(copy.statusId).toBe(reopenId);
+      expect(await assigneesOf(copy.id)).toEqual([]);
     } finally {
       await park.release();
       await unpark('users');

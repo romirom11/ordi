@@ -979,33 +979,18 @@ export async function openTasksAssignedTo(userId: string, conn: any = getDb().db
  * the same transaction, so nothing is announced that did not commit.
  */
 export async function handOffOpenTasks(actor: Actor, fromUserId: string, toUserId: string | null, tx: any) {
-  // Collect and lock inside the transaction, then look again (ORD-41). A move
-  // that held one of these tasks when we asked for it commits a copy with the
-  // same assignees and deletes the original; once its lock is ours, the copy
-  // is there to find. So read, lock what is new – in id order, the order a
-  // task edit locks in, so a hand-off and a concurrent edit wait for each
-  // other rather than deadlock – and read again, until a read turns up
-  // nothing we do not hold. Each round only finds copies made by moves that
-  // were already holding a task of the set; a locked task cannot be moved
-  // again, so the rounds end. (A copy's id is newer than every task already
-  // held, so the locks still go in id order across rounds.)
-  const locked = new Set<string>();
-  let open = await openTasksAssignedTo(fromUserId, tx);
-  for (;;) {
-    const fresh = open.map((t) => t.id).filter((taskId) => !locked.has(taskId));
-    if (!fresh.length) break;
-    await tx.select({ id: tasks.id }).from(tasks).where(inArray(tasks.id, fresh)).orderBy(asc(tasks.id)).for('update');
-    for (const taskId of fresh) locked.add(taskId);
-    open = await openTasksAssignedTo(fromUserId, tx);
-  }
+  // Read under the caller's lock on the person (ORD-41). A task move locks
+  // the people on its tasks before the tasks (moveTask), so one that got
+  // there first has committed – its copy is what this read finds – and one
+  // that comes later waits for this hand-over and finds the person switched off.
+  const open = await openTasksAssignedTo(fromUserId, tx);
   if (!open.length) return { count: 0, taskIds: [] as string[] };
   const ids = open.map((t) => t.id);
   // Handing work to an agent is assigning it: the agent must be a member of
   // each project, and the person handing over must meet its assign policy
   // there with the role they hold in that project – the same rule as
   // assigning it by hand. Checked before anything is written, so a refusal
-  // leaves the person active and every task as it was – and after the tasks
-  // are held, so a task moved meanwhile is judged in the project it is in now.
+  // leaves the person active and every task as it was.
   if (toUserId) {
     const projectIds = [...new Set(open.map((t) => t.projectId))];
     const rows = await tx.select({ id: projects.id, name: projects.name, visibility: projects.visibility })
@@ -1024,6 +1009,9 @@ export async function handOffOpenTasks(actor: Actor, fromUserId: string, toUserI
       }
     }
   }
+  // Tasks first, in id order – the order a task edit locks in – so a hand-off
+  // and a concurrent edit of the same task wait for each other, not deadlock.
+  await tx.select({ id: tasks.id }).from(tasks).where(inArray(tasks.id, ids)).orderBy(asc(tasks.id)).for('update');
   await tx.delete(taskAssignees).where(and(inArray(taskAssignees.taskId, ids), eq(taskAssignees.userId, fromUserId)));
   if (toUserId) {
     await tx.insert(taskAssignees).values(ids.map((taskId) => ({ taskId, userId: toUserId }))).onConflictDoNothing();
@@ -1137,6 +1125,23 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
       subtree.push(...children);
       frontier = children.map((child) => child.id);
     }
+    // The people on these tasks first, then the tasks – person before task,
+    // the order a deactivation locks in (ORD-41). A key-share lock is what
+    // the copy's assignee rows take anyway; held from here, it makes a
+    // deactivation of one of them wait for this move (and then hand over the
+    // copy), or this move wait for the deactivation (and then leave them off).
+    // Agents are left out: a deactivation locks the agents it switches off
+    // after the tasks, so holding one here could close a cycle.
+    const lockPeople = async (taskIds: string[]) => {
+      const people = await tx.selectDistinct({ id: schema.users.id }).from(taskAssignees)
+        .innerJoin(schema.users, eq(schema.users.id, taskAssignees.userId))
+        .where(and(inArray(taskAssignees.taskId, taskIds), eq(schema.users.actorType, 'user')));
+      if (people.length) {
+        await tx.select({ id: schema.users.id }).from(schema.users)
+          .where(inArray(schema.users.id, people.map((p) => p.id))).orderBy(asc(schema.users.id)).for('key share');
+      }
+    };
+    await lockPeople(subtree.map((t) => t.id));
     // Lock the subtree in id order – the order a task edit and a bulk edit
     // lock in – so a second move of the same task waits and then finds it
     // gone, instead of copying it into a second project too.
@@ -1160,6 +1165,10 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
       tx.select().from(taskAssignees).where(inArray(taskAssignees.taskId, oldIds)),
       tx.select().from(taskLabels).where(inArray(taskLabels.taskId, oldIds)),
     ]);
+    // Someone put on a task between that lock and this one is locked now –
+    // out of order, but only for a person who was not on the work a moment
+    // ago; at worst Postgres refuses one of two transactions, nothing is lost.
+    await lockPeople(oldIds);
 
     // Agents work only where they are members: one that is not on the
     // target project comes off the moved tasks rather than being stranded.
@@ -1174,7 +1183,10 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
     for (const t of subtree) { await targetStatusOf(t.statusId); await reporterFor(t.reporterId); }
     // Someone deactivated does not come along onto open work (ORD-41): a
     // deactivation takes them off every open task, and a copy must not put
-    // them back. On a closed task they stay – who did the work is history.
+    // them back – a closed task whose status maps to an open one in the
+    // target included. On a closed copy they stay: who did the work is
+    // history. Read under the locks above, so a deactivation is either
+    // committed and seen here, or waits for this move.
     const assigneeIds = [...new Set(assigneeRows.map((r) => r.userId))];
     const inactive = new Set(assigneeIds.length
       ? (await tx.select({ id: schema.users.id }).from(schema.users)
