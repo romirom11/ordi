@@ -7,7 +7,12 @@
  * 400.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
+import { getDb, schema } from '@ordi/db';
+import { ulid } from 'ulid';
+import { PgDialect } from 'drizzle-orm/pg-core';
 import { resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
+import { generateToken } from '../lib/crypto';
+import { buildCustomFieldFilter } from '../core/customfields';
 
 let users: Awaited<ReturnType<typeof seedRolesAndUsers>>;
 let projectId: string;
@@ -73,6 +78,10 @@ beforeAll(async () => {
     source: 'https://c.example', urgent: false,
   });
   await task(projectId, 'Delta', {});
+  // Values are stored as sent: nothing checks them against the field's type.
+  await task(projectId, 'Echo', { points: '', launch: '2026-02-30', tags: { video: false }, tier: ['gold'] });
+  await task(projectId, 'Foxtrot', { points: { n: 3 }, launch: 'soon', tags: 'pod', tier: null });
+  await task(projectId, 'Golf', { points: '5', launch: '2026-08-10T09:30:00Z' });
 
   // One key, two projects, two types.
   const sized = await owner().post('/custom-fields', { entityType: 'tasks', key: 'size', label: 'Size', type: 'number', projectId: sizedAsNumber });
@@ -98,18 +107,20 @@ describe('in with several values, per type', () => {
   });
 
   it('multiselect: a record holding any of the values', async () => {
-    expect(await titles('tags', ['blog', 'pod'])).toEqual(['Alpha', 'Bravo']);
+    // An object's keys are not its values; a lone string is one value.
+    expect(await titles('tags', ['blog', 'pod'])).toEqual(['Alpha', 'Bravo', 'Foxtrot']);
     expect(await titles('tags', ['video'])).toEqual(['Alpha']);
+    expect(await titles('tags', ['n'])).toEqual([]);
     expect(await titles('tags', ['nothing'])).toEqual([]);
   });
 
   it('number, given as numbers or numeric text', async () => {
     expect(await titles('points', [3, 8.5])).toEqual(['Alpha', 'Charlie']);
-    expect(await titles('points', ['5', 3])).toEqual(['Alpha', 'Bravo']);
+    expect(await titles('points', ['5', 3])).toEqual(['Alpha', 'Bravo', 'Golf']);
   });
 
   it('date', async () => {
-    expect(await titles('launch', ['2026-08-10', '2026-09-01'])).toEqual(['Bravo', 'Charlie']);
+    expect(await titles('launch', ['2026-08-10', '2026-09-01'])).toEqual(['Bravo', 'Charlie', 'Golf']);
   });
 
   it('url', async () => {
@@ -141,8 +152,9 @@ describe('a key two projects define with different types', () => {
     expect(await titles('size', [1, 2], everywhere)).toEqual(['Number one', 'Number two', 'Text one']);
   });
 
-  it('values that are no numbers match only where the key is text', async () => {
-    expect(await titles('size', ['small', 'large', '1'], everywhere)).toEqual(['Text large', 'Text one', 'Text small']);
+  it('values that are no numbers match only where the key is text; the numbers among them match in both', async () => {
+    expect(await titles('size', ['small', 'large'], everywhere)).toEqual(['Text large', 'Text small']);
+    expect(await titles('size', ['small', '1'], everywhere)).toEqual(['Number one', 'Text one', 'Text small']);
   });
 
   it('inside the number project, text values are a 400', async () => {
@@ -182,6 +194,11 @@ describe('an invalid value', () => {
     ['a number field given a blank', 'points', [' ']],
     ['a date field given text', 'launch', ['soon']],
     ['a date that does not exist', 'launch', ['2026-02-30']],
+    ['year 0000', 'launch', ['0000-01-01']],
+    ['a number with a no-break space', 'points', ['\u00a03']],
+    ['a number with a space', 'points', [' 3']],
+    ['a hex number', 'points', ['0x10']],
+    ['Infinity', 'points', ['Infinity']],
   ];
 
   it.each(bad)('%s is a 400', async (_name, key, value) => {
@@ -205,15 +222,73 @@ describe('an invalid value', () => {
     expect((await list([{ field_key: 'points', op: 'gt', value: [1, 2] }])).status).toBe(400);
   });
 
+  it('the other operators check their operands too', async () => {
+    expect((await list([{ field_key: 'points', op: 'eq', value: 'three' }])).status).toBe(400);
+    expect((await list([{ field_key: 'points', op: 'between', value: [[1, 2], 3] }])).status).toBe(400);
+    expect((await list([{ field_key: 'launch', op: 'before', value: '2026-02-30' }])).status).toBe(400);
+    expect((await list([{ field_key: 'platform', op: 'contains', value: { a: 1 } }])).status).toBe(400);
+    // A timestamp still reads as its day for the date operators.
+    const res = await list([{ field_key: 'launch', op: 'eq', value: '2026-08-10T12:00:00Z' }]);
+    expect(res.status).toBe(200);
+    expect(((await json(res)).data as { title: string }[]).map((t) => t.title).sort()).toEqual(['Bravo', 'Golf']);
+  });
+
+  it('a stored value of the wrong type is no match, not a 500, for any operator', async () => {
+    expect(await titles('points', [3])).toEqual(['Alpha']);
+    for (const [op, value] of [['eq', 3], ['gt', 0], ['lt', 100], ['between', [0, 100]]] as const) {
+      expect((await list([{ field_key: 'points', op, value }])).status).toBe(200);
+    }
+    for (const [op, value] of [['eq', '2026-08-03'], ['before', '2030-01-01'], ['after', '2000-01-01']] as const) {
+      expect((await list([{ field_key: 'launch', op, value }])).status).toBe(200);
+    }
+    // A list stored in a select field is no match for its text.
+    expect(await titles('tier', ['gold'])).toEqual(['Alpha']);
+  });
+
   it('a cf that is not a JSON list of filters is a 400', async () => {
     expect((await owner().get(`/tasks?projectId=${projectId}&cf=${encodeURIComponent('not json')}`)).status).toBe(400);
+    expect((await owner().get(`/tasks?projectId=${projectId}&cf=`)).status).toBe(400);
+    expect((await owner().get('/companies?cf=')).status).toBe(400);
     expect((await owner().get(`/tasks?projectId=${projectId}&${cfQuery({ field_key: 'platform', op: 'in', value: ['x'] })}`)).status).toBe(400);
     expect((await owner().get(`/tasks?projectId=${projectId}&${cfQuery([{ field_key: 'platform', op: 'like', value: 'x' }])}`)).status).toBe(400);
     expect((await owner().get(`/companies?cf=${encodeURIComponent('{')}`)).status).toBe(400);
   });
 });
 
+describe('someone who can open no project', () => {
+  it('gets a 400 for a malformed filter, not an empty list', async () => {
+    const { db } = getDb();
+    const roleId = ulid();
+    await db.insert(schema.roles).values({ id: roleId, key: `none-${roleId}`, name: 'No projects', description: 'custom', isSystem: false });
+    await db.insert(schema.rolePermissions).values({ roleId, permission: 'crm.read' as any });
+    const userId = ulid();
+    await db.insert(schema.users).values({ id: userId, email: `${userId}@test.local`, name: 'Outside', passwordHash: 'x', roleId });
+    const token = generateToken();
+    await db.insert(schema.sessions).values({ id: ulid(), userId, token, expiresAt: new Date(Date.now() + 3600_000) });
+    const outsider = reqAs(`ordi_session=${token}`);
+    const empty = await outsider.get(`/tasks?${cfQuery([{ field_key: 'platform', op: 'in', value: [] }])}`);
+    expect(empty.status).toBe(400);
+    const valid = await outsider.get(`/tasks?${cfQuery([{ field_key: 'platform', op: 'in', value: ['x'] }])}`);
+    expect(valid.status).toBe(200);
+    expect((await json(valid)).data).toEqual([]);
+  });
+});
+
 describe('values are bound, never spliced into the SQL', () => {
+  it('the key and every value are parameters of the query', async () => {
+    const dialect = new PgDialect();
+    for (const [key, value] of [['platform', ["x') or true --", 'linkedin']], ['tags', ["video'] or true"]], ['points', ['1', 2]]] as const) {
+      const built = await buildCustomFieldFilter('tasks', { field_key: key, op: 'in', value: [...value] });
+      const query = dialect.sqlToQuery(built);
+      expect(query.params).toContain(key);
+      for (const v of value) {
+        expect(query.params).toContain(String(v));
+        if (typeof v === 'string' && v.length > 2) expect(query.sql).not.toContain(v);
+      }
+      expect(query.sql).not.toContain(`'${key}'`);
+    }
+  });
+
   it('a quote in a value matches that text exactly', async () => {
     expect(await titles('platform', ["o'reilly"])).toEqual(['Charlie']);
   });

@@ -631,20 +631,22 @@ export async function listTasks(actor: Actor, params: {
   } else {
     scope = await accessibleProjectIds(actor);
   }
-  if (!scope.length) return { data: [], nextCursor: null };
-
-  // Every project the caller can open: the blockers they may know of.
-  const reachable = [...new Set([...scope, ...(await accessibleProjectIds(actor))])];
-
   // Only workspace fields and those of projects in the list are known here: a
   // private project's field key reads as unknown, exactly like a made-up one,
   // instead of answering with its type or an empty match. A list of one
   // project knows that project's own fields, so a key it does not define stays
   // an unknown field there (MCP's findByKey then scans the blob instead).
+  // Built before an empty list is answered: a malformed filter is a 400 for
+  // everyone, whatever they can open.
   const cf: SQL[] = [];
   for (const f of params.cfFilters ?? []) {
     cf.push(await buildCustomFieldFilter('tasks', f, { projectIds: scope, projectColumn: sql`${tasks.projectId}` }));
   }
+
+  if (!scope.length) return { data: [], nextCursor: null };
+
+  // Every project the caller can open: the blockers they may know of.
+  const reachable = [...new Set([...scope, ...(await accessibleProjectIds(actor))])];
 
   // Several labels narrow rather than widen: "linkedin" + "case study" means
   // the tasks carrying both, which is how a plan is read off a board.
