@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type ReactNode } from 'react';
+import { useId, useState, type CSSProperties, type ReactNode } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '../ui';
 
@@ -37,6 +37,23 @@ export function SectionHead({ title, desc, actions }: { title: ReactNode; desc?:
       <div className="min-w-0">
         <h2 className="text-base font-semibold leading-tight">{title}</h2>
         {desc && <p className="mt-0.5 text-[13px] text-muted-foreground">{desc}</p>}
+      </div>
+      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+    </div>
+  );
+}
+
+/**
+ * A titled group inside a section: the heading, one line on what the group
+ * holds, and its actions on the right. A real heading, so screen readers can
+ * jump between the groups of a long settings page.
+ */
+export function SubHead({ title, desc, actions, className }: { title: ReactNode; desc?: ReactNode; actions?: ReactNode; className?: string }) {
+  return (
+    <div className={cn('mb-2 flex items-end justify-between gap-3', className)}>
+      <div className="min-w-0">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-faint">{title}</h3>
+        {desc && <p className="mt-0.5 text-xs text-muted-foreground">{desc}</p>}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
     </div>
@@ -82,18 +99,22 @@ export function Disclosure({ label, children, defaultOpen = false, className }: 
   label: ReactNode; children: ReactNode; defaultOpen?: boolean; className?: string;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const id = useId();
   return (
     <div className={className}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex items-center gap-1 text-[13px] text-muted-foreground transition-colors duration-150 hover:text-foreground"
+        aria-controls={id}
+        className="-ml-1 flex min-h-7 items-center gap-1 rounded-md px-1 text-[13px] text-muted-foreground transition-colors duration-150 hover:text-foreground"
       >
-        <ChevronRight size={14} className={cn('transition-transform duration-[250ms] ease-smooth-out', open && 'rotate-90')} />
+        <ChevronRight size={14} aria-hidden className={cn('transition-transform duration-[250ms] ease-smooth-out', open && 'rotate-90')} />
         {label}
       </button>
-      <div className={cn('grid transition-[grid-template-rows] duration-[250ms] ease-smooth-out', open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')}>
+      {/* Closed, the content is only squeezed to no height: inert keeps the
+        * keyboard and screen readers out of what nobody can see. */}
+      <div id={id} inert={!open} className={cn('grid transition-[grid-template-rows] duration-[250ms] ease-smooth-out', open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')}>
         <div className="overflow-hidden">{children}</div>
       </div>
     </div>
