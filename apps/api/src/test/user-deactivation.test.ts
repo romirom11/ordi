@@ -103,6 +103,17 @@ describe('open tasks preview and private projects', () => {
     expect(preview.data).toEqual([{ id: task.id, projectId: hidden.id, title: 'Falcon launch plan', ref: `FAL-${task.number}` }]);
   });
 
+  it('lists at most 20 visible tasks and counts every task, hidden ones included', async () => {
+    for (let i = 0; i < 21; i++) await createTask(`Visible ${i}`, { assigneeIds: [users.member!.userId] });
+    const { task } = await privateProjectWithTask();
+
+    const preview = await json(reqAs(users.admin!.cookie).get(`/users/${users.member!.userId}/open-tasks`));
+    expect(preview.count).toBe(22);
+    expect(preview.hiddenCount).toBe(1);
+    expect(preview.data).toHaveLength(20);
+    expect(preview.data.map((t: { id: string }) => t.id)).not.toContain(task.id);
+  });
+
   it('still hands the hidden task over', async () => {
     const { task } = await privateProjectWithTask();
 

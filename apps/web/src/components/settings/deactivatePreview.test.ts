@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hiddenTasksKey } from './deactivatePreview';
+import { hiddenTasksKey, previewTail } from './deactivatePreview';
 
 describe('hiddenTasksKey', () => {
   it('adds to a visible list, or stands alone when nothing is listed', () => {
@@ -15,5 +15,24 @@ describe('hiddenTasksKey', () => {
       'settings.hiddenTasksOnly.one', 'settings.hiddenTasksOnly.few', 'settings.hiddenTasksOnly.many',
       'settings.hiddenTasksOnly.many', 'settings.hiddenTasksOnly.one', 'settings.hiddenTasksOnly.few',
     ]);
+  });
+});
+
+describe('previewTail', () => {
+  it('marks visible tasks cut off by the page, then the hidden ones', () => {
+    // 21 visible (20 listed) and 1 hidden.
+    expect(previewTail({ count: 22, hiddenCount: 1, listed: 20 }, 'en'))
+      .toEqual({ truncated: true, hiddenKey: 'settings.hiddenTasksMore.one' });
+  });
+
+  it('shows no ellipsis when every visible task is listed', () => {
+    expect(previewTail({ count: 21, hiddenCount: 1, listed: 20 }, 'en'))
+      .toEqual({ truncated: false, hiddenKey: 'settings.hiddenTasksMore.one' });
+  });
+
+  it('has no hidden line when nothing is hidden, and stands alone when everything is', () => {
+    expect(previewTail({ count: 2, hiddenCount: 0, listed: 2 }, 'en')).toEqual({ truncated: false, hiddenKey: null });
+    expect(previewTail({ count: 5, hiddenCount: 5, listed: 0 }, 'uk'))
+      .toEqual({ truncated: false, hiddenKey: 'settings.hiddenTasksOnly.many' });
   });
 });
