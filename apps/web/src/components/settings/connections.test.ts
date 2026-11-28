@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildConnections, connectionsKey, scriptTokens, showIssued, type AgentToken, type OwnToken } from './connections';
+import { buildConnections, connectionsKey, connectionsView, pluralKey, scriptTokens, showIssued, type AgentToken, type OwnToken } from './connections';
 
 const NOW = new Date('2026-11-28T12:00:00Z').getTime();
 
@@ -74,25 +74,56 @@ describe('connectionsKey', () => {
 });
 
 describe('showIssued', () => {
-  const issued = { id: 'zed', token: 'ordi_secret', client: 'other', clientName: 'Zed', actsAs: 'you' as const };
+  const MADE = NOW - 1000;
+  const issued = { id: 'zed', token: 'ordi_secret', at: MADE, client: 'other', clientName: 'Zed', actsAs: 'you' as const };
   const current = { client: 'other', clientName: 'Zed', actsAs: 'you' as const };
+  const fresh = { own, ownAt: NOW, agent, agentAt: NOW };
 
   it('shows the token only for the client, name and identity it was made for', () => {
-    expect(showIssued(issued, current, own, agent, NOW)).toBe(true);
-    expect(showIssued(issued, { ...current, actsAs: 'agent' }, own, agent, NOW)).toBe(false);
-    expect(showIssued(issued, { ...current, clientName: 'Zed 2' }, own, agent, NOW)).toBe(false);
-    expect(showIssued(issued, { ...current, client: 'cursor' }, own, agent, NOW)).toBe(false);
+    expect(showIssued(issued, current, fresh, NOW)).toBe(true);
+    expect(showIssued(issued, { ...current, actsAs: 'agent' }, fresh, NOW)).toBe(false);
+    expect(showIssued(issued, { ...current, clientName: 'Zed 2' }, fresh, NOW)).toBe(false);
+    expect(showIssued(issued, { ...current, client: 'cursor' }, fresh, NOW)).toBe(false);
   });
 
   it('takes the secret off screen once it is disconnected or the agent is switched off', () => {
     const revoked = own.map((t) => (t.id === 'zed' ? { ...t, revokedAt: '2026-11-28T11:00:00Z' } : t));
-    expect(showIssued(issued, current, revoked, agent, NOW)).toBe(false);
+    expect(showIssued(issued, current, { ...fresh, own: revoked }, NOW)).toBe(false);
     const forAgent = { ...issued, id: 'agent-codex', actsAs: 'agent' as const };
-    expect(showIssued(forAgent, { ...current, actsAs: 'agent' }, own, agent, NOW)).toBe(true);
-    expect(showIssued(forAgent, { ...current, actsAs: 'agent' }, own, [], NOW)).toBe(false);
+    expect(showIssued(forAgent, { ...current, actsAs: 'agent' }, fresh, NOW)).toBe(true);
+    expect(showIssued(forAgent, { ...current, actsAs: 'agent' }, { ...fresh, agent: [] }, NOW)).toBe(false);
   });
 
-  it('trusts a token just made until the lists have loaded', () => {
-    expect(showIssued(issued, current, undefined, undefined, NOW)).toBe(true);
+  it('shows a token just made at once, before the lists have caught up with it', () => {
+    expect(showIssued(issued, current, {}, NOW)).toBe(true);
+    // Cached lists from before the token existed do not hide it…
+    const before = { own: own.filter((t) => t.id !== 'zed'), ownAt: MADE - 5000 };
+    expect(showIssued(issued, current, before, NOW)).toBe(true);
+    // …but one fetched since that still lacks it does.
+    expect(showIssued(issued, current, { ...before, ownAt: NOW }, NOW)).toBe(false);
+  });
+});
+
+describe('connectionsView', () => {
+  const ok = { isLoading: false, isError: false, data: [] };
+  const down = { isLoading: false, isError: true, data: undefined };
+  const loading = { isLoading: true, isError: false, data: undefined };
+
+  it('keeps the rows of the list that loaded and names the one that failed', () => {
+    expect(connectionsView({ own: ok, agent: down }, 2)).toEqual({ skeleton: false, failed: ['agent'], empty: false });
+    expect(connectionsView({ own: down, agent: ok }, 1)).toEqual({ skeleton: false, failed: ['own'], empty: false });
+  });
+
+  it('says nothing is connected only once both lists have answered', () => {
+    expect(connectionsView({ own: ok, agent: loading }, 0)).toEqual({ skeleton: true, failed: [], empty: false });
+    expect(connectionsView({ own: ok, agent: ok }, 0)).toEqual({ skeleton: false, failed: [], empty: true });
+    expect(connectionsView({ own: ok, agent: down }, 0)).toEqual({ skeleton: false, failed: ['agent'], empty: false });
+  });
+});
+
+describe('pluralKey', () => {
+  it('picks the plural form of any count for the locale', () => {
+    expect([1, 3].map((n) => pluralKey('mcp.permissions', n, 'en'))).toEqual(['mcp.permissions.one', 'mcp.permissions.other']);
+    expect([1, 3, 5].map((n) => pluralKey('mcp.permissions', n, 'uk'))).toEqual(['mcp.permissions.one', 'mcp.permissions.few', 'mcp.permissions.many']);
   });
 });

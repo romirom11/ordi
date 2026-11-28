@@ -109,17 +109,41 @@ export function scriptTokens(own: OwnToken[], now = Date.now()): { active: OwnTo
 }
 
 /**
- * The dictionary key for "N connections" in a locale: Intl's plural category
- * (English one/other; Ukrainian one/few/many) picks the form.
+ * The dictionary key for a count in a locale, e.g. "N connections": Intl's
+ * plural category (English one/other; Ukrainian one/few/many) picks the form.
  */
-export function connectionsKey(n: number, locale: string): string {
-  return `oauth.connections.${new Intl.PluralRules(locale).select(n)}`;
+export function pluralKey(base: string, n: number, locale: string): string {
+  return `${base}.${new Intl.PluralRules(locale).select(n)}`;
 }
+
+export function connectionsKey(n: number, locale: string): string {
+  return pluralKey('oauth.connections', n, locale);
+}
+
+/**
+ * What Connections may show while its two lists come in: rows from a list
+ * that has loaded show at once, whichever other list failed; each failed list
+ * is named so it alone can be retried; "nothing connected" is said only once
+ * both have answered.
+ */
+export function connectionsView(
+  lists: { own: ListState; agent: ListState },
+  count: number,
+): { skeleton: boolean; failed: ('own' | 'agent')[]; empty: boolean } {
+  const all = [lists.own, lists.agent];
+  const failed = (['own', 'agent'] as const).filter((k) => lists[k].isError && lists[k].data === undefined);
+  const pending = all.some((q) => q.isLoading);
+  return { skeleton: count === 0 && pending && failed.length === 0, failed, empty: count === 0 && !pending && failed.length === 0 };
+}
+
+interface ListState { isLoading: boolean; isError: boolean; data: unknown }
 
 /** A token just issued from "No browser? Connect with a token", shown once. */
 export interface IssuedToken {
   id: string;
   token: string;
+  /** When the create call answered: a list fetched before then cannot know it yet. */
+  at: number;
   /** The client picked when it was made, the name it got, and whom it acts as. */
   client: string;
   clientName: string;
@@ -136,15 +160,17 @@ export interface IssuedToken {
 export function showIssued(
   issued: IssuedToken | null,
   current: { client: string; clientName: string; actsAs: ActsAs },
-  own: OwnToken[] | undefined,
-  agentTokens: AgentToken[] | undefined,
+  lists: { own?: OwnToken[]; ownAt?: number; agent?: AgentToken[]; agentAt?: number },
   now = Date.now(),
 ): issued is IssuedToken {
   if (!issued) return false;
   if (issued.client !== current.client || issued.clientName !== current.clientName || issued.actsAs !== current.actsAs) return false;
-  // Not refetched yet after issuing: trust it until the lists say otherwise.
-  const list: { id: string; revokedAt?: string | null; expiresAt?: string | null }[] | undefined = issued.actsAs === 'you' ? own : agentTokens;
-  if (!list) return true;
-  const row = list.find((t) => t.id === issued.id);
-  return !!row && live(row, now);
+  const [list, fetchedAt]: [{ id: string; revokedAt?: string | null; expiresAt?: string | null }[] | undefined, number | undefined] =
+    issued.actsAs === 'you' ? [lists.own, lists.ownAt] : [lists.agent, lists.agentAt];
+  const row = list?.find((t) => t.id === issued.id);
+  if (row) return live(row, now);
+  // Not in a list fetched before the token existed: that list is stale, so
+  // the create answer is trusted and the setup shows at once. Missing from a
+  // list fetched since, it was disconnected or the agent switched off.
+  return !list || (fetchedAt ?? 0) < issued.at;
 }
