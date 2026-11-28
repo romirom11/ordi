@@ -549,6 +549,12 @@ export async function duplicateInvoice(actor: Actor, id: string) {
   await insertInvoiceItems(newId, items.map((r) => ({
     description: r.description, quantity: Number(r.quantity), unitPrice: Number(r.unitPrice), taxRateId: r.taxRateId, position: Number(r.position), source: 'manual',
   })));
+  // The copy bills the same work: it keeps where that came from.
+  const sources = await db.select({ projectId: schema.invoiceSourceProjects.projectId }).from(schema.invoiceSourceProjects)
+    .where(eq(schema.invoiceSourceProjects.invoiceId, id));
+  if (sources.length) {
+    await db.insert(schema.invoiceSourceProjects).values(sources.map((r) => ({ invoiceId: newId, projectId: r.projectId }))).onConflictDoNothing();
+  }
   await writeActivity(db, { entityType: 'invoice', entityId: newId, action: 'created', after: { duplicatedFrom: id, number }, actorId: actor.userId, actorType: actor.actorType });
   return newId;
 }
@@ -586,7 +592,7 @@ export async function invoiceFromTime(actor: Actor, input: any) {
   if (!projectIds.length) throw err.validation('No client projects for this company in the selection');
 
   const rows = await db.execute(sql`
-    select te.id, te.task_id, te.user_id, te.duration_seconds, te.hourly_rate,
+    select te.id, te.task_id, te.project_id, te.user_id, te.duration_seconds, te.hourly_rate,
            t.title as task_title, u.name as user_name
     from time_entries te
     join tasks t on t.id = te.task_id
@@ -630,6 +636,9 @@ export async function invoiceFromTime(actor: Actor, input: any) {
     publicToken: ulid(), source: 'time', createdBy: actor.userId,
   });
   const itemIds = await insertInvoiceItems(id, items);
+  // Whose time this bills, kept past the entries' links (see invoiceSourceProjects).
+  const billedFrom = [...new Set(rows.map((r) => r.project_id as string))];
+  await db.insert(schema.invoiceSourceProjects).values(billedFrom.map((projectId) => ({ invoiceId: id, projectId }))).onConflictDoNothing();
   // Link each entry to the created invoice item.
   const groupList = [...groups.values()];
   for (let i = 0; i < groupList.length; i++) {

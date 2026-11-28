@@ -721,31 +721,31 @@ function resolveSlackTarget(db: SlackReader, scope: SlackScope): Promise<SlackTa
 }
 
 /**
- * Every project an invoice bills now: the one it is filed under, the project
- * of the quote it came from, and the present projects of the time entries on
- * its lines – an invoice from time across several projects has no project of
- * its own, and an entry follows its task when that moves.
+ * Every project an invoice bills: the one it is filed under, the project of
+ * the quote it came from, the projects its time was billed from (recorded when
+ * it was made), and the present projects of the time entries still on its
+ * lines – an entry follows its task when that moves.
  *
- * Those entries are the only record of where such an invoice's time came
- * from, and they can let go of it: cancelling unlinks them, and editing the
- * lines replaces them. An invoice from time with no project of its own and a
- * line whose entries are gone has lost its sources: null, and nothing is
- * posted, rather than guess that they were all public.
+ * An invoice from time with no source recorded and no entries left on its
+ * lines (only possible for one the migration could not trace, its entries
+ * unlinked before it ran) has lost where it came from: null, and nothing is
+ * posted – whatever project it is filed under now, since that can be edited –
+ * rather than guess that it was all public.
  */
 async function invoiceProjectIds(
   db: SlackReader,
   invoice: { id: string; projectId: string | null; quoteId: string | null; source: string },
 ): Promise<string[] | null> {
-  const lines = await db.select({ itemId: schema.invoiceItems.id, itemSource: schema.invoiceItems.source, projectId: schema.timeEntries.projectId })
-    .from(schema.invoiceItems)
-    .leftJoin(schema.timeEntries, eq(schema.timeEntries.invoiceItemId, schema.invoiceItems.id))
-    .where(eq(schema.invoiceItems.invoiceId, invoice.id));
-  const fromEntries = lines.flatMap((l) => (l.projectId ? [l.projectId] : []));
-  if (!invoice.projectId && invoice.source === 'time') {
-    const timeLineLost = lines.some((l) => l.itemSource === 'time' && !l.projectId);
-    if (!fromEntries.length || timeLineLost) return null;
-  }
-  const ids = [...(invoice.projectId ? [invoice.projectId] : []), ...fromEntries];
+  const [recorded, entries] = await Promise.all([
+    db.select({ projectId: schema.invoiceSourceProjects.projectId }).from(schema.invoiceSourceProjects)
+      .where(eq(schema.invoiceSourceProjects.invoiceId, invoice.id)),
+    db.selectDistinct({ projectId: schema.timeEntries.projectId }).from(schema.timeEntries)
+      .innerJoin(schema.invoiceItems, eq(schema.invoiceItems.id, schema.timeEntries.invoiceItemId))
+      .where(eq(schema.invoiceItems.invoiceId, invoice.id)),
+  ]);
+  const ids = [...recorded, ...entries].map((r) => r.projectId);
+  if (invoice.source === 'time' && !ids.length) return null;
+  if (invoice.projectId) ids.push(invoice.projectId);
   if (invoice.quoteId) {
     const [quote] = await db.select({ projectId: schema.quotes.projectId }).from(schema.quotes).where(eq(schema.quotes.id, invoice.quoteId));
     if (quote?.projectId) ids.push(quote.projectId);

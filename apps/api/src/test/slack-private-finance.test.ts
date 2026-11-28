@@ -8,7 +8,9 @@
  * nothing.
  */
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
-import { getDb, schema, eq, and, inArray } from '@ordi/db';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { getDb, schema, eq, and, inArray, sql } from '@ordi/db';
 import { ulid } from 'ulid';
 import { resetDb, seedRolesAndUsers, reqAs, json } from './helpers';
 import { drainOutbox } from './agents-helpers';
@@ -435,8 +437,8 @@ describe('invoice.paid for an invoice from a quote', () => {
   });
 });
 
-describe('an invoice from time across projects whose time is no longer linked', () => {
-  it('cancelled, then settled by a credit note, posts nothing', async () => {
+describe('an invoice from time whose time entries are no longer linked', () => {
+  it('cancelled, then settled by a credit note, still knows its private project: nothing', async () => {
     const { id } = await invoiceFromTime([await project('workspace'), await project('private')]);
     expect((await owner().post(`/invoices/${id}/cancel`)).status).toBe(200);
     await settle();
@@ -446,7 +448,32 @@ describe('an invoice from time across projects whose time is no longer linked', 
     expect(posts).toEqual([]);
   });
 
-  it('with its lines edited, posts nothing even when every project was public', async () => {
+  it('cancelled, then settled by a credit note, across public projects: the workspace webhook', async () => {
+    const { id } = await invoiceFromTime([await project('workspace'), await project('workspace')]);
+    expect((await owner().post(`/invoices/${id}/cancel`)).status).toBe(200);
+    await settle();
+    expect((await owner().post(`/invoices/${id}/credit-notes`, { amount: 100, reason: 'write-off', date: '2026-10-02' })).status).toBe(201);
+    await deliver();
+    expect(urls()).toEqual([WORKSPACE_HOOK]);
+  });
+
+  it('with its lines edited and filed under a public project, still knows its private project: nothing', async () => {
+    const publicId = await project('workspace');
+    const { id } = await invoiceFromTime([publicId, await project('private')]);
+    const inv = await json(owner().get(`/invoices/${id}`));
+    const edit = await owner().patch(`/invoices/${id}`, {
+      version: inv.version, projectId: publicId, items: [{ description: 'All the time', quantity: 2, unitPrice: 50 }],
+    });
+    expect(edit.status).toBe(200);
+    await settle();
+    await pay(id);
+    await deliver();
+    expect(posts).toEqual([]);
+    // Nothing about where its time came from is handed out with the invoice.
+    expect(JSON.stringify(await json(owner().get(`/invoices/${id}`)))).not.toContain('sourceProject');
+  });
+
+  it('with its lines edited across public projects: the workspace webhook', async () => {
     const { id } = await invoiceFromTime([await project('workspace'), await project('workspace')]);
     const inv = await json(owner().get(`/invoices/${id}`));
     const edit = await owner().patch(`/invoices/${id}`, { version: inv.version, items: [{ description: 'All the time', quantity: 2, unitPrice: 50 }] });
@@ -454,18 +481,30 @@ describe('an invoice from time across projects whose time is no longer linked', 
     await settle();
     await pay(id);
     await deliver();
+    expect(urls()).toEqual([WORKSPACE_HOOK]);
+  });
+
+  it('duplicated, the copy keeps its private project: nothing', async () => {
+    const { id } = await invoiceFromTime([await project('workspace'), await project('private')]);
+    const copy = await owner().post(`/invoices/${id}/duplicate`);
+    expect(copy.status).toBe(201);
+    const copyId = (await json(copy)).id;
+    await settle();
+    await pay(copyId);
+    await deliver();
     expect(posts).toEqual([]);
   });
 
-  it('filed under one project, keeps that project when its lines are edited', async () => {
-    const { id } = await invoiceFromTime([await project('workspace')]);
-    const inv = await json(owner().get(`/invoices/${id}`));
-    const edit = await owner().patch(`/invoices/${id}`, { version: inv.version, items: [{ description: 'All the time', quantity: 1, unitPrice: 50 }] });
-    expect(edit.status).toBe(200);
+  it('with no source recorded and no entries left (from before sources were kept): nothing, whatever it is filed under', async () => {
+    const publicId = await project('workspace');
+    const { id } = await invoiceFromTime([publicId]);
+    const { db } = getDb();
+    await db.delete(schema.invoiceSourceProjects).where(eq(schema.invoiceSourceProjects.invoiceId, id));
+    expect((await owner().post(`/invoices/${id}/cancel`)).status).toBe(200);
     await settle();
-    await pay(id);
+    expect((await owner().post(`/invoices/${id}/credit-notes`, { amount: 50, reason: 'write-off', date: '2026-10-02' })).status).toBe(201);
     await deliver();
-    expect(urls()).toEqual([WORKSPACE_HOOK]);
+    expect(posts).toEqual([]);
   });
 });
 
@@ -481,5 +520,27 @@ describe('a deal.lost still queued when the deal is reopened', () => {
     const lost = posts.find((p) => p.body.text?.includes('Deal lost'));
     expect(lost?.url).toBe(WORKSPACE_HOOK);
     expect(lost!.body.text).not.toContain('Budget');
+  });
+});
+
+describe('the migration that starts recording sources', () => {
+  it('backfills them from the entries still linked and the project an invoice is filed under', async () => {
+    const { db } = getDb();
+    const privateId = await project('private');
+    const publicId = await project('workspace');
+    const multi = await invoiceFromTime([publicId, privateId]);
+    const single = await invoiceFromTime([await project('workspace')]);
+    const [singleRow] = await db.select({ projectId: schema.invoices.projectId }).from(schema.invoices).where(eq(schema.invoices.id, single.id));
+    // As they were before: nothing recorded, and the single one's entries unlinked.
+    await db.delete(schema.invoiceSourceProjects).where(inArray(schema.invoiceSourceProjects.invoiceId, [multi.id, single.id]));
+    await db.update(schema.timeEntries).set({ invoiceItemId: null }).where(inArray(schema.timeEntries.taskId, single.taskIds));
+    const migration = readFileSync(fileURLToPath(new URL('../../../../packages/db/drizzle/0056_invoice_source_projects.sql', import.meta.url)), 'utf8');
+    const backfill = migration.split('--> statement-breakpoint').map((part) => part.trim()).find((part) => part.includes('INSERT INTO'));
+    expect(backfill).toBeDefined();
+    await db.execute(sql.raw(backfill!));
+    const recorded = async (invoiceId: string) => (await db.select({ projectId: schema.invoiceSourceProjects.projectId })
+      .from(schema.invoiceSourceProjects).where(eq(schema.invoiceSourceProjects.invoiceId, invoiceId))).map((r) => r.projectId).sort();
+    expect(await recorded(multi.id)).toEqual([publicId, privateId].sort());
+    expect(await recorded(single.id)).toEqual([singleRow!.projectId]);
   });
 });
