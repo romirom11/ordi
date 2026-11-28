@@ -7,7 +7,7 @@
  * and, collapsed, the technical details of the workers that run them.
  * Everything here needs `agents.manage`.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AGENT_ASSIGN_POLICIES, AGENT_CREDENTIAL_KINDS, AGENT_CREDENTIAL_PROVIDERS, AGENT_CREDENTIAL_SLOTS, AGENT_RUNTIMES,
@@ -26,7 +26,7 @@ import {
 import { Dialog, ConfirmDialog, DropdownMenu, MenuItem, toast } from '../overlays';
 import { SectionHead, SubHead, Field, RowList, StatusChip, Disclosure } from './primitives';
 import { CreateTeamBotDialog, TeamBotDialog, TeamBotSummary, useTeamBots } from './ExternalAgentsSection';
-import { mergeAgents, noWorkerOnline, type AgentKind } from './agentList';
+import { agentStatus, listView, mergeAgents, noWorkerOnline, type AgentKind } from './agentList';
 import { Link } from '../../lib/router';
 import { useT, extendDict } from '../../lib/i18n';
 
@@ -94,7 +94,9 @@ extendDict({
     'agents.ownAgentLink': 'Profile → MCP & API',
     'agents.kind.ordi': 'Runs in Ordi',
     'agents.kind.outside': 'Connects from outside',
-    'agents.kindHint.ordi': 'Works on the Claude connection above: assign it a task and it opens a pull request for review.',
+    'agents.kindHint.ordi': 'Ordi runs it with a credential from the connection above: assign it a task and it opens a pull request for review.',
+    'agents.waitingForWorker': 'Waiting for a worker',
+    'agents.listLoadFailed': 'Some agents could not be loaded.',
     'agents.kindHint.outside': 'Works elsewhere – Claude Code, Codex, a bot on a server – and connects over MCP under its own name.',
     'agents.newKindTitle': 'Which kind of agent?',
     'agents.actions': 'Actions',
@@ -230,7 +232,9 @@ extendDict({
     'agents.ownAgentLink': 'Профіль → MCP і API',
     'agents.kind.ordi': 'Працює в Орді',
     'agents.kind.outside': 'Підключається ззовні',
-    'agents.kindHint.ordi': 'Працює на доступі Claude вище: призначте йому задачу – і він відкриє пулреквест на рев’ю.',
+    'agents.kindHint.ordi': 'Орді запускає його з доступом, доданим вище: призначте йому задачу – і він відкриє пулреквест на рев’ю.',
+    'agents.waitingForWorker': 'Чекає на виконавця',
+    'agents.listLoadFailed': 'Не вдалося завантажити частину агентів.',
     'agents.kindHint.outside': 'Працює деінде – Claude Code, Codex, бот на сервері – і підключається через MCP під власним іменем.',
     'agents.newKindTitle': 'Який агент створити?',
     'agents.actions': 'Дії',
@@ -919,9 +923,14 @@ export function AgentsPanel() {
   const [kindOpen, setKindOpen] = useState(false);
   const [creatingBot, setCreatingBot] = useState(false);
   const [botId, setBotId] = useState<string | null>(null);
+  const [fromChooser, setFromChooser] = useState(false);
   const entries = mergeAgents(agents, botsQ.data ?? []);
-  const listLoading = agentsQ.isLoading || botsQ.isLoading;
+  const list = listView([agentsQ, botsQ], entries.length);
   const noWorker = noWorkerOnline(overview);
+  // The kind chooser closes as its form opens, so the form cannot hand focus
+  // back to it: back to New agent instead, where the keyboard user started.
+  const newAgentRef = useRef<HTMLButtonElement>(null);
+  const backToNewAgent = () => setTimeout(() => newAgentRef.current?.focus(), 0);
 
   return (
     <div>
@@ -956,7 +965,7 @@ export function AgentsPanel() {
         <SubHead
           title={<span id="agents-list">{t('agents.list')}</span>}
           desc={<>{t('agents.listDesc')} {t('agents.ownAgentPrefix')} <Link to="/profile/mcp" className="text-foreground underline underline-offset-2 hover:no-underline">{t('agents.ownAgentLink')}</Link>.</>}
-          actions={<Button size="sm" onClick={() => setKindOpen(true)}><Plus size={14} aria-hidden /> {t('agents.new')}</Button>}
+          actions={<Button ref={newAgentRef} size="sm" onClick={() => setKindOpen(true)}><Plus size={14} aria-hidden /> {t('agents.new')}</Button>}
         />
         {noWorker && (
           <p className="mb-2 flex items-start gap-1.5 rounded-md border border-warning/40 bg-warning/5 px-2.5 py-2 text-xs">
@@ -965,9 +974,15 @@ export function AgentsPanel() {
           </p>
         )}
 
-        {listLoading ? (
+        {list.failed && (
+          <p className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+            {t('agents.listLoadFailed')}
+            <Button size="xs" variant="ghost" onClick={() => { void agentsQ.refetch(); void botsQ.refetch(); }}>{t('common.retry')}</Button>
+          </p>
+        )}
+        {list.skeleton ? (
           <div className="space-y-2">{[0, 1].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
-        ) : entries.length === 0 ? (
+        ) : list.empty ? (
           <RowList className="flex items-start gap-3 px-3 py-3">
             <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground"><Bot size={15} aria-hidden /></div>
             <div className="min-w-0">
@@ -975,7 +990,7 @@ export function AgentsPanel() {
               <p className="mt-0.5 text-xs text-muted-foreground">{t('agents.noneHint')}</p>
             </div>
           </RowList>
-        ) : (
+        ) : entries.length === 0 ? null : (
           <RowList>
             <ul>
               {entries.map((e) => e.kind === 'ordi' ? (
@@ -999,9 +1014,7 @@ export function AgentsPanel() {
                       )}
                     </div>
                   </button>
-                  <StatusChip tone={!e.agent.enabled || !e.agent.isActive ? 'off' : e.agent.dispatchable ? 'ok' : 'muted'}>
-                    {!e.agent.enabled || !e.agent.isActive ? t('agents.stateDisabled') : e.agent.dispatchable ? t('agents.ready') : t('agents.needsCredential')}
-                  </StatusChip>
+                  <AgentStatusChip status={agentStatus(e.agent, noWorker)} />
                   <DropdownMenu align="end" trigger={<Button variant="ghost" size="sm" className="h-7 w-7 px-0" aria-label={`${t('agents.actions')}: ${e.agent.name}`}><MoreHorizontal size={15} aria-hidden /></Button>}>
                     <MenuItem icon={<Bot size={14} />} onSelect={() => openAgent(e.agent)}>{t('common.edit')}</MenuItem>
                     {e.agent.enabled && e.agent.isActive
@@ -1093,19 +1106,32 @@ export function AgentsPanel() {
       <NewAgentKindDialog
         open={kindOpen}
         onClose={() => setKindOpen(false)}
-        onPick={(kind) => { setKindOpen(false); if (kind === 'ordi') openAgent(null); else setCreatingBot(true); }}
+        onPick={(kind) => { setKindOpen(false); setFromChooser(true); if (kind === 'ordi') openAgent(null); else setCreatingBot(true); }}
       />
       <AgentDialog
         open={agentOpen}
-        onClose={() => setAgentOpen(false)}
+        onClose={() => { setAgentOpen(false); if (fromChooser) { setFromChooser(false); backToNewAgent(); } }}
         agent={editing}
         roles={roles}
         credentials={credentials}
       />
-      <CreateTeamBotDialog open={creatingBot} onClose={() => setCreatingBot(false)} onCreated={(id) => { setCreatingBot(false); setBotId(id); }} />
+      <CreateTeamBotDialog
+        open={creatingBot}
+        onClose={() => { setCreatingBot(false); setFromChooser(false); backToNewAgent(); }}
+        onCreated={(id) => { setCreatingBot(false); setFromChooser(false); setBotId(id); }}
+      />
       <TeamBotDialog id={botId} onClose={() => setBotId(null)} />
     </div>
   );
+}
+
+/** Whether an agent ordi runs can take work now, and if not, why – in words, not only a colour. */
+function AgentStatusChip({ status }: { status: ReturnType<typeof agentStatus> }) {
+  const t = useT();
+  const tone = status === 'ready' ? 'ok' : status === 'off' ? 'off' : 'warn';
+  const label = status === 'ready' ? t('agents.ready') : status === 'off' ? t('agents.stateDisabled')
+    : status === 'noWorker' ? t('agents.waitingForWorker') : t('agents.needsCredential');
+  return <StatusChip tone={tone}>{label}</StatusChip>;
 }
 
 /** Which kind an agent is, in words: the list holds both. */

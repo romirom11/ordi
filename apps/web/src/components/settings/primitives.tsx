@@ -122,10 +122,10 @@ export function Disclosure({ label, children, defaultOpen = false, className }: 
 }
 
 /** Tiny state chip for integration card headers: a dot plus a word. */
-export function StatusChip({ tone, children }: { tone: 'ok' | 'muted' | 'off'; children: ReactNode }) {
+export function StatusChip({ tone, children }: { tone: 'ok' | 'muted' | 'warn' | 'off'; children: ReactNode }) {
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
-      <span className={cn('h-1.5 w-1.5 rounded-full', tone === 'ok' ? 'bg-success' : tone === 'muted' ? 'bg-primary' : 'bg-faint')} />
+      <span aria-hidden className={cn('h-1.5 w-1.5 rounded-full', tone === 'ok' ? 'bg-success' : tone === 'muted' ? 'bg-primary' : tone === 'warn' ? 'bg-warning' : 'bg-faint')} />
       {children}
     </span>
   );

@@ -30,3 +30,26 @@ export function mergeAgents<O extends { id: string; name: string }, X extends { 
 export function noWorkerOnline(overview: { workerEnabled: boolean; workers: { online: boolean }[] } | undefined): boolean {
   return !!overview && !overview.workerEnabled && !overview.workers.some((w) => w.online);
 }
+
+/**
+ * What the list may show while its two queries come in. Rows that have
+ * loaded show at once; a query that failed says so beside them; "no agents
+ * yet" is said only once both have answered with none.
+ */
+export function listView(
+  queries: { isLoading: boolean; isError: boolean; data: unknown }[],
+  count: number,
+): { skeleton: boolean; failed: boolean; empty: boolean } {
+  const pending = queries.some((q) => q.isLoading);
+  const failed = queries.some((q) => q.isError && q.data === undefined);
+  return { skeleton: count === 0 && pending && !failed, failed, empty: count === 0 && !pending && !failed };
+}
+
+export type AgentStatus = 'off' | 'needsCredential' | 'noWorker' | 'ready';
+
+/** An agent ordi runs: whether it can take work now, and if not, why. */
+export function agentStatus(a: { enabled: boolean; isActive: boolean; dispatchable: boolean }, noWorker: boolean): AgentStatus {
+  if (!a.enabled || !a.isActive) return 'off';
+  if (!a.dispatchable) return 'needsCredential';
+  return noWorker ? 'noWorker' : 'ready';
+}
