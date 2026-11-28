@@ -32,7 +32,7 @@ import { sendEmailNow } from '../../lib/email';
 import { asLocale, loadBranding, renderEmail, tr } from '../../lib/email-templates';
 import { pageById } from '../../lib/http';
 import { intakeTaskDescription } from './intake';
-import { answerByComment, moveQuestions, openQuestionView, tasksWaitingOn, waitingOnFor } from './questions';
+import { answerByComment, moveQuestions, openQuestionView, tasksWaitingOn, waitingOnFor, withdrawQuestionsWaitingOn } from './questions';
 import { isStorageConfigured } from '../../lib/s3';
 
 const { tasks, projects, taskStatuses, taskAssignees, taskLabels, projectMembers, cycles } = schema;
@@ -405,6 +405,11 @@ export async function removeMember(actor: Actor, projectId: string, userId: stri
   const { db } = getDb();
   await db.delete(projectMembers).where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId)));
   await writeActivity(db, { entityType: 'project', entityId: projectId, action: 'member_removed', after: { userId }, actorId: actor.userId, actorType: actor.actorType });
+  // A question waiting on them here would wait on someone who cannot see it
+  // – unless the project is open to them anyway (a workspace project).
+  if (!(await userCanOpenProject(userId, projectId))) {
+    await db.transaction((tx) => withdrawQuestionsWaitingOn(tx, actor, userId, 'removed', projectId));
+  }
 }
 
 // ── Task statuses (PRD §8.2) ──
@@ -1161,7 +1166,7 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
     // keeping authors, timestamps and invoice links exactly as they were.
     for (const [oldId, mappedId] of newIdOf) {
       await tx.update(schema.comments).set({ taskId: mappedId }).where(eq(schema.comments.taskId, oldId));
-      await moveQuestions(tx, actor, oldId, mappedId, targetProjectId);
+      await moveQuestions(tx, actor, oldId, { id: mappedId, projectId: targetProjectId, projectKey: targetKey });
       await tx.update(schema.taskRelations).set({ taskId: mappedId }).where(eq(schema.taskRelations.taskId, oldId));
       await tx.update(schema.taskRelations).set({ relatedTaskId: mappedId }).where(eq(schema.taskRelations.relatedTaskId, oldId));
       await tx.update(schema.taskLinks).set({ taskId: mappedId }).where(eq(schema.taskLinks.taskId, oldId));
@@ -1818,7 +1823,9 @@ export async function myTasks(actor: Actor) {
       and ts.category not in ('done','canceled') and t.project_id in ${inList}
     order by t.due_date nulls last`) as any[];
 
-  const withRef = (r: any) => ({ ...r, ref: refOf(r.key, r.number) });
+  // Whom each task's open question waits on: the mark on the row.
+  const waiting = await waitingOnFor([...(assigned as any[]), ...(created as any[])].map((r) => r.id));
+  const withRef = (r: any) => ({ ...r, ref: refOf(r.key, r.number), waiting_on_user_id: waiting.get(r.id) ?? null });
   const rows = (assigned as any[]).map(withRef);
   return {
     overdue: rows.filter((t) => t.due_date && t.due_date < today),

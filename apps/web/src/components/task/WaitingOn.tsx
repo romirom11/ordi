@@ -5,7 +5,7 @@
  *
  * The addressee answers by commenting – their first comment closes the
  * question on the server – or with "Mark answered". The asker (or the owner of
- * the asking agent) and the project's lead can withdraw it. Which buttons
+ * a personal agent's question) and the project's lead can withdraw it. Which buttons
  * appear is the server's call (`canMarkAnswered` / `canWithdraw`), so the
  * page never offers an action the API would refuse.
  */
@@ -25,6 +25,7 @@ extendDict({
     'waiting.onYou': 'Waiting on you',
     'waiting.askedBy': 'asked by {name}',
     'waiting.answerHint': 'Reply in the comments below – your first comment answers it.',
+    'waiting.answerHintReadOnly': 'You can read this project but not comment on it: answer where you were asked, then mark it answered.',
     'waiting.markAnswered': 'Mark answered',
     'waiting.withdraw': 'Withdraw',
     'waiting.closed': 'The question is closed.',
@@ -36,6 +37,7 @@ extendDict({
     'waiting.onYou': 'Чекає на вас',
     'waiting.askedBy': 'питає {name}',
     'waiting.answerHint': 'Відповідайте в коментарях нижче – ваш перший коментар закриє питання.',
+    'waiting.answerHintReadOnly': 'Ви можете переглядати цей проєкт, але не коментувати: дайте відповідь там, де вас запитали, і позначте питання як відповідь.',
     'waiting.markAnswered': 'Позначити як відповідь',
     'waiting.withdraw': 'Відкликати',
     'waiting.closed': 'Питання закрито.',
@@ -49,7 +51,11 @@ export function withName(template: string, name: string): string {
   return template.replace('{name}', name);
 }
 
-export function WaitingOnBanner({ taskId, question }: { taskId: string; question: TaskOpenQuestion }) {
+export function WaitingOnBanner({ taskId, question, canComment }: {
+  taskId: string; question: TaskOpenQuestion;
+  /** Whether the reader can write to the project – a viewer answers with "Mark answered" only. */
+  canComment: boolean;
+}) {
   const t = useT();
   const me = useMe();
   const qc = useQueryClient();
@@ -58,10 +64,13 @@ export function WaitingOnBanner({ taskId, question }: { taskId: string; question
   const mine = question.addressee.id === me.user.id;
 
   const close = useMutation({
-    mutationFn: (how: 'answered' | 'withdraw') => api.post(`/tasks/${taskId}/question/${how}`, {}),
+    // The question on screen: if it was replaced meanwhile, the API refuses
+    // rather than closing the new one.
+    mutationFn: (how: 'answered' | 'withdraw') => api.post(`/tasks/${taskId}/question/${how}`, { questionId: question.id }),
     onSuccess: () => {
       toast(t('waiting.closed'));
       qc.invalidateQueries({ queryKey: ['task', taskId] });
+      qc.invalidateQueries({ queryKey: ['task-audit', taskId] });
       qc.invalidateQueries({ queryKey: ['tasks'] });
       qc.invalidateQueries({ queryKey: ['inbox'] });
     },
@@ -92,7 +101,7 @@ export function WaitingOnBanner({ taskId, question }: { taskId: string; question
         </span>
       </div>
       <p className="mt-1.5 whitespace-pre-wrap text-[13px] leading-relaxed">{question.question}</p>
-      {mine && <p className="mt-1.5 text-xs text-muted-foreground">{t('waiting.answerHint')}</p>}
+      {mine && <p className="mt-1.5 text-xs text-muted-foreground">{t(canComment ? 'waiting.answerHint' : 'waiting.answerHintReadOnly')}</p>}
       {(question.canMarkAnswered || question.canWithdraw) && (
         <div className="mt-2.5 flex flex-wrap gap-1.5">
           {question.canMarkAnswered && (

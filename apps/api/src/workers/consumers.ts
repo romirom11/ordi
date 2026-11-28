@@ -375,9 +375,19 @@ const notifications: Consumer = {
         break;
       // The one person a question waits on. The asker hears nothing back:
       // an agent reads the answers with list_answered.
-      case 'task.input_requested':
-        await notify(ev.id, [p.addresseeId], 'task.input_requested', p.ref ?? null, p, self);
+      case 'task.input_requested': {
+        // Read at delivery: a question answered, withdrawn or carried off by a
+        // move before the worker got here is not news, and a moved task is
+        // gated by the project it is in now, not the one it was asked in.
+        if (!p.questionId) break;
+        const [q] = await getDb().db.select({ status: schema.taskQuestions.status, taskId: schema.taskQuestions.taskId, projectId: schema.tasks.projectId })
+          .from(schema.taskQuestions)
+          .innerJoin(schema.tasks, and(eq(schema.tasks.id, schema.taskQuestions.taskId), isNull(schema.tasks.deletedAt)))
+          .where(eq(schema.taskQuestions.id, p.questionId));
+        if (!q || q.status !== 'open') break;
+        await notify(ev.id, [p.addresseeId], 'task.input_requested', p.ref ?? null, { ...p, taskId: q.taskId, projectId: q.projectId }, { ...self, projectId: q.projectId });
         break;
+      }
       case 'comment.created': {
         if (!p.taskId) break;
         // An ordi agent's comments are announced by its run events instead

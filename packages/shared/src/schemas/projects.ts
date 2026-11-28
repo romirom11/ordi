@@ -239,6 +239,11 @@ export const taskQuestionInputSchema = z.object({
   addresseeId: idSchema.optional(),
 });
 
+/** Closing a question by hand: optionally the one the caller is looking at. */
+export const taskQuestionCloseSchema = z.object({
+  questionId: idSchema.optional(),
+});
+
 /**
  * A comment rewrite replaces the whole body, so the body has to say something:
  * rich text is `z.any()`, which alone would let a bodyless PATCH – or one with
