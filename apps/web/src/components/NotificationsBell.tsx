@@ -66,6 +66,10 @@ export function NotificationsBell({ visible = true }: { visible?: boolean }) {
     refetchInterval: 60_000,
   });
   const { data } = notificationsQ;
+  // Opening the bell reads it afresh: a row can have closed to the reader
+  // since the last poll (taken off its project), and the server leaves it out.
+  const { refetch } = notificationsQ;
+  useEffect(() => { if (open) void refetch(); }, [open, refetch]);
   const readAll = useMutation({
     mutationFn: () => api.post('/notifications/read-all'),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['notifications'] }),
