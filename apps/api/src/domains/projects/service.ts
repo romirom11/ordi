@@ -937,14 +937,17 @@ export async function updateTask(actor: Actor, id: string, input: any) {
 /** Statuses that still mean work to do; done/canceled tasks stay with whoever closed them. */
 const OPEN_CATEGORIES = ['backlog', 'todo', 'in_progress'];
 
+export interface OpenTaskRef { id: string; projectId: string; title: string; ref: string }
+
 /**
  * Open tasks a user is assigned to, across every project. Not membership
  * gated: the caller is an admin deactivating that user (users.manage), who
  * has to see the whole picture even for projects they are not a member of.
+ * `conn` is a transaction when the answer must be read under its locks
+ * (handOffOpenTasks).
  */
-export async function openTasksAssignedTo(userId: string) {
-  const { db } = getDb();
-  const rows = await db.select({
+export async function openTasksAssignedTo(userId: string, conn: any = getDb().db): Promise<OpenTaskRef[]> {
+  const rows: { id: string; projectId: string; number: number; title: string; key: string }[] = await conn.select({
     id: tasks.id, projectId: tasks.projectId, number: tasks.number, title: tasks.title, key: projects.key,
   })
     .from(tasks)
@@ -990,7 +993,11 @@ export async function openTasksPreview(actor: Actor, userId: string) {
  * the same transaction, so nothing is announced that did not commit.
  */
 export async function handOffOpenTasks(actor: Actor, fromUserId: string, toUserId: string | null, tx: any) {
-  const open = await openTasksAssignedTo(fromUserId);
+  // Read under the caller's lock on the person (ORD-41). A task move locks
+  // the people on its tasks before the tasks (moveTask), so one that got
+  // there first has committed – its copy is what this read finds – and one
+  // that comes later waits for this hand-over and finds the person switched off.
+  const open = await openTasksAssignedTo(fromUserId, tx);
   if (!open.length) return { count: 0, taskIds: [] as string[] };
   const ids = open.map((t) => t.id);
   // Handing work to an agent is assigning it: the agent must be a member of
@@ -1132,6 +1139,23 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
       subtree.push(...children);
       frontier = children.map((child) => child.id);
     }
+    // The people on these tasks first, then the tasks – person before task,
+    // the order a deactivation locks in (ORD-41). A key-share lock is what
+    // the copy's assignee rows take anyway; held from here, it makes a
+    // deactivation of one of them wait for this move (and then hand over the
+    // copy), or this move wait for the deactivation (and then leave them off).
+    // Agents are left out: a deactivation locks the agents it switches off
+    // after the tasks, so holding one here could close a cycle.
+    const lockPeople = async (taskIds: string[]) => {
+      const people = await tx.selectDistinct({ id: schema.users.id }).from(taskAssignees)
+        .innerJoin(schema.users, eq(schema.users.id, taskAssignees.userId))
+        .where(and(inArray(taskAssignees.taskId, taskIds), eq(schema.users.actorType, 'user')));
+      if (people.length) {
+        await tx.select({ id: schema.users.id }).from(schema.users)
+          .where(inArray(schema.users.id, people.map((p) => p.id))).orderBy(asc(schema.users.id)).for('key share');
+      }
+    };
+    await lockPeople(subtree.map((t) => t.id));
     // Lock the subtree in id order – the order a task edit and a bulk edit
     // lock in – so a second move of the same task waits and then finds it
     // gone, instead of copying it into a second project too.
@@ -1155,6 +1179,10 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
       tx.select().from(taskAssignees).where(inArray(taskAssignees.taskId, oldIds)),
       tx.select().from(taskLabels).where(inArray(taskLabels.taskId, oldIds)),
     ]);
+    // Someone put on a task between that lock and this one is locked now –
+    // out of order, but only for a person who was not on the work a moment
+    // ago; at worst Postgres refuses one of two transactions, nothing is lost.
+    await lockPeople(oldIds);
 
     // Agents work only where they are members: one that is not on the
     // target project comes off the moved tasks rather than being stranded.
@@ -1167,6 +1195,24 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
     // first insert takes the target project's task-number counter, so the
     // move does not hold it while it waits for those reads.
     for (const t of subtree) { await targetStatusOf(t.statusId); await reporterFor(t.reporterId); }
+    // Someone deactivated does not come along onto open work (ORD-41): a
+    // deactivation takes them off every open task, and a copy must not put
+    // them back – a closed task whose status maps to an open one in the
+    // target included. On a closed copy they stay: who did the work is
+    // history. Read under the locks above, so a deactivation is either
+    // committed and seen here, or waits for this move.
+    const assigneeIds = [...new Set(assigneeRows.map((r) => r.userId))];
+    const inactive = new Set(assigneeIds.length
+      ? (await tx.select({ id: schema.users.id }).from(schema.users)
+        .where(and(inArray(schema.users.id, assigneeIds), eq(schema.users.isActive, false)))).map((r) => r.id)
+      : []);
+    const openStatusIds = new Set(inactive.size
+      ? (await tx.select({ id: taskStatuses.id }).from(taskStatuses)
+        .where(and(inArray(taskStatuses.id, [...statusFor.values()]), inArray(taskStatuses.category, OPEN_CATEGORIES)))).map((r) => r.id)
+      : []);
+    const statusOfOld = new Map(subtree.map((t) => [t.id, statusFor.get(t.statusId)!]));
+    const leftOff = (row: { taskId: string; userId: string }) =>
+      strandedAgents.has(row.userId) || (inactive.has(row.userId) && openStatusIds.has(statusOfOld.get(row.taskId)!));
     // Someone timing one of these tasks whose reach ends at the target stops
     // now, the time saved; the entry then moves with the task below.
     await closeTimersOfOutsiders(tx, actor, subtree.map((t) => t.id), targetProjectId);
@@ -1184,7 +1230,7 @@ export async function moveTask(actor: Actor, id: string, targetProjectId: string
         customFields: cf, createdBy: t.createdBy, reporterId: await reporterFor(t.reporterId),
       });
     }
-    const keptAssignees = assigneeRows.filter((row) => !strandedAgents.has(row.userId));
+    const keptAssignees = assigneeRows.filter((row) => !leftOff(row));
     if (keptAssignees.length) {
       await tx.insert(taskAssignees).values(keptAssignees.map((row) => ({
         taskId: newIdOf.get(row.taskId)!, userId: row.userId,
