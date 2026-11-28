@@ -13,7 +13,7 @@ import {
   type CustomFieldFilter, type IntakeAnswer, type LabelScope,
 } from '@ordi/shared';
 import type { Actor } from '../../context';
-import { err } from '../../lib/errors';
+import { ApiException, err } from '../../lib/errors';
 import { logger } from '../../lib/logger';
 import { writeActivity } from '../../core/activity';
 import { emit, publishEvent } from '../../core/events';
@@ -964,11 +964,26 @@ export async function handOffOpenTasks(actor: Actor, fromUserId: string, toUserI
   const open = await openTasksAssignedTo(fromUserId);
   if (!open.length) return { count: 0, taskIds: [] as string[] };
   const ids = open.map((t) => t.id);
-  // An agent successor works only where it is a member – the same rule as
-  // assigning it by hand – so hand-over refuses rather than strand it.
+  // Handing work to an agent is assigning it: the agent must be a member of
+  // each project, and the person handing over must meet its assign policy
+  // there with the role they hold in that project – the same rule as
+  // assigning it by hand. Checked before anything is written, so a refusal
+  // leaves the person active and every task as it was.
   if (toUserId) {
     const projectIds = [...new Set(open.map((t) => t.projectId))];
-    for (const projectId of projectIds) await assertCanAssignAgents(actor, projectId, [toUserId], null, { policy: false });
+    const rows = await tx.select({ id: projects.id, name: projects.name, visibility: projects.visibility })
+      .from(projects).where(inArray(projects.id, projectIds)).orderBy(asc(projects.name));
+    for (const project of rows) {
+      const role = effectiveProjectRole(actor, { id: project.id, visibility: project.visibility as 'workspace' | 'private' });
+      const [refusal] = await agentAssignRefusals(actor, project.id, [toUserId], role);
+      if (refusal) {
+        throw new ApiException(
+          refusal.error.code,
+          `Open tasks in ${project.name} cannot be handed to this agent: ${refusal.error.message}`,
+          refusal.error.details,
+        );
+      }
+    }
   }
   // Tasks first, in id order – the order a task edit locks in – so a hand-off
   // and a concurrent edit of the same task wait for each other, not deadlock.

@@ -4,8 +4,9 @@
  * the caller may assign it, and an @-mention starts an agent only if the
  * commenter may – the comment itself is posted either way, and the answer
  * says which agents did not start and why. A move leaves off an agent the
- * caller may not assign on the target project, and a run an agent not on the
- * task made is retried only by someone who may assign it.
+ * caller may not assign on the target project, and a run is retried only by
+ * someone who may assign its agent – on the task or not – while cancelling
+ * stays open to project writers.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import { getDb, schema, eq } from '@ordi/db';
@@ -179,14 +180,69 @@ describe('retrying a run', () => {
     expect((await owner.post(`/agent-runs/${run!.id}/retry`)).status).toBe(201);
   });
 
-  it('a run of an agent on the task is retried by any member, as before', async () => {
+  // A retry spends another run whether or not the agent is on the task, so
+  // it is held to the assign policy either way (it used to be open to any
+  // member when the agent was assigned).
+  /** Project admin on the shared project, whether or not an earlier test made them a member. */
+  async function makeProjectAdmin(userId: string) {
+    await getDb().db.insert(schema.projectMembers).values({ projectId: ws.projectId, userId, role: 'admin', canWriteTasks: true })
+      .onConflictDoUpdate({ target: [schema.projectMembers.projectId, schema.projectMembers.userId], set: { role: 'admin' } });
+  }
+
+  async function failedRunOf(agentId: string, title: string) {
     const owner = reqAs(ws.users.owner!.cookie);
-    const member = reqAs(ws.users.member!.cookie);
-    const task = await json(owner.post('/tasks', { projectId: ws.projectId, title: 'Assigned retry', assigneeIds: [guarded] }));
+    const task = await json(owner.post('/tasks', { projectId: ws.projectId, title, assigneeIds: [agentId] }));
     await drainOutbox();
     const [run] = await runsForTask(task.id);
+    expect(run!.agentUserId).toBe(agentId);
     const { db } = getDb();
     await db.update(schema.agentRuns).set({ status: 'failed' }).where(eq(schema.agentRuns.id, run!.id));
-    expect((await member.post(`/agent-runs/${run!.id}/retry`)).status).toBe(201);
+    return { taskId: task.id as string, runId: run!.id };
+  }
+
+  it('a run of an agent on the task with a project_admins policy is not retried by a plain member', async () => {
+    const owner = reqAs(ws.users.owner!.cookie);
+    const member = reqAs(ws.users.member!.cookie);
+    const { taskId, runId } = await failedRunOf(guarded, 'Assigned retry, admins only');
+    const refused = await member.post(`/agent-runs/${runId}/retry`);
+    expect(refused.status).toBe(403);
+    expect((await json(refused)).error.message).toMatch(/project admins/i);
+    expect(await runsForTask(taskId)).toHaveLength(1);
+    expect((await owner.post(`/agent-runs/${runId}/retry`)).status).toBe(201);
+  });
+
+  it('a project admin retries a run of an agent with a project_admins policy', async () => {
+    await makeProjectAdmin(ws.users.manager!.userId);
+    const { runId } = await failedRunOf(guarded, 'Assigned retry by a project admin');
+    expect((await reqAs(ws.users.manager!.cookie).post(`/agent-runs/${runId}/retry`)).status).toBe(201);
+  });
+
+  it('a run of an agent on the task with an agents_managers policy is retried only with agents.manage', async () => {
+    const locked = (await createAgent(ws.users, { name: 'Locked', assignPolicy: 'agents_managers' })).id;
+    await addProjectMember(ws.users, ws.projectId, locked);
+    await makeProjectAdmin(ws.users.manager!.userId);
+    const { runId } = await failedRunOf(locked, 'Assigned retry, managers only');
+    const member = await reqAs(ws.users.member!.cookie).post(`/agent-runs/${runId}/retry`);
+    expect(member.status).toBe(403);
+    expect((await json(member)).error.message).toMatch(/agents\.manage/);
+    // Project admin is not enough for this policy.
+    expect((await reqAs(ws.users.manager!.cookie).post(`/agent-runs/${runId}/retry`)).status).toBe(403);
+    expect((await reqAs(ws.users.admin!.cookie).post(`/agent-runs/${runId}/retry`)).status).toBe(201);
+  });
+
+  it('a run of an agent with a project_members policy is retried by any member', async () => {
+    const { runId } = await failedRunOf(open, 'Assigned retry, open agent');
+    expect((await reqAs(ws.users.member!.cookie).post(`/agent-runs/${runId}/retry`)).status).toBe(201);
+  });
+
+  it('a plain member still cancels a run of an agent they may not retry', async () => {
+    const owner = reqAs(ws.users.owner!.cookie);
+    const task = await json(owner.post('/tasks', { projectId: ws.projectId, title: 'Cancel me', assigneeIds: [guarded] }));
+    await drainOutbox();
+    const [run] = await runsForTask(task.id);
+    expect(run!.status).toBe('queued');
+    const res = await reqAs(ws.users.member!.cookie).post(`/agent-runs/${run!.id}/cancel`);
+    expect(res.status).toBe(200);
+    expect((await json(res)).status).toBe('cancelled');
   });
 });

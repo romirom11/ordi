@@ -3,7 +3,8 @@
  *
  * Visibility follows the task: anyone who can open it sees the runs and the
  * live log. Cancel and retry need task write or `agents.manage`, exactly as
- * the API enforces. Events arrive over SSE (see lib/sse.ts, which appends each
+ * the API enforces; a retry is also held to the agent's assign policy, which
+ * the client does not know, so a refusal is shown as the API words it. Events arrive over SSE (see lib/sse.ts, which appends each
  * frame to ['agent-run-events', runId] and refreshes ['agent-runs'] on the
  * frames that change the row); while any run is active both the list and the
  * open log poll every 5s, which is the fallback for a dropped stream.
@@ -309,6 +310,7 @@ function RunRow({ run, canAct, canRetry, hasActive }: {
       // The API refuses a second active run with a domain rule; say it in the
       // reader's language instead of echoing the English sentence.
       if (e instanceof ApiError && e.code === 'domain_rule') { invalidate(); toast.error(t('runs.retryBlocked')); return; }
+      // A refusal by the agent's assign policy (403) says who may retry.
       toast.error(e instanceof ApiError ? e.message : t('runs.actionFailed'));
     },
   });

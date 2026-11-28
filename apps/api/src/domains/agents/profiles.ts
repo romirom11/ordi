@@ -249,8 +249,6 @@ export async function agentAssignRefusals(
   projectId: string,
   assigneeIds: string[],
   projectRole: 'admin' | 'member' | 'viewer' | null,
-  /** policy: false checks membership only (a hand-over by an admin, not an assignment). */
-  opts: { policy?: boolean } = {},
 ): Promise<AgentAssignRefusal[]> {
   if (!assigneeIds.length) return [];
   const { db } = getDb();
@@ -276,7 +274,6 @@ export async function agentAssignRefusals(
       refusals.push({ userId, error: err.domain('This agent is not a member of the project; add it under project members first', { code: 'agent_not_member', userId }) });
     }
   }
-  if (opts.policy === false) return refusals;
   // The assign policy guards spending ordi's runs, so it applies to ordi's agents.
   const profiles = await agentProfilesAmong(agentIds.filter((userId) => !personal.has(userId) && memberSet.has(userId)));
   const canManage = actor.access.permissions.has('agents.manage');
@@ -311,9 +308,7 @@ export async function assertCanAssignAgents(
   projectId: string,
   assigneeIds: string[],
   projectRole: 'admin' | 'member' | 'viewer' | null,
-  /** policy: false checks membership only (a hand-over by an admin, not an assignment). */
-  opts: { policy?: boolean } = {},
 ): Promise<void> {
-  const [first] = await agentAssignRefusals(actor, projectId, assigneeIds, projectRole, opts);
+  const [first] = await agentAssignRefusals(actor, projectId, assigneeIds, projectRole);
   if (first) throw first.error;
 }
