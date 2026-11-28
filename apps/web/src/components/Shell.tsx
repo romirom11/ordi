@@ -5,7 +5,7 @@ import {
   Clock, Receipt, Users, Settings, Search, LogOut, LayoutGrid, CalendarRange,
   SquarePen, Sun, Moon, Monitor, ChevronDown, ChevronRight, GripVertical, User as UserIcon,
   SquareArrowOutUpRight, Link as LinkIcon, ArrowUp, ArrowDown,
-  MonitorDown, UserPlus, PanelLeft, X, Square, Sparkles,
+  MonitorDown, UserPlus, PanelLeft, X, Square, Sparkles, Inbox,
 } from 'lucide-react';
 import { Link, usePathname, useNavigate } from '../lib/router';
 import { useMe, useCan } from '../lib/auth';
@@ -29,6 +29,7 @@ import { UpdateIndicator } from './UpdateIndicator';
 import { WhatsNew } from './WhatsNew';
 import { useActiveTimer, useStopTimer } from '../lib/timer';
 import { useScrollRestoration } from '../lib/scrollRestoration';
+import { useInboxCount } from '../lib/inbox';
 
 extendDict({
   en: {
@@ -71,6 +72,8 @@ interface NavDef {
 const NAV_DEFS: NavDef[] = [
   { key: 'dashboard', to: '/', labelKey: 'nav.dashboard', icon: <LayoutDashboard size={16} />, anyAuth: true, section: 'main' },
   { key: 'myTasks', to: '/my-tasks', labelKey: 'nav.myTasks', icon: <CheckSquare size={16} />, anyAuth: true, section: 'main' },
+  // What waits on me: questions, stopped agent runs, mentions, approvals.
+  { key: 'inbox', to: '/inbox', labelKey: 'nav.inbox', icon: <Inbox size={16} />, anyAuth: true, section: 'main' },
   { key: 'projects', to: '/projects', labelKey: 'nav.projects', icon: <FolderKanban size={16} />, anyAuth: true, section: 'work' },
   { key: 'crm', to: '/crm', labelKey: 'nav.crm', icon: <Handshake size={16} />, perm: 'crm.read', section: 'work', module: 'crm' },
   { key: 'kb', to: '/kb', labelKey: 'nav.knowledge', icon: <BookText size={16} />, perm: 'kb.read', section: 'work', module: 'kb' },
@@ -340,6 +343,8 @@ function ShellInner({ children }: { children: ReactNode }) {
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
 
+  // The Inbox's count: questions put to me and approvals waiting on me.
+  const inboxTotal = useInboxCount().data?.total ?? 0;
   const orderedNav = useMemo(() => {
     const byKey = new Map(NAV_DEFS.map((n) => [n.key, n]));
     const seen = new Set<string>();
@@ -482,6 +487,14 @@ function ShellInner({ children }: { children: ReactNode }) {
         >
           <span className={cn('transition-colors', active ? 'text-foreground' : 'text-faint group-hover/nav:text-muted-foreground')}>{n.icon}</span>
           <span className="flex-1 truncate">{t(n.labelKey)}</span>
+          {n.key === 'inbox' && inboxTotal > 0 && (
+            <span
+              aria-label={`${inboxTotal}`}
+              className="rounded bg-primary/15 px-1.5 text-[11px] font-medium tabular-nums text-primary"
+            >
+              {inboxTotal > 99 ? '99+' : inboxTotal}
+            </span>
+          )}
           <GripVertical
             size={12}
             className="cursor-grab text-faint opacity-0 transition-opacity duration-150 group-hover/nav:opacity-60"

@@ -84,6 +84,7 @@ export function modDigit(e: KeyboardEvent): number {
 export const GO_TO: readonly { key: string; to: string; labelKey: string }[] = [
   { key: 'd', to: '/', labelKey: 'nav.dashboard' },
   { key: 'm', to: '/my-tasks', labelKey: 'nav.myTasks' },
+  { key: 'i', to: '/inbox', labelKey: 'nav.inbox' },
   { key: 'p', to: '/projects', labelKey: 'nav.projects' },
   { key: 'c', to: '/crm', labelKey: 'nav.crm' },
   { key: 'k', to: '/kb', labelKey: 'nav.knowledge' },

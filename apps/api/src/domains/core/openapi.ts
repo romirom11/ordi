@@ -211,6 +211,8 @@ const ROWS: Row[] = [
   ['/tasks/{id}/question/answered', 'post', 'Mark the open question answered', 'projects.read', undefined, 'projects'],
   ['/tasks/{id}/question/withdraw', 'post', 'Withdraw the open question', 'projects.read', undefined, 'projects'],
   ['/me/questions/answered', 'get', 'Questions I asked that have been answered', 'projects.read', undefined, 'projects'],
+  ['/inbox', 'get', 'What waits on me: questions, stopped agent runs, mentions, approvals', null, undefined, 'core'],
+  ['/inbox/count', 'get', 'How many questions and approvals wait on me', null, undefined, 'core'],
   ['/me/tasks', 'get', 'My assigned tasks', null, undefined, 'projects'],
   ['/cycles', 'get', 'List cycles for a project', 'projects.read', undefined, 'projects'],
   ['/cycles', 'post', 'Create cycle', 'projects.write', 'CycleInput', 'projects'],

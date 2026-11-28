@@ -2,6 +2,7 @@ import { Routes, usePathname, type RouteDef } from './lib/router';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { DashboardPage } from './pages/Dashboard';
 import { MyTasksPage } from './pages/MyTasks';
+import { InboxPage } from './pages/Inbox';
 import { CompanyDetailPage } from './pages/CompanyDetail';
 import { DealDetailPage } from './pages/DealDetail';
 import { LeadDetailPage } from './pages/LeadDetail';
@@ -25,6 +26,7 @@ import { ModuleGate } from './components/ModuleGate';
 const routes: RouteDef[] = [
   { pattern: '/', render: () => <DashboardPage /> },
   { pattern: '/my-tasks', render: () => <MyTasksPage /> },
+  { pattern: '/inbox', render: () => <InboxPage /> },
   { pattern: '/crm', render: () => <ModuleGate module="crm" perm="crm.read"><CrmPage /></ModuleGate> },
   { pattern: '/crm/:tab', render: (p) => <ModuleGate module="crm" perm="crm.read"><CrmPage tab={p.tab} /></ModuleGate> },
   { pattern: '/companies', render: () => <ModuleGate module="crm" perm="crm.read"><CrmPage tab="companies" /></ModuleGate> },

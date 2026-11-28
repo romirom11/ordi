@@ -100,6 +100,8 @@ function invalidateFor(qc: QueryClient, type: string, data: any): void {
     if (data?.projectId) inv(['tasks', data.projectId]);
     inv(['me-tasks']);
     inv(['cycles']);
+    // A question opened, answered or withdrawn changes what waits on whom.
+    if (type.startsWith('task.input_')) inv(['inbox']);
   } else if (type.startsWith('comment.')) {
     // comments ride along with the task detail query
     if (data?.taskId) inv(['task', data.taskId]);
@@ -122,6 +124,7 @@ function invalidateFor(qc: QueryClient, type: string, data: any): void {
     inv(['employees']);
     inv(['leave-requests']);
     inv(['people']);
+    if (type.startsWith('leave.')) inv(['inbox']);
   } else if (type.startsWith('time.')) {
     inv(['time']);
     inv(['timer']);
@@ -144,6 +147,7 @@ function invalidateFor(qc: QueryClient, type: string, data: any): void {
     if (data?.taskId) inv(['task', data.taskId]);
     inv(['tasks']);
     inv(['me-tasks']);
+    inv(['inbox']); // a run that stopped, or one that started again
   } else if (type === 'role.updated') {
     inv(['me']);
   }
@@ -236,6 +240,8 @@ export function useRealtime(): { reconnecting: boolean } {
       try { data = JSON.parse(raw); } catch { /* ignore */ }
       if (type === 'notification.created') {
         qc.invalidateQueries({ queryKey: ['notifications'] });
+        // A mention or a question put to me: the Inbox has news too.
+        qc.invalidateQueries({ queryKey: ['inbox'] });
         personalPing(data, tRef.current, (to) => navigateRef.current(to));
         return;
       }
