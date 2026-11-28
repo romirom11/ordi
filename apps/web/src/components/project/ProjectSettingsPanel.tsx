@@ -221,6 +221,7 @@ function ProjectSettings({ projectId, project, onDeleted }: {
         settings={project.settings}
         version={project.version}
         canManage={canManageIntegrations}
+        visibility={project.visibility}
       />
 
       {/* Last, so nobody reaches it by scrolling past what they came for. */}
