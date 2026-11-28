@@ -114,6 +114,30 @@ describe('a task notification from a private project', () => {
     expect(res.unread).toBe(2);
   });
 
+  it('is not marked read from a stale bell while hidden', async () => {
+    await removeFromSecret();
+    const row = (await getDb().db.select().from(schema.notifications).where(eq(schema.notifications.id, secretNote)))[0]!;
+    expect(row.readAt).toBeNull();
+    expect((await reader.as.post(`/notifications/${secretNote}/read`)).status).toBe(200);
+    const after = (await getDb().db.select().from(schema.notifications).where(eq(schema.notifications.id, secretNote)))[0]!;
+    expect(after.readAt).toBeNull();
+    await addToSecret();
+  });
+
+  it('finds the project of an older row through its task', async () => {
+    // Rows written before events carried a projectId name only the task.
+    const legacy = ulid();
+    await getDb().db.insert(schema.notifications).values({
+      id: legacy, userId: reader.userId, type: 'comment.mentioned', dedupeKey: `test:${legacy}`,
+      entityRef: 'SKW-1', payload: { ref: 'SKW-1', taskId: secretTask, mentions: [reader.userId] },
+    });
+    expect((await bell()).data.some((n) => n.id === legacy)).toBe(true);
+    await removeFromSecret();
+    expect((await bell()).data.some((n) => n.id === legacy)).toBe(false);
+    await addToSecret();
+    expect((await bell()).data.some((n) => n.id === legacy)).toBe(true);
+  });
+
   it('goes with a deleted project and returns with its restore', async () => {
     const { db } = getDb();
     await db.update(schema.projects).set({ deletedAt: new Date() }).where(eq(schema.projects.id, secretProject));
@@ -186,6 +210,20 @@ describe('a page mention', () => {
     expect(await mentioned()).toBe(false);
     await db.insert(schema.spaceMembers).values({ spaceId, userId: reader.userId, role: 'viewer' });
     expect(await mentioned()).toBe(true);
+  });
+
+  it('holds a page mention filed under the older comment.mentioned type to the same rule', async () => {
+    const legacy = ulid();
+    await getDb().db.insert(schema.notifications).values({
+      id: legacy, userId: reader.userId, type: 'comment.mentioned', dedupeKey: `test:${legacy}`,
+      entityRef: null, payload: { pageId, spaceId, mentions: [reader.userId] },
+    });
+    const listed = async () => (await bell()).data.some((n) => n.id === legacy);
+    expect(await listed()).toBe(true);
+    await setPage({ visibility: 'private' });
+    expect(await listed()).toBe(false);
+    await setPage({ visibility: 'public' });
+    expect(await listed()).toBe(true);
   });
 
   it('hides once the page is deleted', async () => {
