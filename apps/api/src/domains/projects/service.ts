@@ -964,6 +964,20 @@ export async function openTasksAssignedTo(userId: string) {
 }
 
 /**
+ * What the deactivate dialog shows the admin about a person's open tasks
+ * (ORD-39). users.manage is not a key to private projects: a task in one the
+ * actor cannot open is only counted – no id, ref, title or project – the way
+ * any other list leaves it out. The hand-over itself still moves every open
+ * task (handOffOpenTasks), so `count` is the full number that will move.
+ */
+export async function openTasksPreview(actor: Actor, userId: string) {
+  const all = await openTasksAssignedTo(userId);
+  const canOpen = new Set(await accessibleProjectIds(actor));
+  const visible = all.filter((t) => canOpen.has(t.projectId));
+  return { count: all.length, hiddenCount: all.length - visible.length, visible };
+}
+
+/**
  * Take a leaving person off their open work. Every open task assigned to
  * them loses that assignee and, when a successor is named, gains the
  * successor (a task the successor already had stays as it is). Closed tasks

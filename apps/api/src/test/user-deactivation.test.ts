@@ -61,6 +61,58 @@ describe('open tasks preview', () => {
   });
 });
 
+/**
+ * users.manage is not a key to private projects (ORD-39): the preview names
+ * only tasks the admin can open and counts the rest, while the hand-over
+ * still moves every one of them.
+ */
+describe('open tasks preview and private projects', () => {
+  async function privateProjectWithTask() {
+    const typeId = ulid();
+    await getDb().db.insert(schema.projectTypes).values({ id: typeId, name: 'Hidden' });
+    // The Owner creates it and is its only member besides the assignee; the
+    // workspace Admin is not on it.
+    const hidden = await json(reqAs(users.owner!.cookie).post('/projects', { name: 'Codename Falcon', key: 'FAL', projectTypeId: typeId, visibility: 'private' }));
+    await addProjectMember(users, hidden.id, users.member!.userId);
+    const res = await reqAs(users.owner!.cookie).post('/tasks', { projectId: hidden.id, title: 'Falcon launch plan', assigneeIds: [users.member!.userId] });
+    expect(res.status).toBe(201);
+    return { hidden, task: await json(res) };
+  }
+
+  it('hides a task in a private project the caller is not on, and counts it', async () => {
+    const visible = await createTask('Still to do', { assigneeIds: [users.member!.userId] });
+    const { hidden, task } = await privateProjectWithTask();
+
+    const res = await reqAs(users.admin!.cookie).get(`/users/${users.member!.userId}/open-tasks`);
+    expect(res.status).toBe(200);
+    const preview = await json(res);
+    expect(preview.count).toBe(2);
+    expect(preview.hiddenCount).toBe(1);
+    expect(preview.data.map((t: { id: string }) => t.id)).toEqual([visible.id]);
+    // Nothing about the hidden task or its project in the whole answer.
+    const text = JSON.stringify(preview);
+    for (const secret of [task.id, hidden.id, 'FAL', 'Falcon']) expect(text).not.toContain(secret);
+  });
+
+  it('shows the same task in full to a caller who is on the project', async () => {
+    const { hidden, task } = await privateProjectWithTask();
+
+    const preview = await json(reqAs(users.owner!.cookie).get(`/users/${users.member!.userId}/open-tasks`));
+    expect(preview.count).toBe(1);
+    expect(preview.hiddenCount).toBe(0);
+    expect(preview.data).toEqual([{ id: task.id, projectId: hidden.id, title: 'Falcon launch plan', ref: `FAL-${task.number}` }]);
+  });
+
+  it('still hands the hidden task over', async () => {
+    const { task } = await privateProjectWithTask();
+
+    const res = await reqAs(users.admin!.cookie).post(`/users/${users.member!.userId}/deactivate`, { reassignTo: users.hr!.userId });
+    expect(res.status).toBe(200);
+    expect(await json(res)).toMatchObject({ ok: true, handedOffTasks: 1 });
+    expect(await assigneesOf(task.id)).toEqual([users.hr!.userId]);
+  });
+});
+
 describe('deactivate with hand-off', () => {
   it('moves open tasks to the successor and leaves closed ones alone', async () => {
     const open = await createTask('Still to do', { assigneeIds: [users.member!.userId] });

@@ -35,7 +35,8 @@ import { SectionHead, SettingRow, Field, RowList, AnimatedRow } from '../compone
 import { downscaleImage } from '../components/settings/image';
 import { useMcpConnectors } from '../lib/queries';
 import { usePageTitle } from '../lib/tabs';
-import { useT } from '../lib/i18n';
+import { useLocale, useT } from '../lib/i18n';
+import { hiddenTasksKey } from '../components/settings/deactivatePreview';
 import { extendDict } from '../lib/i18n';
 import { APP_VERSION, compareVersions, isVersion } from '../lib/version';
 
@@ -85,6 +86,10 @@ extendDict({
     'settings.deactivateBody': 'They will be signed out everywhere and their API tokens revoked. Open tasks assigned to them need a new owner.',
     'settings.openTasksNone': 'No open tasks assigned – nothing to hand over.',
     'settings.openTasksCount': 'Open tasks assigned',
+    'settings.hiddenTasksMore.one': 'and {n} more task in a private project',
+    'settings.hiddenTasksMore.other': 'and {n} more tasks in private projects',
+    'settings.hiddenTasksOnly.one': '{n} task in a private project you cannot open',
+    'settings.hiddenTasksOnly.other': '{n} tasks in private projects you cannot open',
     'settings.handOffTo': 'Hand open tasks to',
     'settings.leaveUnassigned': 'Leave unassigned',
     'settings.ownedAgents': 'External agents they own',
@@ -173,6 +178,14 @@ extendDict({
     'settings.deactivateBody': 'Його сесії завершаться, API-токени буде відкликано. Відкриті задачі, призначені на нього, потрібно комусь передати.',
     'settings.openTasksNone': 'Відкритих задач немає, передавати нічого.',
     'settings.openTasksCount': 'Відкритих задач',
+    'settings.hiddenTasksMore.one': 'і ще {n} задача в приватних проєктах',
+    'settings.hiddenTasksMore.few': 'і ще {n} задачі в приватних проєктах',
+    'settings.hiddenTasksMore.many': 'і ще {n} задач у приватних проєктах',
+    'settings.hiddenTasksMore.other': 'і ще {n} задачі в приватних проєктах',
+    'settings.hiddenTasksOnly.one': '{n} задача в приватних проєктах, які ви не можете відкрити',
+    'settings.hiddenTasksOnly.few': '{n} задачі в приватних проєктах, які ви не можете відкрити',
+    'settings.hiddenTasksOnly.many': '{n} задач у приватних проєктах, які ви не можете відкрити',
+    'settings.hiddenTasksOnly.other': '{n} задачі в приватних проєктах, які ви не можете відкрити',
     'settings.handOffTo': 'Передати відкриті задачі',
     'settings.leaveUnassigned': 'Залишити без виконавця',
     'settings.ownedAgents': 'Зовнішні агенти, власником яких є людина',
@@ -632,15 +645,20 @@ function DeactivateUserDialog({ user, candidates, pending, error, onClose, onCon
   onChangeSuccessor: () => void;
 }) {
   const t = useT();
+  const locale = useLocale();
   const [reassignTo, setReassignTo] = useState('');
   useEffect(() => { setReassignTo(''); }, [user?.id]);
   const open = useQuery({
     queryKey: ['user-open-tasks', user?.id],
-    queryFn: () => api.get<{ count: number; data: { id: string; ref: string; title: string }[]; ownedAgents?: { id: string; name: string; kind?: string }[] }>(`/users/${user!.id}/open-tasks`),
+    queryFn: () => api.get<{ count: number; hiddenCount?: number; data: { id: string; ref: string; title: string }[]; ownedAgents?: { id: string; name: string; kind?: string }[] }>(`/users/${user!.id}/open-tasks`),
     enabled: !!user,
   });
   const count = open.data?.count ?? 0;
   const sample = open.data?.data ?? [];
+  // Tasks in private projects this admin is not on: counted, never listed.
+  // They are handed over with the rest.
+  const hiddenCount = open.data?.hiddenCount ?? 0;
+  const visibleCount = count - hiddenCount;
   const ownedAgents = open.data?.ownedAgents ?? [];
   // Their own agent is never handed on: it goes dark with them.
   const teamAgents = ownedAgents.filter((a) => a.kind !== 'personal');
@@ -679,7 +697,10 @@ function DeactivateUserDialog({ user, candidates, pending, error, onClose, onCon
                 {sample.map((task) => (
                   <li key={task.id} className="truncate"><span className="font-mono text-xs text-faint">{task.ref}</span> {task.title}</li>
                 ))}
-                {count > sample.length && <li className="text-xs text-faint">…</li>}
+                {visibleCount > sample.length && <li className="text-xs text-faint">…</li>}
+                {hiddenCount > 0 && (
+                  <li className="text-xs text-faint">{t(hiddenTasksKey(hiddenCount, visibleCount, locale)).replace('{n}', String(hiddenCount))}</li>
+                )}
               </ul>
             </div>}
             {teamAgents.length > 0 && (
