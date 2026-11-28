@@ -1,20 +1,21 @@
 /**
- * Profile → MCP & API → Your agent: one agent of your own for Claude Code,
- * Codex and the like. It works your tasks under its own name – it asks you
- * instead of writing as you – and can do only what you can, as a member at
- * most: tasks and the knowledge base, never finance, people, settings or
- * secrets. Its clients are connected above and listed under Connections, so
- * this section is only the agent itself: its name, its switch, what it can do.
+ * Profile → Connections → Your agent, the first thing on the page: one agent
+ * of your own for Claude Code, Codex and the like. It works your tasks under
+ * its own name – it asks you instead of writing as you – and can do only what
+ * you can, as a member at most: tasks and the knowledge base, never finance,
+ * people, settings or secrets. Its clients are connected below and listed
+ * under Connected clients, so this card is only the agent itself: its name,
+ * its switch, one line on what it does, and what it can do behind a disclosure.
  */
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Bot, Zap } from 'lucide-react';
+import { BookOpen, Bot, Pencil, Zap } from 'lucide-react';
 import { mcpToolsOfKind } from '@ordi/shared';
 import { api, ApiError } from '../../lib/api';
-import { Avatar, Button, Input, Skeleton, Spinner, Switch } from '../ui';
+import { Avatar, Button, IconButton, Input, Skeleton, Spinner, Switch, cn } from '../ui';
 import { ConfirmDialog, toast } from '../overlays';
 import { useT, extendDict } from '../../lib/i18n';
-import { myAgentView } from './myAgentView';
+import { myAgentView, renameOutcome } from './myAgentView';
 import { Disclosure, RowList, SubHead } from './primitives';
 import type { AgentToken } from './connections';
 
@@ -29,6 +30,8 @@ extendDict({
     'myAgent.readTools': 'Read',
     'myAgent.actionTools': 'Actions',
     'myAgent.name': 'Agent name',
+    'myAgent.rename': 'Rename agent',
+    'myAgent.renamed': 'Agent renamed.',
     'myAgent.none': 'No agent yet',
     'myAgent.noneHint': 'Create one to run Claude Code, Codex or another client on your tasks under a name of its own, instead of as you.',
     'myAgent.namePh': 'e.g. Jarvis',
@@ -50,6 +53,8 @@ extendDict({
     'myAgent.readTools': 'Читання',
     'myAgent.actionTools': 'Дії',
     'myAgent.name': 'Ім’я агента',
+    'myAgent.rename': 'Перейменувати агента',
+    'myAgent.renamed': 'Агента перейменовано.',
     'myAgent.none': 'Агента ще немає',
     'myAgent.noneHint': 'Створіть його, щоб запускати Claude Code, Codex чи інший клієнт на своїх задачах під окремим іменем, а не від вашого.',
     'myAgent.namePh': 'напр. Jarvis',
@@ -95,19 +100,25 @@ export function MyAgentSection() {
   return (
     <section className="mb-10" aria-labelledby="my-agent">
       <SubHead title={<span id="my-agent">{t('myAgent.title')}</span>} />
-      <RowList className="px-3 py-3">
+      <RowList className="px-4 py-3.5">
         {view === 'loading' ? (
-          <Skeleton className="h-10 w-full" />
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-9 w-9 shrink-0 rounded-full" />
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-3 w-full max-w-sm" />
+            </div>
+          </div>
         ) : view === 'error' ? (
-          <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
+          <div className="flex min-h-9 items-center gap-2 text-[13px] text-muted-foreground">
             {t('common.loadFailed')}
             <Button size="xs" variant="ghost" onClick={() => q.refetch()}>{t('common.retry')}</Button>
           </div>
         ) : view === 'none' || !q.data ? (
           <div className="flex items-start gap-3">
-            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground"><Bot size={15} aria-hidden /></div>
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground"><Bot size={16} aria-hidden /></div>
             <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-medium">{t('myAgent.none')}</p>
+              <p className="text-sm font-semibold leading-5">{t('myAgent.none')}</p>
               <p className="mt-0.5 text-xs text-muted-foreground">{t('myAgent.noneHint')}</p>
               <form className="mt-2.5 flex flex-wrap gap-2" onSubmit={(e: FormEvent) => { e.preventDefault(); if (name.trim()) create.mutate(); }}>
                 <Input value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder={t('myAgent.namePh')} aria-label={t('myAgent.name')} className="h-8 max-w-xs" />
@@ -120,7 +131,8 @@ export function MyAgentSection() {
         ) : (
           <AgentDetails agent={q.data} onChanged={refresh} onError={apiError} />
         )}
-        <Disclosure label={t('myAgent.details')} className="mt-2">
+        {/* Lined up under the text, past the avatar. */}
+        <Disclosure label={t('myAgent.details')} className="mt-1.5 pl-12">
           <div className="space-y-3 pb-1 pl-5 pt-2">
             <p className="text-xs text-muted-foreground">{t('myAgent.desc')}</p>
             <p className="text-xs text-muted-foreground">{t('myAgent.toolsHint')}</p>
@@ -135,16 +147,17 @@ export function MyAgentSection() {
 
 function AgentDetails({ agent, onChanged, onError }: { agent: MyAgent; onChanged: () => void; onError: (e: unknown) => void }) {
   const t = useT();
-  const [name, setName] = useState(agent.name);
+  const [editing, setEditing] = useState(false);
   const [confirmOff, setConfirmOff] = useState(false);
-  // Renamed elsewhere (another tab) or put back after a failed rename.
-  useEffect(() => { setName(agent.name); }, [agent.name]);
+  const pencil = useRef<HTMLButtonElement>(null);
+  // Focus goes back to the pencil once editing closes – only then, not on the
+  // first render, so opening the page does not jump to it.
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (!editing && refocus.current) { refocus.current = false; pencil.current?.focus(); }
+  }, [editing]);
+  const close = () => { refocus.current = true; setEditing(false); };
 
-  const rename = useMutation({
-    mutationFn: (n: string) => api.patch('/my-agent', { name: n }),
-    onSuccess: onChanged,
-    onError: (e) => { setName(agent.name); onError(e); },
-  });
   const toggle = useMutation({
     mutationFn: (on: boolean) => api.post(`/my-agent/${on ? 'enable' : 'disable'}`),
     onSuccess: () => { setConfirmOff(false); onChanged(); },
@@ -153,27 +166,29 @@ function AgentDetails({ agent, onChanged, onError }: { agent: MyAgent; onChanged
 
   return (
     <div>
-      <div className="flex flex-wrap items-center gap-3">
-        <Avatar name={agent.name} src={agent.avatar} size={32} agent className={agent.isActive ? undefined : 'opacity-50'} />
-        <Input
-          value={name}
-          maxLength={60}
-          aria-label={t('myAgent.name')}
-          className="h-8 max-w-xs flex-1"
-          onChange={(e) => setName(e.target.value)}
-          onBlur={() => {
-            const next = name.trim();
-            if (!next) setName(agent.name);
-            else if (next !== agent.name) rename.mutate(next);
-          }}
-        />
-        {/* The words are part of the control: the switch alone is a small target. */}
-        <label className="ml-auto flex min-h-7 cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-          <span aria-hidden>{agent.isActive ? t('myAgent.on') : t('myAgent.offState')}</span>
-          <Switch checked={agent.isActive} disabled={toggle.isPending} onChange={(v) => (v ? toggle.mutate(true) : setConfirmOff(true))} label={t('myAgent.switch')} />
-        </label>
+      <div className="flex items-start gap-3">
+        <Avatar name={agent.name} src={agent.avatar} size={36} agent className={agent.isActive ? undefined : 'opacity-50'} />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-h-8 flex-wrap items-center gap-x-3 gap-y-2">
+            {editing ? (
+              <RenameForm agent={agent} onDone={(saved) => { close(); if (saved) onChanged(); }} onError={onError} />
+            ) : (
+              <div className="flex min-w-0 items-center gap-0.5">
+                <span className="truncate text-sm font-semibold">{agent.name}</span>
+                <IconButton ref={pencil} aria-label={t('myAgent.rename')} title={t('myAgent.rename')} onClick={() => setEditing(true)}>
+                  <Pencil size={13} aria-hidden />
+                </IconButton>
+              </div>
+            )}
+            {/* The words are part of the control: the switch alone is a small target. */}
+            <label className="ml-auto flex min-h-7 cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+              <span aria-hidden>{agent.isActive ? t('myAgent.on') : t('myAgent.offState')}</span>
+              <Switch checked={agent.isActive} disabled={toggle.isPending} onChange={(v) => (v ? toggle.mutate(true) : setConfirmOff(true))} label={t('myAgent.switch')} />
+            </label>
+          </div>
+          <p className={cn('text-xs text-muted-foreground', editing && 'mt-1.5')}>{agent.isActive ? t('myAgent.summary') : t('myAgent.summaryOff')}</p>
+        </div>
       </div>
-      <p className="mt-2 text-xs text-muted-foreground">{agent.isActive ? t('myAgent.summary') : t('myAgent.summaryOff')}</p>
 
       <ConfirmDialog
         open={confirmOff}
@@ -186,6 +201,79 @@ function AgentDetails({ agent, onChanged, onError }: { agent: MyAgent; onChanged
         pending={toggle.isPending}
       />
     </div>
+  );
+}
+
+/**
+ * The name, being edited in place: Enter or Save keeps it, Escape or Cancel
+ * puts it back. Nothing is saved by just leaving the field, so tabbing on to
+ * Save or Cancel never decides for you.
+ */
+function RenameForm({ agent, onDone, onError }: { agent: MyAgent; onDone: (saved: boolean) => void; onError: (e: unknown) => void }) {
+  const t = useT();
+  const qc = useQueryClient();
+  // The name as it was when editing began: a refetch bringing a rename from
+  // another tab must not turn an untouched draft into a change.
+  const [initial] = useState(agent.name);
+  const [draft, setDraft] = useState(agent.name);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => { input.current?.select(); }, []);
+
+  const rename = useMutation({
+    mutationFn: (n: string) => api.patch('/my-agent', { name: n }),
+    onSuccess: (_r, n) => {
+      // The new name shows the moment editing closes, not after the refetch.
+      qc.setQueryData<MyAgent | null>(KEY, (a) => (a ? { ...a, name: n } : a));
+      toast(t('myAgent.renamed'));
+      onDone(true);
+    },
+    // The draft stays, so a failed save can be retried or cancelled. Enter
+    // keeps focus in the field (read-only while saving, never disabled);
+    // clicking Save, which is disabled while saving, drops it, so it comes
+    // back to the field – unless the person has moved on meanwhile.
+    onError: (e) => {
+      onError(e);
+      if (!document.activeElement || document.activeElement === document.body) input.current?.focus();
+    },
+  });
+  const outcome = renameOutcome(draft, initial);
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (rename.isPending) return;
+    if (outcome.kind === 'save') rename.mutate(outcome.name);
+    else if (outcome.kind === 'close') onDone(false);
+    else input.current?.focus();
+  };
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape' || rename.isPending) return;
+    // Escape belongs to this field here, not to whatever else listens for it.
+    e.preventDefault();
+    e.stopPropagation();
+    onDone(false);
+  };
+
+  return (
+    // Narrow, the field and its buttons take a line of their own and the switch moves under them.
+    <form className="flex min-w-0 flex-1 basis-full items-center gap-2 sm:basis-auto" onSubmit={submit} onKeyDown={onKeyDown}>
+      <Input
+        ref={input}
+        autoFocus
+        value={draft}
+        maxLength={60}
+        aria-label={t('myAgent.name')}
+        readOnly={rename.isPending}
+        aria-busy={rename.isPending}
+        className="h-8 w-auto min-w-0 max-w-xs flex-1"
+        onChange={(e) => setDraft(e.target.value)}
+      />
+      <div className="flex shrink-0 items-center gap-1">
+        <Button type="submit" size="sm" className="h-8" disabled={outcome.kind === 'invalid' || rename.isPending}>
+          {rename.isPending && <Spinner />} {t('common.save')}
+        </Button>
+        <Button type="button" size="sm" variant="ghost" className="h-8" disabled={rename.isPending} onClick={() => onDone(false)}>{t('common.cancel')}</Button>
+      </div>
+    </form>
   );
 }
 

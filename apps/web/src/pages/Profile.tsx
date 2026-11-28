@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../lib/api';
 import { useMe } from '../lib/auth';
@@ -38,7 +38,7 @@ extendDict({
     'profile.notifications': 'Notifications',
     'profile.notificationsDesc': 'What reaches you by email, and the sound on this device.',
     'profile.securityDesc': 'Your password and the second factor for signing in.',
-    'profile.mcp': 'MCP & API',
+    'profile.connections': 'Connections',
   },
   uk: {
     'profile.profileInfo': 'Профіль',
@@ -63,7 +63,7 @@ extendDict({
     'profile.notifications': 'Сповіщення',
     'profile.notificationsDesc': 'Що приходить вам на пошту і звук на цьому пристрої.',
     'profile.securityDesc': 'Пароль і другий фактор для входу.',
-    'profile.mcp': 'MCP і API',
+    'profile.connections': 'Підключення',
   },
 });
 
@@ -92,13 +92,14 @@ const NOTIFICATION_TYPES: { type: string; label: string }[] = [
  * column (profile, preferences, thirteen notification switches, password,
  * tokens, 2FA) – the thing you came for was always a scroll away. The nav
  * mirrors Settings, so both pages read the same; this one is only ever about
- * the signed-in person, which is why personal MCP/API access lives here.
+ * the signed-in person, which is why personal MCP/API access – Connections –
+ * lives here.
  */
 const SECTIONS = [
   { id: 'account', label: 'profile.profileInfo', icon: UserRound },
   { id: 'notifications', label: 'profile.notifications', icon: Bell },
   { id: 'security', label: 'profile.security', icon: ShieldCheck },
-  { id: 'mcp', label: 'profile.mcp', icon: Bot },
+  { id: 'connections', label: 'profile.connections', icon: Bot },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]['id'];
 
@@ -107,7 +108,11 @@ const sectionPath = (id: SectionId) => (id === 'account' ? '/profile' : `/profil
 
 export function ProfilePage({ section }: { section?: string }) {
   const t = useT();
+  // The old /profile/mcp is sent to /profile/connections by the router (REDIRECTS).
   const active = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0];
+  // On a phone the sections are a row that scrolls sideways: keep the current one in sight.
+  const activeLink = useRef<HTMLAnchorElement>(null);
+  useEffect(() => { activeLink.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }, [active.id]);
   usePageTitle(active.id === 'account' ? t('profile.title') : `${t('profile.title')} · ${t(active.label)}`);
 
   return (
@@ -124,6 +129,7 @@ export function ProfilePage({ section }: { section?: string }) {
               return (
                 <Link
                   key={s.id}
+                  ref={isActive ? activeLink : undefined}
                   to={sectionPath(s.id)}
                   aria-current={isActive ? 'page' : undefined}
                   className={cn(
@@ -164,7 +170,7 @@ export function ProfilePage({ section }: { section?: string }) {
                 </div>
               </>
             )}
-            {active.id === 'mcp' && <McpPanel />}
+            {active.id === 'connections' && <McpPanel />}
           </PageBody>
         </div>
       </div>

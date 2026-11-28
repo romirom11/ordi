@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildConnections, connectionsKey, connectionsView, pluralKey, scriptTokens, showIssued, type AgentToken, type OwnToken } from './connections';
+import { buildConnections, connectionLine, connectionRows, connectionsView, pluralKey, scriptTokens, showIssued, type AgentToken, type OwnToken } from './connections';
 
 const NOW = new Date('2026-11-28T12:00:00Z').getTime();
 
@@ -63,13 +63,76 @@ describe('scriptTokens', () => {
   });
 });
 
-describe('connectionsKey', () => {
+describe('pluralKey', () => {
   it('picks the plural form for the locale', () => {
-    expect([1, 2, 21].map((n) => connectionsKey(n, 'en'))).toEqual(['oauth.connections.one', 'oauth.connections.other', 'oauth.connections.other']);
-    expect([1, 2, 5, 11, 21, 22].map((n) => connectionsKey(n, 'uk'))).toEqual([
-      'oauth.connections.one', 'oauth.connections.few', 'oauth.connections.many',
-      'oauth.connections.many', 'oauth.connections.one', 'oauth.connections.few',
+    expect([1, 2, 21].map((n) => pluralKey('mcp.permissions', n, 'en'))).toEqual(['mcp.permissions.one', 'mcp.permissions.other', 'mcp.permissions.other']);
+    expect([1, 2, 5, 11, 21, 22].map((n) => pluralKey('mcp.permissions', n, 'uk'))).toEqual([
+      'mcp.permissions.one', 'mcp.permissions.few', 'mcp.permissions.many',
+      'mcp.permissions.many', 'mcp.permissions.one', 'mcp.permissions.few',
     ]);
+  });
+});
+
+describe('connectionRows', () => {
+  const tok = (id: string, prefix: string | null, client = 'Claude Code'): OwnToken =>
+    ({ id, name: client, client, oauth: true, prefix, createdAt: '2026-11-01T00:00:00Z' });
+
+  it('gives every connection a line of its own, in the groups’ order', () => {
+    const rows = connectionRows(buildConnections(own, agent, NOW));
+    expect(rows.map((r) => [r.client, r.actsAs, r.connection.id])).toEqual([
+      ['Claude', 'agent', 'agent-claude'], ['Claude', 'you', 'server'], ['Claude', 'you', 'laptop'],
+      ['Codex', 'agent', 'agent-codex'], ['Zed', 'you', 'zed'],
+    ]);
+  });
+
+  it('adds a suffix only where one client is connected more than once as the same', () => {
+    const rows = connectionRows(buildConnections([tok('a', 'ordi_Ab3dE9x'), tok('b', 'ordi_Qw7rT2k'), tok('c', 'ordi_Zz9yX1w', 'Cursor')], [
+      { id: 'g', name: 'Claude Code', prefix: 'ordi_Mn4bV6c', lastUsedAt: null, expiresAt: null },
+    ], NOW));
+    expect(rows.map((r) => [r.client, r.actsAs, r.suffix])).toEqual([
+      // The agent's one Claude Code needs none: the badge already tells it from yours.
+      ['Claude Code', 'agent', null],
+      ['Claude Code', 'you', 'dE9x'], ['Claude Code', 'you', 'rT2k'],
+      ['Cursor', 'you', null],
+    ]);
+  });
+
+  it('falls back to the ids where prefixes cannot tell connections apart', () => {
+    const rows = connectionRows(buildConnections([
+      tok('11111111-aaaa', 'ordi_Same123'), tok('22222222-bbbb', 'ordi_Same123'),
+      tok('33333333-cccc', null, 'Cursor'), tok('44444444-dddd', 'ordi_Xy12345', 'Cursor'),
+    ], [], NOW));
+    expect(rows.map((r) => [r.client, r.suffix])).toEqual([
+      ['Claude Code', 'aaaa'], ['Claude Code', 'bbbb'], ['Cursor', 'cccc'], ['Cursor', 'dddd'],
+    ]);
+  });
+
+  it('takes longer tails when two prefixes end alike', () => {
+    const rows = connectionRows(buildConnections([tok('a', 'ordi_A1b2c3d'), tok('b', 'ordi_Z9b2c3d')], [], NOW));
+    expect(rows.map((r) => r.suffix).sort()).toEqual(['1b2c3d', '9b2c3d']);
+  });
+});
+
+describe('connectionLine', () => {
+  const dict: Record<string, string> = {
+    'mcp.lastUsed': 'Last used {when}', 'mcp.neverUsed': 'Not used yet', 'mcp.until': 'Until {date}',
+    'mcp.signedIn': 'Signed in {date}', 'mcp.tokenMade': 'Connected with a token {date}',
+  };
+  const t = (k: string) => dict[k] ?? k;
+  const fmt = { date: (iso: string) => iso.slice(0, 10), relative: () => '2h ago' };
+  const rows = connectionRows(buildConnections(own, agent, NOW));
+  const row = (id: string) => rows.find((r) => r.connection.id === id)!;
+
+  it('says when it was last used, or that it has not been, and when it runs out', () => {
+    expect(connectionLine(row('server'), t, fmt).meta).toEqual(['Last used 2h ago']);
+    expect(connectionLine(row('agent-claude'), t, fmt).meta).toEqual(['Not used yet', 'Until 2027-02-23']);
+  });
+
+  it('keeps how and when it was connected for the tooltip, never at the front of the line', () => {
+    const line = connectionLine(row('agent-claude'), t, fmt);
+    expect(line.meta.join(' ')).not.toMatch(/Signed in|token/);
+    expect(line.tooltip).toBe('Signed in 2026-11-25 · ordi_a…');
+    expect(connectionLine(row('zed'), t, fmt).tooltip).toBe('Connected with a token 2026-11-10');
   });
 });
 

@@ -25,16 +25,16 @@ extendDict({
     'oauth.title': 'Authorize access',
     'oauth.subtitle': '{client} wants to connect to your workspace.',
     'oauth.as': 'You are signed in as',
-    'oauth.scopeHint': 'It will act with your permissions – it can do what you can do, nothing more. You can revoke access anytime in Profile → MCP & API.',
+    'oauth.scopeHint': 'It will act with your permissions – it can do what you can do, nothing more. You can revoke access anytime in Profile → Connections.',
     'oauth.connectAs': 'Connect it as',
     'oauth.asAgent': 'As my agent {name}',
     'oauth.asAgentHint': 'It works under its agent name and asks you when unsure. It can do only what you can with tasks and the knowledge base, never finance, people, settings or secrets.',
     'oauth.asMe': 'As me',
     'oauth.asMeHint': 'It acts with your permissions and writes under your name.',
-    'oauth.revokeHint': 'You can disconnect it anytime in Profile → MCP & API.',
+    'oauth.revokeHint': 'You can disconnect it anytime in Profile → Connections.',
     'oauth.noAgent': 'Want it to work under a name of its own instead of yours?',
-    'oauth.noAgentLink': 'Create your agent in Profile → MCP & API',
-    'oauth.agentOff': 'Your agent {name} is switched off. Switch it on in Profile → MCP & API to connect as it.',
+    'oauth.noAgentLink': 'Create your agent in Profile → Connections',
+    'oauth.agentOff': 'Your agent {name} is switched off. Switch it on in Profile → Connections to connect as it.',
     'oauth.approve': 'Authorize',
     'oauth.deny': 'Deny',
     'oauth.invalid': 'This authorization request is invalid or incomplete. Start again from the app you are connecting.',
@@ -46,16 +46,16 @@ extendDict({
     'oauth.title': 'Надати доступ',
     'oauth.subtitle': '{client} хоче підключитися до вашого воркспейсу.',
     'oauth.as': 'Ви увійшли як',
-    'oauth.scopeHint': 'Він діятиме з вашими правами – зможе те саме, що й ви, і не більше. Доступ можна відкликати будь-коли в Профіль → MCP і API.',
+    'oauth.scopeHint': 'Він діятиме з вашими правами – зможе те саме, що й ви, і не більше. Доступ можна відкликати будь-коли в Профіль → Підключення.',
     'oauth.connectAs': 'Підключити як',
     'oauth.asAgent': 'Як мій агент {name}',
     'oauth.asAgentHint': 'Він працює під іменем агента і питає вас, коли щось незрозуміло. Може лише те, що й ви, із задачами та базою знань, ніколи фінанси, людей, налаштування чи секрети.',
     'oauth.asMe': 'Як я',
     'oauth.asMeHint': 'Він діє з вашими правами і пише від вашого імені.',
-    'oauth.revokeHint': 'Відключити його можна будь-коли в Профіль → MCP і API.',
+    'oauth.revokeHint': 'Відключити його можна будь-коли в Профіль → Підключення.',
     'oauth.noAgent': 'Хочете, щоб він працював під окремим іменем, а не вашим?',
-    'oauth.noAgentLink': 'Створіть агента в Профіль → MCP і API',
-    'oauth.agentOff': 'Ваш агент {name} вимкнений. Увімкніть його в Профіль → MCP і API, щоб підключитися як він.',
+    'oauth.noAgentLink': 'Створіть агента в Профіль → Підключення',
+    'oauth.agentOff': 'Ваш агент {name} вимкнений. Увімкніть його в Профіль → Підключення, щоб підключитися як він.',
     'oauth.approve': 'Дозволити',
     'oauth.deny': 'Відхилити',
     'oauth.invalid': 'Запит на авторизацію некоректний або неповний. Почніть знову із застосунку, який підключаєте.',
@@ -218,7 +218,7 @@ export function OAuthConsentPage() {
                 ? t('oauth.agentOff').replace('{name}', client.data.myAgent.name)
                 : <>{t('oauth.noAgent')}{' '}
                   {/* A new tab: the consent request stays open here to approve afterwards. */}
-                  <a href="/profile/mcp" target="_blank" rel="noopener" className="text-primary underline-offset-2 hover:underline">{t('oauth.noAgentLink')}</a></>}
+                  <a href="/profile/connections" target="_blank" rel="noopener" className="text-primary underline-offset-2 hover:underline">{t('oauth.noAgentLink')}</a></>}
             </p>
           </>
         )}

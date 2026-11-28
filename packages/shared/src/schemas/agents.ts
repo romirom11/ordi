@@ -187,7 +187,7 @@ export const issueExternalAgentTokenSchema = z.object({
   expiresInDays: z.number().int().min(1).max(3650).nullable().default(90),
 });
 
-// ── A person's own agent (Profile → MCP & API) ──
+// ── A person's own agent (Profile → Connections) ──
 
 /**
  * How long a client's token for a personal agent lasts unless the person

@@ -2,7 +2,7 @@
  * Settings → Agents shows every agent of the workspace in one list: those
  * ordi runs itself and those that connect from outside under their own name
  * (team bots). People's own agents are not here – they live in each person's
- * Profile → MCP & API.
+ * Profile → Connections.
  */
 
 export type AgentKind = 'ordi' | 'outside';

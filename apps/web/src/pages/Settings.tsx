@@ -11,7 +11,7 @@ import {
   KeyRound, Sun, Plug2, Mail,
 } from 'lucide-react';
 import { api, qs, ApiError } from '../lib/api';
-import { Link, useNavigate } from '../lib/router';
+import { Link } from '../lib/router';
 import { useCan } from '../lib/auth';
 import { WORKSPACE_CURRENCIES, currencyOptions } from '../lib/currency';
 import {
@@ -321,7 +321,7 @@ const GROUPS: NavGroup[] = [
       { id: 'invoices', label: 'settings.invoices', perm: 'finance.settings', icon: Receipt },
       { id: 'email', label: 'email.title', perm: 'settings.manage', icon: Mail },
       { id: 'integrations', label: 'settings.integrations', perm: 'integrations.manage', icon: Plug },
-      // Personal MCP/API access lives on the profile (/profile/mcp): everything
+      // Personal MCP/API access lives on the profile (/profile/connections): everything
       // here configures the workspace, and a personal page among them read as
       // one more workspace-wide switch.
     ],
@@ -382,12 +382,8 @@ export function SettingsPage({ section }: { section?: string }) {
   const can = useCan();
   const groups = GROUPS.map((g) => ({ ...g, items: g.items.filter((n) => !n.perm || can(n.perm)) })).filter((g) => g.items.length > 0);
   const flat = groups.flatMap((g) => g.items);
-  const navigate = useNavigate();
   const requested = section ?? 'workspace';
-  // Old links and bookmarks to the personal MCP page land where it lives now.
-  useEffect(() => {
-    if (section === 'mcp') navigate('/profile/mcp', { replace: true });
-  }, [section]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Old links to /settings/mcp are sent to /profile/connections by the router (REDIRECTS).
   const active = flat.find((i) => i.id === requested) ?? flat[0];
   // PageHeader used to name the tab; the slim trail bar does it explicitly now.
   usePageTitle(active ? `${t('nav.settings')} · ${t(active.label)}` : t('nav.settings'));

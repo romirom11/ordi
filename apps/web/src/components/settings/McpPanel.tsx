@@ -1,15 +1,17 @@
 /**
- * Profile → MCP & API, top to bottom:
- *   1. Connect a client – pick the client, copy one thing. Signing in through
+ * Profile → Connections (at /profile/connections; the old /profile/mcp still
+ * leads here), top to bottom:
+ *   1. Your agent – a compact card: its name, its switch, one line on what it
+ *      does, and what it can do behind a disclosure; or a prompt to create it.
+ *   2. Connect a client – pick the client, copy one thing. Signing in through
  *      the browser is the way; a token is the fallback behind a disclosure.
- *   2. Connections – everything that can act for the person: their own
- *      agent's clients and the clients connected as them, in one list.
- *   3. Your agent – its name and switch, what it can do behind a disclosure.
+ *   3. Connected clients – everything that can act for the person: their own
+ *      agent's clients and the clients connected as them, one line each.
  *   4. Tokens for scripts – collapsed; they connect no client.
  */
 import { useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Bot, Check, Copy, KeyRound, Plug, Plus, Trash2, TriangleAlert, UserRound } from 'lucide-react';
+import { Check, Copy, KeyRound, Plus, Trash2, TriangleAlert } from 'lucide-react';
 import { EXTERNAL_AGENT_TOKEN_DAYS, MY_AGENT_TOKEN_DEFAULT_DAYS } from '@ordi/shared';
 import { appOrigin, api, ApiError } from '../../lib/api';
 import { useMe } from '../../lib/auth';
@@ -18,13 +20,14 @@ import { Dialog, ConfirmDialog, toast } from '../overlays';
 import { SectionHead, SubHead, Field, RowList, Disclosure } from './primitives';
 import { useLocale, useT, extendDict } from '../../lib/i18n';
 import { MyAgentSection, useMyAgent } from './MyAgentSection';
-import { buildConnections, connectionsKey, connectionsView, pluralKey, scriptTokens, showIssued, type ActsAs, type Connection, type ConnectionGroup, type IssuedToken, type OwnToken } from './connections';
+import { buildConnections, connectionLine, connectionRows, connectionsView, pluralKey, scriptTokens, showIssued, type ActsAs, type ConnectionRow as Row, type IssuedToken, type OwnToken } from './connections';
 import { CLIENT_NAMES, MCP_CLIENTS, signInSetup, tokenSetup, type McpClient } from './mcpClients';
 
 extendDict({
   en: {
-    'settings.mcp': 'MCP & API',
-    'settings.mcpDesc': 'Connect an AI client to ordi and see which clients can act as you or your agent.',
+    'connections.title': 'Connections',
+    'connections.desc': 'Connect an AI client to ordi and see which clients can act as you or your agent.',
+    'connections.mcpNote': 'Works with any client that supports MCP.',
     // 1. Connect a client
     'mcp.connectTitle': 'Connect a client',
     'mcp.clientOther': 'Other',
@@ -57,7 +60,7 @@ extendDict({
     'mcp.worksAs': 'Works as',
     'mcp.asAgent': 'Your agent',
     'mcp.asYou': 'You',
-    'mcp.asYouOnly': 'It works as you. To connect it as your agent, create your agent or switch it on below.',
+    'mcp.asYouOnly': 'It works as you. To connect it as your agent, create your agent or switch it on above.',
     'mcp.clientName': 'Client name',
     'mcp.clientNamePh': 'e.g. Zed',
     'mcp.validFor': 'Valid for',
@@ -69,24 +72,22 @@ extendDict({
     'mcp.issuedFor': 'For {client}, works as: {whom}.',
     'mcp.agentLoadFailed': 'Could not check your agent, so no token can be made yet.',
     'mcp.copyFailed': 'Could not copy. Select the text and copy it yourself.',
-    // 2. Connections
-    'mcp.connections': 'Connections',
+    // 3. Connected clients
+    'mcp.connections': 'Connected clients',
     'mcp.connectionsHint': 'Clients connected as you or your agent.',
     'mcp.someFailed': 'Some connections couldn’t be loaded.',
     'mcp.noConnections': 'No clients connected yet',
     'mcp.noConnectionsHint': 'Pick your client above and paste what it shows. The client appears here once it signs in.',
-    'mcp.signedIn': 'signed in {date}',
-    'mcp.tokenMade': 'token made {date}',
-    'mcp.lastUsed': 'last used {when}',
-    'mcp.neverUsed': 'not used yet',
-    'mcp.expires': 'expires {date}',
+    'mcp.signedIn': 'Signed in {date}',
+    'mcp.tokenMade': 'Connected with a token {date}',
+    'mcp.lastUsed': 'Last used {when}',
+    'mcp.neverUsed': 'Not used yet',
+    'mcp.until': 'Until {date}',
     'mcp.disconnect': 'Disconnect',
     'mcp.disconnectTitle': 'Disconnect {client}?',
     'mcp.disconnectBody': '{what} loses access at its next request. To use it again, connect it again.',
     'mcp.disconnected': 'Disconnected.',
     'mcp.disconnectFailed': 'Could not disconnect.',
-    'oauth.connections.one': '{n} connection',
-    'oauth.connections.other': '{n} connections',
     'oauth.cleanup': 'Unused sign-ins are removed automatically after a day; idle ones after 90 days.',
     // 4. Tokens for scripts
     'mcp.scripts': 'Tokens for scripts',
@@ -119,8 +120,9 @@ extendDict({
     'mcp.revokeFailed': 'Could not revoke the token.',
   },
   uk: {
-    'settings.mcp': 'MCP і API',
-    'settings.mcpDesc': 'Підключіть AI-клієнт до ordi та подивіться, які клієнти можуть діяти від вашого імені чи від імені вашого агента.',
+    'connections.title': 'Підключення',
+    'connections.desc': 'Підключіть AI-клієнт до ordi та подивіться, які клієнти можуть діяти від вашого імені чи від імені вашого агента.',
+    'connections.mcpNote': 'Працює з будь-яким клієнтом, що підтримує MCP.',
     'mcp.connectTitle': 'Підключити клієнт',
     'mcp.clientOther': 'Інший',
     'mcp.clientPicker': 'Ваш клієнт',
@@ -151,7 +153,7 @@ extendDict({
     'mcp.worksAs': 'Працює як',
     'mcp.asAgent': 'Ваш агент',
     'mcp.asYou': 'Ви',
-    'mcp.asYouOnly': 'Він працюватиме як ви. Щоб підключити його як вашого агента, створіть агента або увімкніть його нижче.',
+    'mcp.asYouOnly': 'Він працюватиме як ви. Щоб підключити його як вашого агента, створіть агента або увімкніть його вище.',
     'mcp.clientName': 'Назва клієнта',
     'mcp.clientNamePh': 'напр. Zed',
     'mcp.validFor': 'Термін дії',
@@ -163,25 +165,21 @@ extendDict({
     'mcp.issuedFor': 'Для {client}, працює як: {whom}.',
     'mcp.agentLoadFailed': 'Не вдалося перевірити вашого агента, тож токен поки не створити.',
     'mcp.copyFailed': 'Не вдалося скопіювати. Виділіть текст і скопіюйте його самі.',
-    'mcp.connections': 'Підключення',
+    'mcp.connections': 'Підключені клієнти',
     'mcp.connectionsHint': 'Клієнти, підключені від вашого імені чи від імені вашого агента.',
     'mcp.someFailed': 'Не вдалося завантажити частину підключень.',
     'mcp.noConnections': 'Ще жодного підключеного клієнта',
     'mcp.noConnectionsHint': 'Оберіть свій клієнт вище і вставте те, що він показує. Клієнт з’явиться тут, щойно увійде.',
-    'mcp.signedIn': 'вхід {date}',
-    'mcp.tokenMade': 'токен від {date}',
-    'mcp.lastUsed': 'востаннє {when}',
-    'mcp.neverUsed': 'ще не використовувався',
-    'mcp.expires': 'діє до {date}',
+    'mcp.signedIn': 'Підключено через вхід {date}',
+    'mcp.tokenMade': 'Підключено токеном {date}',
+    'mcp.lastUsed': 'Востаннє {when}',
+    'mcp.neverUsed': 'Ще не використовувався',
+    'mcp.until': 'Діє до {date}',
     'mcp.disconnect': 'Відключити',
     'mcp.disconnectTitle': 'Відключити {client}?',
     'mcp.disconnectBody': '{what} втратить доступ на наступному запиті. Щоб користуватися знову, підключіть його ще раз.',
     'mcp.disconnected': 'Відключено.',
     'mcp.disconnectFailed': 'Не вдалося відключити.',
-    'oauth.connections.one': '{n} підключення',
-    'oauth.connections.few': '{n} підключення',
-    'oauth.connections.many': '{n} підключень',
-    'oauth.connections.other': '{n} підключення',
     'oauth.cleanup': 'Невикористані входи видаляються автоматично через добу, неактивні – через 90 днів.',
     'mcp.scripts': 'Токени для скриптів',
     'mcp.scriptsHint': 'Для CI і ваших скриптів, що звертаються до API ordi. Токен діє від вашого імені в межах обраних дозволів.',
@@ -227,16 +225,19 @@ export function McpPanel() {
   const t = useT();
   return (
     <div>
-      <SectionHead title={t('settings.mcp')} desc={t('settings.mcpDesc')} />
+      <SectionHead
+        title={t('connections.title')}
+        desc={<>{t('connections.desc')}<span className="mt-1 block text-xs text-faint">{t('connections.mcpNote')}</span></>}
+      />
+      <MyAgentSection />
       <ConnectSection />
       <ConnectionsSection />
-      <MyAgentSection />
       <ScriptTokensSection />
     </div>
   );
 }
 
-/* ───────────────────────────── 1. Connect a client ───────────────────────────── */
+/* ───────────────────────────── 2. Connect a client ───────────────────────────── */
 
 function ConnectSection() {
   const t = useT();
@@ -251,7 +252,8 @@ function ConnectSection() {
         <SegmentedControl<McpClient>
           value={client}
           onChange={setClient}
-          className="min-h-8 w-full max-w-xl text-xs"
+          fit
+          className="min-h-8 text-xs"
           options={MCP_CLIENTS.map((key) => ({ key, label: key === 'other' ? t('mcp.clientOther') : CLIENT_NAMES[key] }))}
         />
       </div>
@@ -451,24 +453,22 @@ function DiscoveryCheck() {
   );
 }
 
-/* ───────────────────────────── 2. Connections ───────────────────────────── */
-
-interface DisconnectTarget { group: ConnectionGroup; connection: Connection }
+/* ───────────────────────────── 3. Connected clients ───────────────────────────── */
 
 function ConnectionsSection() {
   const t = useT();
   const qc = useQueryClient();
   const own = useOwnTokens();
   const agent = useMyAgent();
-  const [target, setTarget] = useState<DisconnectTarget | null>(null);
+  const [target, setTarget] = useState<Row | null>(null);
 
-  const groups = buildConnections(own.data ?? [], agent.data?.tokens ?? []);
+  const rows = connectionRows(buildConnections(own.data ?? [], agent.data?.tokens ?? []));
   // Each list stands on its own: one failing keeps the other's rows on screen.
-  const view = connectionsView({ own, agent }, groups.length);
+  const view = connectionsView({ own, agent }, rows.length);
   const retry = () => { if (view.failed.includes('own')) void own.refetch(); if (view.failed.includes('agent')) void agent.refetch(); };
 
   const disconnect = useMutation({
-    mutationFn: ({ connection }: DisconnectTarget) =>
+    mutationFn: ({ connection }: Row) =>
       connection.actsAs === 'agent' ? api.del(`/my-agent/tokens/${connection.id}`) : api.del(`/auth/tokens/${connection.id}`),
     onSuccess: () => {
       setTarget(null);
@@ -479,7 +479,8 @@ function ConnectionsSection() {
     onError: () => { setTarget(null); toast.error(t('mcp.disconnectFailed')); },
   });
 
-  const what = target ? `${target.group.client}${target.connection.prefix ? ` (${target.connection.prefix}…)` : ''}` : '';
+  // The same identifier as on its line, so the dialog names the row that was clicked.
+  const what = target ? `${target.client}${target.suffix ? ` …${target.suffix}` : ''}` : '';
 
   return (
     <section className="mb-10" aria-labelledby="mcp-connections">
@@ -491,21 +492,16 @@ function ConnectionsSection() {
         </p>
       )}
       {view.skeleton ? (
-        <div className="space-y-2">{[0, 1].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
-      ) : groups.length === 0 ? (!view.empty ? null : (
-        <RowList className="flex items-start gap-3 px-3 py-3">
-          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground"><Plug size={15} aria-hidden /></div>
-          <div className="min-w-0">
-            <p className="text-[13px] font-medium">{t('mcp.noConnections')}</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">{t('mcp.noConnectionsHint')}</p>
-          </div>
+        <div className="space-y-2">{[0, 1].map((i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
+      ) : rows.length === 0 ? (!view.empty ? null : (
+        <RowList className="px-3 py-3">
+          <p className="text-[13px] font-medium">{t('mcp.noConnections')}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{t('mcp.noConnectionsHint')}</p>
         </RowList>
       )) : (
         <RowList>
           <ul>
-            {groups.map((group) => (
-              <ConnectionRow key={group.key} group={group} onDisconnect={(connection) => setTarget({ group, connection })} />
-            ))}
+            {rows.map((row) => <ConnectionLine key={row.connection.id} row={row} onDisconnect={() => setTarget(row)} />)}
           </ul>
         </RowList>
       )}
@@ -515,7 +511,7 @@ function ConnectionsSection() {
         open={!!target}
         onClose={() => setTarget(null)}
         onConfirm={() => { if (target) disconnect.mutate(target); }}
-        title={t('mcp.disconnectTitle').replace('{client}', target?.group.client ?? '')}
+        title={t('mcp.disconnectTitle').replace('{client}', target?.client ?? '')}
         body={t('mcp.disconnectBody').replace('{what}', what)}
         confirmLabel={t('mcp.disconnect')}
         danger
@@ -528,53 +524,42 @@ function ConnectionsSection() {
 /** Whom a connection acts as, in words: never told by colour alone. */
 export function ActsAsLabel({ actsAs }: { actsAs: ActsAs }) {
   const t = useT();
-  return (
-    <Badge className="shrink-0">
-      {actsAs === 'agent' ? <Bot size={12} aria-hidden /> : <UserRound size={12} aria-hidden />}
-      {actsAs === 'agent' ? t('mcp.asAgent') : t('mcp.asYou')}
-    </Badge>
-  );
+  return <Badge className="shrink-0 font-normal">{actsAs === 'agent' ? t('mcp.asAgent') : t('mcp.asYou')}</Badge>;
 }
 
-function ConnectionRow({ group, onDisconnect }: { group: ConnectionGroup; onDisconnect: (c: Connection) => void }) {
+/**
+ * One connection on one line: the client (with a short suffix when it is
+ * connected more than once as the same), whom it acts as, when it was last
+ * used and when it runs out, and Disconnect at the end. When and how it was
+ * connected is in the tooltip. Narrow, the details wrap under the name.
+ */
+function ConnectionLine({ row, onDisconnect }: { row: Row; onDisconnect: () => void }) {
   const t = useT();
-  const locale = useLocale();
-  const n = group.connections.length;
-  // Several connections of one client can share a day: the token's first
-  // characters tell them apart.
-  const detail = (c: Connection) => [
-    n > 1 && c.prefix ? `${c.prefix}…` : null,
-    c.createdAt ? t(c.via === 'signIn' ? 'mcp.signedIn' : 'mcp.tokenMade').replace('{date}', fmtDate(c.createdAt)) : null,
-    c.lastUsedAt ? t('mcp.lastUsed').replace('{when}', fmtRelative(c.lastUsedAt)) : t('mcp.neverUsed'),
-    c.expiresAt ? t('mcp.expires').replace('{date}', fmtDate(c.expiresAt)) : null,
-  ].filter(Boolean).join(' · ');
-
+  const { meta, tooltip } = connectionLine(row, t, { date: fmtDate, relative: fmtRelative });
+  const whom = row.actsAs === 'agent' ? t('mcp.asAgent') : t('mcp.asYou');
   return (
-    <li className="anim-fade-in flex items-start gap-3 border-b border-border px-3 py-2.5 last:border-0">
-      <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground"><Plug size={15} aria-hidden /></div>
-      <div className="min-w-0 flex-1">
-        <div className="flex min-h-7 flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="truncate text-[13px] font-medium">{group.client}</span>
-          <ActsAsLabel actsAs={group.actsAs} />
-          {n > 1 && <span className="text-xs text-faint">{t(connectionsKey(n, locale)).replace('{n}', String(n))}</span>}
-        </div>
-        <ul className="space-y-0.5">
-          {group.connections.map((c) => (
-            <li key={c.id} className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="min-w-0 flex-1 break-words" title={c.prefix ? `${c.prefix}…` : undefined}>{detail(c)}</span>
-              <Button
-                size="xs"
-                variant="ghost"
-                className="shrink-0 hover:text-destructive"
-                aria-label={`${t('mcp.disconnect')}: ${group.client}${c.prefix ? ` (${c.prefix}…)` : ''}`}
-                onClick={() => onDisconnect(c)}
-              >
-                {t('mcp.disconnect')}
-              </Button>
-            </li>
-          ))}
-        </ul>
+    <li title={tooltip || undefined} className="anim-fade-in flex items-center gap-3 border-b border-border py-2 pl-3 pr-2 last:border-0">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
+        <span className="flex min-w-0 items-baseline gap-1.5">
+          <span className="truncate text-[13px] font-medium">{row.client}</span>
+          {row.suffix && <span className="shrink-0 font-mono text-[11px] text-faint">…{row.suffix}</span>}
+        </span>
+        <ActsAsLabel actsAs={row.actsAs} />
+        <span className="text-xs text-muted-foreground">
+          {meta.join(' · ')}
+          {/* The tooltip's details, for screen readers too: a hover is not the only way in. */}
+          {tooltip && <span className="sr-only"> · {tooltip}</span>}
+        </span>
       </div>
+      <Button
+        size="xs"
+        variant="ghost"
+        className="shrink-0 hover:text-destructive"
+        aria-label={`${t('mcp.disconnect')}: ${row.client}${row.suffix ? ` …${row.suffix}` : ''} (${whom})`}
+        onClick={onDisconnect}
+      >
+        {t('mcp.disconnect')}
+      </Button>
     </li>
   );
 }

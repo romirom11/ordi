@@ -165,7 +165,7 @@ export const apiTokens = pgTable('api_tokens', {
   oauthClientId: text('oauth_client_id').references(() => oauthClients.id, { onDelete: 'set null' }),
   /**
    * Made by hand for an MCP client that cannot sign in through the browser
-   * (Profile → MCP & API → "No browser?"): it acts as the person, is named
+   * (Profile → Connections → "No browser?"): it acts as the person, is named
    * after the client and is listed with their connections, not with the
    * tokens for scripts. False for every other token.
    */

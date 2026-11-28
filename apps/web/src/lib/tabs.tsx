@@ -12,7 +12,7 @@ import {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
   type ReactNode,
 } from 'react';
-import { NewTabContext, usePathname, useRouter } from './router';
+import { NewTabContext, canonicalPath, usePathname, useRouter } from './router';
 
 export interface TabItem {
   id: string;
@@ -92,6 +92,8 @@ function loadInitial(): TabsState {
       const tabs = (Array.isArray(parsed.tabs) ? parsed.tabs : [])
         .filter((t): t is TabItem => !!t && typeof (t as TabItem).id === 'string'
           && typeof (t as TabItem).url === 'string' && (t as TabItem).url.startsWith('/'))
+        // A tab left on a page's old address reopens on its new one.
+        .map((t) => ({ ...t, url: canonicalPath(t.url), history: Array.isArray(t.history) ? t.history.map((u) => (typeof u === 'string' ? canonicalPath(u) : u)) : t.history }))
         .map((t) => {
           // Tabs persisted before per-tab history existed start a fresh stack.
           const stack = Array.isArray(t.history) && t.history.every((u) => typeof u === 'string' && u.startsWith('/'))

@@ -1,11 +1,12 @@
 /**
- * Profile → MCP & API → Connections: one list of every client that can act
- * for the person – those connected as them and those connected as their own
- * agent, whether signed in through the browser or given a token by hand.
- * Every sign-in is a connection of its own (a laptop and a server each keep
- * theirs), so one client can appear several times: connections are grouped
- * by client and by whom they act as, each with its own last use and its own
- * Disconnect. Tokens for scripts are not connections and are kept apart.
+ * Profile → Connections → Connected clients: one list of every client that
+ * can act for the person – those connected as them and those connected as
+ * their own agent, whether signed in through the browser or given a token by
+ * hand. Every sign-in is a connection of its own (a laptop and a server each
+ * keep theirs), so one client can appear several times: each connection is a
+ * row of its own, with its own last use and its own Disconnect, and repeats
+ * of one client are told apart by a short suffix. Tokens for scripts are not
+ * connections and are kept apart.
  */
 
 export type ActsAs = 'agent' | 'you';
@@ -98,6 +99,76 @@ export function buildConnections(own: OwnToken[], agentTokens: AgentToken[], now
     .sort((a, b) => a.client.localeCompare(b.client) || (a.actsAs === b.actsAs ? 0 : a.actsAs === 'agent' ? -1 : 1));
 }
 
+/** One line of Connected clients: a single connection. */
+export interface ConnectionRow {
+  client: string;
+  actsAs: ActsAs;
+  /**
+   * Set only when the same client is connected more than once as the same
+   * identity: the end of the token's prefix, so a laptop and a server can be
+   * told apart without a date in front of everything.
+   */
+  suffix: string | null;
+  connection: Connection;
+}
+
+const PREFIX_HEAD = /^ordi_/;
+const SUFFIX_MIN = 4;
+
+/** The shortest tails, at least four characters, that are all different; null when none are. */
+function distinctTails(sources: string[]): string[] | null {
+  const longest = Math.max(SUFFIX_MIN, ...sources.map((x) => x.length));
+  for (let n = SUFFIX_MIN; n <= longest; n++) {
+    const tails = sources.map((x) => x.slice(-n));
+    if (new Set(tails).size === tails.length) return tails;
+  }
+  return null;
+}
+
+/**
+ * Suffixes that tell every connection of one group apart: the end of each
+ * token's prefix, which is the part people can match against a config.
+ * Tokens are random, so four characters nearly always do; two that happen
+ * to end alike get as many more as it takes. Where prefixes cannot do it –
+ * one is missing, or two are the same – the connections' ids do instead.
+ */
+function suffixes(connections: Connection[]): string[] {
+  const prefixes = connections.map((c) => c.prefix?.replace(PREFIX_HEAD, '') ?? '');
+  const byPrefix = prefixes.every(Boolean) ? distinctTails(prefixes) : null;
+  return byPrefix ?? distinctTails(connections.map((c) => c.id.replace(/-/g, ''))) ?? connections.map((c) => c.id);
+}
+
+/** The connections flattened into rows, in the groups' order, each a line of its own. */
+export function connectionRows(groups: ConnectionGroup[]): ConnectionRow[] {
+  return groups.flatMap((g) => {
+    const tails = g.connections.length > 1 ? suffixes(g.connections) : [];
+    return g.connections.map((connection, i) => ({ client: g.client, actsAs: g.actsAs, suffix: tails[i] ?? null, connection }));
+  });
+}
+
+/**
+ * What a row says after the client's name, and its tooltip. The line keeps
+ * to what tells one connection from another and what needs doing: when it
+ * was last used, and when it runs out. How and when it was connected – rarely
+ * the question – is left to the tooltip, with the full prefix.
+ */
+export function connectionLine(
+  row: ConnectionRow,
+  t: (key: string) => string,
+  fmt: { date: (iso: string) => string; relative: (iso: string) => string },
+): { meta: string[]; tooltip: string } {
+  const c = row.connection;
+  const meta = [
+    c.lastUsedAt ? t('mcp.lastUsed').replace('{when}', fmt.relative(c.lastUsedAt)) : t('mcp.neverUsed'),
+    ...(c.expiresAt ? [t('mcp.until').replace('{date}', fmt.date(c.expiresAt))] : []),
+  ];
+  const tooltip = [
+    c.createdAt ? t(c.via === 'signIn' ? 'mcp.signedIn' : 'mcp.tokenMade').replace('{date}', fmt.date(c.createdAt)) : null,
+    c.prefix ? `${c.prefix}…` : null,
+  ].filter(Boolean).join(' · ');
+  return { meta, tooltip };
+}
+
 /** Tokens for scripts: made by hand, connecting no client. Revoked ones apart, newest first. */
 export function scriptTokens(own: OwnToken[], now = Date.now()): { active: OwnToken[]; revoked: OwnToken[] } {
   const newest = (a: OwnToken, b: OwnToken) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '');
@@ -109,15 +180,11 @@ export function scriptTokens(own: OwnToken[], now = Date.now()): { active: OwnTo
 }
 
 /**
- * The dictionary key for a count in a locale, e.g. "N connections": Intl's
+ * The dictionary key for a count in a locale, e.g. "N permissions": Intl's
  * plural category (English one/other; Ukrainian one/few/many) picks the form.
  */
 export function pluralKey(base: string, n: number, locale: string): string {
   return `${base}.${new Intl.PluralRules(locale).select(n)}`;
-}
-
-export function connectionsKey(n: number, locale: string): string {
-  return pluralKey('oauth.connections', n, locale);
 }
 
 /**

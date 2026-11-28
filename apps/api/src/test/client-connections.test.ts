@@ -1,5 +1,5 @@
 /**
- * Profile → MCP & API lists, in one place, every client that can act for a
+ * Profile → Connections lists, in one place, every client that can act for a
  * person: clients connected as them (signed in through the browser, or given
  * a token by hand when they have no browser) and their own agent's clients.
  * Each person sees only their own and their own agent's – never anyone

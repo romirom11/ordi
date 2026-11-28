@@ -9,7 +9,7 @@
  * hand-made tokens and is revoked the same way. No refresh tokens: the access
  * token lives until revoked, exactly like a hand-made one.
  *
- * A person who has an agent of their own (Profile → MCP & API → My agent) can
+ * A person who has an agent of their own (Profile → Connections → Your agent) can
  * approve the client to work as that agent instead: the token is then the
  * agent's, named after the client, scoped and bounded like the tokens the My
  * agent card issues. Every consent is a connection of its own: signing in
@@ -202,7 +202,7 @@ export function oauthRoutes() {
     let agentUserId: string | null = null;
     if (body.actAs === 'agent') {
       const agent = await personalAgentOf(actor.userId);
-      if (!agent) throw err.notFound('You have no agent yet – create one in Profile → MCP & API');
+      if (!agent) throw err.notFound('You have no agent yet – create one in Profile → Connections');
       if (!agent.isActive) throw err.domain('Your agent is switched off; switch it on before connecting a client');
       agentUserId = agent.id;
     }

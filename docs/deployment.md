@@ -503,9 +503,9 @@ and do the same.
   **Connections.** Each sign-in is a connection of its own: someone running
   Claude Code on a laptop and on a server keeps both, and signing in again
   never cuts off an earlier one. The consent page asks whether the client
-  works as the person or as their own agent (Profile → MCP & API → My agent).
-  Profile → MCP & API lists connections grouped by client, each with its last
-  use and its own Revoke. Clients often repeat the sign-in, so the worker
+  works as the person or as their own agent (Profile → Connections → Your
+  agent). Profile → Connections → Connected clients lists every connection on
+  a line of its own, with its last use and its own Disconnect. Clients often repeat the sign-in, so the worker
   revokes, every hour, a token issued by the OAuth sign-in that was **never
   used within 24 hours** of being issued, or **not used for 90 days**. A
   client listing its tools counts as use. Every revocation is logged in the
