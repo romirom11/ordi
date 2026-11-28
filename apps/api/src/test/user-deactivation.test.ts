@@ -218,6 +218,22 @@ describe('deactivate with hand-off to an agent', () => {
     expect(await assigneesOf(there.id)).toEqual([users.member!.userId]);
   });
 
+  it('lets a plain project member hand tasks to a project_members agent, and not a reader', async () => {
+    const agentId = await agentOnProject('project_members');
+    const actor = await peopleAdmin();
+    const open = await createTask('Still to do', { assigneeIds: [users.member!.userId] });
+
+    const refused = await reqAs(actor.cookie).post(`/users/${users.member!.userId}/deactivate`, { reassignTo: agentId });
+    expect(refused.status).toBe(403);
+    expect((await json(refused)).error.message).toMatch(/project members/);
+    expect(await isActive(users.member!.userId)).toBe(true);
+
+    await addProjectMember(users, project.id, actor.userId, 'member');
+    const res = await reqAs(actor.cookie).post(`/users/${users.member!.userId}/deactivate`, { reassignTo: agentId });
+    expect(res.status).toBe(200);
+    expect(await assigneesOf(open.id)).toEqual([agentId]);
+  });
+
   it('does not name a private project the actor cannot open', async () => {
     const agentId = await agentOnProject('project_members');
     const actor = await peopleAdmin();
