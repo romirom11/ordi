@@ -12,6 +12,7 @@ import { writeActivity } from '../../core/activity';
 import { publishEvent } from '../../core/events';
 import { assertVersion } from '../../core/locking';
 import { assertProject, assertLiveProject, accessibleProjectIds, notInDeletedProject, userCanOpenProject } from '../../core/access';
+import { hasPerm } from '../../core/rbac';
 
 /** Inclusive upper bound for a plain date (`YYYY-MM-DD` → end of that day). */
 function upperBound(to?: string): string | undefined {
@@ -143,8 +144,10 @@ function withRef(row: EntryRow) {
  * the task are called (and their ids, which open them) is the project's, so
  * the entry says only that it is on a project you cannot open.
  *
- * time.read_all sees every entry as it is: that holder reads the whole
- * workspace's time by permission, as the reports do.
+ * The entry list and an entry opened on its own show time.read_all every entry
+ * as it is: that holder reads the whole workspace's time by permission, as the
+ * reports do. The week and the running timer are the caller's own views, not
+ * reports, and follow project access alone.
  */
 type ShownEntry = Omit<ReturnType<typeof withRef>, 'taskId' | 'projectId' | 'taskNumber' | 'taskTitle' | 'projectKey' | 'projectName' | 'taskRef' | 'projectHidden'> & {
   taskId: string | null; projectId: string | null; taskNumber: number | null; taskTitle: string | null;
@@ -267,11 +270,17 @@ export async function createEntry(actor: Actor, input: any): Promise<string> {
   return id;
 }
 
-export async function updateEntry(actor: Actor, id: string, input: any, canManage: boolean) {
+export async function updateEntry(actor: Actor, id: string, input: any, canManage: boolean, canReadAll: boolean) {
   const { db } = getDb();
   const entry = await getEntry(id);
   if (entry.userId !== actor.userId && !canManage) throw err.forbidden('Cannot edit others’ time', 'time.manage');
-  assertVersion(entry, input.version, entry);
+  if (input.version !== undefined && input.version !== entry.version) {
+    // The conflict hands back the entry as it is now, held to what the caller
+    // may read: an edit opened before its task moved into a private project
+    // must not learn the destination from the 409.
+    const { costRate, ...rest } = await shownRawEntry(actor, entry, canReadAll);
+    assertVersion(entry, input.version, hasPerm(actor, 'finance.read_costs') ? { ...rest, costRate } : rest);
+  }
 
   if (entry.invoiceItemId && input.durationSeconds !== undefined && input.durationSeconds !== entry.durationSeconds) {
     throw err.domain('Cannot change the duration of a billed entry; remove it from the invoice first');
@@ -384,31 +393,39 @@ export async function closeTimersOfOutsiders(tx: any, actor: Actor, taskIds: str
   }
 }
 
+/**
+ * Take the caller's running timer and save it as an entry, in `tx`. The row is
+ * claimed by deleting it first: a task move holds it locked while it saves or
+ * re-points it, so this waits and then finds it gone (already saved by the
+ * move) or on the moved task – never saving the same time twice.
+ */
+async function claimTimer(actor: Actor, tx: any): Promise<{ entryId: string | null } | null> {
+  const [timer] = await tx.delete(schema.activeTimers).where(eq(schema.activeTimers.userId, actor.userId)).returning();
+  if (!timer) return null;
+  return { entryId: await timerToEntry(actor, timer, tx) };
+}
+
 export async function startTimer(actor: Actor, input: any) {
   const { db } = getDb();
   await taskProject(actor, input.taskId); // assert access to the task's project
-  // Stop any existing active timer (one active timer per user, PRD §10.2).
-  const [existing] = await db.select().from(schema.activeTimers).where(eq(schema.activeTimers.userId, actor.userId));
-  let stoppedEntryId: string | null = null;
-  if (existing) {
-    stoppedEntryId = await timerToEntry(actor, { userId: existing.userId, taskId: existing.taskId, startedAt: existing.startedAt, note: existing.note });
-    await db.delete(schema.activeTimers).where(eq(schema.activeTimers.userId, actor.userId));
-  }
   const startedAt = new Date();
-  await db.insert(schema.activeTimers).values({ userId: actor.userId, taskId: input.taskId, startedAt, note: input.note ?? '' });
+  // Stop any existing active timer (one active timer per user, PRD §10.2).
+  const stoppedEntryId = await db.transaction(async (tx) => {
+    const stopped = await claimTimer(actor, tx);
+    await tx.insert(schema.activeTimers).values({ userId: actor.userId, taskId: input.taskId, startedAt, note: input.note ?? '' });
+    return stopped?.entryId ?? null;
+  });
   return { userId: actor.userId, taskId: input.taskId, startedAt, note: input.note ?? '', elapsedSeconds: 0, stoppedEntryId };
 }
 
 export async function stopTimer(actor: Actor) {
   const { db } = getDb();
-  const [timer] = await db.select().from(schema.activeTimers).where(eq(schema.activeTimers.userId, actor.userId));
-  if (!timer) throw err.notFound('No active timer');
-  const entryId = await timerToEntry(actor, { userId: timer.userId, taskId: timer.taskId, startedAt: timer.startedAt, note: timer.note });
-  await db.delete(schema.activeTimers).where(eq(schema.activeTimers.userId, actor.userId));
-  return { entryId };
+  const stopped = await db.transaction((tx) => claimTimer(actor, tx));
+  if (!stopped) throw err.notFound('No active timer');
+  return { entryId: stopped.entryId };
 }
 
-export async function getTimer(actor: Actor, canReadAll: boolean) {
+export async function getTimer(actor: Actor) {
   const { db } = getDb();
   const [timer] = await db.select().from(schema.activeTimers).where(eq(schema.activeTimers.userId, actor.userId));
   if (!timer) return null;
@@ -428,7 +445,7 @@ export async function getTimer(actor: Actor, canReadAll: boolean) {
   }
   // A timer on a project closed to you (taken off it while timing) runs on
   // and can be stopped, but no longer says what it is on – as your entries do.
-  const named = task ? await namedProjects(actor, canReadAll) : null;
+  const named = task ? await namedProjects(actor, false) : null;
   if (task && named && !named.has(task.projectId)) {
     return { ...timer, taskId: null, elapsedSeconds, ref: null, title: null, projectHidden: true };
   }
@@ -639,7 +656,7 @@ export async function unbilled(params: { companyId?: string; from?: string; to?:
  * viewer's own time zone: a UTC week put Monday 01:00 in Kyiv into the week
  * before. Without them (older clients) the week runs midnight to midnight UTC.
  */
-export async function myWeek(actor: Actor, weekStart: string, bounds: { from?: string; to?: string } | undefined, canReadAll: boolean) {
+export async function myWeek(actor: Actor, weekStart: string, bounds?: { from?: string; to?: string }) {
   let start = new Date(`${weekStart.slice(0, 10)}T00:00:00.000Z`);
   let end = new Date(start.getTime());
   end.setUTCDate(end.getUTCDate() + 7);
@@ -653,7 +670,7 @@ export async function myWeek(actor: Actor, weekStart: string, bounds: { from?: s
     gte(te.startedAt, start),
     lt(te.startedAt, end),
     isNull(schema.projects.deletedAt),
-  )).orderBy(te.startedAt, te.id), await namedProjects(actor, canReadAll));
+  )).orderBy(te.startedAt, te.id), await namedProjects(actor, false));
 
   const byDay = new Map<string, { date: string; totalSeconds: number; billableSeconds: number; entries: any[] }>();
   for (const e of rows) {

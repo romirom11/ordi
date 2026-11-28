@@ -86,6 +86,8 @@ describe('a task moved into a private project a tracker is not on', () => {
   let manual = '';
   let insiderManual = '';
   let stayed = '';
+  /** The version of `manual` as an edit opened before the move saw it. */
+  let versionBefore = 0;
 
   beforeAll(async () => {
     left = await task(openProject, 'Falcon prep');
@@ -93,6 +95,7 @@ describe('a task moved into a private project a tracker is not on', () => {
     manual = await log(outsider, left, 'My notes on prep', 5400, false);
     insiderManual = await log(insider, left, 'Insider notes');
     stayed = await log(outsider, staying, 'Chores');
+    versionBefore = (await json(outsider.as.get(`/time/entries/${manual}`))).version;
     // Both are timing the task when it moves.
     expect((await outsider.as.post('/time/timer/start', { taskId: left, note: 'Timing prep' })).status).toBe(200);
     expect((await insider.as.post('/time/timer/start', { taskId: left, note: 'Insider timing' })).status).toBe(200);
@@ -170,6 +173,24 @@ describe('a task moved into a private project a tracker is not on', () => {
     }
   });
 
+  it('does not name the project in the conflict an edit opened before the move runs into', async () => {
+    const current = (await json(outsider.as.get(`/time/entries/${manual}`))).version;
+    // The move re-pointed the entry; an edit from before it is stale either way.
+    const stale = current === versionBefore ? versionBefore - 1 : versionBefore;
+    const res = await outsider.as.patch(`/time/entries/${manual}`, { note: 'From an old tab', version: stale });
+    expect(res.status).toBe(409);
+    const body = await json(res);
+    expectNoLeak(body);
+    expect(JSON.stringify(body)).not.toContain('costRate');
+    expect(JSON.stringify(body)).toContain('"projectHidden":true');
+  });
+
+  it('saves the moved timer once: a stop afterwards finds none', async () => {
+    expect((await outsider.as.post('/time/timer/stop')).status).toBe(404);
+    const { data } = await json(outsider.as.get('/time/entries?limit=50'));
+    expect((data as Entry[]).filter((e) => e.note === 'Timing prep')).toHaveLength(1);
+  });
+
   it('still lets the outsider edit and delete their hidden time, without naming the project', async () => {
     const entry = await json(outsider.as.get(`/time/entries/${manual}`));
     const res = await outsider.as.patch(`/time/entries/${manual}`, {
@@ -234,6 +255,21 @@ describe('a timer running on a project its tracker is taken off', () => {
     expect(timer).toMatchObject({ projectHidden: true, taskId: null, ref: null, title: null, note: 'Plans' });
     expect(JSON.stringify(timer)).not.toContain(secretTask);
     expect(JSON.stringify(timer)).not.toContain('Orbit');
+  });
+
+  it('is masked on the timer and in the week for time.read_all too, but not in the entry list', async () => {
+    // The auditor reads all time by permission; their own timer and week are
+    // not reports, and say no more than project access allows.
+    expect((await owner.post(`/projects/${secretProject}/members`, { userId: auditor.userId, role: 'member' })).status).toBe(201);
+    const entry = await log(auditor, secretTask, 'Audit notes');
+    expect((await auditor.as.post('/time/timer/start', { taskId: secretTask, note: 'Auditing' })).status).toBe(200);
+    expect((await owner.del(`/projects/${secretProject}/members/${auditor.userId}`)).status).toBeLessThan(300);
+
+    expect(await json(auditor.as.get('/time/timer'))).toMatchObject({ projectHidden: true, taskId: null, ref: null, title: null });
+    const week = await json(auditor.as.get(`/time/my-week?weekStart=${monday}`));
+    expect(week.days.flatMap((d: { entries: Entry[] }) => d.entries).find((e: Entry) => e.id === entry)).toMatchObject(HIDDEN);
+    expect(await json(auditor.as.get(`/time/entries/${entry}`))).toMatchObject({ projectId: secretProject, taskId: secretTask, projectHidden: false });
+    expect((await auditor.as.post('/time/timer/stop')).status).toBe(200);
   });
 
   it('stops into a hidden entry', async () => {
